@@ -90,7 +90,8 @@ def record(ledger: Ledger, seen, ended_keys=(), now=None) -> Ledger:
     """Fold this run's sightings into `ledger` and return the result.
 
     Takes the ledger read at the start of the run, the `LiveCode` results, and the fingerprints that
-    were ended. Returns a new ledger, bounded in size, with the oldest entries dropped first.
+    were ended. Returns a new ledger holding at most `_MAX_ENTRIES` identified and `_MAX_ENTRIES`
+    other entries, the oldest of each dropped first.
     """
     from stayawake.bots.security.livecode import fingerprint
     stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
@@ -102,10 +103,16 @@ def record(ledger: Ledger, seen, ended_keys=(), now=None) -> Ledger:
         entries[key] = Seen(first=prior.first or stamp, last=stamp, times=prior.times + 1,
                             identified=prior.identified or bool(item.confirmed),
                             ended=prior.ended + (1 if key in ended_keys else 0))
-    if len(entries) > _MAX_ENTRIES:
-        keep = sorted(entries.items(), key=lambda kv: kv[1].last, reverse=True)[:_MAX_ENTRIES]
-        entries = dict(keep)
-    return Ledger(entries=entries, status=LOADED)
+    identified = {k: v for k, v in entries.items() if v.identified}
+    others = {k: v for k, v in entries.items() if not v.identified}
+    return Ledger(entries={**_newest(others), **_newest(identified)}, status=LOADED)
+
+
+def _newest(entries: dict[str, Seen]) -> dict[str, Seen]:
+    """Keep the most recently seen entries. Takes the entries. Returns at most `_MAX_ENTRIES`."""
+    if len(entries) <= _MAX_ENTRIES:
+        return entries
+    return dict(sorted(entries.items(), key=lambda kv: kv[1].last, reverse=True)[:_MAX_ENTRIES])
 
 
 def save(ledger: Ledger, path: Path | None = None) -> bool:

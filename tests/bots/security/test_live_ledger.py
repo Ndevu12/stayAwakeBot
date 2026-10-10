@@ -11,6 +11,7 @@ import os
 import pathlib
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from stayawake.bots.security import liveledger as ledger
 from stayawake.bots.security.livecode import LiveCode
@@ -137,6 +138,19 @@ class TestItAnswersWhetherSomethingCameBack(unittest.TestCase):
                     for i in range(ledger._MAX_ENTRIES + 200)]
             ledger.save(ledger.record(ledger.load(p), many), p)
             self.assertLessEqual(len(ledger.load(p).entries), ledger._MAX_ENTRIES)
+
+    def test_a_flood_of_unidentified_code_does_not_erase_what_was_identified(self):
+        # Code that was stopped and comes back must still read as having come back.
+        from stayawake.bots.security.livecode import fingerprint
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d) / "live.json"
+            bad = LiveCode(Process(pid=1, argv=("node", "-e", "bad")), "bad", "shape", True)
+            ledger.save(ledger.record(ledger.load(p), [bad], ended_keys={fingerprint("bad")}), p)
+            flood = [LiveCode(Process(pid=i, argv=("node", "-e", f"n{i}")), f"n{i}", "shape",
+                              False) for i in range(2, ledger._MAX_ENTRIES + 200)]
+            later = datetime.now(timezone.utc) + timedelta(minutes=1)
+            ledger.save(ledger.record(ledger.load(p), flood, now=later), p)
+            self.assertEqual(ledger.load(p).returning(fingerprint("bad")), 1)
 
 
 if __name__ == "__main__":
