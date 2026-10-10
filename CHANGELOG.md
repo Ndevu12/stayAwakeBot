@@ -14,6 +14,13 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw watch` tells you on your desktop.** A notification appears when it stops code, when code it
+  stopped before comes back, when something could not be stopped, and when it has not been able to
+  check the machine for a while. Code that came back is repeated every hour until you run
+  `saw harden`. A short report arrives once a day, on quiet days too. Every other `saw` command
+  prints one line when the watcher has stopped checking or found code that came back, and
+  `saw watch status` and `saw audit` say so too. On macOS the notifications come from Script
+  Editor; `saw watch` sends one when you set it up so you can allow them.
 - **On a terminal, `saw fix` and `saw fix amend` ask about the other files added in the same
   commit as the malware.** Each file shows how many of your project's files mention it. You take out
   all of them, some, or none; Enter keeps them. `saw fix` removes the ones you take out in the

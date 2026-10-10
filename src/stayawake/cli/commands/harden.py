@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from stayawake.bots.security import harden
+from stayawake.bots.security import harden, watchrecord
 from stayawake.cli.helptext import add_command
 from stayawake.utils.streaming import busy, say
 from stayawake.cli.argtypes import no_stream_requested
@@ -29,10 +29,17 @@ def register(sub) -> None:
     p.set_defaults(func=run)
 
 
+acknowledge_came_back = watchrecord.acknowledge
+
+
 def run(a: argparse.Namespace) -> int:
+    """Put the host controls in place, or take them back. Takes the parsed arguments. Returns the
+    exit code; a run that protected the machine also marks code that came back as dealt with."""
     label = "removing host denials…" if a.take_back else "creating host denials…"
     no_stream = no_stream_requested(a)
     with busy(label, no_stream=no_stream):
         code, text = harden.take_back() if a.take_back else harden.run()
     say(text, no_stream=no_stream)
+    if code == 0 and not a.take_back:
+        acknowledge_came_back()
     return code

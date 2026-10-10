@@ -42,6 +42,14 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _say_watcher_notice() -> None:
+    """Print one line when this machine's watcher has stopped or found code that came back."""
+    from stayawake.bots.security.watch import foreground_notice
+    line = foreground_notice()
+    if line:
+        print(f"saw: {line}", file=sys.stderr)
+
+
 def _clear_scratch() -> None:
     """Remove what this run made under the temporary root, and name what survived."""
     try:
@@ -65,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         # The full help still lives at `saw -h`, which argparse handled before we reach here.
         print(render_welcome(color_level(sys.stdout), __version__), end="")
         return exitcodes.CLEAN
+    if args.command != "watch":
+        _say_watcher_notice()
     try:
         return args.func(args)
     except Exception as exc:                      # noqa: BLE001 — the last line before a traceback

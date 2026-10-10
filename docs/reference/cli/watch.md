@@ -42,8 +42,19 @@ One line about where this machine stands:
 - something is running that this machine cannot identify;
 - something could not be stopped.
 
-It names no paths and no process numbers. If a pass could not finish what it started, it says so
-rather than reporting a clean machine.
+It names no paths and no process numbers. If a pass could not finish what it started, or could not
+examine what is running, it says so rather than reporting a clean machine.
+
+It tells you where you will notice. A desktop notification appears when it stops code, when code it
+stopped before comes back, when something could not be stopped, and when it has not been able to
+check the machine for a while. Code that came back is repeated every hour until you run
+[`saw harden`](harden.md). Once a day it sends a short report, on quiet days too, so a day without
+one is worth a `saw watch status`. Every other `saw` command also prints one line when the watcher
+has stopped checking or has found code that came back.
+
+`saw watch` sends one notification when you set it up, to show where they will appear. On macOS
+they come from Script Editor; if none appears, allow notifications for Script Editor in System
+Settings.
 
 ## When it runs by itself
 
@@ -56,16 +67,12 @@ or from your next login; where the system will not start it immediately, the arr
 made and takes effect then. It keeps doing that until `saw watch stop`.
 Asking twice changes nothing and says so.
 
-It is asked for by name rather than arranged by [`saw harden`](harden.md), because a process that
-keeps running and ends things is a larger thing to agree to than the controls harden places, and it
-should not arrive as a side effect of something else.
-
 What it runs is fixed. There is nothing in it to configure, and therefore nothing in it for anyone
 else to point somewhere else; if it is not exactly what `saw` wrote, running `saw watch` again puts it
 back and tells you it had been changed. Anything else found under that name is left alone —
 stopping removes saw's own work and nothing else.
 
-A quiet pass says nothing. Only a pass that found something speaks.
+A quiet pass sends nothing; the daily report says the machine was checked.
 
 ## The record
 

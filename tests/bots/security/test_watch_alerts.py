@@ -112,6 +112,48 @@ class TestTheTeller(unittest.TestCase):
         self.assertEqual(said, [watch._NOT_TOLD])
 
 
+class TestEveryCommandSaysWhenTheWatcherNeedsYou(unittest.TestCase):
+    def test_the_line_any_command_prints(self):
+        placed = lambda: True                                                      # noqa: E731
+        self.assertEqual(watch.foreground_notice(record=dict, placed=placed), "")
+        self.assertIn("saw harden", watch.foreground_notice(
+            record=lambda: {"unacknowledged": 1.0}, placed=placed))
+        self.assertEqual(watch.foreground_notice(record=lambda: {"last_good": 0.0}, placed=placed,
+                                                 clock=lambda: 10_000.0), watch._STALLED)
+        self.assertEqual(watch.foreground_notice(record=lambda: {"last_good": 0.0},
+                                                 placed=lambda: False, clock=lambda: 10_000.0), "")
+
+    def test_every_command_but_watch_prints_it_on_stderr(self):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        from unittest import mock
+        from stayawake.cli import dispatch
+        for argv, expected in ((["search", "scan"], 1), (["watch", "status"], 0)):
+            with self.subTest(argv=argv):
+                err = io.StringIO()
+                with mock.patch.object(watch, "foreground_notice", return_value=watch._STALLED), \
+                     mock.patch.object(watch, "status_of", return_value=(0, "")), \
+                     redirect_stdout(io.StringIO()), redirect_stderr(err):
+                    dispatch.main(argv)
+                self.assertEqual(err.getvalue().count(watch._STALLED), expected)
+
+    def test_a_protected_harden_run_marks_a_return_dealt_with(self):
+        import argparse
+        from unittest import mock
+        from stayawake.cli.commands import harden as cli_harden
+        acked = []
+        with mock.patch.object(cli_harden.harden, "run", return_value=(0, "protected")), \
+             mock.patch.object(cli_harden, "acknowledge_came_back", lambda: acked.append(1)), \
+             mock.patch.object(cli_harden, "say", lambda *a, **k: None):
+            cli_harden.run(argparse.Namespace(take_back=False, no_stream=True))
+        self.assertEqual(acked, [1])
+        with mock.patch.object(cli_harden.harden, "run", return_value=(3, "not all")), \
+             mock.patch.object(cli_harden, "acknowledge_came_back", lambda: acked.append(2)), \
+             mock.patch.object(cli_harden, "say", lambda *a, **k: None):
+            cli_harden.run(argparse.Namespace(take_back=False, no_stream=True))
+        self.assertEqual(acked, [1])
+
+
 class TestTheRecordHoldsOnlyCountsAndTimes(unittest.TestCase):
     def test_acknowledge_clears_a_return(self):
         import tempfile

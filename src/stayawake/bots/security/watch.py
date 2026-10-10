@@ -155,6 +155,20 @@ def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
     return code, line
 
 
+def foreground_notice(*, record=None, placed=schedule.was_placed, clock=time.time) -> str:
+    """Build the line any foreground command prints about the watcher. Takes the collaborators that
+    read the record and the placement. Returns the line, or "" when there is nothing to say."""
+    try:
+        kept = (record or watchrecord.load)()
+        if not kept or not placed():
+            return ""
+        if kept.get("unacknowledged"):
+            return _CAME_BACK
+        return _STALLED if watchrecord.stale(kept, clock()) else ""
+    except Exception:
+        return ""
+
+
 def _schedule_status(supported, verdict, running) -> tuple[int, str]:
     """Read whether the scheduled check is in place and held. Takes the schedule's collaborators.
     Returns the exit code and one line."""
