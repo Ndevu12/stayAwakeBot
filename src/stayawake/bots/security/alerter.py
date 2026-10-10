@@ -11,19 +11,12 @@ from __future__ import annotations
 
 import urllib.parse
 
-from stayawake.utils import env, textsafe
+from stayawake.utils import docs_site, env, textsafe
 from stayawake.lib.adapters.slack import send_slack
 from stayawake.lib.adapters import github_api
 from stayawake.utils.timeutil import utc_stamp
 
 LABEL = "stayawakebot-security"
-
-
-# The published docs are VERSIONED with mike; `latest` is the alias a push to main deploys, so it
-# is the only path that stays correct as releases land.
-DOCS = "https://saw-docs.ndevuspace.com/latest"
-DOCS_FIX = f"{DOCS}/how-to/fix-findings/"
-DOCS_AUDIT = f"{DOCS}/how-to/audit-a-machine/"
 
 
 def _title(target: str) -> str:
@@ -56,7 +49,7 @@ def _issue_body(result: dict) -> str:
                   "establish that any machine which ran this code is clean. If the finding may have "
                   "executed on a developer machine, run `saw audit` there before rotating any "
                   "credential.",
-              "", f"Documentation: {DOCS_FIX} · {DOCS_AUDIT}"]
+              "", f"Documentation: {docs_site.FIX_FINDINGS} · {docs_site.AUDIT_A_MACHINE}"]
     return "\n".join(lines)
 
 

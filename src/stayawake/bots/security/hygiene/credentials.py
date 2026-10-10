@@ -13,12 +13,12 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from stayawake.bots.security import hookscript
+from stayawake.utils import docs_site
 from stayawake.lib.git.run import OPERATOR_CONFIG, run as git_run
 from stayawake.utils import textsafe
 from .models import HygieneIssue, _WIPER_NOTE
 
-CREDENTIAL_HYGIENE_DOC = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/"
-                          "docs/explanation/credential-hygiene.md")
+CREDENTIAL_HYGIENE_DOC = docs_site.CREDENTIAL_HYGIENE
 
 
 @dataclass(frozen=True)

@@ -39,7 +39,7 @@ from .editor import check_editors
 from .mechanism import (check_ssh_authorized_keys, check_shell_profile,
                         check_git_config_execution, git_config_predicate)
 from .remote import check_branch_protection
-from stayawake.utils import textsafe
+from stayawake.utils import docs_site, textsafe
 from stayawake.utils.render import MARKER, SEVERITY, block, marked_list, paint
 
 __all__ = [
@@ -247,8 +247,7 @@ def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, widt
     return lines
 
 
-_SCOPE_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-machine.md"
-               "#what-a-clean-audit-does-and-does-not-mean")
+_SCOPE_DOCS = docs_site.WHAT_A_CLEAN_AUDIT_MEANS
 
 
 def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:

@@ -3,6 +3,7 @@
 import unittest
 
 from stayawake.bots.security import alerter
+from stayawake.utils import docs_site
 
 RESULT = {
     "target": "acme/web", "source": "remote",
@@ -38,10 +39,9 @@ class IssueBody(unittest.TestCase):
         self.assertIn("this repository only", self.body)
         self.assertIn("saw audit", self.body)
 
-    def test_it_links_the_versioned_documentation(self):
-        # `latest` is the alias a push to main deploys; a bare or version-pinned path goes stale.
-        self.assertIn("https://saw-docs.ndevuspace.com/latest/", self.body)
-        self.assertIn("how-to/fix-findings/", self.body)
+    def test_it_links_the_documentation_on_fixing_and_auditing(self):
+        self.assertIn(docs_site.FIX_FINDINGS, self.body)
+        self.assertIn(docs_site.AUDIT_A_MACHINE, self.body)
 
     def test_the_finding_table_still_renders(self):
         self.assertIn("postcss.config.mjs:11", self.body)
