@@ -1794,9 +1794,9 @@
 
 
 <h1 id="saw-scan"><code>saw scan</code><a class="headerlink" href="#saw-scan" title="Permanent link">&para;</a></h1>
-<p>Hunt for supply-chain worms across repositories or directories. The full report — with full match
-evidence — renders to stdout and <strong>nothing is persisted</strong> unless you ask for a sink; progress goes to
-stderr. <code>scan</code> never changes a file.</p>
+<p>Hunt for supply-chain worms across repositories or directories. Read-only. The full report — with
+full match evidence — renders to stdout; progress goes to stderr. The last line is the verdict, and
+a scan that could not complete never reports clean. <a href="../fix/"><code>saw fix</code></a> removes what it finds.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>         [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>         [--no-advisories] [-x | --external] [--deep] [--require-db]
