@@ -336,6 +336,7 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
     plural = "y" if n == 1 else "ies"
     prog.line(f"\nProcessed {n} repositor{plural}"
               + (f"; {needs_review} need review." if needs_review else "."))
+    prog.line(fix_host_note())
     return 1 if needs_review else 0
 
 
@@ -451,6 +452,7 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
                                 branches=branches, resolver=resolver))
     if not outcomes:
         prog.line("No repositories to fix.")
+        prog.line(fix_host_note())
         return 0
     prog.line(fix_tally(outcomes))
     prog.line(fix_host_note())

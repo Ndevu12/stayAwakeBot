@@ -66,6 +66,24 @@ class TestAnUnfixedRepoFailsClosed(RemoteFixExitCase):
         self.assertIn("saw fix cleans repositories, not this machine", tail)
         self.assertIn("run `saw audit`", tail)
 
+    def test_an_amend_run_and_an_empty_fix_run_end_by_pointing_at_saw_audit(self):
+        import contextlib
+        import io
+        outcome = mock.Mock(needs_review=False)
+        runs = (("amend", "_amend_local", [outcome], lambda: remediator.amend(no_stream=True)),
+                ("empty fix", "_fix_local", [], lambda: remediator.fix(no_stream=True)))
+        for name, inner, outcomes, call in runs:
+            with self.subTest(run=name):
+                err = io.StringIO()
+                with mock.patch.object(remediator, "_resolve_config", return_value=self.CONFIG), \
+                     mock.patch.object(remediator, "load_signatures", return_value={}), \
+                     mock.patch.object(remediator, inner, return_value=outcomes), \
+                     contextlib.redirect_stderr(err):
+                    call()
+                tail = " ".join(err.getvalue().split())
+                self.assertIn("saw fix cleans repositories, not this machine", tail)
+                self.assertIn("run `saw audit`", tail)
+
     def test_a_real_fix_still_exits_zero(self):
         # The gate must not become "always fail" — that would be a different kind of useless.
         self.assertEqual(0, self._run(clone=mock.Mock(), submit=_verdict(BaseState.PR_OPENED,

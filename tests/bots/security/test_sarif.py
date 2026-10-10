@@ -125,6 +125,34 @@ class TestSarifSaysWhatWasNotScanned(unittest.TestCase):
         self.assertIn("repo-b", note["message"]["text"])
         self.assertIn("not clean", note["message"]["text"])
 
+    def test_a_target_that_could_not_be_scanned_is_an_alert_github_shows(self):
+        # Code scanning reads results only; a run with an unscanned target must not show zero.
+        bad = dict(_result(target="repo-b"), error="clone failed")
+        log = sarif.build_sarif(_payload([_result(target="repo-a"), bad]))
+        run = log["runs"][0]
+        alerts = [r for r in run["results"] if r["ruleId"] == sarif.NOT_SCANNED_ID]
+        self.assertEqual(len(alerts), 1)
+        alert = alerts[0]
+        self.assertEqual(alert["level"], "error")
+        self.assertTrue(alert["message"]["text"].startswith("repo-b could not be scanned and is "
+                                                            "not clean."))
+        self.assertEqual(run["tool"]["driver"]["rules"][alert["ruleIndex"]]["id"],
+                         sarif.NOT_SCANNED_ID)
+        self.assertEqual(alert["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+                         "repo-b")
+        self.assertTrue(alert["partialFingerprints"])
+
+    def test_a_long_reason_never_cuts_the_verdict(self):
+        bad = dict(_result(target="r" * 900), error="e" * 900)
+        text = [r for r in sarif.build_sarif(_payload([bad]))["runs"][0]["results"]
+                if r["ruleId"] == sarif.NOT_SCANNED_ID][0]["message"]["text"]
+        self.assertIn("could not be scanned and is not clean.", text)
+
+    def test_a_complete_run_has_no_such_alert_or_rule(self):
+        run = sarif.build_sarif(_payload([_result()]))["runs"][0]
+        self.assertFalse([r for r in run["results"] if r["ruleId"] == sarif.NOT_SCANNED_ID])
+        self.assertNotIn(sarif.NOT_SCANNED_ID, [r["id"] for r in run["tool"]["driver"]["rules"]])
+
     def test_a_complete_run_succeeds_with_no_notifications(self):
         run = sarif.build_sarif(_payload([_result()]))["runs"][0]
         self.assertEqual(run["invocations"], [{"executionSuccessful": True,

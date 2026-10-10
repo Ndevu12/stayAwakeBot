@@ -674,6 +674,25 @@ class TestScanHostNote(unittest.TestCase):
         self.assertNotIn("all scanned targets are clean", out)
         self.assertIn("1 target(s) could not be scanned and are not clean", out)
 
+    def test_only_a_fully_clean_scan_is_called_a_clean_repo_scan(self):
+        unread = self._payload(infected=0)
+        unread["results"][0]["error"] = "clone failed"
+        doubtful = self._payload(infected=0)
+        doubtful["results"][0]["suspicious"] = True
+        empty = self._payload(infected=0)
+        empty["results"] = []
+        for name, payload in (("unread", unread), ("suspicious", doubtful), ("empty", empty)):
+            with self.subTest(run=name):
+                for render in (sink_render.render_terminal, sink_render.render_markdown):
+                    out = " ".join(render(payload).split())
+                    self.assertNotIn("clean repo scan", out)
+                    self.assertIn("checked repositories, not this machine", out)
+                    self.assertIn("run `saw audit`", out)
+                    self.assertNotIn("all scanned targets are clean", out)
+        self.assertIn("No targets scanned", sink_render.render_markdown(empty))
+        clean = " ".join(sink_render.render_terminal(self._payload(infected=0)).split())
+        self.assertIn("a clean repo scan is NOT a host all-clear", clean)
+
     def test_a_loader_path_reaches_the_terminal_escaped(self):
         payload = self._payload(infected=1)
         payload["results"][0]["findings"] = [{"category": "code-loader", "confidence": "confirmed",

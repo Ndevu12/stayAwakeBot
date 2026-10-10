@@ -96,7 +96,7 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
 
     results = payload["results"]
     if not results:
-        out.append("No targets scanned.")
+        out += ["No targets scanned.", "", _host_note(payload, textsafe.plain)]
         return "\n".join(out) + "\n"
 
     ordered = sorted(results, key=report_order)
@@ -191,7 +191,15 @@ def _host_note(payload: dict[str, Any], escape) -> str:
     and the escaping the sink applies to a path. Returns the note."""
     infected = bool(payload["summary"].get("infected"))
     loaders = [escape(p) for p in _local_loader_paths(payload)] if infected else []
-    return scan_host_note(infected=infected, local_loaders=loaders)
+    return scan_host_note(infected=infected, local_loaders=loaders, clean=_fully_clean(payload))
+
+
+def _fully_clean(payload: dict[str, Any]) -> bool:
+    """Tell whether a run scanned at least one target and every target was read and found clean.
+    Takes the report payload. Returns the answer."""
+    results = payload.get("results") or []
+    return bool(results) and not any(r.get("error") or r.get("suspicious") or r.get("infected")
+                                     for r in results)
 
 
 def _local_loader_paths(payload: dict[str, Any]) -> list[str]:
@@ -327,9 +335,15 @@ def render_markdown(payload: dict[str, Any]) -> str:
         out.append("")
     if not any_f:
         unread = sum(1 for r in payload["results"] if r.get("error"))
-        out.append("_No findings — all scanned targets are clean._" if not unread else
-                   f"_No findings in what was read; {unread} target(s) could not be scanned and are "
-                   "not clean._")
+        if not payload["results"]:
+            out.append("_No targets scanned._")
+        elif unread:
+            out.append(f"_No findings in what was read; {unread} target(s) could not be scanned "
+                       "and are not clean._")
+        elif _fully_clean(payload):
+            out.append("_No findings — all scanned targets are clean._")
+        else:
+            out.append("_No findings listed._")
 
     advised = [r for r in sorted(payload["results"], key=report_order) if r.get("advisories")]
     if advised:

@@ -125,7 +125,11 @@ def build_sarif(payload: dict) -> dict[str, Any]:
                 rule_index[sig] = len(rules)
                 rules.append(_rule(f))
             results.append(_result(r, f, rule_index[sig]))
-    unscanned = [_unscanned(r) for r in payload.get("results", []) if r.get("error")]
+    errored = [r for r in payload.get("results", []) if r.get("error")]
+    if errored:
+        rules.append(NOT_SCANNED_RULE)
+        results.extend(_not_scanned_result(r, len(rules) - 1) for r in errored)
+    unscanned = [_unscanned(r) for r in errored]
     return {
         "$schema": SCHEMA,
         "version": "2.1.0",
@@ -143,13 +147,46 @@ def build_sarif(payload: dict) -> dict[str, Any]:
     }
 
 
+NOT_SCANNED_ID = "saw-target-not-scanned"
+NOT_SCANNED_RULE: dict[str, Any] = {
+    "id": NOT_SCANNED_ID,
+    "name": "TargetNotScanned",
+    "shortDescription": {"text": "A target could not be scanned"},
+    "fullDescription": {"text": "A target saw could not scan is not clean. Scan it again."},
+    "help": {"text": "A target saw could not scan is not clean. Scan it again."},
+    "defaultConfiguration": {"level": "error"},
+    "properties": {"category": "scan", "tags": ["scan"]},
+}
+
+
+def _not_scanned_text(result: dict) -> str:
+    """Say that a target could not be scanned. Takes one result of the payload. Returns the
+    sentence, with the reason after it."""
+    target = textsafe.plain(str(result.get("target") or ""), limit=200)
+    reason = textsafe.plain(str(result.get("error") or ""), limit=200)
+    return f"{target} could not be scanned and is not clean. Reason: {reason}"
+
+
+def _not_scanned_result(result: dict, rule_index: int) -> dict[str, Any]:
+    """Build the alert for a target the scan could not complete. Takes one result of the payload
+    and the index of its rule. Returns a SARIF result at error level, located at the target."""
+    target = str(result.get("target") or ".")
+    return {
+        "ruleId": NOT_SCANNED_ID,
+        "ruleIndex": rule_index,
+        "level": "error",
+        "message": {"text": _not_scanned_text(result)},
+        "locations": [{"physicalLocation": {"artifactLocation": {"uri": target}}}],
+        "partialFingerprints": {"sawSignatureLocation/v1": _fingerprint(NOT_SCANNED_ID, target,
+                                                                          None)},
+        "properties": {"target": result.get("target"), "source": result.get("source")},
+    }
+
+
 def _unscanned(result: dict) -> dict[str, Any]:
     """Build the notification for a target the scan could not complete. Takes one result of the
     payload. Returns a SARIF notification at error level."""
-    return {"level": "error",
-            "message": {"text": textsafe.plain(f"{result.get('target', '')} could not be scanned "
-                                               f"and is not clean: {result.get('error', '')}",
-                                               limit=500)}}
+    return {"level": "error", "message": {"text": _not_scanned_text(result)}}
 
 
 def write_sarif(payload: dict, path: str | Path) -> Path:

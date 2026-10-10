@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.utils import textsafe
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.contexts import empty_hooks_dir
 from stayawake.bots.security import hookscript, outbound, push_record
 from stayawake.lib.git.run import stdout_bytes
 from stayawake.bots.security.hook_policy import operator_policy
@@ -63,11 +65,21 @@ _hook_script = hookscript.render
 _is_ours = hookscript.is_ours
 
 
-def _global_hookspath() -> str | None:
-    """Return the folder git is set to run every repository's hooks from, if any."""
-    val = gitutil.stdout(None, ["config", "--global", "--get", "core.hooksPath"],
-                         context=gitutil.OPERATOR_CONFIG).strip()
-    return val or None
+def _hookspath_git_uses() -> tuple[bool, str | None]:
+    """Read the folder git runs every repository's hooks from, as git sees it outside any
+    repository: system and global configuration, their includes, and the caller's environment.
+    Returns whether the setting could be read, and the folder, or None when none is set."""
+    res = gitutil.run(None, ["config", "--includes", "--show-scope", "--get-all", "core.hooksPath"],
+                      context=gitutil.OPERATOR_CONFIG)
+    if res is None or res.returncode not in (0, 1):
+        return False, None
+    values = []
+    for line in res.stdout.splitlines():
+        scope, _, value = line.partition("\t")
+        if scope == "command" and _same_path(value, empty_hooks_dir()):
+            continue
+        values.append(value.strip())
+    return True, (values[-1] or None) if values else None
 
 
 def _tape(no_stream: bool, dest=None):
@@ -94,17 +106,20 @@ def _tape(no_stream: bool, dest=None):
 
 
 def _hooks_overridden() -> bool:
-    """Tell whether git is set to run every repository's hooks from a folder other than saw's.
-    Returns True when saw's hooks will not run."""
-    hp = _global_hookspath()
-    return bool(hp) and not _same_path(os.path.expanduser(hp), _hooks_dir())
+    """Tell whether saw's hooks may not run. Returns True when git runs every repository's hooks
+    from a folder other than saw's, or when that setting could not be read."""
+    read, hp = _hookspath_git_uses()
+    return not read or (bool(hp) and not _same_path(os.path.expanduser(hp), _hooks_dir()))
 
 
 def _warn_hookspath(stream) -> None:
-    """Warn that saw's hooks will not run when git runs hooks from another folder. Takes the stream
-    to print to."""
-    if _hooks_overridden():
-        hp = _global_hookspath() or ""
+    """Warn that saw's hooks will not run, or may not, when git runs hooks from another folder or
+    that setting could not be read. Takes the stream to print to."""
+    read, hp = _hookspath_git_uses()
+    if not read:
+        print(_paint("  ⚠ git's hooks setting could not be read, so whether saw's hooks run is NOT "
+                     "verified.", "warn", stream), file=stream)
+    elif hp and not _same_path(os.path.expanduser(hp), _hooks_dir()):
         print(_paint(f"  ⚠ git is set to run every repository's hooks from "
                      f"{textsafe.plain(hp, limit=4096)}, so saw's hooks will not run.", "warn", stream),
               file=stream)
@@ -832,46 +847,48 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         return 0
 
     display = str(root).replace(os.path.expanduser("~"), "~")
+    shown = textsafe.plain(display, limit=4096)
+    rescan = "saw scan " + shlex.quote(textsafe.plain(str(root), limit=4096))
     head = gitutil.stdout(root, ["rev-parse", "HEAD"]).strip()
     clean_key = _clean_key(head, config_path) if head and include is None else None
     if clean_key and _load_cache().get(os.path.realpath(root)) == clean_key:
         return 0
 
     err = sys.stderr
-    with spin_status(f"{_BRAND}: scanning {display} for supply-chain worms…",
+    with spin_status(f"{_BRAND}: scanning {shown} for supply-chain worms…",
                      enabled=stream_enabled(err, force_off=no_stream)):
         scanned = _scan_within_budget(root, include, config_path, display)
     if scanned is _TIMED_OUT:
         budget = env.hook_timeout()
-        print(_paint(f"⚠  {_BRAND}: scan of {display} aborted after {budget:.0f}s (large tree) — "
+        print(_paint(f"⚠  {_BRAND}: scan of {shown} aborted after {budget:.0f}s (large tree) — "
                      "NOT verified.", "warn", err), file=err)
-        print("   " + _paint("Scan it yourself:", "dim", err) + " " + _cmd(f"saw scan {display}", err),
+        print("   " + _paint("Scan it yourself:", "dim", err) + " " + _cmd(rescan, err),
               file=err)
         return 2
     result = scanned
     if clean_key:
         _remember(root, "")
     if result.infected:
-        _warn_infected(display, result)
+        _warn_infected(shown, result)
         return 1
     if result.error:
-        print(_paint(f"⚠  {_BRAND}: {display} could not be scanned — NOT verified "
+        print(_paint(f"⚠  {_BRAND}: {shown} could not be scanned — NOT verified "
                      f"({textsafe.plain(result.error, limit=200)}).", "warn", err), file=err)
-        print("   " + _paint("Scan it yourself:", "dim", err) + " " + _cmd(f"saw scan {display}", err),
+        print("   " + _paint("Scan it yourself:", "dim", err) + " " + _cmd(rescan, err),
               file=err)
         return 2
     if result.suspicious:
-        print(_paint(f"⚠  {_BRAND}: {display} — {len(result.findings)} suspicious signal(s). "
+        print(_paint(f"⚠  {_BRAND}: {shown} — {len(result.findings)} suspicious signal(s). "
                      f"Until you've reviewed it, do NOT {_AVOID}.", "warn", err), file=err)
-        print("   " + _paint("Review:", "dim", err) + " " + _cmd(f"saw scan {display}", err), file=err)
+        print("   " + _paint("Review:", "dim", err) + " " + _cmd(rescan, err), file=err)
         return 0
     if result.residue:
-        print(_paint(f"⚠  {_BRAND}: {display} — nothing here runs, but it holds what the project "
+        print(_paint(f"⚠  {_BRAND}: {shown} — nothing here runs, but it holds what the project "
                      "would not carry.", "warn", err), file=err)
-        print("   " + _paint("Review:", "dim", err) + " " + _cmd(f"saw scan {display}", err), file=err)
+        print("   " + _paint("Review:", "dim", err) + " " + _cmd(rescan, err), file=err)
         return 0
     if clean_key:
         _remember(root, clean_key)
     if label == "clone":
-        print(_paint(f"✓ {_BRAND}: {display} scanned clean.", "ok", err), file=err)
+        print(_paint(f"✓ {_BRAND}: {shown} scanned clean.", "ok", err), file=err)
     return 0
