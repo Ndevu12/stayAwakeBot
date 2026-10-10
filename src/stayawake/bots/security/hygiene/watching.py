@@ -2,7 +2,9 @@
 """Whether this machine is still checking itself, and whether it stopped without being told to."""
 from __future__ import annotations
 
-from stayawake.bots.security import schedule
+import time
+
+from stayawake.bots.security import schedule, watchrecord
 
 from .models import HygieneIssue
 
@@ -13,16 +15,18 @@ _DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-
 
 
 def check_self_check(placed=schedule.was_placed, verdict=schedule.verdict,
-                     running=schedule.is_running,
-                     supported=schedule.supported) -> list[HygieneIssue]:
-    """Report a check this machine was set to make and is no longer making."""
+                     running=schedule.is_running, supported=schedule.supported,
+                     record=watchrecord.load, clock=time.time) -> list[HygieneIssue]:
+    """Report a check this machine was set to make and is no longer making. Takes the collaborators
+    that read the schedule and the watcher's record. Returns the issues; a check that cannot be
+    read raises, so the audit reports it as not completed."""
     if not supported() or not placed():
         return []
-    try:
-        state = verdict()
-        loaded = running()
-    except Exception:
-        return []
+    state = verdict()
+    loaded = running()
+    kept = record()
+    if state == schedule.PRISTINE and loaded and kept and watchrecord.stale(kept, clock()):
+        loaded = False
     if state == schedule.PRISTINE and loaded:
         return []
     if state == schedule.PRISTINE:

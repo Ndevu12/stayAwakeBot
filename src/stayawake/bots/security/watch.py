@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 
-from stayawake.bots.security import liveledger, schedule
+from stayawake.bots.security import liveledger, schedule, watchrecord
 from stayawake.bots.security.harden.live import end_live_code
 from stayawake.bots.security.livecode import fingerprint, live_code_processes
 from stayawake.utils import elevate, exitcodes
@@ -25,6 +25,9 @@ _QUIET = "Nothing on this machine is running code it should not."
 _NOT_READ = "Running processes could not be examined, so nothing here covers one."
 _PASS_FAILED = "This machine could not check itself. Run `saw watch status`."
 _NOT_TOLD = "What this machine found could not be recorded or announced. Run `saw watch status`."
+_STALLED = "This machine is set to check itself but has not done so recently. Run `saw watch`."
+_CAME_BACK = ("Code stopped here before came back and has not been dealt with. Take this machine "
+              "off the network, then run `saw harden`.")
 _SCHEDULED = "This machine will keep checking itself from now on."
 _AT_LOGIN = "This machine will keep checking itself from your next login."
 _ALREADY = "This machine was already checking itself."
@@ -140,8 +143,21 @@ def schedule_it(*, settle=schedule.settle) -> tuple[int, str]:
 
 
 def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
-              running=schedule.is_running) -> tuple[int, str]:
-    """Whether this machine is checking itself. Returns the exit code and one line."""
+              running=schedule.is_running, record=None, clock=time.time) -> tuple[int, str]:
+    """Say whether this machine is checking itself. Takes the collaborators that read the schedule
+    and the watcher's record. Returns the exit code and the lines an operator reads."""
+    code, line = _schedule_status(supported, verdict, running)
+    kept = (record or watchrecord.load)()
+    if code == exitcodes.CLEAN and kept and watchrecord.stale(kept, clock()):
+        code, line = exitcodes.FINDINGS, _STALLED
+    if kept.get("unacknowledged"):
+        line += "\n" + _CAME_BACK
+    return code, line
+
+
+def _schedule_status(supported, verdict, running) -> tuple[int, str]:
+    """Read whether the scheduled check is in place and held. Takes the schedule's collaborators.
+    Returns the exit code and one line."""
     if not supported():
         return exitcodes.INCOMPLETE, _CANNOT_TELL
     try:

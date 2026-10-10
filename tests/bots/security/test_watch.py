@@ -286,9 +286,19 @@ class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
     """`saw watch status`. Whether the job is loaded is asked of the service manager, because one
     unprivileged command stops it without touching a byte."""
 
-    def _status(self, state, running=True, supported=True):
+    def _status(self, state, running=True, supported=True, record=None, now=1000.0):
         return watch.status_of(supported=lambda: supported, verdict=lambda: state,
-                               running=lambda: running)
+                               running=lambda: running, record=lambda: dict(record or {}),
+                               clock=lambda: now)
+
+    def test_held_but_not_checking_recently_is_not_clean(self):
+        code, text = self._status(schedule.PRISTINE, record={"last_good": 0.0}, now=10_000.0)
+        self.assertEqual((code, text), (exitcodes.FINDINGS, watch._STALLED))
+
+    def test_code_that_came_back_is_said_until_it_is_dealt_with(self):
+        _, text = self._status(schedule.PRISTINE, record={"last_good": 990.0,
+                                                          "unacknowledged": 5.0})
+        self.assertIn("saw harden", text)
 
     def test_in_place_and_running_is_the_only_clean_answer(self):
         self.assertEqual(self._status(schedule.PRISTINE, running=True),
@@ -316,7 +326,8 @@ class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
     def test_a_verdict_that_raises_does_not_take_the_command_down(self):
         def boom():
             raise OSError("x")
-        code, text = watch.status_of(supported=lambda: True, verdict=boom, running=lambda: True)
+        code, text = watch.status_of(supported=lambda: True, verdict=boom, running=lambda: True,
+                                     record=dict)
         self.assertEqual((code, text), (exitcodes.INCOMPLETE, watch._CANNOT_TELL))
 
     def test_it_names_no_location(self):
