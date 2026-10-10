@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import time
 
-from stayawake.bots.security import liveledger, schedule, watchalerts, watchrecord
-from stayawake.bots.security.watchevents import (  # noqa: F401
-    _ENDED, _LEFT, _NOT_READ, _NOT_REMEMBERED, _PASS_FAILED, _QUIET, _RETURNED, _UNNAMED, ENDED,
-    LEFT, NOT_READ, NOT_REMEMBERED, PASS_FAILED, QUIET, RETURNED, SENTENCE_FOR, UNNAMED)
+from stayawake.bots.security import liveledger, schedule
+from stayawake.bots.security.watchevents import (
+    ENDED, LEFT, NOT_READ, NOT_REMEMBERED, PASS_FAILED, QUIET, RETURNED, SENTENCE_FOR, UNNAMED)
 from stayawake.bots.security.harden.live import end_live_code
 from stayawake.bots.security.livecode import fingerprint, live_code_processes
 from stayawake.utils import elevate, exitcodes
@@ -21,12 +20,6 @@ from stayawake.utils.procsnap import snapshot
 BETWEEN_PASSES = 30
 
 _NOT_TOLD = "What this machine found could not be recorded or announced. Run `saw watch status`."
-_NOT_SHOWN = "This machine could not show you notifications. Run `saw watch status`."
-_NOT_SHOWN_STATUS = "Notifications could not be shown on this machine. Since the last report:"
-_STALLED = ("This machine is set to check itself but has not done so recently. Run `saw watch stop`, "
-            "then `saw watch`.")
-_CAME_BACK = ("Code stopped here before came back and has not been dealt with. Take this machine "
-              "off the network, then run `saw harden`.")
 _SCHEDULED = "This machine will keep checking itself from now on."
 _AT_LOGIN = "This machine will keep checking itself from your next login."
 _ALREADY = "This machine was already checking itself."
@@ -35,11 +28,6 @@ _NOT_SCHEDULED = "This machine could not be asked to keep checking itself."
 _UNSCHEDULED = "This machine will no longer check itself."
 _WAS_NOT = "This machine was not checking itself."
 _NOT_OURS = "Something else is there under that name. It has been left alone."
-_CHECKING = "This machine is checking itself."
-_FROM_LOGIN = "This machine will check itself from your next login. Run `saw watch` to start it now."
-_NOT_CHECKING = "This machine is not checking itself. Run `saw watch`."
-_WAS_CHANGED = "What checks this machine was changed. Run `saw watch` to put it back."
-_CANNOT_TELL = "Whether this machine checks itself could not be established."
 
 
 def _never_asks(pids, *, signatures):
@@ -74,25 +62,24 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     if identified:
         ending = stop(find=lambda: [i for i in again() if i.confirmed], elevated=_never_asks)
 
-    ended_keys = set()
-    if ending is not None and ending.ended:
-        ended_keys = {fingerprint(item.code) for item in identified}
+    ended_something = ending is not None and ending.ended > 0
+    ended_keys = {fingerprint(item.code) for item in identified} if ended_something else set()
     try:
         kept = bool(save(liveledger.record(before, seen, ended_keys=ended_keys, now=now)))
     except Exception:
         kept = False
     remembered = kept and before.status in (liveledger.LOADED, liveledger.ABSENT)
 
-    returning = any(before.returning(fingerprint(item.code)) for item in identified)
+    came_back = any(before.ended_before(fingerprint(item.code)) for item in identified)
     unfinished = ending is not None and not ending.finished
 
     kinds = []
-    if ending is not None:
+    if ended_something:
         kinds.append(ENDED)
-        if returning:
-            kinds.append(RETURNED)
-        if unfinished:
-            kinds.append(LEFT)
+    if came_back:
+        kinds.append(RETURNED)
+    if unfinished:
+        kinds.append(LEFT)
     if len(seen) > len(identified):
         kinds.append(UNNAMED)
     if not remembered:
@@ -151,68 +138,6 @@ def schedule_it(*, settle=schedule.settle) -> tuple[int, str]:
     if not out.changed:
         return exitcodes.CLEAN, _ALREADY
     return exitcodes.CLEAN, _SCHEDULED if out.active else _AT_LOGIN
-
-
-def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
-              running=schedule.is_running, record=None, clock=time.time,
-              placed_since=schedule.placed_since, acknowledged=None) -> tuple[int, str]:
-    """Say whether this machine is checking itself. Takes the collaborators that read the schedule,
-    the watcher's record and `saw harden`'s acknowledgement. Returns the exit code and the lines an
-    operator reads."""
-    code, line = _schedule_status(supported, verdict, running)
-    kept = _record_as_settled(record, acknowledged)
-    if code == exitcodes.CLEAN and watchrecord.stale(kept, clock(), placed_since()):
-        code, line = exitcodes.FINDINGS, _STALLED
-    if kept.get("unacknowledged"):
-        code = max(code, exitcodes.FINDINGS)
-        line += "\n" + _CAME_BACK
-    if kept.get("undelivered"):
-        code = max(code, exitcodes.FINDINGS)
-        said = watchalerts.facts(kept.get("since", {})) or [watchalerts.QUIET_DAY]
-        line += "\n" + " ".join([_NOT_SHOWN_STATUS] + said)
-    return code, line
-
-
-def foreground_notice(*, record=None, placed=schedule.was_placed, clock=time.time,
-                      placed_since=schedule.placed_since, acknowledged=None) -> str:
-    """Build the line any foreground command prints about the watcher. Takes the collaborators that
-    read the record, the placement and `saw harden`'s acknowledgement. Returns the line, or "" when
-    there is nothing to say."""
-    try:
-        if not placed():
-            return ""
-        kept = _record_as_settled(record, acknowledged)
-        said = [_CAME_BACK] if kept.get("unacknowledged") else []
-        if watchrecord.stale(kept, clock(), placed_since()):
-            said.append(_STALLED)
-        elif kept.get("undelivered"):
-            said.append(_NOT_SHOWN)
-        return " ".join(said)
-    except Exception:
-        return ""
-
-
-def _record_as_settled(record, acknowledged) -> dict:
-    """Read the watcher's record with `saw harden`'s acknowledgement applied. Takes the two
-    readers, or None for the real ones. Returns the record."""
-    return watchrecord.settled((record or watchrecord.load)(),
-                               (acknowledged or watchrecord.load_acknowledgement)())
-
-
-def _schedule_status(supported, verdict, running) -> tuple[int, str]:
-    """Read whether the scheduled check is in place and held. Takes the schedule's collaborators.
-    Returns the exit code and one line."""
-    if not supported():
-        return exitcodes.INCOMPLETE, _CANNOT_TELL
-    try:
-        state = verdict()
-    except Exception:
-        return exitcodes.INCOMPLETE, _CANNOT_TELL
-    if state == schedule.ABSENT:
-        return exitcodes.FINDINGS, _NOT_CHECKING
-    if state != schedule.PRISTINE:
-        return exitcodes.FINDINGS, _WAS_CHANGED
-    return (exitcodes.CLEAN, _CHECKING) if running() else (exitcodes.FINDINGS, _FROM_LOGIN)
 
 
 def unschedule_it(*, remove=schedule.take_back) -> tuple[int, str]:

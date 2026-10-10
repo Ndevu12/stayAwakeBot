@@ -10,7 +10,8 @@ import types
 import unittest
 from unittest import mock
 
-from stayawake.bots.security import liveledger, schedule, watch
+from stayawake.bots.security import liveledger, schedule, watch, watchstate, watchstatus
+from stayawake.bots.security.watchevents import SENTENCE_FOR
 from stayawake.bots.security.harden.live import Ending
 from stayawake.bots.security.livecode import LiveCode, fingerprint
 from stayawake.utils import elevate, exitcodes
@@ -95,13 +96,24 @@ class TestARecordThatCouldNotBeKeptIsSaid(unittest.TestCase):
         self.assertEqual((code, kinds), (exitcodes.CLEAN, (watch.QUIET,)))
 
 
+class TestTheLedgerNeverKeepsThePassFromEndingCode(unittest.TestCase):
+    def test_a_ledger_that_cannot_be_read_still_lets_the_pass_end_identified_code(self):
+        def boom():
+            raise RecursionError("deep")
+        ender = _Recorder()
+        code, kinds = watch.examine(find=lambda: [_held(7, "bad", True)], stop=ender, load=boom,
+                                    save=lambda ledger: True, look=lambda: _READABLE)
+        self.assertIsNotNone(ender.find, "the pass stopped nothing because of its ledger")
+        self.assertIn(watch.NOT_REMEMBERED, kinds)
+
+
 class TestAPassThatCouldNotLookIsNeverQuiet(unittest.TestCase):
     def test_a_process_table_it_cannot_read_is_not_a_quiet_machine(self):
         for snap in (Snapshot(supported=False), Snapshot(processes=[])):
             code, text = watch.watch_once(find=lambda: [], stop=None, load=liveledger.Ledger,
                                           save=lambda ledger: True, look=lambda s=snap: s)
             self.assertEqual(code, exitcodes.INCOMPLETE)
-            self.assertNotIn(watch._QUIET, text)
+            self.assertNotIn(SENTENCE_FOR[watch.QUIET], text)
             self.assertIn("could not be examined", text)
 
     def test_a_pass_that_failed_is_reported(self):
@@ -110,7 +122,7 @@ class TestAPassThatCouldNotLookIsNeverQuiet(unittest.TestCase):
         def boom():
             raise RuntimeError("x")
         watch.keep_going(once=boom, sleep=lambda n: None, passes=1, report=said.append)
-        self.assertEqual(said, [watch._PASS_FAILED])
+        self.assertEqual(said, [SENTENCE_FOR[watch.PASS_FAILED]])
 
 
 class TestItNeverAsksForAPassword(unittest.TestCase):
@@ -148,11 +160,18 @@ class TestItRemembersWhatItSaw(unittest.TestCase):
         _c, _t, ledger, _e = _run([_held(2, "shape-only", False)])
         self.assertIn(fingerprint("shape-only"), ledger.entries)
 
-    def test_something_seen_before_is_named_as_having_come_back(self):
+    def test_something_stopped_before_is_named_as_having_come_back(self):
+        code = "bad"
+        before = liveledger.record(liveledger.Ledger(), [_held(1, code, True)],
+                                   ended_keys={fingerprint(code)})
+        _c, text, _l, _e = _run([_held(1, code, True)], _Recorder(), before=before)
+        self.assertIn("running again", text)
+
+    def test_something_seen_before_but_never_stopped_has_not_come_back(self):
         code = "bad"
         before = liveledger.record(liveledger.Ledger(), [_held(1, code, True)])
         _c, text, _l, _e = _run([_held(1, code, True)], _Recorder(), before=before)
-        self.assertIn("running again", text)
+        self.assertNotIn("running again", text)
 
     def test_something_new_is_not(self):
         _c, text, _l, _e = _run([_held(1, "fresh", True)], _Recorder())
@@ -165,6 +184,13 @@ class TestWhatItCouldNotFinishIsNotSilence(unittest.TestCase):
         code, text, _l, _e = _run([_held(1, "bad", True)], ender)
         self.assertEqual(code, exitcodes.INCOMPLETE)
         self.assertIn("saw harden", text)
+
+    def test_a_stop_that_ended_nothing_is_not_reported_as_stopped(self):
+        ender = _Recorder(Ending(matched=1, ended=0, survived=[9], quiet=True))
+        code, text, _l, _e = _run([_held(1, "bad", True)], ender)
+        self.assertNotIn(SENTENCE_FOR[watch.ENDED], text)
+        self.assertIn(SENTENCE_FOR[watch.LEFT], text)
+        self.assertEqual(code, exitcodes.INCOMPLETE)
 
     def test_a_finished_ending_reports_findings_not_clean(self):
         # It ended them, but this machine WAS running identified code; a gate must not read that as
@@ -203,7 +229,7 @@ class TestItKeepsGoing(unittest.TestCase):
         said = []
         watch.keep_going(once=lambda: (exitcodes.FINDINGS, (watch.ENDED,)),
                          sleep=lambda n: None, passes=1, report=said.append)
-        self.assertEqual(said, [watch._ENDED])
+        self.assertEqual(said, [SENTENCE_FOR[watch.ENDED]])
 
 
 class TestItSchedulesItselfRatherThanBeingScheduled(unittest.TestCase):
@@ -306,27 +332,37 @@ class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
 
     def _status(self, state, running=True, supported=True, record=None, now=1000.0,
                 since=995.0):
-        return watch.status_of(supported=lambda: supported, verdict=lambda: state,
+        return watchstatus.status_of(supported=lambda: supported, verdict=lambda: state,
                                running=lambda: running, record=lambda: dict(record or {}),
                                clock=lambda: now, placed_since=lambda: since,
                                acknowledged=lambda: None)
 
     def test_held_with_no_pass_since_it_was_placed_long_ago_is_not_clean(self):
         code, text = self._status(schedule.PRISTINE, since=0.0, now=10_000.0)
-        self.assertEqual((code, text), (exitcodes.FINDINGS, watch._STALLED))
+        self.assertEqual((code, text), (exitcodes.FINDINGS, watchstate.LINE_FOR[watchstate.NOT_CHECKING]))
 
     def test_held_but_not_checking_recently_is_not_clean(self):
         code, text = self._status(schedule.PRISTINE, record={"last_good": 0.0}, now=10_000.0)
-        self.assertEqual((code, text), (exitcodes.FINDINGS, watch._STALLED))
+        self.assertEqual((code, text), (exitcodes.FINDINGS, watchstate.LINE_FOR[watchstate.NOT_CHECKING]))
 
     def test_code_that_came_back_is_said_until_it_is_dealt_with(self):
         _, text = self._status(schedule.PRISTINE, record={"last_good": 990.0,
                                                           "unacknowledged": 5.0})
         self.assertIn("saw harden", text)
 
+    def test_it_shows_what_a_notification_pointed_to(self):
+        record = {"last_good": 990.0, "since": {"ended": 1}}
+        code, text = self._status(schedule.PRISTINE, record=record)
+        self.assertEqual(code, exitcodes.CLEAN)
+        self.assertIn("Code running here was stopped once.", text)
+        code, text = self._status(schedule.PRISTINE,
+                                  record={"last_good": 990.0, "not_stopped": 900.0})
+        self.assertEqual(code, exitcodes.FINDINGS)
+        self.assertIn(watchstate.LINE_FOR[watchstate.NOT_STOPPED], text)
+
     def test_in_place_and_running_is_the_only_clean_answer(self):
         self.assertEqual(self._status(schedule.PRISTINE, running=True),
-                         (exitcodes.CLEAN, watch._CHECKING))
+                         (exitcodes.CLEAN, watchstatus._CHECKING))
 
     def test_in_place_but_not_loaded_says_from_the_next_login(self):
         code, text = self._status(schedule.PRISTINE, running=False)
@@ -335,25 +371,25 @@ class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
 
     def test_nothing_there_says_it_is_not_checking(self):
         code, text = self._status(schedule.ABSENT)
-        self.assertEqual((code, text), (exitcodes.FINDINGS, watch._NOT_CHECKING))
+        self.assertEqual((code, text), (exitcodes.FINDINGS, watchstatus._NOT_CHECKING))
 
     def test_changed_underneath_you_is_not_reported_as_absent(self):
         for state in (schedule.ALTERED, schedule.UNREADABLE):
             with self.subTest(state=state):
                 code, text = self._status(state)
-                self.assertEqual((code, text), (exitcodes.FINDINGS, watch._WAS_CHANGED))
+                self.assertEqual((code, text), (exitcodes.FINDINGS, watchstatus._WAS_CHANGED))
 
     def test_a_platform_without_one_says_it_could_not_tell(self):
         self.assertEqual(self._status(schedule.PRISTINE, supported=False),
-                         (exitcodes.INCOMPLETE, watch._CANNOT_TELL))
+                         (exitcodes.INCOMPLETE, watchstatus._CANNOT_TELL))
 
     def test_a_verdict_that_raises_does_not_take_the_command_down(self):
         def boom():
             raise OSError("x")
-        code, text = watch.status_of(supported=lambda: True, verdict=boom, running=lambda: True,
+        code, text = watchstatus.status_of(supported=lambda: True, verdict=boom, running=lambda: True,
                                      record=dict, placed_since=lambda: None,
                                      acknowledged=lambda: None)
-        self.assertEqual((code, text), (exitcodes.INCOMPLETE, watch._CANNOT_TELL))
+        self.assertEqual((code, text), (exitcodes.INCOMPLETE, watchstatus._CANNOT_TELL))
 
     def test_it_names_no_location(self):
         for state in (schedule.PRISTINE, schedule.ABSENT, schedule.ALTERED):

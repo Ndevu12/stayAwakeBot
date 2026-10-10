@@ -57,6 +57,11 @@ class Ledger:
         """How many earlier runs saw `key`. Zero when the record is not trusted."""
         return self.entries[key].times if self.trusted and key in self.entries else 0
 
+    def ended_before(self, key: str) -> int:
+        """Tell how many earlier runs ended `key`. Takes the fingerprint. Returns the count, zero
+        when the record is not trusted."""
+        return self.entries[key].ended if self.trusted and key in self.entries else 0
+
 
 def load(path: Path | None = None) -> Ledger:
     """Read the record. Every failure is a STATE, never an exception and never an empty all-clear."""

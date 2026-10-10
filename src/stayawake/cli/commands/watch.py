@@ -9,7 +9,8 @@ from __future__ import annotations
 import argparse
 import time
 
-from stayawake.bots.security import watch, watchalerts, watchrecord
+from stayawake.bots.security import (watch, watchack, watchalerts, watchrecord, watchstatus,
+                                     watchteller)
 from stayawake.utils import notify
 from stayawake.cli.helptext import add_command, declare_streaming
 from stayawake.utils.streaming import busy, say
@@ -87,7 +88,7 @@ def run_stop(a: argparse.Namespace) -> int:
 def run_status(a: argparse.Namespace) -> int:
     no_stream = no_stream_requested(a)
     with busy("checking whether this machine is watching itself…", no_stream=no_stream):
-        code, text = watch.status_of()
+        code, text = watchstatus.status_of()
     say(text, no_stream=no_stream)
     return code
 
@@ -95,7 +96,7 @@ def run_status(a: argparse.Namespace) -> int:
 def run_internal(a: argparse.Namespace) -> int:
     """Keep making the pass until stopped, telling the user what it finds. Takes the parsed
     arguments. Returns the code of the last pass."""
-    tell = watchalerts.teller(notifier_for_this_machine(), load=watchrecord.load,
+    tell = watchteller.teller(notifier_for_this_machine(), load=watchrecord.load,
                               save=watchrecord.save, clock=time.time, local=time.localtime,
-                              acknowledged=watchrecord.load_acknowledgement)
+                              acknowledged=watchack.load_acknowledgement)
     return watch.keep_going(tell=tell)

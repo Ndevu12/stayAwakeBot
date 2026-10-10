@@ -6,20 +6,28 @@ import os
 import stat
 
 
-def user_manager_env(*, uid=os.getuid, lstat=os.lstat, runtime_dir: str | None = None) -> dict:
+def user_manager_env(*, uid=os.getuid, lstat=os.lstat, runtime_dir: str | None = None,
+                     environ=os.environ) -> dict:
     """Build the environment the user's service manager is reached with. Takes the user id, the
-    stat call and an optional runtime folder. Returns the runtime folder when it is a folder this
-    user owns, with the session bus added when that is this user's own socket; else nothing."""
+    stat call, an optional runtime folder and the caller's environment. Returns the user's runtime
+    folder — `/run/user/<uid>`, else the caller's — when it is a folder this user owns, with the
+    session bus added when that is this user's own socket; else nothing."""
     user = uid()
-    runtime = runtime_dir or f"/run/user/{user}"
+    for runtime in (runtime_dir or f"/run/user/{user}", environ.get("XDG_RUNTIME_DIR")):
+        if runtime and _owned_folder(runtime, user, lstat):
+            bus = session_bus_env(uid=lambda: user, lstat=lstat, runtime_dir=runtime) or {}
+            return {"XDG_RUNTIME_DIR": runtime, **bus}
+    return {}
+
+
+def _owned_folder(path: str, user: int, lstat) -> bool:
+    """Tell whether a path is a folder the user owns, not a link. Takes the path, the user id and
+    the stat call. Returns the answer."""
     try:
-        info = lstat(runtime)
+        info = lstat(path)
     except OSError:
-        return {}
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != user:
-        return {}
-    bus = session_bus_env(uid=lambda: user, lstat=lstat, runtime_dir=runtime) or {}
-    return {"XDG_RUNTIME_DIR": runtime, **bus}
+        return False
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == user
 
 
 def session_bus_env(*, uid=os.getuid, lstat=os.lstat, runtime_dir: str | None = None) -> dict | None:
