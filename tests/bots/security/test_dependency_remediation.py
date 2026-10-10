@@ -67,6 +67,11 @@ class TestRemediationBuilders(unittest.TestCase):
         self.assertIn("upgrading does not help", fix.advice)
         self.assertEqual(fix.state, R.MALICIOUS)
 
+    def test_malware_fix_puts_saw_audit_before_any_rotation(self):
+        advice = R.malware_fix("evil", "1.0", "npm").advice
+        self.assertIn("saw audit", advice)
+        self.assertLess(advice.index("saw audit"), advice.index("rotate"))
+
     def test_an_external_auditors_advisory_is_an_upgrade(self):
         fix = R.external_advisory_fix("left-pad", "1.0.0", "GHSA-1", "npm audit")
         self.assertIn("left-pad 1.0.0 is reported", fix.advice)

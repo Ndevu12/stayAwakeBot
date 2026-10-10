@@ -15,6 +15,7 @@ from stayawake.utils.streaming import Streamer, stream_enabled, status
 from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
+from stayawake.bots.security.host_note import fix_host_note
 from stayawake.bots.security import resolution
 from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.service.config import _options
@@ -329,12 +330,14 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
         # slug, an empty resolution, a named path that matched no repository — all printed an
         # error and did no work; reporting success would let a CI gate read "no credential" as
         # "no payload".
+        prog.line(fix_host_note())
         return 2
     needs_review = sum(1 for o in outcomes if o.needs_review)
     n = len(outcomes)
     plural = "y" if n == 1 else "ies"
     prog.line(f"\nProcessed {n} repositor{plural}"
               + (f"; {needs_review} need review." if needs_review else "."))
+    prog.line(fix_host_note())
     return 1 if needs_review else 0
 
 
@@ -450,8 +453,10 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
                                 branches=branches, resolver=resolver))
     if not outcomes:
         prog.line("No repositories to fix.")
+        prog.line(fix_host_note())
         return 0
     prog.line(fix_tally(outcomes))
+    prog.line(fix_host_note())
     return fix_status(outcomes)
 
 
