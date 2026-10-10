@@ -15,15 +15,6 @@ NOT_STOPPED_ID = "self-check-code-not-stopped"
 
 _DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-machine.md"
          "#what-a-clean-audit-does-and-does-not-mean")
-_FOUND = {
-    watchstate.CAME_BACK: (CAME_BACK_ID, "Code this machine stopped before came back",
-                           "It is running again and has not been dealt with.",
-                           "Run `saw harden`, then `saw audit` to find what brings it back."),
-    watchstate.NOT_STOPPED: (NOT_STOPPED_ID, "Code running on this machine could not be stopped",
-                             "The watcher found it and could not end it.", "Run `saw harden`."),
-}
-
-
 def check_self_check(placed=schedule.was_placed, verdict=schedule.verdict,
                      running=schedule.is_running, supported=schedule.supported,
                      record=watchrecord.load, clock=time.time,
@@ -40,11 +31,24 @@ def check_self_check(placed=schedule.was_placed, verdict=schedule.verdict,
     kept = watchack.settled(record(), acknowledged())
     matters = watchstate.still_open(kept, now=clock(), placed=held, placed_since=placed_since())
     issues = _schedule_issues(state) if state is not None and not held else []
-    if any(m.kind == watchstate.NOT_CHECKING for m in matters):
-        issues.append(_issue(STOPPED_ID, "This machine stopped checking itself",
-                             "It is set to check itself and has not done so recently.",
-                             "Run `saw watch stop`, then `saw watch`."))
-    issues += [_issue(*_FOUND[m.kind]) for m in matters if m.kind in _FOUND]
+    kinds = {m.kind for m in matters}
+    if watchstate.NOT_CHECKING in kinds:
+        issues.append(HygieneIssue(
+            id=STOPPED_ID, severity="warning", title="This machine stopped checking itself",
+            detail="It is set to check itself and has not done so recently.",
+            remediation="Run `saw watch stop`, then `saw watch`.", reference=_DOCS))
+    if watchstate.CAME_BACK in kinds:
+        issues.append(HygieneIssue(
+            id=CAME_BACK_ID, severity="warning", title="Code this machine stopped before came back",
+            detail="It is running again and has not been dealt with.",
+            remediation="Run `saw harden`, then `saw audit` to find what brings it back.",
+            reference=_DOCS))
+    if watchstate.NOT_STOPPED in kinds:
+        issues.append(HygieneIssue(
+            id=NOT_STOPPED_ID, severity="warning",
+            title="Code running on this machine could not be stopped",
+            detail="The watcher found it and could not end it.", remediation="Run `saw harden`.",
+            reference=_DOCS))
     return issues
 
 
@@ -52,14 +56,11 @@ def _schedule_issues(state: str) -> list[HygieneIssue]:
     """Report a scheduled check that is not held. Takes what the scheduled item is to saw. Returns
     the issue."""
     if state == schedule.PRISTINE:
-        return [_issue(STOPPED_ID, "This machine stopped checking itself",
-                       "It is set to check itself and is not doing so.", "Run `saw watch`.")]
-    return [_issue(STOPPED_ID, "What was checking this machine is gone",
-                   "It was set to check itself; what does that is no longer there.",
-                   "Run `saw watch`.")]
-
-
-def _issue(issue_id: str, title: str, detail: str, remediation: str) -> HygieneIssue:
-    """Build one warning of this check. Takes its id, title, detail and remediation. Returns it."""
-    return HygieneIssue(id=issue_id, severity="warning", title=title, detail=detail,
-                        remediation=remediation, reference=_DOCS)
+        return [HygieneIssue(id=STOPPED_ID, severity="warning",
+                             title="This machine stopped checking itself",
+                             detail="It is set to check itself and is not doing so.",
+                             remediation="Run `saw watch`.", reference=_DOCS)]
+    return [HygieneIssue(id=STOPPED_ID, severity="warning",
+                         title="What was checking this machine is gone",
+                         detail="It was set to check itself; what does that is no longer there.",
+                         remediation="Run `saw watch`.", reference=_DOCS)]
