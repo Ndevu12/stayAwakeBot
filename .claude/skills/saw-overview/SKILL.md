@@ -109,6 +109,12 @@ Each of these was crossed in real work, and each crossing changed what a user wa
 - **`saw` reports on the host, never on itself.** No internal vocabulary reaches an operator. What
   they read is a condition of their machine and what to do about it — never that the tool may have
   failed its own checks.
+- **Tell the user what they deserve to know — no more, no less.** Every line an operator reads
+  answers where they stand and what to do: the verdict, what it covers for them, whether it is safe
+  to act, and the command to run. A rewrite for tone or brevity may reword such a line; it may not
+  drop it, soften a verdict, or let a target that could not be scanned read as clean. It never adds
+  how saw decides, what it does not look at, or commentary on the tool. Promotional copy kept
+  elsewhere follows its own rules and never flows into the tool's own text.
 - **`saw` may say what its own actions will destroy. It may not say what you can restore.** Advice
   to back up or preserve costs nothing; enumerating or auditing recovery tooling is someone else's
   capability, and out of scope.

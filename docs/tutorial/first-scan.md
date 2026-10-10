@@ -35,7 +35,7 @@ Stand in a repository and run:
 saw scan
 ```
 
-The hunt runs on the tree you have. The last line of the report is the verdict.
+The scan runs on your machine and only reads. The last line of the report is the verdict.
 
 ## 3. Read the verdict
 

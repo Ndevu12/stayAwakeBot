@@ -1,12 +1,12 @@
 ---
-description: Documentation for saw — a supply-chain worm hunter. Install it, run your first scan, harden the host, gate CI, and look up any command.
+description: Documentation for saw — an offline supply-chain worm hunter. Install it, run your first scan, harden the host, gate CI, and look up any command.
 ---
 
 # StayAwakeBot documentation
 
-`saw` hunts supply-chain worms in repositories, lockfiles, installed packages and on the host.
-The fix opens as a pull request. The host is hardened; the merge is gated. The last line of the
-report is the verdict.
+`saw` hunts supply-chain worms in repositories, lockfiles, installed packages and on the host. It
+runs offline, out of the box. It removes what it confirms, opens the fix as a pull request, hardens
+the host and gates the merge. The last line of every report is the verdict.
 
 For developers who ship software — in any of the eight package ecosystems `saw`
 [reads](reference/advisory-db.md#ecosystems-saw-reads) — and for the people who keep an

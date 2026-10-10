@@ -17,15 +17,15 @@ Self-propagating packages spread through installs, builds and merges — arrivin
 asked for, and running before you ever read it.
 
 **`saw` hunts them where they land**: repositories, lockfiles, installed packages, and the
-machine's start-up surface. The fix opens as a pull request. The host is hardened; the merge is
-gated.
+machine's start-up surface. It runs offline, out of the box. It removes what it confirms, opens the
+fix as a pull request, hardens the host and gates the merge.
 
 | | |
 | --- | --- |
-| **Detect** | `saw scan` — the tree and the host. `saw hook` — a clone, a pull, a switch, a rebase. `saw audit` — credentials, editor settings, start-up. |
-| **Remediate** | `saw fix` — the previous version onto a pull request; `--pr` publishes it. `saw fix amend` replaces past commits that still carry the payload. `saw discard` undoes the branch. |
-| **Prevent** | `saw harden` — this machine; in place after a read-back. `saw guard` — the merge. |
-| **Advisories** | `saw db` — the advisory corpus for CVE and malicious-package matching. |
+| **Detect** | `saw scan` — repositories, lockfiles and installed dependency trees; read-only. `saw hook` — each clone, pull, switch, rebase and push. `saw audit` — this machine and a repository's branch protection, ending with a rotation-safety verdict. |
+| **Remediate** | `saw fix` — clears a confirmed infection from your checkout and prepares the cleanup branch; `--pr` opens it as a pull request. `saw fix amend` replaces past commits that still carry the payload. `saw discard` undoes the branch. |
+| **Prevent** | `saw harden` — protections on this machine, each checked once it is written. `saw guard` — the CI gate that blocks an infected merge. |
+| **Advisories** | `saw db` — the offline advisory corpus for CVE and malicious-package matching. |
 
 ## Quick start
 

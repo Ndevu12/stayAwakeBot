@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """`saw scan` — hunt supply-chain worms (READ-ONLY). Routes to security.service.scan.
 
-The hunt writes a report to the terminal. The last line is the verdict. The clean is
-`saw fix`. Scope is LOCAL by default (given paths / configured globs / the current repo);
+Renders the report to the terminal; its last line is the verdict, and `saw fix` removes what it
+finds. Scope is LOCAL by default (given paths / configured globs / the current repo);
 `--remote` (or naming `--user`/`--org`) scans GitHub repos instead. Persisting/alerting is
 opt-in: --json, --sarif FILE, -d DIR (redacted), --alert.
 """
@@ -22,8 +22,9 @@ def register(sub) -> None:
         sub, "scan", aliases=["s", "sc"],
         help="hunt supply-chain worms (read-only)",
         description=(
-            "Hunt supply-chain worms across repositories or directories. The full report "
-            "renders to the terminal. The last line is the verdict. The clean is `saw fix`."),
+            "Hunt supply-chain worms across repositories or directories. Read-only. The full "
+            "report renders to the terminal, and its last line is the verdict; a scan that could "
+            "not complete never reports clean. `saw fix` removes what it finds."),
         examples=[
             ("saw scan", "the last line of the report is the verdict"),
             ("saw scan ./svc-a ./svc-b", "specific local paths"),
