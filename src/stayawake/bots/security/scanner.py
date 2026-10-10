@@ -15,6 +15,7 @@ from stayawake.utils import textsafe
 from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL, RESIDUE,
                                             ROLLBACK_DIR, Finding, ScanResult, Severity)
 from stayawake.bots.security.matchers import REGISTRY
+from stayawake.bots.security.signatures import every_signature
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.run import one_pass, stalls_recorded
 
@@ -322,7 +323,7 @@ def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
     """Scan ONE target with EVERY matcher, sequentially — the single-worker path and the reference
     for the parallel path, which splits the same matchers across file-chunks and merges into
     the same `finalize`."""
-    all_sigs = [s for group in signatures_by_matcher.values() for s in group]
+    all_sigs = every_signature(signatures_by_matcher)
     order = list(signatures_by_matcher.keys())
     with one_pass():
         return _scan_target(target, signatures_by_matcher, allowlist, all_sigs, order)

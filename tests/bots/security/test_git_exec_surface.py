@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security.matchers.git_exec_surface import (PAYLOAD_SIGNATURE, RUNS_SIGNATURE,
-                                                               SUSPICIOUS_SIGNATURE)
+                                                               SUSPICIOUS_SIGNATURE, payload_check_for)
 from stayawake.bots.security.models import CONFIRMED, HEURISTIC, INFORMATIONAL
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
@@ -656,6 +656,44 @@ class TestReadingNeverRunsTheConfiguration(ExecSurfaceSandbox):
         tiers = self.graded(repo)
         self.assertFalse(sentinel.exists(), "reading the repository ran something it configures")
         self.assertTrue(tiers[INFORMATIONAL])
+
+
+def _quoted(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+class TestAFingerprintConfirmsOnlyWhereItHolds(ExecSurfaceSandbox):
+    """A fingerprint meant for some files, or one that needs a corroborator, confirms a setting only
+    as it would confirm a file."""
+
+    _MEANT_FOR_OTHER_FILES = (
+        "curl -s -X POST -d '{\"serverUrl\": \"https://ci.example.com\"}' https://hooks.example.com/n",
+        "echo TechMono",
+        "cat branch_structure.json",
+        "echo SHA1HULUD",
+        "node -e \"const DEL = String.fromCharCode(127)\"",
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.carries_payload = payload_check_for([s for group in load_signatures().values()
+                                                  for s in group])
+
+    def test_a_hook_naming_text_another_files_fingerprint_matches_is_not_confirmed(self):
+        for value in self._MEANT_FOR_OTHER_FILES:
+            with self.subTest(value=value):
+                repo = self.repo(f"repo-{uuid.uuid4().hex[:8]}")
+                self.append_config(repo, f'[hook "notify"]\n\tcommand = {_quoted(value)}\n'
+                                         '\tevent = pre-push\n')
+                self.assertEqual([], [f.evidence for f in self.graded(repo)[CONFIRMED]])
+
+    def test_a_fingerprint_held_to_a_corroborator_confirms_beside_it(self):
+        self.assertEqual("loader-fromcharcode-127",
+                         self.carries_payload("node -e \"eval(String.fromCharCode(127)+x)\""))
+        self.assertIsNone(self.carries_payload("node -e \"const DEL = String.fromCharCode(127)\""))
+
+    def test_a_fingerprint_that_holds_anywhere_still_confirms(self):
+        self.assertEqual("loader-global-v-marker", self.carries_payload("node -e \"global['_V']='8-12';\""))
 
 
 if __name__ == "__main__":

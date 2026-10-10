@@ -305,7 +305,15 @@ def payload_check_for(signatures) -> object:
     return build_any_payload_check([s for s in signatures if s.get("matcher") == "content"])
 
 
-def _shown(path: Path, root: Path) -> str:
+def evidence_of(judgement: Judgement) -> str:
+    """Write the evidence a finding carries for one judgement. Takes the judgement. Returns it."""
+    if judgement.value is not None:
+        return f"{judgement.subject} = {judgement.value}"
+    return judgement.subject
+
+
+def shown_path(path: Path, root: Path) -> str:
+    """Write a path the way a finding names it. Takes the path and the scanned root. Returns it."""
     try:
         return str(Path(os.path.abspath(path)).relative_to(os.path.abspath(root)))
     except ValueError:
@@ -330,12 +338,12 @@ class GitExecSurfaceMatcher(Matcher):
             sig = by_id.get(_TIER_SIGNATURE[j.tier])
             if sig is None:
                 continue
-            evidence = f"{j.subject} = {j.value}" if j.value is not None else j.subject
+            evidence = evidence_of(j)
             findings.append(Finding(
                 signature_id=sig["id"], category=sig["category"],
-                severity=Severity.parse(sig["severity"]), path=_shown(j.where, target.root),
+                severity=Severity.parse(sig["severity"]), path=shown_path(j.where, target.root),
                 description=f"{sig['description']} {j.reason[:1].upper()}{j.reason[1:]}.",
                 remediation=sig.get("remediation", "manual"), evidence=evidence,
                 vector=sig["category"],
-                payload_paths=tuple(_shown(p, target.root) for p in j.payload_files)))
+                payload_paths=tuple(shown_path(p, target.root) for p in j.payload_files)))
         return findings

@@ -20,7 +20,7 @@ INFORMATIONAL = "informational"
 CONFIDENCE_LEVELS = (CONFIRMED, HEURISTIC, RESIDUE, INFORMATIONAL)
 
 REMEDIATION_VERBS = ("manual", "recover", "remove-file", "remove-foreign-vscode",
-                     "strip-gitignore-markers")
+                     "strip-gitignore-markers", "remove-git-exec-payload")
 
 CLEAN = "clean"
 RESIDUE_VERDICT = "residue"

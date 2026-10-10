@@ -137,11 +137,11 @@ def check_global_install_tree() -> list[HygieneIssue]:
     if not roots:
         return []
     from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
-    from stayawake.bots.security.signatures import load_signatures
+    from stayawake.bots.security.signatures import every_signature, load_signatures
 
     by_matcher = load_signatures()
     sigs = by_matcher.get(InstalledPackageAuditMatcher.handles, [])
-    every = [s for group in by_matcher.values() for s in group]
+    every = every_signature(by_matcher)
     matcher = InstalledPackageAuditMatcher(trees=(GlobalNpmInstalledTree(),), resolvers=())
     issues: list[HygieneIssue] = []
     for root in roots:

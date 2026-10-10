@@ -19,6 +19,7 @@ from stayawake.bots.security.remediation import (delivery, changes, footprint, i
                                                  oracle, preserve)
 from stayawake.bots.security.pr.fix_verdict import Checkout, checkout_clauses, checkout_of
 from stayawake.bots.security.scanner import scan_target
+from stayawake.bots.security.signatures import every_signature
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.targets.base import is_source_path
 from stayawake.lib.git.auth import run_remote_git
@@ -425,7 +426,7 @@ def _place_history_finding(repo: Path, finding, entry, signatures, allowlist, op
         out.repaired.add(key)
         return
     text = gitutil.blob_text(repo, entry.oid)
-    flat = _flat(signatures)
+    flat = every_signature(signatures)
     known = out.excise.get(entry.path)
     fixes = ([Repair(*known)] if known is not None else
              [_repair_checks(finding, flat),
@@ -479,13 +480,6 @@ def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]] |
         for name, tip, cas_old in carrying:
             heads.setdefault(name, (name, tip, cas_old))
     return list(heads.values())
-
-
-def _flat(signatures) -> list:
-    """The signature list, whether given as the by-matcher map or already flat."""
-    if isinstance(signatures, dict):
-        return [s for group in signatures.values() for s in group]
-    return list(signatures or [])
 
 
 def _committed_anywhere(repo: Path, path: str) -> bool:
@@ -578,7 +572,7 @@ def _repair_checks(finding, flat) -> Repair:
 def _content_targets(repo: Path, scan, signatures, unread: list[str]) -> list[ContentTarget]:
     """Confirmed file findings this verb can excise, one per path and only where the corrector clears
     the footprint at HEAD. A path git could not read is named in `unread`."""
-    flat = _flat(signatures)
+    flat = every_signature(signatures)
     out: list[ContentTarget] = []
     seen: set[str] = set()
     for f in scan.findings:
@@ -610,7 +604,7 @@ def _predates_content_targets(repo: Path, scan, signatures, allowlist, opts,
     is then re-scanned in full, so a path whose file carries a second, co-resident payload of another
     class is left out too. `already` are the paths the HEAD content and remove lanes own; a path git
     could not read is named in `unread`."""
-    flat = _flat(signatures)
+    flat = every_signature(signatures)
     payload = oracle.payload_matchers(signatures)
     out = []
     seen: set[str] = set()
@@ -957,7 +951,7 @@ def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
     """The paths of confirmed, non-advisory findings this verb neither reverts (a revert path),
     excises (its footprint gone from the cleaned HEAD of its path), nor removes whole. Each is a
     file the operator must recover by hand, so the caller can name them rather than count them."""
-    flat = _flat(signatures)
+    flat = every_signature(signatures)
     paths: list[str] = []
     for f in scan.findings:
         if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):

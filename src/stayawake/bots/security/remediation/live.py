@@ -10,12 +10,16 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
 from stayawake.bots.security.models import CONFIRMED, SAW_DIR
-from stayawake.bots.security.remediation import changes as ch, installed, preserve
+from stayawake.bots.security.remediation import changes as ch, git_settings, installed, preserve
 from stayawake.bots.security.remediation.oracle import (ABSENT, REFUSED, UNREADABLE,
                                                         content_confirms, payload_matchers,
                                                         still_condemned)
 from stayawake.lib.git.write.working_tree import rewrite_index, uncommitted_paths
 from stayawake.lib.git.run import run, stdout, stdout_bytes, stdout_bytes_fed
+
+
+_HELD_BACK_FOR_A_CONFIRMED_HOOK = ("your uncommitted work and staged changes were left as they are, because a confirmed "
+         "git hook in this repository is still in place; remove it, then run `saw fix` again")
 
 
 @dataclass
@@ -76,7 +80,8 @@ class CheckoutResult:
 
     `cleared` names the confirmed paths the run took out of the checkout, or found already gone;
     what the history still stores at them is a separate question. `index_unread` names why git
-    could not say what its index holds, "" when it could.
+    could not say what its index holds, "" when it could. `settings_left` says, one sentence each,
+    which confirmed git settings and hooks were left and why.
     """
 
     confirmed: int = 0
@@ -90,6 +95,7 @@ class CheckoutResult:
     unstaged: list[str] = field(default_factory=list)
     cleared: list[str] = field(default_factory=list)
     index_unread: str = ""
+    settings_left: list[str] = field(default_factory=list)
 
     @property
     def infected(self) -> bool:
@@ -145,6 +151,8 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
     findings = list({(f.path, getattr(f, "signature_id", None)): f
                      for read in reads for f in read.findings
                      if getattr(f, "confidence", None) == CONFIRMED}.values())
+    settings_taken = git_settings.take_out_payload_settings(
+        repo, [f for read in reads for f in read.findings], signatures, opts)
     stored = StoredContent(repo, signatures, allowlist, opts)
     staged_payloads, committed_payloads, index_unread = _index_payloads(repo, stored)
     on_disk = {f.path for f in findings}
@@ -186,16 +194,21 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
                  if f.path not in {g.path for g in findings}]
     payload_digests |= _digests(repo, findings, limit)
     removed = clean(repo, findings, signatures, allowlist, opts)
+    removed.stripped += settings_taken.stripped
+    removed.absent += settings_taken.absent
+    removed.unread += settings_taken.unread
     removed_committed = _removed_committed_payloads(repo, stored, {*theirs, *committed_payloads})
     committed_payloads = [*committed_payloads, *removed_committed]
     read_whole = [*kept_dirs, *first, *skipped]
     unread = [p for p in theirs if _unread(p, opts, read_whole)
               and os.path.lexists(Path(repo) / p)]
-    named = sorted({f.path for f in findings} | set(removed.named))
+    named = sorted({f.path for f in findings} | set(removed.named) | set(settings_taken.left_paths))
     acted = bool(removed.removed or removed.stripped or (report is not None and report.acted))
     taken = [p for p in (present if not blocker else ()) if not os.path.lexists(Path(repo) / p)]
     kept = preserve.Preserved()
-    if acted and not blocker:
+    if settings_taken.confirmed_hook_left:
+        failure = "; ".join(p for p in (failure, _HELD_BACK_FOR_A_CONFIRMED_HOOK) if p)
+    elif acted and not blocker:
         try:
             kept = preserve.preserve(
                 repo, theirs, condemned=[*named, *committed_payloads], removed=taken,
@@ -209,11 +222,13 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
         except preserve.WorkingTreeUnlisted as exc:
             kept = preserve.Preserved(reason=f"git could not list your uncommitted work ({exc})",
                                       blocked=True)
-    dealt = {*removed.removed, *removed.stripped, *removed.absent, *removed.unfinished}
+    dealt = {*removed.removed, *removed.stripped, *removed.absent,
+             *removed.unfinished} - set(settings_taken.left_paths)
     cleared = {*removed.removed, *removed.stripped, *removed.absent}
     gone = list(dict.fromkeys([*(p for p in named if p in cleared), *staged_only]))
     history_only = [p for p in committed_payloads if p not in gone]
-    unstaged, untouched = _unstage_confirmed(repo, gone, stored)
+    unstaged, untouched = (([], []) if settings_taken.confirmed_hook_left
+                           else _unstage_confirmed(repo, gone, stored))
     if untouched:
         failure = "; ".join(p for p in (failure, "your staged changes could not be rewritten") if p)
     staged, unasked = _still_staged(repo, gone, signatures, allowlist, opts)
@@ -224,7 +239,8 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
                           cleared=[*gone, *history_only],
                           scan_error=scan_error,
                           unstaged=unstaged,
-                          index_unread=unasked or index_unread)
+                          index_unread=unasked or index_unread,
+                          settings_left=settings_taken.left_reasons)
 
 
 def _index_payloads(repo: Path, stored) -> tuple[list[str], list[str], str]:

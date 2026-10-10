@@ -74,6 +74,7 @@ class ExecSurface:
     work_trees: dict[Path, Path] = field(default_factory=dict)
     hooks_dir: Path | None = None
     commands: list[Command] = field(default_factory=list)
+    entries: list[ConfigEntry] = field(default_factory=list)
     includes: list[Include] = field(default_factory=list)
     hooks: list[Hook] = field(default_factory=list)
     unexamined: list[str] = field(default_factory=list)
@@ -427,6 +428,7 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
         surface.unexamined.append(f"{git_dir}: {type(exc).__name__}")
         return surface
     entries = _repo_config(git_dir, common_dir, surface)
+    surface.entries += entries
     surface.git_dirs = list(dict.fromkeys([git_dir, common_dir]))
     surface.commands = _commands(entries, common_dir)
     surface.hooks_dir = _hooks_dir(work_tree, common_dir, entries)
@@ -436,7 +438,9 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
         surface.hooks += _hooks(default_hooks, False, common_dir, surface)
     others = list(common_dir.glob("worktrees/*/config.worktree"))
     for config in others:
-        surface.commands += _commands(read_config(config, surface), common_dir)
+        worktree_entries = read_config(config, surface)
+        surface.entries += worktree_entries
+        surface.commands += _commands(worktree_entries, common_dir)
     pointed = _submodule_pointers(work_tree, surface)
     for module, tree in pointed:
         surface.work_trees.setdefault(module, tree)
@@ -446,6 +450,7 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
             continue
         surface.git_dirs.append(module)
         module_entries = read_config(module / "config", surface)
+        surface.entries += module_entries
         configured = _last(module_entries, "core.worktree")
         if configured is not None and configured.value:
             surface.work_trees[module] = _resolve(module, configured.value)

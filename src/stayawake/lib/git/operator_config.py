@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from stayawake.lib.git.run import OPERATOR_CONFIG, run
+from stayawake.lib.git.run import OPERATOR_CONFIG, run, stdout_bytes
 
 
 def global_config(repo: str | Path | None = None) -> dict[str, str]:
@@ -23,6 +23,19 @@ def global_config(repo: str | Path | None = None) -> dict[str, str]:
         if key:
             found[key] = value if newline else "true"
     return found
+
+
+def config_files() -> list[Path] | None:
+    """List the files git reads the operator's own configuration from, system and global scopes and
+    what they include, each once, in git's order. Returns them, or None when git could not list
+    them."""
+    listed = stdout_bytes(None, ["config", "--list", "--show-origin", "--null", "--name-only"],
+                          context=OPERATOR_CONFIG)
+    if listed is None:
+        return None
+    origins = listed.split(b"\0")[0::2]
+    return list(dict.fromkeys(Path(os.fsdecode(o[len(b"file:"):])) for o in origins
+                              if o.startswith(b"file:")))
 
 
 def global_bool(key: str, repo: str | Path | None = None) -> str:

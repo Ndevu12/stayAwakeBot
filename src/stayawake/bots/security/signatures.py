@@ -21,6 +21,14 @@ from stayawake.bots.security.models import CONFIDENCE_LEVELS, REMEDIATION_VERBS
 _REQUIRED = ("id", "category", "severity", "matcher", "description", "confidence")
 
 
+def every_signature(signatures) -> list[dict[str, Any]]:
+    """List every signature in one list. Takes the by-matcher map `load_signatures` returns, or a list
+    already flat. Returns the list, empty for none."""
+    if isinstance(signatures, dict):
+        return [s for group in signatures.values() for s in group]
+    return list(signatures or [])
+
+
 def _read_default() -> str:
     return files("stayawake.bots.security").joinpath("data/signatures.yml").read_text(encoding="utf-8")
 

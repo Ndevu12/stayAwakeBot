@@ -97,9 +97,11 @@ def build_any_loader_check(signatures: list[dict[str, Any]]):
 
 
 def build_any_payload_check(signatures: list[dict[str, Any]]):
-    """`check(text) -> signature_id | None` over every confirmed content fingerprint, all
-    categories. Takes the signatures; returns the check."""
-    return _content_check(signatures, confirmed_only=True, categories=None)
+    """`check(text) -> signature_id | None` over every confirmed content fingerprint that holds in
+    text taken from anywhere, all categories: one limited to some files is left out, and one that
+    names a corroborator is held to it. Takes the signatures; returns the check."""
+    anywhere = [s for s in signatures if not s.get("file_globs")]
+    return _content_check(anywhere, confirmed_only=True, corroborated=True, categories=None)
 
 
 class Matcher:
