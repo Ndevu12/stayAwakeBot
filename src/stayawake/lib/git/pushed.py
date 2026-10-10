@@ -249,6 +249,32 @@ def _peeled(repo: str | Path, oids: list[str]) -> dict[str, tuple[str, str]] | N
     return found
 
 
+def tip_versions(repo: str | Path, oids: list[str], *, limit: int = 200_000
+                 ) -> tuple[list[str], list[Introduced], int, bool] | None:
+    """Sort what refs point at into the commits they name and the file versions a tree or file they
+    name holds. Takes the repo, the ids the refs point at and a bound on the versions collected.
+    Returns the commits, the versions, the submodule count among them and whether every version
+    was kept, or None when git could not answer."""
+    kinds = _peeled(repo, oids)
+    if kinds is None:
+        return None
+    commits: list[str] = []
+    found: list[tuple[str, str, tuple[bytes, str, bytes], str]] = []
+    for oid in dict.fromkeys(oids):
+        target, kind = kinds[oid]
+        if kind == "commit":
+            commits.append(target)
+        elif kind == "blob":
+            found.append(("", target, (b"100644", target, b"A"), HISTORY))
+        else:
+            served = _whole_tree(repo, target)
+            if served is None:
+                return None
+            found += [("", path, meta, HISTORY) for meta, path in served]
+    entries, submodules, complete = _collect(found, limit)
+    return list(dict.fromkeys(commits)), entries, submodules, complete
+
+
 def _held(repo: str | Path, oids: list[str]) -> set[str] | None:
     """Ask which objects the repository holds. Takes the repo and the ids. Returns the ones held, or
     None when git could not answer."""

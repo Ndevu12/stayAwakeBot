@@ -497,5 +497,219 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertFalse(outcome.needs_review, self._causes(outcome))
 
+class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
+
+    def add_then_remove(self, path, text=LOADER):
+        self.write(self.d, path, text)
+        self.commit(self.d, "add it")
+        self.git(self.d, "rm", "-q", path)
+        self.commit(self.d, "remove it by hand")
+
+    def test_a_payload_removed_by_hand_is_taken_out_of_the_past_commits(self):
+        self.add_then_remove("vendor/x/loader.js")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self.ever_holds(LOADER))
+
+    def test_a_payload_only_on_another_branch_is_taken_out_there(self):
+        self.git(self.d, "checkout", "-qb", "side")
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.commit(self.d, "side work")
+        self.git(self.d, "checkout", "-q", self.base)
+        before = self.git(self.d, "rev-parse", self.base).strip()
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self.holds("side", "vendor/x/loader.js"))
+        self.assertEqual(before, self.git(self.d, "rev-parse", self.base).strip())
+
+    def test_a_version_the_checkout_still_holds_is_left_for_recovery_by_hand(self):
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.commit(self.d, "add it")
+        before = self.git(self.d, "rev-parse", "HEAD").strip()
+        empty = self.d.parent / "empty"
+        empty.mkdir()
+        nothing = scan_target(LocalRepoTarget(empty, str(empty), ScanOptions()), load_signatures())
+        with self._remote(), \
+                mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=nothing):
+            outcome = amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
+                                    pusher=lambda *a: PushResult(True), resolver=None)
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertEqual(before, self.git(self.d, "rev-parse", "HEAD").strip())
+
+    def test_past_commits_it_could_not_list_are_named(self):
+        self.add_then_remove("vendor/x/loader.js")
+        with mock.patch.object(amendmod.pushed, "commits_between", return_value=None):
+            outcome = self.run_amend()
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
+        self.assertIn("past commits", " ".join(r.subjects + r.detail for r in outcome.reasons))
+        self.assertTrue(self.ever_holds(LOADER))
+
+    def test_a_read_cut_at_its_bound_is_named_for_review(self):
+        self.write(self.d, "c.txt", "c\n")
+        self.commit(self.d, "more work")
+        with mock.patch.object(amendmod, "_PAST_VERSIONS_READ", 1):
+            outcome = self.run_amend()
+        self.assertIn(Cause.PAST_COMMITS_READ_IN_PART, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
+    def test_past_versions_read_in_part_are_named(self):
+        binary = "\x00\x01" + "\x7f" * 2_200_000
+        pointer = ("version https://git-lfs.github.com/spec/v1\noid sha256:" + "0" * 64
+                   + "\nsize 3000000\n")
+        for path, text, mode, cause in (("bin/tool", binary, 0o755, Cause.HISTORY_PARTLY_READ),
+                                        ("assets/a.png", binary, 0o644,
+                                         Cause.LARGE_FILES_NOT_READ_IN_FULL),
+                                        ("assets/m.bin", pointer, 0o644,
+                                         Cause.LARGE_FILES_NOT_READ_IN_FULL)):
+            with self.subTest(path=path):
+                self.setUp()
+                self.write(self.d, path, text)
+                os.chmod(self.d / path, mode)
+                self.commit(self.d, "add it")
+                self.git(self.d, "rm", "-q", path)
+                self.commit(self.d, "remove it")
+                outcome = self.run_amend()
+                self.assertIn(cause, self._causes(outcome))
+                self.assertEqual(cause is Cause.HISTORY_PARTLY_READ, outcome.needs_review)
+
+    def test_a_detached_checkout_on_no_branch_is_read(self):
+        self.add_then_remove("vendor/x/loader.js")
+        self.git(self.d, "checkout", "-q", "--detach")
+        for branch in (self.base, "feature"):
+            self.git(self.d, "branch", "-q", "-D", branch)
+        outcome = self.run_amend()
+        self.assertNotEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
+
+    def test_a_checkout_on_no_branch_in_another_folder_is_read(self):
+        self.git(self.d, "checkout", "-qb", "side")
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.commit(self.d, "side work")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git(self.d, "worktree", "add", "-q", "--detach", str(self.d.parent / "other"), "side")
+        self.git(self.d, "branch", "-q", "-D", "side")
+        outcome = self.run_amend()
+        self.assertNotEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_checkout_whose_branch_is_gone_leaves_the_read_whole(self):
+        self.add_then_remove("vendor/x/loader.js")
+        self.git(self.d, "branch", "-q", "gone")
+        self.git(self.d, "worktree", "add", "-q", str(self.d.parent / "other"), "gone")
+        self.git(self.d, "update-ref", "-d", "refs/heads/gone")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotIn(Cause.REMOVAL_NOT_CONFIRMED, self._causes(outcome))
+        self.assertFalse(self.ever_holds(LOADER))
+
+    def test_submodule_versions_in_past_commits_are_named(self):
+        head = self.git(self.d, "rev-parse", "HEAD").strip()
+        self.git(self.d, "update-index", "--add", "--cacheinfo", f"160000,{head},lib/sub")
+        self.git(self.d, "commit", "-qm", "add a submodule")
+        self.git(self.d, "rm", "-q", "--cached", "lib/sub")
+        self.git(self.d, "commit", "-qm", "remove it")
+        outcome = self.run_amend()
+        self.assertIn(Cause.SUBMODULES_NOT_READ, self._causes(outcome))
+        self.assertFalse(outcome.needs_review)
+
+    def test_a_payload_only_a_tag_holds_is_named(self):
+        self.git(self.d, "checkout", "-qb", "side")
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.commit(self.d, "side work")
+        self.git(self.d, "tag", "v-side")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git(self.d, "branch", "-q", "-D", "side")
+        outcome = self.run_amend()
+        self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+        self.assertIn("v-side", " ".join(r.detail for r in outcome.reasons))
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_tag_on_a_tree_or_a_file_holding_a_payload_is_named(self):
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.git(self.d, "add", "vendor/x/loader.js")
+        tree = self.git(self.d, "write-tree").strip()
+        blob = self.git(self.d, "rev-parse", ":vendor/x/loader.js").strip()
+        self.git(self.d, "rm", "-q", "--cached", "vendor/x/loader.js")
+        (self.d / "vendor/x/loader.js").unlink()
+        for name, target in (("tree-bad", tree), ("blob-bad", blob)):
+            with self.subTest(tag=name):
+                self.git(self.d, "tag", name, target)
+                outcome = self.run_amend()
+                self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+                self.assertIn(name, " ".join(r.detail for r in outcome.reasons))
+                self.git(self.d, "tag", "-d", name)
+
+    def test_a_tag_is_named_when_the_checkout_holds_malware_too(self):
+        self.git(self.d, "checkout", "-q", "--detach")
+        self.write(self.d, "vendor/y/loader.js", LOADER + "// kept by a tag\n")
+        self.commit(self.d, "tagged work")
+        self.git(self.d, "tag", "v-old")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.evil_merge()
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+        self.assertIn("v-old", " ".join(r.detail for r in outcome.reasons))
+        self.assertFalse(self.ever_holds(LOADER))
+
+    def test_a_tag_on_files_already_read_reads_nothing_twice(self):
+        self.git(self.d, "tag", "v-tree", "HEAD^{tree}")
+        scanned = []
+        real = amendmod.version_scan.scan_batch
+
+        def spy(repo, display, batch, *rest):
+            scanned.extend((e.path, e.oid) for e in batch)
+            return real(repo, display, batch, *rest)
+
+        with mock.patch.object(amendmod.version_scan, "scan_batch", side_effect=spy):
+            outcome = self.run_amend()
+        self.assertEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
+        self.assertEqual(len(set(scanned)), len(scanned))
+
+    def test_files_already_read_do_not_count_toward_the_bound(self):
+        from types import SimpleNamespace
+        held = [SimpleNamespace(path=p, oid=o) for p, o in (("a.js", "1" * 40), ("b.js", "2" * 40))]
+        out = amendmod._HistoryPayloads(judged={(e.path, e.oid) for e in held})
+        with mock.patch.object(amendmod.gitutil, "listed_branch_refs", return_value=[]), \
+                mock.patch.object(amendmod, "_candidate_refs",
+                                  return_value=([("refs/tags/t", "3" * 40)], [])), \
+                mock.patch.object(amendmod.pushed, "tip_versions",
+                                  return_value=([], held, 0, True)), \
+                mock.patch.object(amendmod, "_PAST_VERSIONS_READ", 1):
+            amendmod._read_other_refs(self.d, "repo", load_signatures(), [], ScanOptions(),
+                                      lambda _p, _o: False, out)
+        self.assertEqual(0, out.cut_at)
+
+    def test_refs_it_could_not_list_are_named(self):
+        with mock.patch.object(amendmod, "_candidate_refs", return_value=([], ["the tags"])):
+            outcome = self.run_amend()
+        self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
+    def test_refs_whose_targets_it_could_not_read_are_named(self):
+        self.git(self.d, "tag", "v-old", "HEAD^{tree}")
+        with mock.patch.object(amendmod.pushed, "tip_versions", return_value=None):
+            outcome = self.run_amend()
+        self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
+
+    def test_a_tag_holding_its_own_copy_leaves_the_branches_cleaned(self):
+        self.git(self.d, "checkout", "-q", "--detach")
+        self.write(self.d, "vendor/y/loader.js", LOADER + "// kept by a tag\n")
+        self.commit(self.d, "tagged work")
+        self.git(self.d, "tag", "v-old")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.add_then_remove("vendor/x/loader.js")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self.ever_holds(LOADER))
+        self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+
+    def test_a_clean_history_needs_nothing(self):
+        outcome = self.run_amend()
+        self.assertEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
+        self.assertFalse(outcome.needs_review)
+
+
 if __name__ == "__main__":
     unittest.main()
