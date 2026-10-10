@@ -36,7 +36,8 @@ def teller(notifier, *, load, save, clock, local, acknowledged=lambda: None):
             updated.pop("undelivered", None)
         saved = record.get("saved")
         recently = watchrecord.is_time(saved) and 0 <= now - saved < SAVE_QUIET_EVERY_SECONDS
-        if tuple(kinds) == (QUIET,) and not alerts and recently and not held:
+        counting = record.get("failures", 0) != updated.get("failures", 0)
+        if tuple(kinds) == (QUIET,) and not alerts and recently and not held and not counting:
             return
         updated["saved"] = now
         held[:] = [] if save(updated) else [updated]
@@ -70,13 +71,13 @@ def _paused(record: dict, now: float, *, urgent: bool) -> bool:
     """Tell whether sending is paused after a failure. Takes the record, the time and whether an
     urgent alert is waiting. Returns True within the pause; an urgent alert waits no longer than
     `watchalerts.URGENT_EVERY_SECONDS` after the failure, and a pause longer than the longest
-    allowed is ignored."""
+    allowed, or a failure dated in the future, is ignored."""
     pause, until = record.get("backoff", 0), record.get("backoff_until", now)
     if not 0 < until - now <= LONGEST_BACKOFF_SECONDS:
         return False
     failed_at = until - pause
     longest = min(pause, watchalerts.URGENT_EVERY_SECONDS) if urgent else pause
-    return now - failed_at < longest
+    return 0 <= now - failed_at < longest
 
 
 def _read_or(read, fallback):

@@ -99,15 +99,16 @@ def _parsed(raw: bytes) -> Ledger:
     if not isinstance(held, dict):
         return Ledger(status=CORRUPT)
     entries = {}
+    current = data.get("version") == 2
     for key, row in held.items():
         if not isinstance(row, dict):
             return Ledger(status=CORRUPT)
-        entries[str(key)] = Seen(first=str(row.get("first", ""))[:64],
-                                 last=str(row.get("last", ""))[:64],
+        last, ended = str(row.get("last", ""))[:64], int(row.get("ended", 0) or 0)
+        last_ended = str(row.get("last_ended", ""))[:64] if current else (last if ended else "")
+        entries[str(key)] = Seen(first=str(row.get("first", ""))[:64], last=last,
                                  times=int(row.get("times", 0) or 0),
-                                 identified=bool(row.get("identified")),
-                                 ended=int(row.get("ended", 0) or 0),
-                                 last_ended=str(row.get("last_ended", ""))[:64])
+                                 identified=bool(row.get("identified")), ended=ended,
+                                 last_ended=last_ended)
     last_pass = str(data.get("last_pass", ""))[:64] if data.get("version") == 2 else ""
     hashed = _self_hash(held, last_pass if data.get("version") == 2 else None)
     status = LOADED if data.get("self_hash") == hashed else EDITED

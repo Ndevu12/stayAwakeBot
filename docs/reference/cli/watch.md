@@ -48,14 +48,16 @@ examine what is running, it says so rather than reporting a clean machine.
 It tells you where you will notice. A desktop notification appears when it stops code, when code it
 stopped before comes back, when code could not be stopped, and when it has not been able to check
 the machine for a while. Code that came back, and code that could not be stopped, are repeated
-every hour until they are dealt with; run [`saw harden`](harden.md). Once a day it sends a short
-report, on quiet days too, so a day without one is worth a `saw watch status`.
+every hour until they are dealt with: run [`saw harden`](harden.md), and when code came back, take
+the machine off the network first and run [`saw audit`](audit.md) to find what brings it back.
+Once a day it sends a short report, on quiet days too, so a day without one is worth a
+`saw watch status`.
 
 While something is not dealt with, every other `saw` command prints one line saying so, whether or
 not a notification was shown: code that came back, code that could not be stopped, or a watcher
 that has stopped checking. `saw watch status` lists the same, with what happened since the last
-report and whether notifications could be shown, and `saw audit` reports code that came back or
-could not be stopped.
+report and any notifications that could not be sent, and `saw audit` reports code that came back
+or could not be stopped.
 
 `saw watch` sends one notification when you set it up, to show where they will appear. On macOS
 they come from Script Editor; if none appears, allow notifications for Script Editor in System

@@ -166,11 +166,14 @@ def _what_to_do(outcomes) -> list[str]:
     return out
 
 
+IN_PLACE, LIVE_CODE_LEFT, NOT_ON_THIS_PLATFORM, CONTROLS_INCOMPLETE = 0, 1, 2, 3
+
+
 def dealt_with_live_code(code: int) -> bool:
     """Tell whether a run ended every piece of live code it found. Takes the code `run` returned.
     Returns True when the process table was read and nothing was left running, whatever the other
     controls reached."""
-    return code in (0, 3)
+    return code in (IN_PLACE, CONTROLS_INCOMPLETE)
 
 
 def run(*, live=check_live_processes, folders=_global_folders,
@@ -191,13 +194,14 @@ def run(*, live=check_live_processes, folders=_global_folders,
     second, and a run can hold both.
     """
     if not supported():
-        return 2, _NOT_HERE
+        return NOT_ON_THIS_PLATFORM, _NOT_HERE
     outcome = run_probe("running processes", live)
     if outcome.state == BLOCKED:
-        return 1, _REFUSED_BLOCKED.format(reason=textsafe.plain(outcome.reason or "", limit=200))
+        return LIVE_CODE_LEFT, _REFUSED_BLOCKED.format(
+            reason=textsafe.plain(outcome.reason or "", limit=200))
     issues = list(outcome.issues)
     if any(i.id == PROCESSES_NOT_READABLE_ID for i in issues):
-        return 1, _REFUSED_UNREAD
+        return LIVE_CODE_LEFT, _REFUSED_UNREAD
     ending, ending_failed = None, None
     if [i for i in issues if i.id == _LIVE]:
         try:
@@ -266,7 +270,7 @@ def run(*, live=check_live_processes, folders=_global_folders,
         lines.extend(["", _DEAD_SAW_NOTE])
     body = "\n".join(lines).rstrip()
     if unresolved:
-        return 1, body
+        return LIVE_CODE_LEFT, body
     if not _every_reachable_one(outcomes) or not hooks_ok or not editors_ok or not agents_ok:
-        return 3, body
-    return 0, body
+        return CONTROLS_INCOMPLETE, body
+    return IN_PLACE, body

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
@@ -10,6 +12,19 @@ from unittest import mock
 from stayawake.cli import dispatch
 from stayawake.utils import scratch
 from tests.support.scratchroot import OwnTempRoot
+
+
+def setUpModule():
+    """Keep the watcher's real record out of these runs of the dispatcher."""
+    global _watcher_folder
+    from stayawake.bots.security import watchrecord
+    _watcher_folder = mock.patch.object(watchrecord, "shared_folder",
+                                        return_value=Path(tempfile.mkdtemp()) / "watcher")
+    _watcher_folder.start()
+
+
+def tearDownModule():
+    _watcher_folder.stop()
 
 
 def _run(argv: list[str]) -> tuple[int, str]:

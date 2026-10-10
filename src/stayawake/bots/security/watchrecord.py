@@ -25,12 +25,26 @@ _NAME = re.compile(r"[a-z][a-z-]{0,31}")
 
 def shared_folder() -> Path:
     """Find the folder the scheduled watcher and the user's own commands both read and write.
-    Returns it under the account's home folder, whatever either environment sets."""
+    Returns it under the home folder of the account saw acts for, whatever either environment
+    sets."""
     try:
-        home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        home = Path(pwd.getpwuid(acting_for()[0]).pw_dir)
     except (KeyError, OSError):
         home = Path.home()
     return home / ".local" / "state" / "saw"
+
+
+def acting_for() -> tuple[int, int]:
+    """Name the account saw acts for: the user who ran `sudo` when saw runs as root through it,
+    else the account running saw. Returns its user and group ids."""
+    if os.geteuid() == 0:
+        try:
+            uid, gid = int(os.environ["SUDO_UID"]), int(os.environ["SUDO_GID"])
+            if uid > 0:
+                return uid, gid
+        except (KeyError, ValueError):
+            pass
+    return os.getuid(), os.getgid()
 
 
 def record_path() -> Path:
@@ -68,12 +82,21 @@ def read_state(where: Path):
 
 def write_state(where: Path, data: dict) -> bool:
     """Write one of the watcher's state files privately and atomically, never through a link and
-    never failing. Takes the path and the content. Returns whether it was written."""
+    never failing; written for another account (under `sudo`), it is handed to that account and
+    no folder is created. Takes the path and the content. Returns whether it was written."""
+    uid, gid = acting_for()
+    for_another = uid != os.geteuid()
     try:
+        if for_another and not where.parent.is_dir():
+            return False
         where.parent.mkdir(parents=True, exist_ok=True)
         if where.is_symlink():
             return False
-        return atomicwrite.replace(where, json.dumps(data, sort_keys=True), mode=0o600)
+        if not atomicwrite.replace(where, json.dumps(data, sort_keys=True), mode=0o600):
+            return False
+        if for_another:
+            os.lchown(where, uid, gid)
+        return True
     except Exception:
         return False
 

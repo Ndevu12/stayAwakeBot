@@ -7,6 +7,7 @@ privilege. What it declines is left for harden, which runs with an operator pres
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 
 from stayawake.bots.security import liveledger, schedule
 from stayawake.bots.security.watchevents import (
@@ -58,22 +59,20 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     seen = find() if find is not None else live_code_processes(snap)
     identified = [item for item in seen if item.confirmed]
 
-    identified_keys = {fingerprint(item.code) for item in identified}
-    ending, still_running = None, set()
+    ending, outcome = None, StopOutcome()
     if identified:
         ending = stop(find=lambda: [i for i in again() if i.confirmed], elevated=_never_asks)
-        still_running = _identified_running(again, if_unknown=identified_keys)
+        outcome = what_the_stop_did(identified, _look_again(find, look))
 
     ended_something = ending is not None and ending.ended > 0
-    ended_keys = identified_keys - still_running
     try:
-        kept = bool(save(liveledger.record(before, seen, ended_keys=ended_keys, now=now)))
+        kept = bool(save(liveledger.record(before, seen, ended_keys=outcome.ended, now=now)))
     except Exception:
         kept = False
     remembered = kept and before.status in (liveledger.LOADED, liveledger.ABSENT)
 
-    came_back = any(before.came_back(key) for key in identified_keys)
-    unfinished = ending is not None and not ending.finished
+    came_back = any(before.came_back(fingerprint(item.code)) for item in identified)
+    unfinished = ending is not None and (not ending.finished or bool(outcome.survived))
 
     kinds = []
     if ended_something:
@@ -96,13 +95,49 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     return exitcodes.CLEAN, tuple(kinds)
 
 
-def _identified_running(find, *, if_unknown: set) -> set:
-    """Look again for identified code still running, never failing. Takes the finder and what to
-    assume when it cannot look. Returns the fingerprints still running."""
+@dataclass(frozen=True)
+class StopOutcome:
+    """What a stop did to the identified code: the fingerprints whose processes all ended, and the
+    fingerprints still running in a process that was there before the stop."""
+    ended: frozenset = frozenset()
+    survived: frozenset = frozenset()
+
+
+def what_the_stop_did(identified, after) -> StopOutcome:
+    """Compare the identified processes before a stop with what runs after it. Takes the identified
+    code before the stop and the identified code running after it, or None when that could not be
+    read. Returns the outcome; a process is the same when its pid and start time match, so code
+    restarted in a new process still counts as ended, and nothing is claimed when the second look
+    could not be read."""
+    if after is None:
+        return StopOutcome()
+    later = {_process_identity(item) for item in after}
+    survived = {fingerprint(item.code) for item in identified if _process_identity(item) in later}
+    gone = {fingerprint(item.code) for item in identified if _process_identity(item) not in later}
+    return StopOutcome(frozenset(gone - survived), frozenset(survived))
+
+
+def _look_again(find, look):
+    """Look again for identified code after a stop, never failing. Takes the injected finder, if
+    any, and the snapshot taker. Returns the identified code running, or None when the process
+    table could not be read."""
     try:
-        return {fingerprint(item.code) for item in find() if item.confirmed}
+        if find is not None:
+            return [item for item in find() if item.confirmed]
+        snap = look()
+        if not snap.supported or not snap.processes:
+            return None
+        return [item for item in live_code_processes(snap) if item.confirmed]
     except Exception:
-        return set(if_unknown)
+        return None
+
+
+def _process_identity(item) -> tuple:
+    """Name the process a piece of live code runs in. Takes the live code. Returns its pid and
+    start time, the start time None when unknown."""
+    process = item.process
+    return getattr(process, "pid", None), getattr(getattr(process, "identity", None),
+                                                  "start_time", None)
 
 
 def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes=None,

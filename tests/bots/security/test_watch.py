@@ -70,10 +70,16 @@ class _Recorder:
 _READABLE = Snapshot(processes=[Process(pid=1, argv=("launchd",))])
 
 
-def _run(seen, ender=None, before=None):
+def _looks(first, *later):
+    """A finder that sees `first` before the stop and each of `later` after it (the last repeats)."""
+    answers = [list(first)] + [list(x) for x in later or ([],)]
+    return lambda: answers.pop(0) if len(answers) > 1 else list(answers[0])
+
+
+def _run(seen, ender=None, before=None, after=()):
     saved = {}
     code, text = watch.watch_once(
-        find=lambda: list(seen), stop=ender, load=lambda: before or liveledger.Ledger(),
+        find=_looks(seen, list(after)), stop=ender, load=lambda: before or liveledger.Ledger(),
         save=lambda ledger: saved.setdefault("ledger", ledger) or True, look=lambda: _READABLE)
     return code, text, saved.get("ledger"), ender
 
@@ -99,9 +105,8 @@ class TestARecordThatCouldNotBeKeptIsSaid(unittest.TestCase):
 class TestOnlyWhatEndedIsRecordedAsEnded(unittest.TestCase):
     def test_ending_one_of_two_marks_only_that_one(self):
         first, second = _held(1, "one", True), _held(2, "two", True)
-        finds = [[first, second], [second]]
         saved = {}
-        watch.examine(find=lambda: finds.pop(0) if len(finds) > 1 else finds[0],
+        watch.examine(find=_looks([first, second], [second]),
                       stop=_Recorder(Ending(matched=2, ended=1, survived=[2], quiet=True)),
                       load=liveledger.Ledger, look=lambda: _READABLE,
                       save=lambda ledger: saved.setdefault("ledger", ledger) or True)
@@ -109,6 +114,39 @@ class TestOnlyWhatEndedIsRecordedAsEnded(unittest.TestCase):
         self.assertEqual(entries[fingerprint("one")].ended, 1)
         self.assertEqual(entries[fingerprint("two")].ended, 0,
                          "code still running after the stop was recorded as ended")
+
+
+class TestCodeRestartedInANewProcessCameBack(unittest.TestCase):
+    def test_a_respawn_is_ended_now_and_said_to_have_come_back_on_the_next_pass(self):
+        original, respawn = _held(10, "bad", True), _held(11, "bad", True)
+        first = {}
+        watch.examine(find=_looks([original], [respawn]), stop=_Recorder(), look=lambda: _READABLE,
+                      load=liveledger.Ledger,
+                      save=lambda ledger: first.setdefault("ledger", ledger) or True)
+        self.assertEqual(first["ledger"].entries[fingerprint("bad")].ended, 1,
+                         "a process that ended was not counted because its code restarted")
+        _code, kinds = watch.examine(find=_looks([respawn], []), stop=_Recorder(),
+                                     look=lambda: _READABLE, load=lambda: first["ledger"],
+                                     save=lambda ledger: True)
+        self.assertIn(watch.RETURNED, kinds)
+
+    def test_the_same_process_still_running_after_the_stop_could_not_be_stopped(self):
+        held = _held(10, "bad", True)
+        code, text, _l, _e = _run([held], _Recorder(), after=[held])
+        self.assertIn(SENTENCE_FOR[watch.LEFT], text)
+        self.assertEqual(code, exitcodes.INCOMPLETE)
+
+    def test_a_second_look_that_cannot_be_read_claims_nothing_ended(self):
+        saved = {}
+        looks = iter([_READABLE, Snapshot(processes=[])])
+        watch.examine(find=None, stop=_Recorder(), look=lambda: next(looks),
+                      load=liveledger.Ledger,
+                      save=lambda ledger: saved.setdefault("ledger", ledger) or True)
+        self.assertEqual(watch.what_the_stop_did([_held(1, "x", True)], None), watch.StopOutcome())
+        for unreadable in (Snapshot(processes=[]), Snapshot(supported=False)):
+            with self.subTest(unreadable=unreadable):
+                self.assertIsNone(watch._look_again(None, lambda s=unreadable: s),
+                                  "an unreadable second look was read as nothing running")
 
 
 class TestTheLedgerNeverKeepsThePassFromEndingCode(unittest.TestCase):
@@ -159,7 +197,7 @@ class TestItEndsOnlyWhatWasIdentified(unittest.TestCase):
     def test_the_ender_is_given_a_view_that_drops_the_merely_suspected(self):
         ender = _Recorder()
         seen = [_held(1, "identified", True), _held(2, "shape-only", False)]
-        _run(seen, ender)
+        _run(seen, ender, after=seen)
         self.assertEqual([lc.process.pid for lc in ender.find()], [1])
 
     def test_nothing_identified_means_the_ender_is_never_called(self):

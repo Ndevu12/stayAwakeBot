@@ -72,6 +72,20 @@ class TestDeliveryIsRecordedOnlyWhenItHappens(unittest.TestCase):
         self.assertEqual(T.send_some(_Notifier(), dict(record), [quiet], later), ([], True),
                          "a routine alert ignored the pause")
 
+    def test_a_failure_dated_in_the_future_never_holds_an_urgent_alert(self):
+        from stayawake.bots.security import watchalerts
+        record = {"backoff": 600.0, "backoff_until": 100_000.0 + 600.0}
+        urgent = watchalerts.Alert("x", True, "came-back")
+        self.assertEqual(T.send_some(_Notifier(), dict(record), [urgent], 100_000.0 - 3000.0),
+                         ([urgent], False))
+
+    def test_failures_count_on_across_quiet_passes_only_when_consecutive(self):
+        store = {}
+        from stayawake.bots.security.watchevents import NOT_READ
+        _teller(_Notifier(), store, now=36000.0)((NOT_READ,))
+        _teller(_Notifier(), store, now=36030.0)((QUIET,))
+        self.assertEqual(store["r"]["failures"], 0, "a quiet pass did not reset the count")
+
     def test_no_more_than_a_few_alerts_go_out_in_one_pass(self):
         store, notifier = {}, _Notifier()
         _teller(notifier, store, now=36000.0)((ENDED, RETURNED, LEFT))
