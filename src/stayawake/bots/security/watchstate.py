@@ -12,7 +12,7 @@ from stayawake.bots.security.watchevents import (
 STALE_AFTER_SECONDS = 600
 CAME_BACK, NOT_STOPPED, NOT_CHECKING, NOT_SHOWN = (
     "came-back", "not-stopped", "not-checking", "not-shown")
-DEAL_WITH_IT = "Take this machine off the network, then run `saw harden` and `saw audit`."
+DEAL_WITH_IT = "Run `saw harden`, then `saw audit` to find what brings it back."
 LINE_FOR = {
     CAME_BACK: "Code stopped here before came back and has not been dealt with. " + DEAL_WITH_IT,
     NOT_STOPPED: "Code was running here that could not be stopped. Run `saw harden`.",

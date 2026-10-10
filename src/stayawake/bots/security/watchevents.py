@@ -6,7 +6,8 @@ ENDED, RETURNED, LEFT, UNNAMED, QUIET = "ended", "returned", "left", "unnamed", 
 NOT_READ, PASS_FAILED, NOT_REMEMBERED = "not-read", "pass-failed", "not-remembered"
 
 _ENDED = "Code running on this machine was stopped."
-_RETURNED = "It has been stopped here before and is running again. Take this machine off the network."
+_RETURNED = ("It has been stopped here before and is running again. Run `saw harden`, then "
+             "`saw audit` to find what brings it back.")
 _LEFT = "Something running here could not be stopped. Run `saw harden`."
 _UNNAMED = "Something is running that this machine cannot identify."
 _QUIET = "Nothing on this machine is running code it should not."

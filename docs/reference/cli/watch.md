@@ -37,8 +37,8 @@ One line about where this machine stands:
 
 - nothing is running code it should not;
 - code was running and has been stopped;
-- something that was stopped here before is running again — which is the sentence that matters, and
-  the point at which to take the machine off the network;
+- something that was stopped here before is running again — the sentence that matters, and the
+  point at which to run `saw harden`, then `saw audit` to find what brings it back;
 - something is running that this machine cannot identify;
 - something could not be stopped.
 
@@ -48,8 +48,8 @@ examine what is running, it says so rather than reporting a clean machine.
 It tells you where you will notice. A desktop notification appears when it stops code, when code it
 stopped before comes back, when code could not be stopped, and when it has not been able to check
 the machine for a while. Code that came back, and code that could not be stopped, are repeated
-every hour until they are dealt with: run [`saw harden`](harden.md), and when code came back, take
-the machine off the network first and run [`saw audit`](audit.md) to find what brings it back.
+every hour until they are dealt with: run [`saw harden`](harden.md), and when code came back, run
+[`saw audit`](audit.md) to find what brings it back.
 Once a day it sends a short report, on quiet days too, so a day without one is worth a
 `saw watch status`.
 

@@ -18,7 +18,7 @@ _DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-
 _FOUND = {
     watchstate.CAME_BACK: (CAME_BACK_ID, "Code this machine stopped before came back",
                            "It is running again and has not been dealt with.",
-                           "Take this machine off the network, then run `saw harden`."),
+                           "Run `saw harden`, then `saw audit` to find what brings it back."),
     watchstate.NOT_STOPPED: (NOT_STOPPED_ID, "Code running on this machine could not be stopped",
                              "The watcher found it and could not end it.", "Run `saw harden`."),
 }

@@ -37,7 +37,7 @@ _LIVE = "live-obfuscated-process"
 _ENDED_LIVE = "Code was running here with no file behind it. It has been stopped."
 _STILL_LIVE = "Code is running here with no file behind it, and not all of it could be stopped."
 _NOT_OURS_LIVE = "Run again with sudo."
-_STILL_SPAWNING = "It is starting again by itself. Take this machine off the network."
+_STILL_SPAWNING = "It is starting again by itself. Run `saw audit` to find what starts it."
 _REFUSED_UNREAD = (
     "Running processes could not be examined, so this control was not applied."
 )

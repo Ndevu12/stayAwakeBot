@@ -51,8 +51,8 @@ def run(a: argparse.Namespace) -> int:
 
 _NOT_ACKNOWLEDGED = ("The watcher could not record that what it found has been dealt with, so it "
                      "will keep reminding you. Run `saw watch status`.")
-_CAME_BACK_DURING = ("Code came back or kept running while saw harden ran. Take this machine off "
-                     "the network, then run `saw harden` again.")
+_CAME_BACK_DURING = ("Code came back or kept running while saw harden ran. Run `saw harden` "
+                     "again, then `saw audit` to find what brings it back.")
 _SETTLE_WITHOUT_SUDO = ("Run `saw harden` again without sudo to mark what the watcher found as dealt "
                         "with.")
 
