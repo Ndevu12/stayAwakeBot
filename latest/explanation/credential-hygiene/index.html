@@ -2136,7 +2136,7 @@ confirms you can still authenticate over SSH.</p>
 <p>Keeping <code>gh</code>'s short-lived token is a good end state.</p>
 <h2 id="if-the-host-may-be-compromised">If the host may be compromised<a class="headerlink" href="#if-the-host-may-be-compromised" title="Permanent link">&para;</a></h2>
 <p>This page covers routine hygiene. If <code>saw audit</code> reports persistence, follow the incident order
-instead: isolate the host, remove the persistence, rebuild, and rotate credentials last. Rotating
+instead: run <code>saw harden</code>, remove the persistence, rebuild, and rotate credentials last. Rotating
 while persistence is running can trigger a home-directory wiper.</p>
 <h2 id="checklist">Checklist<a class="headerlink" href="#checklist" title="Permanent link">&para;</a></h2>
 <ul>

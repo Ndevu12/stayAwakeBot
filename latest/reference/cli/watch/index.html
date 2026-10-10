@@ -2013,13 +2013,29 @@ it will act on what this pass would not.</p>
 <ul>
 <li>nothing is running code it should not;</li>
 <li>code was running and has been stopped;</li>
-<li>something that was stopped here before is running again — which is the sentence that matters, and
-  the point at which to take the machine off the network;</li>
+<li>something that was stopped here before is running again — the sentence that matters, and the
+  point at which to run <code>saw harden</code>, then <code>saw audit</code> to find what brings it back;</li>
 <li>something is running that this machine cannot identify;</li>
 <li>something could not be stopped.</li>
 </ul>
-<p>It names no paths and no process numbers. If a pass could not finish what it started, it says so
-rather than reporting a clean machine.</p>
+<p>It names no paths and no process numbers. If a pass could not finish what it started, or could not
+examine what is running, it says so rather than reporting a clean machine.</p>
+<p>It tells you where you will notice. A desktop notification appears when it stops code, when code it
+stopped before comes back, when code could not be stopped, and when it has not been able to check
+the machine for a while. Code that came back, and code that could not be stopped, are repeated
+every hour until they are dealt with: run <a href="../harden/"><code>saw harden</code></a>, and when code came back, run
+<a href="../audit/"><code>saw audit</code></a> to find what brings it back.
+Once a day it sends a short report, on quiet days too, so a day without one is worth a
+<code>saw watch status</code>.</p>
+<p>While something is not dealt with, every other <code>saw</code> command prints one line saying so, whether or
+not a notification was shown: code that came back, code that could not be stopped, or a watcher
+that has stopped checking. <code>saw watch status</code> lists the same, with what happened since the last
+report and any notifications that could not be sent, and <code>saw audit</code> reports code that came back
+or could not be stopped.</p>
+<p><code>saw watch</code> sends one notification when you set it up, to show where they will appear. On macOS
+they come from Script Editor; if none appears, allow notifications for Script Editor in System
+Settings. On Linux they go to your desktop's notification service. A notification that cannot be
+shown is tried again later.</p>
 <h2 id="when-it-runs-by-itself">When it runs by itself<a class="headerlink" href="#when-it-runs-by-itself" title="Permanent link">&para;</a></h2>
 <p><a href="../harden/"><code>saw harden</code></a> puts this in place as part of hardening a machine, and <code>saw watch</code> is how
 you ask for it on its own, check it, or change your mind about it.</p>
@@ -2028,14 +2044,11 @@ again if it ever stops, so the machine is not left unwatched. It says whether th
 or from your next login; where the system will not start it immediately, the arrangement is still
 made and takes effect then. It keeps doing that until <code>saw watch stop</code>.
 Asking twice changes nothing and says so.</p>
-<p>It is asked for by name rather than arranged by <a href="../harden/"><code>saw harden</code></a>, because a process that
-keeps running and ends things is a larger thing to agree to than the controls harden places, and it
-should not arrive as a side effect of something else.</p>
 <p>What it runs is fixed. There is nothing in it to configure, and therefore nothing in it for anyone
 else to point somewhere else; if it is not exactly what <code>saw</code> wrote, running <code>saw watch</code> again puts it
 back and tells you it had been changed. Anything else found under that name is left alone —
 stopping removes saw's own work and nothing else.</p>
-<p>A quiet pass says nothing. Only a pass that found something speaks.</p>
+<p>A quiet pass sends nothing; the daily report says the machine was checked.</p>
 <h2 id="the-record">The record<a class="headerlink" href="#the-record" title="Permanent link">&para;</a></h2>
 <p>The pass keeps a small record under your state directory of the code it has seen: when each was
 first and last seen, how often, and whether it was ended. That is what lets it say <em>again</em> rather
@@ -2054,7 +2067,9 @@ your session and is started again if it stops, and <code>saw watch stop</code> r
 <li><a href="../audit/"><code>saw audit</code></a> — what else this machine looks like</li>
 </ul>
 <p><code>saw watch status</code> says whether this machine is checking itself. Whether it is running is asked
-of the system, not read from the file: one command stops the check without changing a byte.</p>
+of the system, not read from the file: one command stops the check without changing a byte. If it
+says the machine has not checked itself recently, run <code>saw watch stop</code>, then <code>saw watch</code>; do the
+same once after upgrading saw.</p>
 <p>It is set up from the copy of saw you run it with, so run it from an installed one. A copy inside a temporary directory is refused: the check would work until that directory is cleaned up. If the check ever stops, <code>saw audit</code> says so.</p>
 
 
