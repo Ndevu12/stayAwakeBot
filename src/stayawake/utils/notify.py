@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-import stat
 import subprocess
 import sys
 from dataclasses import dataclass
 
 from stayawake.utils import textsafe
+from stayawake.utils.sessionbus import session_bus_env
 from stayawake.utils.systembin import system_binary
 
 SENT, UNCONFIRMED, FAILED, UNAVAILABLE = "sent", "unconfirmed", "failed", "unavailable"
@@ -103,16 +103,7 @@ class FreedesktopNotifier:
     def _session_bus(self) -> dict | None:
         """Build the environment that reaches this user's own session bus. Returns it, or None when
         the bus socket is missing or is not this user's."""
-        uid = self._uid()
-        runtime = self._runtime_dir or f"/run/user/{uid}"
-        socket_path = f"{runtime}/bus"
-        try:
-            info = self._lstat(socket_path)
-        except OSError:
-            return None
-        if not stat.S_ISSOCK(info.st_mode) or info.st_uid != uid:
-            return None
-        return {"XDG_RUNTIME_DIR": runtime, "DBUS_SESSION_BUS_ADDRESS": f"unix:path={socket_path}"}
+        return session_bus_env(uid=self._uid, lstat=self._lstat, runtime_dir=self._runtime_dir)
 
 
 def _escaped(text: str) -> str:

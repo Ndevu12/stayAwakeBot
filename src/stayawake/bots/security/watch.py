@@ -63,7 +63,10 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     if not snap.supported or not snap.processes:
         return exitcodes.INCOMPLETE, (NOT_READ,)
     again = find or live_code_processes
-    before = load()
+    try:
+        before = load()
+    except Exception:
+        before = liveledger.Ledger(status=liveledger.CORRUPT)
     seen = find() if find is not None else live_code_processes(snap)
     identified = [item for item in seen if item.confirmed]
 
@@ -74,7 +77,10 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     ended_keys = set()
     if ending is not None and ending.ended:
         ended_keys = {fingerprint(item.code) for item in identified}
-    kept = save(liveledger.record(before, seen, ended_keys=ended_keys, now=now))
+    try:
+        kept = bool(save(liveledger.record(before, seen, ended_keys=ended_keys, now=now)))
+    except Exception:
+        kept = False
     remembered = kept and before.status in (liveledger.LOADED, liveledger.ABSENT)
 
     returning = any(before.returning(fingerprint(item.code)) for item in identified)
@@ -149,14 +155,16 @@ def schedule_it(*, settle=schedule.settle) -> tuple[int, str]:
 
 def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
               running=schedule.is_running, record=None, clock=time.time,
-              placed_since=schedule.placed_since) -> tuple[int, str]:
-    """Say whether this machine is checking itself. Takes the collaborators that read the schedule
-    and the watcher's record. Returns the exit code and the lines an operator reads."""
+              placed_since=schedule.placed_since, acknowledged=None) -> tuple[int, str]:
+    """Say whether this machine is checking itself. Takes the collaborators that read the schedule,
+    the watcher's record and `saw harden`'s acknowledgement. Returns the exit code and the lines an
+    operator reads."""
     code, line = _schedule_status(supported, verdict, running)
-    kept = (record or watchrecord.load)()
+    kept = _record_as_settled(record, acknowledged)
     if code == exitcodes.CLEAN and watchrecord.stale(kept, clock(), placed_since()):
         code, line = exitcodes.FINDINGS, _STALLED
     if kept.get("unacknowledged"):
+        code = max(code, exitcodes.FINDINGS)
         line += "\n" + _CAME_BACK
     if kept.get("undelivered"):
         code = max(code, exitcodes.FINDINGS)
@@ -166,20 +174,29 @@ def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
 
 
 def foreground_notice(*, record=None, placed=schedule.was_placed, clock=time.time,
-                      placed_since=schedule.placed_since) -> str:
+                      placed_since=schedule.placed_since, acknowledged=None) -> str:
     """Build the line any foreground command prints about the watcher. Takes the collaborators that
-    read the record and the placement. Returns the line, or "" when there is nothing to say."""
+    read the record, the placement and `saw harden`'s acknowledgement. Returns the line, or "" when
+    there is nothing to say."""
     try:
-        kept = (record or watchrecord.load)()
         if not placed():
             return ""
-        if kept.get("unacknowledged"):
-            return _CAME_BACK
+        kept = _record_as_settled(record, acknowledged)
+        said = [_CAME_BACK] if kept.get("unacknowledged") else []
         if watchrecord.stale(kept, clock(), placed_since()):
-            return _STALLED
-        return _NOT_SHOWN if kept.get("undelivered") else ""
+            said.append(_STALLED)
+        elif kept.get("undelivered"):
+            said.append(_NOT_SHOWN)
+        return " ".join(said)
     except Exception:
         return ""
+
+
+def _record_as_settled(record, acknowledged) -> dict:
+    """Read the watcher's record with `saw harden`'s acknowledgement applied. Takes the two
+    readers, or None for the real ones. Returns the record."""
+    return watchrecord.settled((record or watchrecord.load)(),
+                               (acknowledged or watchrecord.load_acknowledgement)())
 
 
 def _schedule_status(supported, verdict, running) -> tuple[int, str]:

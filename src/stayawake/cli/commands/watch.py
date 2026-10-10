@@ -96,5 +96,6 @@ def run_internal(a: argparse.Namespace) -> int:
     """Keep making the pass until stopped, telling the user what it finds. Takes the parsed
     arguments. Returns the code of the last pass."""
     tell = watchalerts.teller(notifier_for_this_machine(), load=watchrecord.load,
-                              save=watchrecord.save, clock=time.time, local=time.localtime)
+                              save=watchrecord.save, clock=time.time, local=time.localtime,
+                              acknowledged=watchrecord.load_acknowledgement)
     return watch.keep_going(tell=tell)

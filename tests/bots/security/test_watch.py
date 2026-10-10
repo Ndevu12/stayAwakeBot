@@ -308,7 +308,8 @@ class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
                 since=995.0):
         return watch.status_of(supported=lambda: supported, verdict=lambda: state,
                                running=lambda: running, record=lambda: dict(record or {}),
-                               clock=lambda: now, placed_since=lambda: since)
+                               clock=lambda: now, placed_since=lambda: since,
+                               acknowledged=lambda: None)
 
     def test_held_with_no_pass_since_it_was_placed_long_ago_is_not_clean(self):
         code, text = self._status(schedule.PRISTINE, since=0.0, now=10_000.0)
@@ -350,7 +351,8 @@ class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
         def boom():
             raise OSError("x")
         code, text = watch.status_of(supported=lambda: True, verdict=boom, running=lambda: True,
-                                     record=dict, placed_since=lambda: None)
+                                     record=dict, placed_since=lambda: None,
+                                     acknowledged=lambda: None)
         self.assertEqual((code, text), (exitcodes.INCOMPLETE, watch._CANNOT_TELL))
 
     def test_it_names_no_location(self):

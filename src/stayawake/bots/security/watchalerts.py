@@ -52,8 +52,9 @@ def decide(record: dict, kinds, now: float, today: str, hour: int) -> tuple[dict
     rec["failures"] = min(rec.get("failures", 0) + 1, watchrecord.MOST_COUNT) if failed else 0
     if not failed:
         rec["last_good"] = now
-    if RETURNED in kinds and not rec.get("unacknowledged"):
-        rec["unacknowledged"] = now
+    if RETURNED in kinds:
+        rec["last_returned"] = now
+        rec.setdefault("unacknowledged", now)
     for kind, flag in _PENDING.items():
         if kind in kinds:
             rec[flag] = True
@@ -79,14 +80,12 @@ def decide(record: dict, kinds, now: float, today: str, hour: int) -> tuple[dict
 
 def _as_of(rec: dict, now: float) -> dict:
     """Read a record's times against the clock now. Takes the record and the time. Returns it with
-    any time of sending dated in the future dropped, and a return dated in the future held at now;
-    a future date never holds an alert back."""
+    any time of sending or reminding dated in the future dropped; a future date never holds an
+    alert back."""
     rec["sent"] = {kind: at for kind, at in rec.get("sent", {}).items() if at <= now}
-    for name in ("reminded", "acknowledged"):
+    for name in ("reminded", "acknowledged", "last_returned"):
         if rec.get(name, now) > now:
             rec.pop(name)
-    if rec.get("unacknowledged", now) > now:
-        rec["unacknowledged"] = now
     return rec
 
 
@@ -101,7 +100,7 @@ def _urgent_due(rec: dict, now: float) -> str | None:
         if rec.get(_PENDING[kind]):
             return kind
     since_told = rec.get("reminded") or rec.get("unacknowledged")
-    if rec.get("unacknowledged") and now - since_told >= REMIND_EVERY_SECONDS:
+    if rec.get("unacknowledged") and not 0 <= now - since_told < REMIND_EVERY_SECONDS:
         return REMINDER
     return None
 
@@ -163,17 +162,19 @@ def daily_report(since: dict, unacknowledged) -> Alert:
     return Alert(body, bool(unacknowledged), DAILY)
 
 
-def teller(notifier, *, load, save, clock, local):
+def teller(notifier, *, load, save, clock, local, acknowledged=lambda: None):
     """Build what tells the user after each pass. Takes the notifier, the record's load and save,
-    the clock and a function giving the local time. Returns a callable taking a pass's event kinds;
-    it raises when the record could not be written, and keeps the record in memory until it can."""
+    the clock, a function giving the local time, and one reading `saw harden`'s acknowledgement.
+    Returns a callable taking a pass's event kinds; it raises when the record could not be
+    written, and keeps the record in memory until it can."""
     held = []
 
     def tell(kinds) -> None:
         now = clock()
         moment = local(now)
         today = f"{moment.tm_year:04d}-{moment.tm_mon:02d}-{moment.tm_mday:02d}"
-        record = held[0] if held else _load_or_empty(load)
+        record = watchrecord.settled(held[0] if held else _load_or_empty(load),
+                                     _load_or_none(acknowledged))
         updated, alerts = decide(record, kinds, now, today, moment.tm_hour)
         shown = [a for a in alerts if _send(notifier, a) in _DELIVERED]
         updated = delivered(updated, shown, now, today)
@@ -198,6 +199,14 @@ def _load_or_empty(load) -> dict:
         return load()
     except Exception:
         return {}
+
+
+def _load_or_none(load):
+    """Read something, never failing. Takes the loader. Returns what it read, or None."""
+    try:
+        return load()
+    except Exception:
+        return None
 
 
 def _send(notifier, alert: Alert) -> str:

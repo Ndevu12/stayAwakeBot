@@ -64,15 +64,21 @@ def load(path: Path | None = None) -> Ledger:
     try:
         if not os.path.lexists(where):
             return Ledger(status=ABSENT)
-    except OSError:
+    except (OSError, ValueError):
         return Ledger(status=CORRUPT)
-    raw = pathsafe.read_regular_no_follow(where, _MOST_BYTES)
+    raw = pathsafe.read_regular_following(where, _MOST_BYTES)
     if raw is None:
         return Ledger(status=CORRUPT)
     try:
-        data = json.loads(raw.decode("utf-8", errors="replace"))
-    except (ValueError, RecursionError):
+        return _parsed(raw)
+    except Exception:
         return Ledger(status=CORRUPT)
+
+
+def _parsed(raw: bytes) -> Ledger:
+    """Turn the record's bytes into a ledger. Takes the bytes. Returns the ledger, CORRUPT when it
+    is not one; it may raise on input built to make it."""
+    data = json.loads(raw.decode("utf-8", errors="replace"))
     held = data.get("entries") if isinstance(data, dict) else None
     if not isinstance(held, dict):
         return Ledger(status=CORRUPT)
@@ -80,14 +86,11 @@ def load(path: Path | None = None) -> Ledger:
     for key, row in held.items():
         if not isinstance(row, dict):
             return Ledger(status=CORRUPT)
-        try:
-            entries[str(key)] = Seen(first=str(row.get("first", ""))[:64],
-                                     last=str(row.get("last", ""))[:64],
-                                     times=int(row.get("times", 0) or 0),
-                                     identified=bool(row.get("identified")),
-                                     ended=int(row.get("ended", 0) or 0))
-        except (TypeError, ValueError, OverflowError):
-            return Ledger(status=CORRUPT)
+        entries[str(key)] = Seen(first=str(row.get("first", ""))[:64],
+                                 last=str(row.get("last", ""))[:64],
+                                 times=int(row.get("times", 0) or 0),
+                                 identified=bool(row.get("identified")),
+                                 ended=int(row.get("ended", 0) or 0))
     if data.get("self_hash") != _self_hash(held):
         return Ledger(entries=entries, status=EDITED)
     return Ledger(entries=entries, status=LOADED)

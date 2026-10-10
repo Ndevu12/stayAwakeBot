@@ -34,10 +34,22 @@ def read_regular_no_follow(path: Path, limit: int) -> bytes | None:
     """Read a regular file without following a link and without waiting on anything that is not a
     file. Takes the path and the most bytes to accept. Returns the bytes, or None when the path is
     not a regular file, is larger than `limit`, or cannot be read."""
+    return _read_regular(path, limit, getattr(os, "O_NOFOLLOW", 0))
+
+
+def read_regular_following(path: Path, limit: int) -> bytes | None:
+    """Read a regular file, following a link, without waiting on anything that is not a file.
+    Takes the path and the most bytes to accept. Returns the bytes, or None when what the path
+    names is not a regular file, is larger than `limit`, or cannot be read."""
+    return _read_regular(path, limit, 0)
+
+
+def _read_regular(path: Path, limit: int, extra_flags: int) -> bytes | None:
+    """Open, check and read a regular file without blocking. Takes the path, the most bytes to
+    accept and extra open flags. Returns the bytes, or None."""
     try:
-        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-                     | getattr(os, "O_NONBLOCK", 0))
-    except OSError:
+        fd = os.open(str(path), os.O_RDONLY | extra_flags | getattr(os, "O_NONBLOCK", 0))
+    except (OSError, ValueError):
         return None
     try:
         info = os.fstat(fd)
