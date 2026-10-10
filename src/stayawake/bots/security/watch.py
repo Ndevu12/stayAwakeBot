@@ -12,6 +12,7 @@ from stayawake.bots.security import liveledger, schedule
 from stayawake.bots.security.harden.live import end_live_code
 from stayawake.bots.security.livecode import fingerprint, live_code_processes
 from stayawake.utils import elevate, exitcodes
+from stayawake.utils.procsnap import snapshot
 
 
 BETWEEN_PASSES = 30
@@ -22,6 +23,7 @@ _LEFT = "Something running here could not be stopped. Run `saw harden`."
 _UNNAMED = "Something is running that this machine cannot identify."
 _QUIET = "Nothing on this machine is running code it should not."
 _NOT_READ = "Running processes could not be examined, so nothing here covers one."
+_PASS_FAILED = "This machine could not check itself. Run `saw watch status`."
 _SCHEDULED = "This machine will keep checking itself from now on."
 _AT_LOGIN = "This machine will keep checking itself from your next login."
 _ALREADY = "This machine was already checking itself."
@@ -42,16 +44,22 @@ def _never_asks(pids, *, signatures):
     return elevate.CANNOT_ASK, []
 
 
-def watch_once(*, find=live_code_processes, stop=end_live_code, load=liveledger.load,
-               save=liveledger.save, now=None) -> tuple[int, str]:
-    """Make one pass. Returns the exit code and the line an operator would read."""
+def watch_once(*, find=None, stop=end_live_code, load=liveledger.load,
+               save=liveledger.save, now=None, look=snapshot) -> tuple[int, str]:
+    """Make one pass. Takes the collaborators that read the processes, end them and keep the
+    ledger. Returns the exit code and the line an operator would read; a process table that could
+    not be read is a pass that could not complete."""
+    snap = look()
+    if not snap.supported or not snap.processes:
+        return exitcodes.INCOMPLETE, _NOT_READ
+    again = find or live_code_processes
     before = load()
-    seen = find()
+    seen = find() if find is not None else live_code_processes(snap)
     identified = [item for item in seen if item.confirmed]
 
     ending = None
     if identified:
-        ending = stop(find=lambda: [i for i in find() if i.confirmed], elevated=_never_asks)
+        ending = stop(find=lambda: [i for i in again() if i.confirmed], elevated=_never_asks)
 
     ended_keys = set()
     if ending is not None and ending.ended:
@@ -91,10 +99,10 @@ def keep_going(*, once=watch_once, sleep=time.sleep, between=BETWEEN_PASSES, pas
     while passes is None or made < passes:
         try:
             code, text = once()
-            if code != exitcodes.CLEAN:
-                report(text)
         except Exception:
-            code = exitcodes.INCOMPLETE
+            code, text = exitcodes.INCOMPLETE, _PASS_FAILED
+        if code != exitcodes.CLEAN:
+            report(text)
         made += 1
         if passes is None or made < passes:
             sleep(between)

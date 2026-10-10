@@ -14,7 +14,7 @@ from stayawake.bots.security import liveledger, schedule, watch
 from stayawake.bots.security.harden.live import Ending
 from stayawake.bots.security.livecode import LiveCode, fingerprint
 from stayawake.utils import elevate, exitcodes
-from stayawake.utils.procsnap import Process
+from stayawake.utils.procsnap import Process, Snapshot
 
 
 def _held(pid, code, confirmed):
@@ -66,12 +66,33 @@ class _Recorder:
         return self.ending
 
 
+_READABLE = Snapshot(processes=[Process(pid=1, argv=("launchd",))])
+
+
 def _run(seen, ender=None, before=None):
     saved = {}
     code, text = watch.watch_once(
         find=lambda: list(seen), stop=ender, load=lambda: before or liveledger.Ledger(),
-        save=lambda ledger: saved.setdefault("ledger", ledger) or True)
+        save=lambda ledger: saved.setdefault("ledger", ledger) or True, look=lambda: _READABLE)
     return code, text, saved.get("ledger"), ender
+
+
+class TestAPassThatCouldNotLookIsNeverQuiet(unittest.TestCase):
+    def test_a_process_table_it_cannot_read_is_not_a_quiet_machine(self):
+        for snap in (Snapshot(supported=False), Snapshot(processes=[])):
+            code, text = watch.watch_once(find=lambda: [], stop=None, load=liveledger.Ledger,
+                                          save=lambda ledger: True, look=lambda s=snap: s)
+            self.assertEqual(code, exitcodes.INCOMPLETE)
+            self.assertNotIn(watch._QUIET, text)
+            self.assertIn("could not be examined", text)
+
+    def test_a_pass_that_failed_is_reported(self):
+        said = []
+
+        def boom():
+            raise RuntimeError("x")
+        watch.keep_going(once=boom, sleep=lambda n: None, passes=1, report=said.append)
+        self.assertEqual(said, [watch._PASS_FAILED])
 
 
 class TestItNeverAsksForAPassword(unittest.TestCase):
