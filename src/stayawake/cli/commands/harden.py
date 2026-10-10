@@ -53,6 +53,8 @@ _NOT_ACKNOWLEDGED = ("The watcher could not record that what it found has been d
                      "will keep reminding you. Run `saw watch status`.")
 _CAME_BACK_DURING = ("Code came back or kept running while saw harden ran. Take this machine off "
                      "the network, then run `saw harden` again.")
+_SETTLE_WITHOUT_SUDO = ("Run `saw harden` again without sudo to mark what the watcher found as dealt "
+                        "with.")
 
 
 def _watcher_counted():
@@ -70,6 +72,9 @@ def _after_protecting(counted) -> str:
     try:
         if counted is None:
             return ""
+        if watchrecord.owned_by_another_account(watchrecord.record_path()):
+            found = watchrecord.load()
+            return _SETTLE_WITHOUT_SUDO if "unacknowledged" in found or "not_stopped" in found else ""
         if not acknowledge_came_back(counted):
             return _NOT_ACKNOWLEDGED
         still = watchack.settled(watchrecord.load(), watchack.load_acknowledgement())

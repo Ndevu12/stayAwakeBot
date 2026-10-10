@@ -11,7 +11,7 @@ import re
 import secrets
 from pathlib import Path
 
-from stayawake.utils import atomicwrite, pathsafe
+from stayawake.utils import atomicwrite, operator, pathsafe
 
 MOST_BYTES = 64 << 10
 MOST_COUNT = 10 ** 9
@@ -25,26 +25,37 @@ _NAME = re.compile(r"[a-z][a-z-]{0,31}")
 
 def shared_folder() -> Path:
     """Find the folder the scheduled watcher and the user's own commands both read and write.
-    Returns it under the home folder of the account saw acts for, whatever either environment
-    sets."""
+    Returns it under the home folder of the account saw acts for — the one that raised privilege
+    when it was raised — whatever either environment sets."""
+    who = operator.resolve()
+    if who is not None and who.raised:
+        return who.home / ".local" / "state" / "saw"
     try:
-        home = Path(pwd.getpwuid(acting_for()[0]).pw_dir)
+        home = Path(pwd.getpwuid(os.getuid()).pw_dir)
     except (KeyError, OSError):
         home = Path.home()
     return home / ".local" / "state" / "saw"
 
 
-def acting_for() -> tuple[int, int]:
-    """Name the account saw acts for: the user who ran `sudo` when saw runs as root through it,
-    else the account running saw. Returns its user and group ids."""
-    if os.geteuid() == 0:
-        try:
-            uid, gid = int(os.environ["SUDO_UID"]), int(os.environ["SUDO_GID"])
-            if uid > 0:
-                return uid, gid
-        except (KeyError, ValueError):
-            pass
-    return os.getuid(), os.getgid()
+def running_as_root() -> bool:
+    """Tell whether saw runs as root, as it does through `sudo` and similar tools. Returns the
+    answer."""
+    return os.geteuid() == 0
+
+
+def owned_by_another_account(where: Path) -> bool:
+    """Tell whether root would be writing under a folder another account owns. Takes the path to
+    be written. Returns True when saw runs as root and the nearest existing folder on that path is
+    not root's, or cannot be read; False otherwise."""
+    if not running_as_root():
+        return False
+    folder = where.parent
+    try:
+        while not os.path.lexists(folder) and folder != folder.parent:
+            folder = folder.parent
+        return os.lstat(folder).st_uid != 0
+    except OSError:
+        return True
 
 
 def record_path() -> Path:
@@ -82,21 +93,15 @@ def read_state(where: Path):
 
 def write_state(where: Path, data: dict) -> bool:
     """Write one of the watcher's state files privately and atomically, never through a link and
-    never failing; written for another account (under `sudo`), it is handed to that account and
-    no folder is created. Takes the path and the content. Returns whether it was written."""
-    uid, gid = acting_for()
-    for_another = uid != os.geteuid()
+    never failing; root never writes under a folder another account owns. Takes the
+    path and the content. Returns whether it was written."""
+    if owned_by_another_account(where):
+        return False
     try:
-        if for_another and not where.parent.is_dir():
-            return False
         where.parent.mkdir(parents=True, exist_ok=True)
         if where.is_symlink():
             return False
-        if not atomicwrite.replace(where, json.dumps(data, sort_keys=True), mode=0o600):
-            return False
-        if for_another:
-            os.lchown(where, uid, gid)
-        return True
+        return atomicwrite.replace(where, json.dumps(data, sort_keys=True), mode=0o600)
     except Exception:
         return False
 

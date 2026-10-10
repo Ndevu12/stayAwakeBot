@@ -78,29 +78,33 @@ class TestStateFilesAreReadSafely(unittest.TestCase):
             self.assertEqual(watchrecord.load(where),
                              {"unacknowledged": 5, "epoch": "ab", "returns_seen": 1})
 
-    def test_under_sudo_it_acts_for_the_user_who_ran_it(self):
-        account = SimpleNamespace(pw_dir="/accounts/me")
-        with mock.patch.object(watchrecord.os, "geteuid", return_value=0), \
-             mock.patch.dict(os.environ, {"SUDO_UID": "48213", "SUDO_GID": "48214"}), \
-             mock.patch.object(watchrecord.pwd, "getpwuid", return_value=account) as lookup:
-            self.assertEqual(watchrecord.acting_for(), (48213, 48214))
+    def test_under_sudo_it_reads_the_folder_of_the_user_who_ran_it(self):
+        invoker = SimpleNamespace(raised=True, home=Path("/accounts/me"))
+        with mock.patch.object(watchrecord.operator, "resolve", return_value=invoker):
             self.assertEqual(watchrecord.shared_folder(), Path("/accounts/me/.local/state/saw"))
-            lookup.assert_called_with(48213)
 
-    def test_a_file_written_under_sudo_is_handed_to_that_user_and_no_folder_is_made(self):
+    def test_root_never_writes_under_a_folder_another_account_owns(self):
         with tempfile.TemporaryDirectory() as d, \
-             mock.patch.object(watchrecord, "acting_for", return_value=(501, 20)), \
              mock.patch.object(watchrecord.os, "geteuid", return_value=0), \
-             mock.patch.object(watchrecord.os, "lchown") as chown:
-            self.assertTrue(watchrecord.write_state(Path(d) / "ack.json", {"a": 1}))
-            chown.assert_called_once_with(Path(d) / "ack.json", 501, 20)
+             mock.patch.object(watchrecord.atomicwrite, "replace") as write:
+            self.assertNotEqual(os.lstat(d).st_uid, 0)
+            self.assertFalse(watchrecord.write_state(Path(d) / "ack.json", {"a": 1}))
             self.assertFalse(watchrecord.write_state(Path(d) / "missing" / "ack.json", {"a": 1}))
-            self.assertFalse((Path(d) / "missing").exists())
+            write.assert_not_called()
+            self.assertEqual(list(Path(d).iterdir()), [], "root wrote into the user's folder")
+
+    def test_root_keeps_its_own_watchers_record(self):
+        real_lstat = os.lstat
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(watchrecord.os, "geteuid", return_value=0), \
+             mock.patch.object(watchrecord.os, "lstat",
+                               lambda p: SimpleNamespace(st_uid=0, st_mode=real_lstat(p).st_mode)):
+            self.assertTrue(watchrecord.write_state(Path(d) / "events.json", {"a": 1}))
 
     def test_the_watcher_and_the_users_commands_share_one_folder_whatever_the_environment(self):
         account = SimpleNamespace(pw_dir="/accounts/me")
         with mock.patch.object(watchrecord.pwd, "getpwuid", return_value=account), \
-             mock.patch.object(watchrecord, "acting_for", return_value=(501, 20)), \
+             mock.patch.object(watchrecord.operator, "resolve", return_value=None), \
              mock.patch.dict(os.environ, {"HOME": "/elsewhere", "XDG_STATE_HOME": "/other"}):
             self.assertEqual(watchrecord.record_path().parent,
                              Path("/accounts/me/.local/state/saw"))

@@ -136,6 +136,13 @@ class TestHardenSettlesWhatItCountedWhenItStarted(unittest.TestCase):
         said.clear()
         run_harden(0, lambda through: acked.append(through) or True, before={})
         self.assertEqual(said, ["done"], "a machine without a watcher record got a watcher line")
+        said.clear()
+        before_root = len(acked)
+        with mock.patch.object(cli_harden.watchrecord, "owned_by_another_account",
+                               return_value=True):
+            run_harden(0, lambda through: acked.append(through) or True)
+        self.assertEqual(len(acked), before_root, "harden under sudo wrote the user's record")
+        self.assertEqual(said[-1], cli_harden._SETTLE_WITHOUT_SUDO)
 
 
 class TestTheServiceManagerIsReachedOnlyThroughTheUsersOwnFolder(unittest.TestCase):
