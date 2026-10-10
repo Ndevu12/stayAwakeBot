@@ -16,7 +16,8 @@ _DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-
 
 def check_self_check(placed=schedule.was_placed, verdict=schedule.verdict,
                      running=schedule.is_running, supported=schedule.supported,
-                     record=watchrecord.load, clock=time.time) -> list[HygieneIssue]:
+                     record=watchrecord.load, clock=time.time,
+                     placed_since=schedule.placed_since) -> list[HygieneIssue]:
     """Report a check this machine was set to make and is no longer making. Takes the collaborators
     that read the schedule and the watcher's record. Returns the issues; a check that cannot be
     read raises, so the audit reports it as not completed."""
@@ -24,11 +25,14 @@ def check_self_check(placed=schedule.was_placed, verdict=schedule.verdict,
         return []
     state = verdict()
     loaded = running()
-    kept = record()
-    if state == schedule.PRISTINE and loaded and kept and watchrecord.stale(kept, clock()):
-        loaded = False
     if state == schedule.PRISTINE and loaded:
-        return []
+        if not watchrecord.stale(record(), clock(), placed_since()):
+            return []
+        return [HygieneIssue(
+            id=STOPPED_ID, severity="warning",
+            title="This machine stopped checking itself",
+            detail="It is set to check itself and has not done so recently.",
+            remediation="Run `saw watch stop`, then `saw watch`.", reference=_DOCS)]
     if state == schedule.PRISTINE:
         return [HygieneIssue(
             id=STOPPED_ID, severity="warning",

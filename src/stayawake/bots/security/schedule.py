@@ -70,6 +70,15 @@ def was_placed(path: Path | None = None) -> bool:
     return recorded(path) is not None
 
 
+def placed_since(path: Path | None = None) -> float | None:
+    """Tell when saw last placed the item. Takes an optional record path. Returns the time, or None
+    when there is no readable record."""
+    try:
+        return (path or record_path()).stat().st_mtime
+    except OSError:
+        return None
+
+
 def recorded(path: Path | None = None) -> list[str] | None:
     """The argv saw last placed, or None when there is no readable record."""
     try:

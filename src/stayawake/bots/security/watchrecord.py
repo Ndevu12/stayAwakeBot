@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 from stayawake.utils import atomicwrite, env
 
 STALE_AFTER_SECONDS = 600
+_TIMES = ("last_good", "unacknowledged", "reminded", "acknowledged", "saved")
 
 
 def record_path() -> Path:
@@ -27,7 +29,38 @@ def load(path: Path | None = None) -> dict:
         data = json.loads(where.read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return {}
-    return data if isinstance(data, dict) else {}
+    return well_formed(data)
+
+
+def well_formed(data) -> dict:
+    """Keep the fields of a record that have the expected type. Takes what was read. Returns the
+    record with every other field dropped."""
+    if not isinstance(data, dict):
+        return {}
+    kept = {k: data[k] for k in _TIMES if is_time(data.get(k))}
+    if isinstance(data.get("failures"), int) and data["failures"] >= 0:
+        kept["failures"] = data["failures"]
+    if isinstance(data.get("daily_for"), str):
+        kept["daily_for"] = data["daily_for"][:16]
+    for name in ("since", "sent"):
+        held = data.get(name)
+        if isinstance(held, dict):
+            wanted = _is_count if name == "since" else is_time
+            kept[name] = {str(k)[:32]: v for k, v in list(held.items())[:32] if wanted(v)}
+    if isinstance(data.get("recent"), list):
+        kept["recent"] = [t for t in data["recent"][-64:] if is_time(t)]
+    return kept
+
+
+def is_time(value) -> bool:
+    """Tell whether a value is a usable timestamp. Takes the value. Returns the answer."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def _is_count(value) -> bool:
+    """Tell whether a value is a usable count. Takes the value. Returns the answer."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def save(record: dict, path: Path | None = None) -> bool:
@@ -55,23 +88,13 @@ def acknowledge(path: Path | None = None, *, now=time.time) -> bool:
     return save(record, path)
 
 
-def heartbeat_age(record: dict, now: float) -> float | None:
-    """Tell how long ago the watcher last completed a pass. Takes the record and the time now.
-    Returns the age in seconds, or None when it has never completed one."""
+def stale(record: dict, now: float, placed_since: float | None = None) -> bool:
+    """Tell whether the watcher has stopped completing passes. Takes the record, the time now and
+    when the watcher was placed, if known. Returns True when the last pass is too old or is dated
+    in the future, or when there is none and the watcher was placed too long ago or at a time not
+    known."""
     last = record.get("last_good")
-    return now - last if isinstance(last, (int, float)) else None
+    if not is_time(last):
+        return placed_since is None or now - placed_since > STALE_AFTER_SECONDS
+    return not 0 <= now - last <= STALE_AFTER_SECONDS
 
-
-def stale(record: dict, now: float) -> bool:
-    """Tell whether the watcher has stopped completing passes. Takes the record and the time now.
-    Returns True when it never completed one or the last was too long ago."""
-    age = heartbeat_age(record, now)
-    return age is None or age > STALE_AFTER_SECONDS
-
-
-def placed_here() -> bool:
-    """Tell whether this user has a watcher record at all. Returns the answer."""
-    try:
-        return os.path.exists(record_path())
-    except OSError:
-        return False

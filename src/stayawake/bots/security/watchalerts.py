@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from stayawake.bots.security import watchrecord
 from stayawake.bots.security.watch import (
     ENDED, LEFT, NOT_READ, PASS_FAILED, QUIET, RETURNED, SENTENCE_FOR)
 
@@ -31,9 +32,12 @@ def decide(record: dict, kinds, now: float, today: str, hour: int) -> tuple[dict
     """Decide what to tell the user after one pass. Takes the watcher's record, the pass's event
     kinds, the time now, today's local date and the local hour. Returns the updated record and the
     alerts to send, worst first."""
-    rec = dict(record)
-    since = dict(rec.get("since") or {})
-    sent = dict(rec.get("sent") or {})
+    rec = watchrecord.well_formed(record)
+    since = dict(rec.get("since", {}))
+    sent = {kind: min(at, now) for kind, at in rec.get("sent", {}).items()}
+    for name in ("unacknowledged", "reminded"):
+        if name in rec:
+            rec[name] = min(rec[name], now)
     for kind in kinds:
         if kind != QUIET:
             since[kind] = since.get(kind, 0) + 1
@@ -55,7 +59,7 @@ def decide(record: dict, kinds, now: float, today: str, hour: int) -> tuple[dict
             and now - (rec.get("reminded") or rec["unacknowledged"]) >= REMIND_EVERY_SECONDS):
         due.append("reminder")
 
-    recent = [t for t in rec.get("recent") or [] if now - t < 3600]
+    recent = [min(t, now) for t in rec.get("recent", []) if now - min(t, now) < 3600]
     alerts = []
     for about in sorted(due, key=_WORST_FIRST.index):
         if len(recent) >= MOST_PER_HOUR:
@@ -126,8 +130,9 @@ def teller(notifier, *, load, save, clock, local):
                                  f"{moment.tm_mday:02d}", moment.tm_hour)
         for alert in alerts:
             notifier.send(alert.title, alert.body, urgent=alert.urgent)
-        quiet = tuple(kinds) == (QUIET,) and not alerts
-        if quiet and now - record.get("saved", float("-inf")) < SAVE_QUIET_EVERY_SECONDS:
+        saved = record.get("saved")
+        recently = watchrecord.is_time(saved) and 0 <= now - saved < SAVE_QUIET_EVERY_SECONDS
+        if tuple(kinds) == (QUIET,) and not alerts and recently:
             return
         updated["saved"] = now
         if not save(updated):

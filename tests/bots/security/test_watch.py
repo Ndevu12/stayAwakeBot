@@ -286,10 +286,15 @@ class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
     """`saw watch status`. Whether the job is loaded is asked of the service manager, because one
     unprivileged command stops it without touching a byte."""
 
-    def _status(self, state, running=True, supported=True, record=None, now=1000.0):
+    def _status(self, state, running=True, supported=True, record=None, now=1000.0,
+                since=995.0):
         return watch.status_of(supported=lambda: supported, verdict=lambda: state,
                                running=lambda: running, record=lambda: dict(record or {}),
-                               clock=lambda: now)
+                               clock=lambda: now, placed_since=lambda: since)
+
+    def test_held_with_no_pass_since_it_was_placed_long_ago_is_not_clean(self):
+        code, text = self._status(schedule.PRISTINE, since=0.0, now=10_000.0)
+        self.assertEqual((code, text), (exitcodes.FINDINGS, watch._STALLED))
 
     def test_held_but_not_checking_recently_is_not_clean(self):
         code, text = self._status(schedule.PRISTINE, record={"last_good": 0.0}, now=10_000.0)
@@ -327,7 +332,7 @@ class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
         def boom():
             raise OSError("x")
         code, text = watch.status_of(supported=lambda: True, verdict=boom, running=lambda: True,
-                                     record=dict)
+                                     record=dict, placed_since=lambda: None)
         self.assertEqual((code, text), (exitcodes.INCOMPLETE, watch._CANNOT_TELL))
 
     def test_it_names_no_location(self):

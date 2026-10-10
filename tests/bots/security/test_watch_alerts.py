@@ -114,14 +114,16 @@ class TestTheTeller(unittest.TestCase):
 
 class TestEveryCommandSaysWhenTheWatcherNeedsYou(unittest.TestCase):
     def test_the_line_any_command_prints(self):
-        placed = lambda: True                                                      # noqa: E731
-        self.assertEqual(watch.foreground_notice(record=dict, placed=placed), "")
-        self.assertIn("saw harden", watch.foreground_notice(
-            record=lambda: {"unacknowledged": 1.0}, placed=placed))
-        self.assertEqual(watch.foreground_notice(record=lambda: {"last_good": 0.0}, placed=placed,
-                                                 clock=lambda: 10_000.0), watch._STALLED)
-        self.assertEqual(watch.foreground_notice(record=lambda: {"last_good": 0.0},
-                                                 placed=lambda: False, clock=lambda: 10_000.0), "")
+        def notice(record, *, placed=True, since=9_990.0):
+            return watch.foreground_notice(record=lambda: record, placed=lambda: placed,
+                                           clock=lambda: 10_000.0, placed_since=lambda: since)
+        self.assertEqual(notice({}), "", "a watcher placed seconds ago has not missed a pass")
+        self.assertEqual(notice({"last_good": 9_990.0}), "")
+        self.assertIn("saw harden", notice({"unacknowledged": 1.0, "last_good": 9_990.0}))
+        self.assertEqual(notice({"last_good": 0.0}), watch._STALLED)
+        self.assertEqual(notice({}, since=0.0), watch._STALLED)
+        self.assertEqual(notice({}, since=None), watch._STALLED)
+        self.assertEqual(notice({"last_good": 0.0}, placed=False), "")
 
     def test_every_command_but_watch_prints_it_on_stderr(self):
         import io
@@ -161,12 +163,37 @@ class TestTheRecordHoldsOnlyCountsAndTimes(unittest.TestCase):
         where = Path(tempfile.mkdtemp()) / "w.json"
         self.assertTrue(watchrecord.save({"unacknowledged": 5.0, "reminded": 6.0}, where))
         self.assertTrue(watchrecord.acknowledge(where, now=lambda: 7.0))
-        self.assertIsNone(watchrecord.load(where)["unacknowledged"])
+        self.assertIsNone(watchrecord.load(where).get("unacknowledged"))
 
-    def test_a_heartbeat_too_old_is_stale(self):
+    def test_a_heartbeat_too_old_or_dated_ahead_is_stale(self):
         self.assertTrue(watchrecord.stale({}, 1000.0))
         self.assertTrue(watchrecord.stale({"last_good": 0.0}, 1000.0))
+        self.assertTrue(watchrecord.stale({"last_good": 5000.0}, 1000.0))
+        self.assertTrue(watchrecord.stale({"last_good": "900"}, 1000.0))
         self.assertFalse(watchrecord.stale({"last_good": 900.0}, 1000.0))
+        self.assertFalse(watchrecord.stale({}, 1000.0, placed_since=990.0))
+        self.assertTrue(watchrecord.stale({}, 1000.0, placed_since=0.0))
+
+    def test_a_record_of_the_wrong_shape_is_read_as_far_as_it_is_right(self):
+        odd = {"last_good": "x", "failures": -5, "since": [1], "sent": {"returned": float("inf")},
+               "recent": "abc", "unacknowledged": True, "daily_for": 7, "reminded": 3.0}
+        self.assertEqual(watchrecord.well_formed(odd), {"reminded": 3.0, "sent": {}})
+        self.assertEqual(watchrecord.well_formed([1, 2]), {})
+
+    def test_times_planted_in_the_future_hold_back_one_interval_at_most(self):
+        planted = {"sent": {RETURNED: 1e12}, "recent": [1e12] * 6, "unacknowledged": 1e12,
+                   "reminded": 1e12, "last_good": 1e12}
+        _, sent = _run([(ENDED, RETURNED)] * 240, start=36000, record=planted)    # two hours
+        self.assertGreaterEqual(sum(1 for _, a in sent if a.about == RETURNED), 4)
+        _, sent = _run([(QUIET,)] * 240, start=36000, record=planted)
+        self.assertTrue([a for _, a in sent if a.about == "reminder"],
+                        "a return dated in the future is still reminded")
+
+    def test_any_well_formed_record_reaches_decide_without_raising(self):
+        for junk in ({"since": {"x": 1}, "sent": {"y": 2.0}}, {"recent": [1e300, -1e300]},
+                     {"failures": 10**9}, {"daily_for": "d0"}):
+            with self.subTest(junk=junk):
+                A.decide(junk, (ENDED, RETURNED, NOT_READ), 36000.0, "d0", 10)
 
 
 if __name__ == "__main__":

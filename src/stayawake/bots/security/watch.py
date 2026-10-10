@@ -25,7 +25,8 @@ _QUIET = "Nothing on this machine is running code it should not."
 _NOT_READ = "Running processes could not be examined, so nothing here covers one."
 _PASS_FAILED = "This machine could not check itself. Run `saw watch status`."
 _NOT_TOLD = "What this machine found could not be recorded or announced. Run `saw watch status`."
-_STALLED = "This machine is set to check itself but has not done so recently. Run `saw watch`."
+_STALLED = ("This machine is set to check itself but has not done so recently. Run `saw watch stop`, "
+            "then `saw watch`.")
 _CAME_BACK = ("Code stopped here before came back and has not been dealt with. Take this machine "
               "off the network, then run `saw harden`.")
 _SCHEDULED = "This machine will keep checking itself from now on."
@@ -143,28 +144,30 @@ def schedule_it(*, settle=schedule.settle) -> tuple[int, str]:
 
 
 def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
-              running=schedule.is_running, record=None, clock=time.time) -> tuple[int, str]:
+              running=schedule.is_running, record=None, clock=time.time,
+              placed_since=schedule.placed_since) -> tuple[int, str]:
     """Say whether this machine is checking itself. Takes the collaborators that read the schedule
     and the watcher's record. Returns the exit code and the lines an operator reads."""
     code, line = _schedule_status(supported, verdict, running)
     kept = (record or watchrecord.load)()
-    if code == exitcodes.CLEAN and kept and watchrecord.stale(kept, clock()):
+    if code == exitcodes.CLEAN and watchrecord.stale(kept, clock(), placed_since()):
         code, line = exitcodes.FINDINGS, _STALLED
     if kept.get("unacknowledged"):
         line += "\n" + _CAME_BACK
     return code, line
 
 
-def foreground_notice(*, record=None, placed=schedule.was_placed, clock=time.time) -> str:
+def foreground_notice(*, record=None, placed=schedule.was_placed, clock=time.time,
+                      placed_since=schedule.placed_since) -> str:
     """Build the line any foreground command prints about the watcher. Takes the collaborators that
     read the record and the placement. Returns the line, or "" when there is nothing to say."""
     try:
         kept = (record or watchrecord.load)()
-        if not kept or not placed():
+        if not placed():
             return ""
         if kept.get("unacknowledged"):
             return _CAME_BACK
-        return _STALLED if watchrecord.stale(kept, clock()) else ""
+        return _STALLED if watchrecord.stale(kept, clock(), placed_since()) else ""
     except Exception:
         return ""
 

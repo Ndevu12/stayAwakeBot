@@ -56,18 +56,22 @@ class TestTakingItBackForgetsIt(unittest.TestCase):
 
 class TestAMachineThatStoppedCheckingItselfSaysSo(unittest.TestCase):
     def _check(self, *, placed=True, state=schedule.PRISTINE, loaded=True, supported=True,
-               record=None, now=1000.0):
+               record=None, now=1000.0, since=995.0):
         return watching.check_self_check(placed=lambda: placed, verdict=lambda: state,
                                          running=lambda: loaded, supported=lambda: supported,
-                                         record=lambda: dict(record or {}), clock=lambda: now)
+                                         record=lambda: dict(record or {}), clock=lambda: now,
+                                         placed_since=lambda: since)
 
     def test_checking_and_running_reports_nothing(self):
         self.assertEqual(self._check(), [])
         self.assertEqual(self._check(record={"last_good": 900.0}), [])
 
     def test_running_but_not_checking_for_a_while_is_reported(self):
-        issues = self._check(record={"last_good": 0.0}, now=10_000.0)
-        self.assertEqual([i.id for i in issues], [watching.STOPPED_ID])
+        for record, since in (({"last_good": 0.0}, 995.0), ({}, 0.0), ({}, None)):
+            with self.subTest(record=record, since=since):
+                issues = self._check(record=record, now=10_000.0, since=since)
+                self.assertEqual([i.id for i in issues], [watching.STOPPED_ID])
+                self.assertIn("saw watch stop", issues[0].remediation)
 
     def test_a_check_that_cannot_be_read_is_not_silence(self):
         def broken():
@@ -75,7 +79,8 @@ class TestAMachineThatStoppedCheckingItselfSaysSo(unittest.TestCase):
         with self.assertRaises(OSError):
             watching.check_self_check(placed=lambda: True, verdict=broken,
                                       running=lambda: True, supported=lambda: True,
-                                      record=dict, clock=lambda: 0.0)
+                                      record=dict, clock=lambda: 0.0,
+                                      placed_since=lambda: None)
 
     def test_one_never_set_up_is_not_a_finding(self):
         self.assertEqual(self._check(placed=False, state=schedule.ABSENT, loaded=False), [])

@@ -98,6 +98,8 @@ Elsewhere the command says it could not arrange it, rather than reporting a mach
 - [`saw audit`](audit.md) — what else this machine looks like
 
 `saw watch status` says whether this machine is checking itself. Whether it is running is asked
-of the system, not read from the file: one command stops the check without changing a byte.
+of the system, not read from the file: one command stops the check without changing a byte. If it
+says the machine has not checked itself recently, run `saw watch stop`, then `saw watch`; do the
+same once after upgrading saw.
 
 It is set up from the copy of saw you run it with, so run it from an installed one. A copy inside a temporary directory is refused: the check would work until that directory is cleaned up. If the check ever stops, `saw audit` says so.
