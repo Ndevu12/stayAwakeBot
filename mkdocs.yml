@@ -28,6 +28,9 @@ edit_uri: edit/main/docs/
 
 docs_dir: docs
 site_dir: site
+# The short links' map is read by the docs workflow, not served as a page.
+exclude_docs: |
+  short-links.yml
 
 # Fail the build on a broken relative link, a dangling #anchor, or a page missing from the nav,
 # so a docs regression cannot merge. `strict` promotes every warning below to an error.

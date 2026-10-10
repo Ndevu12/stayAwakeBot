@@ -4,7 +4,8 @@
 Everything that can read it does. `pyproject.toml`, the README and `stayawake.utils.docs_site` (an
 installed saw has no mkdocs.yml to read) cannot, so they hold a literal — and this pins that literal
 to the one source, which is what stops the copies drifting apart the way they did when the site
-moved subdomain. Every link to a page is pinned to a page and section that exist in `docs/`.
+moved subdomain. Every link saw prints is a short link the site serves, and every link leads to a
+page and section that exist in `docs/`.
 """
 from __future__ import annotations
 
@@ -12,6 +13,8 @@ import pathlib
 import re
 import unicodedata
 import unittest
+
+import yaml
 
 from stayawake.utils import docs_site
 
@@ -23,6 +26,7 @@ _WORKFLOW = _ROOT / ".github/workflows/docs.yml"
 _SUPPORT = _ROOT / "SUPPORT.md"
 _DOCS = _ROOT / "docs"
 _SRC = _ROOT / "src/stayawake"
+_SHORT_LINKS = _DOCS / "short-links.yml"
 
 
 def _declared_site_url() -> str:
@@ -81,28 +85,48 @@ def _section_ids(page: pathlib.Path) -> set[str]:
     return ids
 
 
-def _source_page(link: str) -> tuple[pathlib.Path | None, str]:
-    """Map a hosted link to the page in docs/ it is built from. Returns the page, or None, and the
-    section id it names."""
-    rest, _, section = link[len(docs_site.SITE):].partition("#")
+def _source_page(site_path: str) -> tuple[pathlib.Path | None, str]:
+    """Map a path on the latest documentation to the page in docs/ it is built from. Returns the
+    page, or None, and the section id it names."""
+    rest, _, section = site_path.partition("#")
     path = rest.strip("/")
     candidates = [_DOCS / f"{path}.md", _DOCS / path / "index.md"] if path else [_DOCS / "index.md"]
     return next((c for c in candidates if c.is_file()), None), section
 
 
-def _links_saw_and_its_readers_are_given() -> list[str]:
-    found = [v for v in vars(docs_site).values() if isinstance(v, str) and v.startswith(docs_site.SITE + "/")]
+def _short_links() -> dict[str, str]:
+    return yaml.safe_load(_SHORT_LINKS.read_text(encoding="utf-8"))
+
+
+def _names_saw_prints() -> list[str]:
+    prefix = docs_site.SITE + "/go/"
+    return [v[len(prefix):].strip("/") for v in vars(docs_site).values()
+            if isinstance(v, str) and v.startswith(prefix)]
+
+
+def _pages_readers_are_sent_to() -> list[str]:
+    """Every path on the latest documentation that a short link or the README and support guide
+    lead to."""
+    latest = docs_site.SITE + "/latest/"
+    found = list(_short_links().values())
     for doc in (_README, _SUPPORT):
-        found += re.findall(r"\((" + re.escape(docs_site.SITE) + r"[^)\s]*)\)", doc.read_text(encoding="utf-8"))
+        found += re.findall(r"\(" + re.escape(latest) + r"([^)\s]*)\)", doc.read_text(encoding="utf-8"))
     return found
 
 
 class TestEveryDocsLinkLeadsToAPage(unittest.TestCase):
-    def test_saw_links_the_site_mkdocs_publishes_as_latest(self):
-        self.assertEqual(docs_site.SITE, _declared_site_url().rstrip("/") + "/latest")
+    def test_saw_links_the_site_mkdocs_publishes(self):
+        self.assertEqual(docs_site.SITE, _declared_site_url().rstrip("/"))
+
+    def test_every_link_saw_prints_is_a_short_link_the_site_serves(self):
+        names = _names_saw_prints()
+        self.assertGreaterEqual(len(names), 4, "the links saw prints were not found")
+        for name in names:
+            with self.subTest(name=name):
+                self.assertIn(name, _short_links(), f"saw prints go/{name}/ but the site has no such link")
 
     def test_no_other_source_file_writes_a_docs_address(self):
-        """One home: a page moved or renamed is fixed in docs_site and nowhere else."""
+        """One home: a topic's address is built in docs_site and nowhere else."""
         host = _declared_site_url().split("://", 1)[1].rstrip("/")
         for path in sorted(_SRC.rglob("*.py")):
             if path.name == "docs_site.py":
@@ -119,15 +143,14 @@ class TestEveryDocsLinkLeadsToAPage(unittest.TestCase):
                 self.assertNotRegex(doc.read_text(encoding="utf-8"), r"\]\((?:\./)?docs/")
 
     def test_every_link_names_a_page_and_section_that_exist(self):
-        links = _links_saw_and_its_readers_are_given()
-        self.assertGreaterEqual(len(links), 20, "the links were not found, so none were checked")
-        for link in links:
-            with self.subTest(link=link):
-                page, section = _source_page(link)
-                self.assertIsNotNone(page, f"{link} has no page in docs/")
+        paths = _pages_readers_are_sent_to()
+        self.assertGreaterEqual(len(paths), 25, "the links were not found, so none were checked")
+        for site_path in paths:
+            with self.subTest(path=site_path):
+                page, section = _source_page(site_path)
+                self.assertIsNotNone(page, f"{site_path} has no page in docs/")
                 if section:
-                    self.assertIn(section, _section_ids(page), f"{link} names a section {page.name} lacks")
-
+                    self.assertIn(section, _section_ids(page), f"{site_path} names a section {page.name} lacks")
 
 if __name__ == "__main__":
     unittest.main()

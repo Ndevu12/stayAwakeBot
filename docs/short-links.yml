@@ -1,0 +1,11 @@
+# The short links saw prints, as https://saw-docs.ndevuspace.com/go/<name>/.
+#
+# Each name opens the page (and section) on the right, in the latest documentation. The docs
+# workflow writes one redirect page per entry at the site root; saw itself knows only the names.
+#
+# An installed saw keeps printing every name it shipped with, so a name is never removed or
+# renamed. When a page moves or a heading is reworded, change its target here.
+audit-a-machine: how-to/audit-a-machine/
+clean-audit: how-to/audit-a-machine/#what-a-clean-audit-does-and-does-not-mean
+credential-hygiene: explanation/credential-hygiene/
+fix-findings: how-to/fix-findings/

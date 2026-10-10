@@ -24,6 +24,7 @@ on:
       - 'mkdocs.yml'
       - 'requirements-docs.txt'
       - '.github/workflows/docs.yml'
+      - '.github/scripts/short_links.py'
   push:
     branches: [main]
     paths:
@@ -31,6 +32,7 @@ on:
       - 'mkdocs.yml'
       - 'requirements-docs.txt'
       - '.github/workflows/docs.yml'
+      - '.github/scripts/short_links.py'
   release:
     types: [published]
   # Publish a version by hand — for backfilling a release that predates this site, or re-cutting
@@ -100,6 +102,11 @@ jobs:
           grep -q "<link rel=\"canonical\" href=\"${site_url%/}/latest/" \
             /tmp/site-versioned/reference/cli/scan/index.html \
             || { echo "::error::canonical is not the versioned URL"; exit 1; }
+
+      # saw prints https://<site>/go/<name>/ links. Each must open a page and section this build
+      # really has — checked against the built HTML, so a moved page or reworded heading fails here.
+      - name: Every short link leads to a page
+        run: python .github/scripts/short_links.py check docs/short-links.yml /tmp/site-versioned
 
   # Writes the version to `gh-pages` and hands the whole versioned tree to Pages.
   publish:
@@ -214,6 +221,14 @@ jobs:
             grep -o '<loc>https://[^/]*' pages-artifact/latest/sitemap.xml | sort -u
             exit 1
           fi
+
+      # The short links saw prints sit at the site root, outside every version directory, and open
+      # the latest documentation. Written from docs/short-links.yml, then checked against the tree.
+      - name: Write the short links
+        run: |
+          set -euo pipefail
+          python .github/scripts/short_links.py write docs/short-links.yml pages-artifact
+          python .github/scripts/short_links.py check docs/short-links.yml pages-artifact/latest
 
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d   # v6.0.0

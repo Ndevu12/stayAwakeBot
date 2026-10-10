@@ -109,9 +109,10 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 
-- **Documentation links open the hosted documentation.** The links on `saw audit` findings, and
-  those in the README and support guide, go to saw-docs.ndevuspace.com instead of the files in the
-  repository; the README's links now also work on its package page.
+- **Documentation links are short and open the hosted documentation.** `saw audit` and the issues
+  saw opens link to short addresses such as `saw-docs.ndevuspace.com/go/clean-audit/`, which keep
+  working when a page moves. The README and support guide link to saw-docs.ndevuspace.com instead
+  of the files in the repository, so the README's links also work on its package page.
 - **A target that could not be scanned reads as not clean in the saved report, and appears as an
   alert in code scanning from the SARIF upload. A scan or `saw fix` run that reports on
   repositories ends by telling you to run `saw audit` before you rotate a credential.** The advice
