@@ -1,58 +1,76 @@
 #!/usr/bin/env python3
-"""`saw harden`'s acknowledgement that code which came back was dealt with, and how it settles
-the watcher's record."""
+"""`saw harden`'s acknowledgement that the code the watcher found was dealt with, and how it
+settles the watcher's record."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.bots.security import watchrecord
-from stayawake.bots.security.watchstate import CAME_BACK
+from stayawake.bots.security.watchstate import CAME_BACK, NOT_STOPPED
+
+
+@dataclass(frozen=True)
+class Counted:
+    """What the watcher's record held when a `saw harden` run started: the record's name, how many
+    returns it had counted, and when the current streak of code that could not be stopped began."""
+    epoch: str
+    returns: int
+    not_stopped: float | None = None
 
 
 def acknowledgement_path() -> Path:
-    """Find where `saw harden` records that it dealt with code that came back. Returns the path."""
+    """Find where `saw harden` records what it dealt with. Returns the path."""
     return watchrecord.shared_folder() / "watch-acknowledged.json"
 
 
-def returns_so_far(record: dict) -> tuple[str, int] | None:
-    """Say which returns a record has counted. Takes the record. Returns its name and how many
-    returns it has seen, or None when it names none."""
+def counted_so_far(record: dict) -> Counted | None:
+    """Say what a record holds for `saw harden` to deal with. Takes the record. Returns what it
+    counted, or None when it names no record."""
     epoch = record.get("epoch")
-    return (epoch, record.get("returns_seen", 0)) if watchrecord.is_epoch(epoch) else None
+    if not watchrecord.is_epoch(epoch):
+        return None
+    return Counted(epoch, record.get("returns_seen", 0), record.get("not_stopped"))
 
 
-def acknowledge(through: tuple[str, int], path: Path | None = None) -> bool:
-    """Record that a `saw harden` run dealt with every return the watcher had counted when it
-    started. Takes the record's name and that count, and an optional path. Returns whether it was
-    written."""
-    epoch, count = through
-    return watchrecord.write_state(path or acknowledgement_path(),
-                                   {"epoch": epoch, "through": count})
+def acknowledge(counted: Counted, path: Path | None = None) -> bool:
+    """Record that a `saw harden` run dealt with what the watcher had counted when it started.
+    Takes that count and an optional path. Returns whether it was written."""
+    data = {"epoch": counted.epoch, "through": counted.returns}
+    if counted.not_stopped is not None:
+        data["not_stopped"] = counted.not_stopped
+    return watchrecord.write_state(path or acknowledgement_path(), data)
 
 
-def load_acknowledgement(path: Path | None = None) -> tuple[str, int] | None:
-    """Read the last acknowledgement `saw harden` recorded. Takes an optional path. Returns the
-    record's name and the count of returns dealt with, or None when there is none to use."""
+def load_acknowledgement(path: Path | None = None) -> Counted | None:
+    """Read the last acknowledgement `saw harden` recorded. Takes an optional path. Returns what it
+    dealt with, or None when there is none to use."""
     data = watchrecord.read_state(path or acknowledgement_path())
     if not isinstance(data, dict):
         return None
-    epoch, through = data.get("epoch"), data.get("through")
-    if watchrecord.is_epoch(epoch) and watchrecord.is_count(through):
-        return epoch, through
-    return None
+    epoch, through, not_stopped = data.get("epoch"), data.get("through"), data.get("not_stopped")
+    if not (watchrecord.is_epoch(epoch) and watchrecord.is_count(through)):
+        return None
+    return Counted(epoch, through, not_stopped if watchrecord.is_time(not_stopped) else None)
 
 
-def settled(record: dict, acknowledgement) -> dict:
+def settled(record: dict, acknowledgement: Counted | None) -> dict:
     """Apply `saw harden`'s acknowledgement to the watcher's record. Takes the record and the
-    acknowledgement, or None. Returns the record with code that came back marked as dealt with when
-    the acknowledgement names this record and the exact count of returns it holds; a return counted
-    after that run started stays open."""
+    acknowledgement, or None. Returns the record with what that run dealt with marked as such:
+    code that came back when it names this record and the exact count of returns it holds, and
+    code that could not be stopped when it names the same streak; anything counted after that run
+    started stays open."""
     rec = dict(record)
-    if not acknowledgement or "unacknowledged" not in rec:
+    if not acknowledgement or rec.get("epoch") != acknowledgement.epoch:
         return rec
-    epoch, through = acknowledgement
-    if rec.get("epoch") == epoch and rec.get("returns_seen", 0) == through:
-        rec.pop("unacknowledged", None)
-        rec["pending"] = {k: v for k, v in rec.get("pending", {}).items() if k != CAME_BACK}
+    dealt_with = []
+    if "unacknowledged" in rec and rec.get("returns_seen", 0) == acknowledgement.returns:
+        rec.pop("unacknowledged")
+        dealt_with.append(CAME_BACK)
+    if "not_stopped" in rec and rec["not_stopped"] == acknowledgement.not_stopped:
+        rec.pop("not_stopped")
+        dealt_with.append(NOT_STOPPED)
+    if dealt_with:
+        rec["pending"] = {k: v for k, v in rec.get("pending", {}).items() if k not in dealt_with}
         rec["window_reopened"] = True
     return rec

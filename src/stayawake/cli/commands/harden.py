@@ -34,44 +34,45 @@ acknowledge_came_back = watchack.acknowledge
 
 def run(a: argparse.Namespace) -> int:
     """Put the host controls in place, or take them back. Takes the parsed arguments. Returns the
-    exit code; a run that protected the machine also marks code that came back as dealt with."""
+    exit code; a run that ended the live code it found also marks what the watcher had found
+    before it started as dealt with."""
     label = "removing host denials…" if a.take_back else "creating host denials…"
     no_stream = no_stream_requested(a)
-    counted = _returns_counted()
+    counted = _watcher_counted()
     with busy(label, no_stream=no_stream):
         code, text = harden.take_back() if a.take_back else harden.run()
     say(text, no_stream=no_stream)
-    if code == 0 and not a.take_back:
+    if harden.dealt_with_live_code(code) and not a.take_back:
         line = _after_protecting(counted)
         if line:
             say(line, no_stream=no_stream)
     return code
 
 
-_NOT_ACKNOWLEDGED = ("The watcher could not record that code which came back has been dealt with, "
-                     "so it will keep reminding you. Run `saw watch status`.")
-_CAME_BACK_DURING = ("Code came back while saw harden was running. Take this machine off the "
-                     "network, then run `saw harden` again.")
+_NOT_ACKNOWLEDGED = ("The watcher could not record that what it found has been dealt with, so it "
+                     "will keep reminding you. Run `saw watch status`.")
+_CAME_BACK_DURING = ("Code came back or kept running while saw harden ran. Take this machine off "
+                     "the network, then run `saw harden` again.")
 
 
-def _returns_counted():
-    """Read which returns the watcher had counted before this run, never failing. Returns the
-    record's name and count, or None."""
+def _watcher_counted():
+    """Read what the watcher had found before this run, never failing. Returns what its record
+    counted, or None."""
     try:
-        return watchack.returns_so_far(watchrecord.load())
+        return watchack.counted_so_far(watchrecord.load())
     except Exception:
         return None
 
 
 def _after_protecting(counted) -> str:
-    """Mark the returns counted before this run started as dealt with, never failing. Takes what
-    was counted then. Returns the line to print, or "" when there is nothing to say."""
+    """Mark what the watcher had found before this run started as dealt with, never failing. Takes
+    what was counted then. Returns the line to print, or "" when there is nothing to say."""
     try:
         if counted is None:
             return ""
         if not acknowledge_came_back(counted):
             return _NOT_ACKNOWLEDGED
         still = watchack.settled(watchrecord.load(), watchack.load_acknowledgement())
-        return _CAME_BACK_DURING if "unacknowledged" in still else ""
+        return _CAME_BACK_DURING if "unacknowledged" in still or "not_stopped" in still else ""
     except Exception:
         return _NOT_ACKNOWLEDGED

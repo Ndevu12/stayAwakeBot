@@ -51,7 +51,7 @@ def send_some(notifier, record: dict, alerts, now: float) -> tuple[list, bool]:
     alerts shown and whether any could not be."""
     if not alerts:
         return [], False
-    if 0 < record.get("backoff_until", now) - now <= LONGEST_BACKOFF_SECONDS:
+    if _paused(record, now, urgent=any(alert.urgent for alert in alerts)):
         return [], True
     shown = []
     for alert in alerts[:MOST_SENT_PER_PASS]:
@@ -64,6 +64,19 @@ def send_some(notifier, record: dict, alerts, now: float) -> tuple[list, bool]:
     record.pop("backoff", None)
     record.pop("backoff_until", None)
     return shown, False
+
+
+def _paused(record: dict, now: float, *, urgent: bool) -> bool:
+    """Tell whether sending is paused after a failure. Takes the record, the time and whether an
+    urgent alert is waiting. Returns True within the pause; an urgent alert waits no longer than
+    `watchalerts.URGENT_EVERY_SECONDS` after the failure, and a pause longer than the longest
+    allowed is ignored."""
+    pause, until = record.get("backoff", 0), record.get("backoff_until", now)
+    if not 0 < until - now <= LONGEST_BACKOFF_SECONDS:
+        return False
+    failed_at = until - pause
+    longest = min(pause, watchalerts.URGENT_EVERY_SECONDS) if urgent else pause
+    return now - failed_at < longest
 
 
 def _read_or(read, fallback):

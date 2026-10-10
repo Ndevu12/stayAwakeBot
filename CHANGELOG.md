@@ -18,9 +18,10 @@ reader, not the mechanism or the weakness it closed.
   stopped before comes back, when code could not be stopped, and when it has not been able to
   check the machine for a while. Code that came back, and code that could not be stopped, are
   repeated every hour until dealt with. A short report arrives once a day, on quiet days too.
-  While something is not dealt with, every other `saw` command prints one line saying so,
-  whether or not a notification was shown; `saw watch status` lists the same with what happened
-  since the last report, and `saw audit` reports code that came back or could not be stopped. On
+  While code that came back or could not be stopped is not dealt with, or the watcher has stopped
+  checking, every other `saw` command prints one line saying so, whether or not a notification
+  was shown; `saw watch status` lists the same with what happened since the last report, and
+  `saw audit` reports code that came back or could not be stopped. On
   macOS the notifications come from Script Editor; `saw watch` sends one when you set it up so
   you can allow them. If this machine already checks itself, run `saw watch stop`, then
   `saw watch`, once after upgrading.

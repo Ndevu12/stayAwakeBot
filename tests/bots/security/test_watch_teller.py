@@ -43,8 +43,12 @@ class TestDeliveryIsRecordedOnlyWhenItHappens(unittest.TestCase):
         line = watchstatus.foreground_notice(record=lambda: store["r"], placed=lambda: True,
                                              clock=lambda: 36010.0, placed_since=lambda: 0.0,
                                              acknowledged=lambda: None)
-        self.assertIn("could not show you notifications", line)
         self.assertIn("could not be stopped", line)
+        _, status = watchstatus.status_of(
+            supported=lambda: True, verdict=lambda: "pristine", running=lambda: True,
+            record=lambda: store["r"], clock=lambda: 36010.0, placed_since=lambda: 0.0,
+            acknowledged=lambda: None)
+        self.assertIn("Notifications could not be shown", status)
         working = _Notifier()
         _teller(working, store, now=36000.0 + T.FIRST_BACKOFF_SECONDS + 1)((LEFT,))
         self.assertTrue(working.got, "not retried once the pause was over")
@@ -55,6 +59,18 @@ class TestDeliveryIsRecordedOnlyWhenItHappens(unittest.TestCase):
         for i in range(20):                                                    # ten minutes
             _teller(failing, store, now=36000.0 + 30 * i)((ENDED, RETURNED, LEFT))
         self.assertLessEqual(len(failing.got), 4, "a failing notifier was called every pass")
+
+    def test_an_urgent_alert_waits_no_longer_than_the_urgent_interval_after_a_failure(self):
+        from stayawake.bots.security import watchalerts
+        record = {"backoff": T.LONGEST_BACKOFF_SECONDS,
+                  "backoff_until": 36000.0 + T.LONGEST_BACKOFF_SECONDS}
+        urgent = watchalerts.Alert("x", True, "came-back")
+        later = 36000.0 + watchalerts.URGENT_EVERY_SECONDS
+        self.assertEqual(T.send_some(_Notifier(), dict(record), [urgent], later - 1), ([], True))
+        self.assertEqual(T.send_some(_Notifier(), dict(record), [urgent], later), ([urgent], False))
+        quiet = watchalerts.Alert("y", False, "ended")
+        self.assertEqual(T.send_some(_Notifier(), dict(record), [quiet], later), ([], True),
+                         "a routine alert ignored the pause")
 
     def test_no_more_than_a_few_alerts_go_out_in_one_pass(self):
         store, notifier = {}, _Notifier()

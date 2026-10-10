@@ -96,6 +96,21 @@ class TestARecordThatCouldNotBeKeptIsSaid(unittest.TestCase):
         self.assertEqual((code, kinds), (exitcodes.CLEAN, (watch.QUIET,)))
 
 
+class TestOnlyWhatEndedIsRecordedAsEnded(unittest.TestCase):
+    def test_ending_one_of_two_marks_only_that_one(self):
+        first, second = _held(1, "one", True), _held(2, "two", True)
+        finds = [[first, second], [second]]
+        saved = {}
+        watch.examine(find=lambda: finds.pop(0) if len(finds) > 1 else finds[0],
+                      stop=_Recorder(Ending(matched=2, ended=1, survived=[2], quiet=True)),
+                      load=liveledger.Ledger, look=lambda: _READABLE,
+                      save=lambda ledger: saved.setdefault("ledger", ledger) or True)
+        entries = saved["ledger"].entries
+        self.assertEqual(entries[fingerprint("one")].ended, 1)
+        self.assertEqual(entries[fingerprint("two")].ended, 0,
+                         "code still running after the stop was recorded as ended")
+
+
 class TestTheLedgerNeverKeepsThePassFromEndingCode(unittest.TestCase):
     def test_a_ledger_that_cannot_be_read_still_lets_the_pass_end_identified_code(self):
         def boom():
@@ -339,11 +354,11 @@ class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
 
     def test_held_with_no_pass_since_it_was_placed_long_ago_is_not_clean(self):
         code, text = self._status(schedule.PRISTINE, since=0.0, now=10_000.0)
-        self.assertEqual((code, text), (exitcodes.FINDINGS, watchstate.LINE_FOR[watchstate.NOT_CHECKING]))
+        self.assertEqual((code, text), (exitcodes.FINDINGS, watchstatus._STALLED))
 
     def test_held_but_not_checking_recently_is_not_clean(self):
         code, text = self._status(schedule.PRISTINE, record={"last_good": 0.0}, now=10_000.0)
-        self.assertEqual((code, text), (exitcodes.FINDINGS, watchstate.LINE_FOR[watchstate.NOT_CHECKING]))
+        self.assertEqual((code, text), (exitcodes.FINDINGS, watchstatus._STALLED))
 
     def test_code_that_came_back_is_said_until_it_is_dealt_with(self):
         _, text = self._status(schedule.PRISTINE, record={"last_good": 990.0,

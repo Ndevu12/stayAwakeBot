@@ -52,10 +52,10 @@ every hour until they are dealt with; run [`saw harden`](harden.md). Once a day 
 report, on quiet days too, so a day without one is worth a `saw watch status`.
 
 While something is not dealt with, every other `saw` command prints one line saying so, whether or
-not a notification was shown: code that came back, code that could not be stopped, a watcher that
-has stopped checking, notifications that could not be shown. `saw watch status` lists the same,
-with what happened since the last report, and `saw audit` reports code that came back or could not
-be stopped.
+not a notification was shown: code that came back, code that could not be stopped, or a watcher
+that has stopped checking. `saw watch status` lists the same, with what happened since the last
+report and whether notifications could be shown, and `saw audit` reports code that came back or
+could not be stopped.
 
 `saw watch` sends one notification when you set it up, to show where they will appear. On macOS
 they come from Script Editor; if none appears, allow notifications for Script Editor in System

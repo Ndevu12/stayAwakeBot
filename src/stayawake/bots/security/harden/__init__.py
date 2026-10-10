@@ -166,6 +166,13 @@ def _what_to_do(outcomes) -> list[str]:
     return out
 
 
+def dealt_with_live_code(code: int) -> bool:
+    """Tell whether a run ended every piece of live code it found. Takes the code `run` returned.
+    Returns True when the process table was read and nothing was left running, whatever the other
+    controls reached."""
+    return code in (0, 3)
+
+
 def run(*, live=check_live_processes, folders=_global_folders,
         apply=apply_one, supported=hostdenial.platform_supported,
         altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs,

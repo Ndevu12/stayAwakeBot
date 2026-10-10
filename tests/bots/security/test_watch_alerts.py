@@ -41,7 +41,7 @@ class TestWhatMattersIsTold(unittest.TestCase):
         record, _ = _run([(ENDED, RETURNED)], start=36000)
         _, sent = _run([(QUIET,)] * 240, start=36030, record=record)          # two hours, quiet
         self.assertEqual(len(_urgent(sent)), 2)
-        settled = watchack.settled(record, watchack.returns_so_far(record))
+        settled = watchack.settled(record, watchack.counted_so_far(record))
         _, sent = _run([(QUIET,)] * 240, start=43200, record=settled)
         self.assertFalse(_urgent(sent))
 
@@ -54,18 +54,32 @@ class TestWhatMattersIsTold(unittest.TestCase):
 
     def test_a_return_after_it_was_dealt_with_is_told_at_once(self):
         record, _ = _run([(ENDED, RETURNED)], start=36000)
-        record = watchack.settled(record, watchack.returns_so_far(record))
+        record = watchack.settled(record, watchack.counted_so_far(record))
         _, sent = _run([(ENDED, RETURNED)], start=36400, record=record)
         self.assertEqual([about for _, about in _urgent(sent)], [CAME_BACK])
 
     def test_a_return_counted_after_harden_started_stays_open(self):
         record, _ = _run([(ENDED, RETURNED)], start=36000)
-        started_with = watchack.returns_so_far(record)
+        started_with = watchack.counted_so_far(record)
         record, _ = _run([(ENDED, RETURNED)], start=36300, record=record)    # during harden
         self.assertEqual(record["returns_seen"], 2)
         self.assertIn("unacknowledged", watchack.settled(record, started_with))
         self.assertNotIn("unacknowledged",
-                         watchack.settled(record, watchack.returns_so_far(record)))
+                         watchack.settled(record, watchack.counted_so_far(record)))
+
+    def test_code_that_came_back_is_never_held_behind_another_urgent_alert(self):
+        record, sent = _run([(LEFT,), (ENDED, RETURNED)], start=36000)
+        told = _urgent(sent)
+        self.assertEqual([about for _, about in told], [NOT_STOPPED, CAME_BACK])
+        self.assertEqual(told[1][0] - told[0][0], 30.0)
+
+    def test_a_count_at_its_limit_starts_a_new_record_name(self):
+        record = {"epoch": "ab", "returns_seen": 10 ** 9, "unacknowledged": 1.0}
+        record, _ = _run([(ENDED, RETURNED)], start=36000, record=record)
+        self.assertNotEqual(record["epoch"], "ab")
+        self.assertIn("unacknowledged",
+                      watchack.settled(record, watchack.Counted("ab", 10 ** 9)),
+                      "an acknowledgement for the saturated count settled a new return")
 
     def test_code_that_could_not_be_stopped_is_told_even_in_one_pass_and_then_cleared(self):
         record, _ = _run([(ENDED, RETURNED)], start=36000)

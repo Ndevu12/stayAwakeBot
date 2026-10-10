@@ -13,7 +13,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from stayawake.bots.security import schedule, watchstate, watchstatus
+from stayawake.bots.security import schedule, watchack, watchstate, watchstatus
 from stayawake.bots.security.watchstate import CAME_BACK, NOT_CHECKING, NOT_SHOWN, NOT_STOPPED
 from stayawake.utils import sessionbus
 
@@ -40,15 +40,34 @@ class TestEveryCommandSaysWhatIsStillOpen(unittest.TestCase):
         line = _notice({"last_good": 9_990.0, "not_stopped": 9_000.0})
         self.assertEqual(line, _LINE[NOT_STOPPED])
 
-    def test_an_open_return_is_still_said_after_the_watcher_is_stopped(self):
-        line = _notice({"unacknowledged": 1.0, "not_stopped": 2.0, "undelivered": 3.0},
-                       placed=False)
-        self.assertEqual(line, _LINE[CAME_BACK],
-                         "only the return outlives the watcher; the rest are about a live watch")
+    def test_what_was_found_is_still_said_after_the_watcher_stops_or_stalls(self):
+        for placed, last_good in ((False, 9_990.0), (True, 0.0)):
+            with self.subTest(placed=placed, last_good=last_good):
+                line = _notice({"unacknowledged": 1.0, "not_stopped": 2.0, "undelivered": 3.0,
+                                "last_good": last_good}, placed=placed)
+                self.assertIn(_LINE[CAME_BACK], line)
+                self.assertIn(_LINE[NOT_STOPPED], line, "code that survived hid by stopping it")
+                self.assertNotIn(_LINE[NOT_SHOWN], line)
 
-    def test_failed_notifications_are_said(self):
-        self.assertEqual(_notice({"last_good": 9_990.0, "undelivered": 9_000.0}),
-                         _LINE[NOT_SHOWN])
+    def test_failed_notifications_are_said_in_status_not_on_every_command(self):
+        record = {"last_good": 9_990.0, "undelivered": 9_000.0}
+        self.assertEqual(_notice(record), "")
+        code, text = watchstatus.status_of(
+            supported=lambda: True, verdict=lambda: schedule.PRISTINE, running=lambda: True,
+            record=lambda: record, clock=lambda: 10_000.0, placed_since=lambda: 9_990.0,
+            acknowledged=lambda: None)
+        self.assertIn(_LINE[NOT_SHOWN], text)
+        self.assertEqual(code, 0, "a machine without notifications is not a finding")
+
+    def test_the_line_and_status_agree_for_a_watcher_that_starts_at_next_login(self):
+        line = _notice({}, since=0.0)
+        self.assertIn("saw watch status", line)
+        code, text = watchstatus.status_of(
+            supported=lambda: True, verdict=lambda: schedule.PRISTINE, running=lambda: False,
+            record=lambda: {}, clock=lambda: 10_000.0, placed_since=lambda: 0.0,
+            acknowledged=lambda: None)
+        self.assertIn("next login", text)
+        self.assertNotIn("saw watch stop", text)
 
     def test_every_command_but_watch_prints_it_on_stderr(self):
         from stayawake.cli import dispatch
@@ -98,10 +117,13 @@ class TestHardenSettlesWhatItCountedWhenItStarted(unittest.TestCase):
                  mock.patch.object(cli_harden, "say", lambda text, **k: said.append(text)):
                 return cli_harden.run(argparse.Namespace(take_back=False, no_stream=True))
         self.assertEqual(run_harden(0, lambda through: acked.append(through) or True), 0)
-        self.assertEqual(acked, [("ab", 1)], "harden did not acknowledge what it saw at its start")
-        self.assertEqual(run_harden(3, lambda through: acked.append(("x", 0)) or True), 3)
-        self.assertEqual(acked, [("ab", 1)])
-        self.assertEqual(said, ["done", "done"])
+        self.assertEqual(acked, [watchack.Counted("ab", 1)],
+                         "harden did not acknowledge what it saw at its start")
+        self.assertEqual(run_harden(3, lambda through: acked.append(through) or True), 3)
+        self.assertEqual(len(acked), 2, "live code was dealt with; other controls are not the watcher's")
+        self.assertEqual(run_harden(1, lambda through: acked.append(through) or True), 1)
+        self.assertEqual(len(acked), 2, "harden left live code running and still settled the alarm")
+        self.assertEqual(said, ["done", "done", "done"])
 
         def raising(through):
             raise OverflowError("x")

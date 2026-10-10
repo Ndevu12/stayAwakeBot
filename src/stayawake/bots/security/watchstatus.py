@@ -13,6 +13,8 @@ _FROM_LOGIN = "This machine will check itself from your next login. Run `saw wat
 _NOT_CHECKING = "This machine is not checking itself. Run `saw watch`."
 _WAS_CHANGED = "What checks this machine was changed. Run `saw watch` to put it back."
 _CANNOT_TELL = "Whether this machine checks itself could not be established."
+_STALLED = ("This machine is set to check itself but has not done so recently. Run `saw watch stop`, "
+            "then `saw watch`.")
 
 
 def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
@@ -26,12 +28,13 @@ def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
     kept = _settled_record(record, acknowledged)
     matters = watchstate.still_open(kept, now=clock(), placed=code == exitcodes.CLEAN,
                                     placed_since=placed_since())
-    lines = [] if any(m.kind == watchstate.NOT_CHECKING for m in matters) else [line]
-    lines += [m.line for m in matters]
+    stalled = any(m.kind == watchstate.NOT_CHECKING for m in matters)
+    lines = [_STALLED] if stalled else [line]
+    lines += [m.line for m in matters if m.kind != watchstate.NOT_CHECKING]
     said = watchstate.what_happened(kept.get("since", {}))
     if said:
         lines.append(" ".join([watchstate.since_heading(kept)] + said))
-    if matters:
+    if any(m.urgent for m in matters):
         code = max(code, exitcodes.FINDINGS)
     return code, "\n".join(lines)
 
@@ -39,13 +42,13 @@ def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
 def foreground_notice(*, record=None, placed=schedule.was_placed, clock=time.time,
                       placed_since=schedule.placed_since, acknowledged=None) -> str:
     """Build the line every other command prints. Takes the collaborators that read the record,
-    the placement and `saw harden`'s acknowledgement. Returns everything still open as one line, or
-    "" when nothing is; never fails."""
+    the placement and `saw harden`'s acknowledgement. Returns every urgent matter still open as one
+    line, or "" when none is; never fails."""
     try:
         kept = _settled_record(record, acknowledged)
         matters = watchstate.still_open(kept, now=clock(), placed=placed(),
                                         placed_since=placed_since())
-        return " ".join(m.line for m in matters)
+        return " ".join(m.line for m in matters if m.urgent)
     except Exception:
         return ""
 

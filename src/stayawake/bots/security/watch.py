@@ -58,19 +58,21 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     seen = find() if find is not None else live_code_processes(snap)
     identified = [item for item in seen if item.confirmed]
 
-    ending = None
+    identified_keys = {fingerprint(item.code) for item in identified}
+    ending, still_running = None, set()
     if identified:
         ending = stop(find=lambda: [i for i in again() if i.confirmed], elevated=_never_asks)
+        still_running = _identified_running(again, if_unknown=identified_keys)
 
     ended_something = ending is not None and ending.ended > 0
-    ended_keys = {fingerprint(item.code) for item in identified} if ended_something else set()
+    ended_keys = identified_keys - still_running
     try:
         kept = bool(save(liveledger.record(before, seen, ended_keys=ended_keys, now=now)))
     except Exception:
         kept = False
     remembered = kept and before.status in (liveledger.LOADED, liveledger.ABSENT)
 
-    came_back = any(before.ended_before(fingerprint(item.code)) for item in identified)
+    came_back = any(before.came_back(key) for key in identified_keys)
     unfinished = ending is not None and not ending.finished
 
     kinds = []
@@ -92,6 +94,15 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     if identified:
         return exitcodes.FINDINGS, tuple(kinds)
     return exitcodes.CLEAN, tuple(kinds)
+
+
+def _identified_running(find, *, if_unknown: set) -> set:
+    """Look again for identified code still running, never failing. Takes the finder and what to
+    assume when it cannot look. Returns the fingerprints still running."""
+    try:
+        return {fingerprint(item.code) for item in find() if item.confirmed}
+    except Exception:
+        return set(if_unknown)
 
 
 def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes=None,

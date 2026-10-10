@@ -15,39 +15,40 @@ CAME_BACK, NOT_STOPPED, NOT_CHECKING, NOT_SHOWN = (
 DEAL_WITH_IT = "Take this machine off the network, then run `saw harden`."
 LINE_FOR = {
     CAME_BACK: "Code stopped here before came back and has not been dealt with. " + DEAL_WITH_IT,
-    NOT_STOPPED: "Code running here could not be stopped. Run `saw harden`.",
-    NOT_CHECKING: ("This machine is set to check itself but has not done so recently. Run "
-                   "`saw watch stop`, then `saw watch`."),
-    NOT_SHOWN: "This machine could not show you notifications. Run `saw watch status`.",
+    NOT_STOPPED: "Code was running here that could not be stopped. Run `saw harden`.",
+    NOT_CHECKING: "This machine has not checked itself recently. Run `saw watch status`.",
+    NOT_SHOWN: "Notifications could not be shown on this machine; saw tells you here instead.",
 }
+URGENT = frozenset({CAME_BACK, NOT_STOPPED, NOT_CHECKING})
 QUIET_DAY = "Nothing was running that should not be."
 
 
 @dataclass(frozen=True)
 class Matter:
-    """One thing the user still has to know about: what it is and the line that says it."""
+    """One thing the user still has to know about: what it is, the line that says it, and whether
+    every command says it until it is dealt with."""
     kind: str
     line: str
+    urgent: bool
 
 
 def still_open(record: dict, *, now: float, placed: bool,
                placed_since: float | None) -> list[Matter]:
     """Decide what the user still has to know. Takes the watcher's record with any acknowledgement
     applied, the time now, whether the watcher is placed and when. Returns the open matters, most
-    urgent first: code that came back stays open until dealt with; code that could not be stopped,
-    a watcher that stopped checking and notifications that could not be shown are open only while
-    the watcher is placed."""
+    urgent first: code that came back and code that could not be stopped stay open until a pass no
+    longer sees them or `saw harden` deals with them; a watcher that stopped checking and
+    notifications that could not be shown are open only while the watcher is placed."""
     open_ = []
     if "unacknowledged" in record:
         open_.append(CAME_BACK)
-    checking = placed and not stale(record, now, placed_since)
-    if checking and "not_stopped" in record:
+    if "not_stopped" in record:
         open_.append(NOT_STOPPED)
-    if placed and not checking:
+    if placed and stale(record, now, placed_since):
         open_.append(NOT_CHECKING)
     if placed and "undelivered" in record:
         open_.append(NOT_SHOWN)
-    return [Matter(kind, LINE_FOR[kind]) for kind in open_]
+    return [Matter(kind, LINE_FOR[kind], kind in URGENT) for kind in open_]
 
 
 def stale(record: dict, now: float, placed_since: float | None = None) -> bool:

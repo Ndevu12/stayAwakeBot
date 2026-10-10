@@ -28,8 +28,11 @@ def ledger_path() -> Path:
     return Path(env.xdg_state_home()) / "saw" / "live-code.json"
 
 
-def _self_hash(entries: dict) -> str:
-    return sha256(json.dumps(entries, sort_keys=True).encode("utf-8")).hexdigest()
+def _self_hash(entries: dict, last_pass: str | None = None) -> str:
+    """Hash what the record holds. Takes its rows and, from version 2, its last pass. Returns the
+    hash."""
+    held = entries if last_pass is None else {"entries": entries, "last_pass": last_pass}
+    return sha256(json.dumps(held, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -40,6 +43,7 @@ class Seen:
     times: int = 0
     identified: bool = False
     ended: int = 0
+    last_ended: str = ""
 
 
 @dataclass
@@ -47,6 +51,7 @@ class Ledger:
     """The record as read, and how far it can be trusted."""
     entries: dict[str, Seen] = field(default_factory=dict)
     status: str = ABSENT
+    last_pass: str = ""
 
     @property
     def trusted(self) -> bool:
@@ -57,10 +62,16 @@ class Ledger:
         """How many earlier runs saw `key`. Zero when the record is not trusted."""
         return self.entries[key].times if self.trusted and key in self.entries else 0
 
-    def ended_before(self, key: str) -> int:
-        """Tell how many earlier runs ended `key`. Takes the fingerprint. Returns the count, zero
-        when the record is not trusted."""
-        return self.entries[key].ended if self.trusted and key in self.entries else 0
+    def came_back(self, key: str) -> bool:
+        """Tell whether code seen now had gone and is running again. Takes the fingerprint.
+        Returns True when the trusted record saw it before and it was ended at its last sighting,
+        or was missing from the last pass; never when the record cannot say."""
+        seen = self.entries.get(key) if self.trusted else None
+        if seen is None or not seen.last:
+            return False
+        ended_then = seen.last_ended == seen.last
+        missing_since = bool(self.last_pass) and seen.last != self.last_pass
+        return ended_then or missing_since
 
 
 def load(path: Path | None = None) -> Ledger:
@@ -95,10 +106,12 @@ def _parsed(raw: bytes) -> Ledger:
                                  last=str(row.get("last", ""))[:64],
                                  times=int(row.get("times", 0) or 0),
                                  identified=bool(row.get("identified")),
-                                 ended=int(row.get("ended", 0) or 0))
-    if data.get("self_hash") != _self_hash(held):
-        return Ledger(entries=entries, status=EDITED)
-    return Ledger(entries=entries, status=LOADED)
+                                 ended=int(row.get("ended", 0) or 0),
+                                 last_ended=str(row.get("last_ended", ""))[:64])
+    last_pass = str(data.get("last_pass", ""))[:64] if data.get("version") == 2 else ""
+    hashed = _self_hash(held, last_pass if data.get("version") == 2 else None)
+    status = LOADED if data.get("self_hash") == hashed else EDITED
+    return Ledger(entries=entries, status=status, last_pass=last_pass)
 
 
 def record(ledger: Ledger, seen, ended_keys=(), now=None) -> Ledger:
@@ -115,12 +128,15 @@ def record(ledger: Ledger, seen, ended_keys=(), now=None) -> Ledger:
     for item in seen:
         key = fingerprint(item.code) or f"noncode:{item.reason}"
         prior = entries.get(key, Seen(first=stamp))
+        ended_now = key in ended_keys
         entries[key] = Seen(first=prior.first or stamp, last=stamp, times=prior.times + 1,
                             identified=prior.identified or bool(item.confirmed),
-                            ended=prior.ended + (1 if key in ended_keys else 0))
+                            ended=prior.ended + (1 if ended_now else 0),
+                            last_ended=stamp if ended_now else prior.last_ended)
     identified = {k: v for k, v in entries.items() if v.identified}
     others = {k: v for k, v in entries.items() if not v.identified}
-    return Ledger(entries={**_newest(others), **_newest(identified)}, status=LOADED)
+    return Ledger(entries={**_newest(others), **_newest(identified)}, status=LOADED,
+                  last_pass=stamp)
 
 
 def _newest(entries: dict[str, Seen]) -> dict[str, Seen]:
@@ -134,9 +150,10 @@ def save(ledger: Ledger, path: Path | None = None) -> bool:
     """Write the record atomically. Returns whether it was written. Best effort by design."""
     where = path or ledger_path()
     rows = {k: {"first": v.first, "last": v.last, "times": v.times,
-                "identified": v.identified, "ended": v.ended}
+                "identified": v.identified, "ended": v.ended, "last_ended": v.last_ended}
             for k, v in ledger.entries.items()}
-    payload = {"version": 1, "entries": rows, "self_hash": _self_hash(rows)}
+    payload = {"version": 2, "entries": rows, "last_pass": ledger.last_pass,
+               "self_hash": _self_hash(rows, ledger.last_pass)}
     try:
         where.parent.mkdir(parents=True, exist_ok=True)
         if where.is_symlink():

@@ -39,6 +39,19 @@ class TestStateFilesAreReadSafely(unittest.TestCase):
             self.assertEqual(self._within(lambda: schedule.verdict(Path(d) / "item", saw=["saw"])),
                              schedule.UNREADABLE)
 
+    def test_a_pipe_raced_in_after_a_write_is_not_waited_on(self):
+        from stayawake.utils import atomicwrite
+        real_replace = os.replace
+
+        def replace_then_race(staged, where):
+            real_replace(staged, where)
+            os.unlink(where)
+            os.mkfifo(where)
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(atomicwrite.os, "replace", replace_then_race):
+            where = Path(d) / "w.json"
+            self.assertFalse(self._within(lambda: watchrecord.save({"a": 1}, where)))
+
     def test_a_record_that_cannot_be_parsed_is_an_empty_one(self):
         with tempfile.TemporaryDirectory() as d:
             where = Path(d) / "w.json"
@@ -79,8 +92,10 @@ class TestHardenSettlesOnlyWhatItCounted(unittest.TestCase):
     def test_an_acknowledgement_is_written_apart_from_the_record_and_read_back(self):
         with tempfile.TemporaryDirectory() as d:
             where = Path(d) / "ack.json"
-            self.assertTrue(watchack.acknowledge(("ab12", 3), where))
-            self.assertEqual(watchack.load_acknowledgement(where), ("ab12", 3))
+            self.assertTrue(watchack.acknowledge(watchack.Counted("ab12", 3, 5.0), where))
+            self.assertEqual(watchack.load_acknowledgement(where), watchack.Counted("ab12", 3, 5.0))
+            self.assertTrue(watchack.acknowledge(watchack.Counted("ab12", 3), where))
+            self.assertEqual(watchack.load_acknowledgement(where), watchack.Counted("ab12", 3))
             for bad in ('{"epoch": "../x", "through": 3}', '{"epoch": "ab", "through": -1}',
                         '{"epoch": "ab", "through": %d}' % HUGE, "[1]", "{"):
                 with self.subTest(bad=bad[:24]):
@@ -88,20 +103,72 @@ class TestHardenSettlesOnlyWhatItCounted(unittest.TestCase):
                     self.assertIsNone(watchack.load_acknowledgement(where))
 
     def test_it_settles_the_exact_count_only(self):
+        C = watchack.Counted
         open_ = {"unacknowledged": 5.0, "epoch": "ab", "returns_seen": 2,
                  "pending": {"came-back": True}}
-        self.assertEqual(watchack.settled(open_, ("ab", 2)),
+        self.assertEqual(watchack.settled(open_, C("ab", 2)),
                          {"epoch": "ab", "returns_seen": 2, "pending": {},
                           "window_reopened": True})
-        self.assertEqual(watchack.settled(open_, ("ab", 1)), open_, "a later return was settled")
-        self.assertEqual(watchack.settled(open_, ("ab", 10 ** 9)), open_,
+        self.assertEqual(watchack.settled(open_, C("ab", 1)), open_, "a later return was settled")
+        self.assertEqual(watchack.settled(open_, C("ab", 10 ** 9)), open_,
                          "a count past the record's settled it forever")
-        self.assertEqual(watchack.settled(open_, ("cd", 2)), open_)
+        self.assertEqual(watchack.settled(open_, C("cd", 2)), open_)
         self.assertEqual(watchack.settled(open_, None), open_)
 
+    def test_it_settles_the_streak_of_code_that_could_not_be_stopped_it_saw(self):
+        C = watchack.Counted
+        open_ = {"not_stopped": 100.0, "epoch": "ab", "returns_seen": 0,
+                 "pending": {"not-stopped": True}}
+        self.assertNotIn("not_stopped", watchack.settled(open_, C("ab", 0, 100.0)))
+        self.assertIn("not_stopped", watchack.settled(open_, C("ab", 0, 50.0)),
+                      "a newer streak was settled by an older acknowledgement")
+        self.assertIn("not_stopped", watchack.settled(open_, C("ab", 0)))
+
     def test_harden_counts_what_the_record_holds_when_it_starts(self):
-        self.assertEqual(watchack.returns_so_far({"epoch": "ab", "returns_seen": 4}), ("ab", 4))
-        self.assertIsNone(watchack.returns_so_far({}))
+        self.assertEqual(watchack.counted_so_far({"epoch": "ab", "returns_seen": 4,
+                                                  "not_stopped": 9.0}),
+                         watchack.Counted("ab", 4, 9.0))
+        self.assertIsNone(watchack.counted_so_far({}))
+
+
+class TestCameBackMeansItWasGone(unittest.TestCase):
+    def _seen(self, *passes):
+        from stayawake.bots.security.livecode import LiveCode
+        from stayawake.utils.procsnap import Process
+        from datetime import datetime, timezone, timedelta
+        led = liveledger.Ledger(status=liveledger.LOADED)
+        t0 = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        for i, (present, ended) in enumerate(passes):
+            seen = [LiveCode(Process(pid=1, argv=("node", "-e", "x")), "x", "shape", True)]
+            led = liveledger.record(led, seen if present else [],
+                                    ended_keys={"k"} if ended else (), now=t0 + timedelta(seconds=30 * i))
+            led = liveledger.Ledger(entries=led.entries, status=liveledger.LOADED,
+                                    last_pass=led.last_pass)
+        return led
+
+    def test_code_running_on_without_a_break_has_not_come_back(self):
+        from stayawake.bots.security.livecode import fingerprint
+        led = self._seen((True, False), (True, False))
+        self.assertFalse(led.came_back(fingerprint("x")))
+
+    def test_code_gone_for_a_pass_or_ended_has_come_back(self):
+        from stayawake.bots.security.livecode import fingerprint
+        self.assertTrue(self._seen((True, False), (False, False)).came_back(fingerprint("x")))
+
+    def test_a_ledger_written_before_this_change_raises_nothing(self):
+        from stayawake.bots.security.livecode import fingerprint
+        with tempfile.TemporaryDirectory() as d:
+            where = Path(d) / "live.json"
+            rows = {fingerprint("x"): {"first": "a", "last": "b", "times": 3,
+                                       "identified": True, "ended": 2}}
+            import json
+            where.write_text(json.dumps({"version": 1, "entries": rows,
+                                         "self_hash": liveledger._self_hash(rows)}))
+            old = liveledger.load(where)
+            self.assertEqual(old.status, liveledger.LOADED)
+            self.assertFalse(old.came_back(fingerprint("x")))
+            liveledger.save(old, where)
+            self.assertEqual(liveledger.load(where).status, liveledger.LOADED)
 
 
 class TestStaleness(unittest.TestCase):

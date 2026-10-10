@@ -55,7 +55,9 @@ def decide(record: dict, kinds, now: float, today: str, hour: int) -> tuple[dict
     failed = NOT_READ in kinds or PASS_FAILED in kinds
     rec["failures"] = min(rec.get("failures", 0) + 1, watchrecord.MOST_COUNT) if failed else 0
     if RETURNED in kinds:
-        rec["returns_seen"] = min(rec.get("returns_seen", 0) + 1, watchrecord.MOST_COUNT)
+        if rec.get("returns_seen", 0) >= watchrecord.MOST_COUNT:
+            rec.update(epoch=watchrecord.new_epoch(), returns_seen=0)
+        rec["returns_seen"] = rec.get("returns_seen", 0) + 1
         rec.setdefault("unacknowledged", now)
         pending[CAME_BACK] = True
     if not failed:
@@ -95,18 +97,22 @@ def _as_of(rec: dict, now: float) -> dict:
 
 def _urgent_due(rec: dict, now: float) -> str | None:
     """Choose the urgent alert this pass sends, if any. Takes the record and the time. Returns the
-    matter it is about: one that happened and was not yet told first, even if it is over, else the
-    worst open one due a reminder; at most one every `URGENT_EVERY_SECONDS`, and at once after code
-    that came back was dealt with."""
+    matter it is about: one that happened and was not yet told first, even if it is over — at once
+    unless that kind was told within `URGENT_EVERY_SECONDS`, never held behind another kind; else
+    the worst open one due a reminder. Beyond that, at most one every `URGENT_EVERY_SECONDS`, and at
+    once after something was dealt with."""
+    told = rec.get("told", {})
+    pending = [kind for kind in (CAME_BACK, NOT_STOPPED) if rec.get("pending", {}).get(kind)]
+    for kind in pending:
+        if now - told.get(kind, float("-inf")) >= URGENT_EVERY_SECONDS:
+            return kind
     if (now - rec.get("urgent_at", float("-inf")) < URGENT_EVERY_SECONDS
             and not rec.get("window_reopened")):
         return None
-    for kind in (CAME_BACK, NOT_STOPPED):
-        if rec.get("pending", {}).get(kind):
-            return kind
+    if pending:
+        return pending[0]
     open_ = [kind for kind, field in ((CAME_BACK, "unacknowledged"), (NOT_STOPPED, "not_stopped"))
              if field in rec]
-    told = rec.get("told", {})
     due = [kind for kind in open_
            if now - told.get(kind, float("-inf")) >= REMIND_EVERY_SECONDS]
     return due[0] if due else None
@@ -139,7 +145,7 @@ def daily_report(record: dict) -> Alert:
     if "unacknowledged" in record:
         lead = "Daily report: code that came back has not been dealt with. " + DEAL_WITH_IT
     elif "not_stopped" in record:
-        lead = "Daily report: code running here could not be stopped. Run `saw harden`."
+        lead = "Daily report: " + watchstate.LINE_FOR[NOT_STOPPED]
     elif said:
         lead = "Daily report: run `saw watch status`."
     else:
