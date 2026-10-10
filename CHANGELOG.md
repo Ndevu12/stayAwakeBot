@@ -95,10 +95,11 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 
 - **A target that could not be scanned reads as not clean in the saved report, and appears as an
-  alert in code scanning from the SARIF upload. Every scan and `saw fix` run ends by telling you to
-  run `saw audit` before you rotate a credential.** The advice for a known-malicious package says
-  the same.
-- **`saw hook install` says the hooks are not installed when they would not run, and a hook that
+  alert in code scanning from the SARIF upload. A scan or `saw fix` run that reports on
+  repositories ends by telling you to run `saw audit` before you rotate a credential.** The advice
+  for a known-malicious package says the same.
+- **`saw hook install` says the hooks are not installed when git's configuration runs hooks from
+  another folder, and that it could not verify them when that setting cannot be read. A hook that
   could not finish its scan says the code is not verified and what to run.**
 - **`saw scan --history`, `saw fix amend` and the push check read both a stored file's own text and
   the content Git LFS keeps for it.**
