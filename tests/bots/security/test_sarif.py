@@ -142,6 +142,13 @@ class TestSarifSaysWhatWasNotScanned(unittest.TestCase):
                          "repo-b")
         self.assertTrue(alert["partialFingerprints"])
 
+    def test_the_alert_location_is_a_valid_uri(self):
+        bad = dict(_result(target="/Users/me/My Projects/app #1?x"), error="clone failed")
+        alert = [r for r in sarif.build_sarif(_payload([bad]))["runs"][0]["results"]
+                 if r["ruleId"] == sarif.NOT_SCANNED_ID][0]
+        self.assertEqual(alert["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+                         "/Users/me/My%20Projects/app%20%231%3Fx")
+
     def test_a_long_reason_never_cuts_the_verdict(self):
         bad = dict(_result(target="r" * 900), error="e" * 900)
         text = [r for r in sarif.build_sarif(_payload([bad]))["runs"][0]["results"]

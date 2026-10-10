@@ -330,6 +330,7 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
         # slug, an empty resolution, a named path that matched no repository — all printed an
         # error and did no work; reporting success would let a CI gate read "no credential" as
         # "no payload".
+        prog.line(fix_host_note())
         return 2
     needs_review = sum(1 for o in outcomes if o.needs_review)
     n = len(outcomes)

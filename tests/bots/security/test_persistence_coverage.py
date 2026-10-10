@@ -681,7 +681,10 @@ class TestScanHostNote(unittest.TestCase):
         doubtful["results"][0]["suspicious"] = True
         empty = self._payload(infected=0)
         empty["results"] = []
-        for name, payload in (("unread", unread), ("suspicious", doubtful), ("empty", empty)):
+        leftover = self._payload(infected=0)
+        leftover["results"][0]["residue"] = True
+        for name, payload in (("unread", unread), ("suspicious", doubtful), ("empty", empty),
+                              ("residue", leftover)):
             with self.subTest(run=name):
                 for render in (sink_render.render_terminal, sink_render.render_markdown):
                     out = " ".join(render(payload).split())
@@ -690,6 +693,8 @@ class TestScanHostNote(unittest.TestCase):
                     self.assertIn("run `saw audit`", out)
                     self.assertNotIn("all scanned targets are clean", out)
         self.assertIn("No targets scanned", sink_render.render_markdown(empty))
+        saved = sink_render.render_markdown(self._payload(infected=0))
+        self.assertIn("\n\nHost note:", saved, "the note runs into the line before it")
         clean = " ".join(sink_render.render_terminal(self._payload(infected=0)).split())
         self.assertIn("a clean repo scan is NOT a host all-clear", clean)
 

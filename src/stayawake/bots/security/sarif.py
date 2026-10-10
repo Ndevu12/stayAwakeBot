@@ -16,6 +16,7 @@ import hashlib
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from stayawake.bots.security import redaction
 from stayawake.utils import textsafe
@@ -171,12 +172,13 @@ def _not_scanned_result(result: dict, rule_index: int) -> dict[str, Any]:
     """Build the alert for a target the scan could not complete. Takes one result of the payload
     and the index of its rule. Returns a SARIF result at error level, located at the target."""
     target = str(result.get("target") or ".")
+    location = quote(target, safe="/~:@")
     return {
         "ruleId": NOT_SCANNED_ID,
         "ruleIndex": rule_index,
         "level": "error",
         "message": {"text": _not_scanned_text(result)},
-        "locations": [{"physicalLocation": {"artifactLocation": {"uri": target}}}],
+        "locations": [{"physicalLocation": {"artifactLocation": {"uri": location}}}],
         "partialFingerprints": {"sawSignatureLocation/v1": _fingerprint(NOT_SCANNED_ID, target,
                                                                           None)},
         "properties": {"target": result.get("target"), "source": result.get("source")},

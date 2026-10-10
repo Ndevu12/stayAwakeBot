@@ -71,6 +71,7 @@ class TestAnUnfixedRepoFailsClosed(RemoteFixExitCase):
         import io
         outcome = mock.Mock(needs_review=False)
         runs = (("amend", "_amend_local", [outcome], lambda: remediator.amend(no_stream=True)),
+                ("empty amend", "_amend_local", [], lambda: remediator.amend(no_stream=True)),
                 ("empty fix", "_fix_local", [], lambda: remediator.fix(no_stream=True)))
         for name, inner, outcomes, call in runs:
             with self.subTest(run=name):

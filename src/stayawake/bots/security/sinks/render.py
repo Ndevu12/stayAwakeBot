@@ -199,7 +199,7 @@ def _fully_clean(payload: dict[str, Any]) -> bool:
     Takes the report payload. Returns the answer."""
     results = payload.get("results") or []
     return bool(results) and not any(r.get("error") or r.get("suspicious") or r.get("infected")
-                                     for r in results)
+                                     or r.get("residue") for r in results)
 
 
 def _local_loader_paths(payload: dict[str, Any]) -> list[str]:
@@ -369,5 +369,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     if notes:
         out += ["## Coverage notes", "", "_Not gating — what this scan did not look at._", ""]
         out += [f"- {textsafe.code(n)}" for n in notes] + [""]
+    if out and out[-1] != "":
+        out.append("")
     out += [_host_note(payload, textsafe.code), ""]
     return "\n".join(out) + "\n"

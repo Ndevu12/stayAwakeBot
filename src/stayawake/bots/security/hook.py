@@ -68,18 +68,48 @@ _is_ours = hookscript.is_ours
 def _hookspath_git_uses() -> tuple[bool, str | None]:
     """Read the folder git runs every repository's hooks from, as git sees it outside any
     repository: system and global configuration, their includes, and the caller's environment.
-    Returns whether the setting could be read, and the folder, or None when none is set."""
-    res = gitutil.run(None, ["config", "--includes", "--show-scope", "--get-all", "core.hooksPath"],
-                      context=gitutil.OPERATOR_CONFIG)
+    Returns whether the setting could be read, and the folder, "" when it is set empty, or None
+    when it is not set."""
+    res = gitutil.run(None, ["config", "-z", "--includes", "--show-scope", "--get-all",
+                             "core.hooksPath"], context=gitutil.OPERATOR_CONFIG)
     if res is None or res.returncode not in (0, 1):
         return False, None
-    values = []
-    for line in res.stdout.splitlines():
-        scope, _, value = line.partition("\t")
-        if scope == "command" and _same_path(value, empty_hooks_dir()):
-            continue
-        values.append(value.strip())
-    return True, (values[-1] or None) if values else None
+    fields = res.stdout.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2:
+        return False, None
+    values = [value for scope, value in zip(fields[::2], fields[1::2])
+              if not (scope == "command" and _same_path(value, empty_hooks_dir()))]
+    read, from_environment = _hookspath_from_environment(os.environ)
+    if not read:
+        return False, None
+    if from_environment is not None:
+        values.append(from_environment)
+    return True, values[-1] if values else None
+
+
+_MOST_ENVIRONMENT_ENTRIES = 10_000
+
+
+def _hookspath_from_environment(environ) -> tuple[bool, str | None]:
+    """Read a hooks folder set through git's configuration environment variables. Takes the
+    environment. Returns whether it could be read, and the last folder set there, or None."""
+    value = None
+    count = environ.get("GIT_CONFIG_COUNT")
+    if count is not None:
+        try:
+            entries = int(count)
+        except ValueError:
+            return False, None
+        if not 0 <= entries <= _MOST_ENVIRONMENT_ENTRIES:
+            return False, None
+        for i in range(entries):
+            if environ.get(f"GIT_CONFIG_KEY_{i}", "").lower() == "core.hookspath":
+                value = environ.get(f"GIT_CONFIG_VALUE_{i}", "")
+    if "hookspath" in environ.get("GIT_CONFIG_PARAMETERS", "").lower():
+        return False, None
+    return True, value
 
 
 def _tape(no_stream: bool, dest=None):
@@ -109,7 +139,7 @@ def _hooks_overridden() -> bool:
     """Tell whether saw's hooks may not run. Returns True when git runs every repository's hooks
     from a folder other than saw's, or when that setting could not be read."""
     read, hp = _hookspath_git_uses()
-    return not read or (bool(hp) and not _same_path(os.path.expanduser(hp), _hooks_dir()))
+    return not read or (hp is not None and not _is_saws_hooks_folder(hp))
 
 
 def _warn_hookspath(stream) -> None:
@@ -119,10 +149,19 @@ def _warn_hookspath(stream) -> None:
     if not read:
         print(_paint("  ⚠ git's hooks setting could not be read, so whether saw's hooks run is NOT "
                      "verified.", "warn", stream), file=stream)
-    elif hp and not _same_path(os.path.expanduser(hp), _hooks_dir()):
+    elif hp == "":
+        print(_paint("  ⚠ git is set to run every repository's hooks from its top folder, so saw's "
+                     "hooks will not run.", "warn", stream), file=stream)
+    elif hp is not None and not _is_saws_hooks_folder(hp):
         print(_paint(f"  ⚠ git is set to run every repository's hooks from "
                      f"{textsafe.plain(hp, limit=4096)}, so saw's hooks will not run.", "warn", stream),
               file=stream)
+
+
+def _is_saws_hooks_folder(folder: str) -> bool:
+    """Tell whether a hooks folder git is set to use is saw's own. Takes the folder. Returns the
+    answer; an empty setting is never saw's."""
+    return folder != "" and _same_path(os.path.expanduser(folder), _hooks_dir())
 
 
 def _same_path(a: str | Path, b: str | Path) -> bool:
@@ -800,7 +839,9 @@ def _scan_within_budget(root: Path, include, config_path: str | None, display: s
     return box["result"]
 
 
-def _warn_infected(display: str, result) -> None:
+def _warn_infected(display: str, quoted_root: str, result) -> None:
+    """Warn that freshly landed code is infected. Takes the repository as shown, the repository
+    quoted for a shell command, and the scan result."""
     err = sys.stderr
     print("\n" + _paint(f"⚠  {_BRAND}: WORM DETECTED in freshly-landed code — {display}",
                         "warn", err), file=err)
@@ -811,8 +852,9 @@ def _warn_infected(display: str, result) -> None:
     if extra > 0:
         print(_paint(f"     • …and {extra} more", "dim", err), file=err)
     print(_paint(f"   Until it is cleaned, do NOT {_AVOID}.", "warn", err), file=err)
-    print("   " + _paint("Inspect:", "dim", err) + " " + _cmd(f"saw scan {display}", err)
-          + _paint("   ·   Remediate:", "dim", err) + " " + _cmd(f"saw fix --path {display}", err)
+    print("   " + _paint("Inspect:", "dim", err) + " " + _cmd(f"saw scan {quoted_root}", err)
+          + _paint("   ·   Remediate:", "dim", err) + " "
+          + _cmd(f"saw fix --path {quoted_root}", err)
           + "\n", file=err)
 
 
@@ -848,7 +890,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
 
     display = str(root).replace(os.path.expanduser("~"), "~")
     shown = textsafe.plain(display, limit=4096)
-    rescan = "saw scan " + shlex.quote(textsafe.plain(str(root), limit=4096))
+    quoted_root = shlex.quote(textsafe.plain(str(root), limit=4096))
+    rescan = "saw scan " + quoted_root
     head = gitutil.stdout(root, ["rev-parse", "HEAD"]).strip()
     clean_key = _clean_key(head, config_path) if head and include is None else None
     if clean_key and _load_cache().get(os.path.realpath(root)) == clean_key:
@@ -869,7 +912,7 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     if clean_key:
         _remember(root, "")
     if result.infected:
-        _warn_infected(shown, result)
+        _warn_infected(shown, quoted_root, result)
         return 1
     if result.error:
         print(_paint(f"⚠  {_BRAND}: {shown} could not be scanned — NOT verified "
