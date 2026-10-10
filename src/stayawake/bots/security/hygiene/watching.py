@@ -6,6 +6,7 @@ from __future__ import annotations
 import time
 
 from stayawake.bots.security import schedule, watchack, watchrecord, watchstate
+from stayawake.utils import docs_site
 
 from .models import HygieneIssue
 
@@ -13,8 +14,9 @@ STOPPED_ID = "self-check-stopped"
 CAME_BACK_ID = "self-check-code-came-back"
 NOT_STOPPED_ID = "self-check-code-not-stopped"
 
-_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-machine.md"
-         "#what-a-clean-audit-does-and-does-not-mean")
+_DOCS = docs_site.WHAT_A_CLEAN_AUDIT_MEANS
+
+
 def check_self_check(placed=schedule.was_placed, verdict=schedule.verdict,
                      running=schedule.is_running, supported=schedule.supported,
                      record=watchrecord.load, clock=time.time,

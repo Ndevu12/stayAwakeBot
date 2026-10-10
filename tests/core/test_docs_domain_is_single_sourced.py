@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
 """The documentation domain is written once, in mkdocs.yml.
 
-Everything that can read it does. `pyproject.toml` and the README are static formats that cannot,
-so they hold a literal — and this pins that literal to the one source, which is what stops the
-copies drifting apart the way they did when the site moved subdomain.
+Everything that can read it does. `pyproject.toml`, the README and `stayawake.utils.docs_site` (an
+installed saw has no mkdocs.yml to read) cannot, so they hold a literal — and this pins that literal
+to the one source, which is what stops the copies drifting apart the way they did when the site
+moved subdomain. Every link to a page is pinned to a page and section that exist in `docs/`.
 """
 from __future__ import annotations
 
 import pathlib
 import re
+import unicodedata
 import unittest
+
+from stayawake.utils import docs_site
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _MKDOCS = _ROOT / "mkdocs.yml"
 _PYPROJECT = _ROOT / "pyproject.toml"
 _README = _ROOT / "README.md"
 _WORKFLOW = _ROOT / ".github/workflows/docs.yml"
+_SUPPORT = _ROOT / "SUPPORT.md"
+_DOCS = _ROOT / "docs"
+_SRC = _ROOT / "src/stayawake"
 
 
 def _declared_site_url() -> str:
@@ -54,6 +61,72 @@ class TestTheDomainIsWrittenOnce(unittest.TestCase):
         """The deploy derives the host from mkdocs.yml; a literal there is a second source."""
         self.assertNotIn(self.host, _WORKFLOW.read_text(encoding="utf-8"),
                          "the docs workflow hardcodes the domain instead of reading mkdocs.yml")
+
+
+def _section_ids(page: pathlib.Path) -> set[str]:
+    """The ids the site gives a page's headings: an explicit `{#id}`, else the heading slugified as
+    Python-Markdown's toc does."""
+    ids = set()
+    for line in page.read_text(encoding="utf-8").splitlines():
+        heading = re.match(r"#{1,6}\s+(.*)", line)
+        if not heading:
+            continue
+        explicit = re.search(r"\{#([\w-]+)\}", heading.group(1))
+        if explicit:
+            ids.add(explicit.group(1))
+            continue
+        text = unicodedata.normalize("NFKD", heading.group(1)).encode("ascii", "ignore").decode()
+        text = re.sub(r"[^\w\s-]", "", text).strip().lower()
+        ids.add(re.sub(r"[-\s]+", "-", text))
+    return ids
+
+
+def _source_page(link: str) -> tuple[pathlib.Path | None, str]:
+    """Map a hosted link to the page in docs/ it is built from. Returns the page, or None, and the
+    section id it names."""
+    rest, _, section = link[len(docs_site.SITE):].partition("#")
+    path = rest.strip("/")
+    candidates = [_DOCS / f"{path}.md", _DOCS / path / "index.md"] if path else [_DOCS / "index.md"]
+    return next((c for c in candidates if c.is_file()), None), section
+
+
+def _links_saw_and_its_readers_are_given() -> list[str]:
+    found = [v for v in vars(docs_site).values() if isinstance(v, str) and v.startswith(docs_site.SITE + "/")]
+    for doc in (_README, _SUPPORT):
+        found += re.findall(r"\((" + re.escape(docs_site.SITE) + r"[^)\s]*)\)", doc.read_text(encoding="utf-8"))
+    return found
+
+
+class TestEveryDocsLinkLeadsToAPage(unittest.TestCase):
+    def test_saw_links_the_site_mkdocs_publishes_as_latest(self):
+        self.assertEqual(docs_site.SITE, _declared_site_url().rstrip("/") + "/latest")
+
+    def test_no_other_source_file_writes_a_docs_address(self):
+        """One home: a page moved or renamed is fixed in docs_site and nowhere else."""
+        host = _declared_site_url().split("://", 1)[1].rstrip("/")
+        for path in sorted(_SRC.rglob("*.py")):
+            if path.name == "docs_site.py":
+                continue
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.relative_to(_ROOT)):
+                self.assertNotIn(host, text)
+                self.assertNotIn("/blob/main/docs/", text)
+
+    def test_readers_are_not_sent_to_a_path_inside_the_repository(self):
+        """The README is also the package page, where a relative docs/ link leads nowhere."""
+        for doc in (_README, _SUPPORT):
+            with self.subTest(doc=doc.name):
+                self.assertNotRegex(doc.read_text(encoding="utf-8"), r"\]\((?:\./)?docs/")
+
+    def test_every_link_names_a_page_and_section_that_exist(self):
+        links = _links_saw_and_its_readers_are_given()
+        self.assertGreaterEqual(len(links), 20, "the links were not found, so none were checked")
+        for link in links:
+            with self.subTest(link=link):
+                page, section = _source_page(link)
+                self.assertIsNotNone(page, f"{link} has no page in docs/")
+                if section:
+                    self.assertIn(section, _section_ids(page), f"{link} names a section {page.name} lacks")
 
 
 if __name__ == "__main__":

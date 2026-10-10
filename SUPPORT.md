@@ -12,11 +12,11 @@ saw intro                 # a 60-second tour
 
 Then the docs:
 
-- [CLI command guide](docs/reference/cli/index.md) — every `saw` command and its flags
-- [Usage](docs/index.md) — install, secrets, GitHub Actions, deploying your own
-- [Configuration & Reports](docs/reference/configuration.md) — config fields and report formats
-- [Credential hygiene](docs/explanation/credential-hygiene.md) — what a cached-credential finding means
-- [Prerequisites](docs/tutorial/first-scan.md) — supported Python versions and install troubleshooting
+- [CLI command guide](https://saw-docs.ndevuspace.com/latest/reference/cli/) — every `saw` command and its flags
+- [Usage](https://saw-docs.ndevuspace.com/latest/) — install, secrets, GitHub Actions, deploying your own
+- [Configuration & Reports](https://saw-docs.ndevuspace.com/latest/reference/configuration/) — config fields and report formats
+- [Credential hygiene](https://saw-docs.ndevuspace.com/latest/explanation/credential-hygiene/) — what a cached-credential finding means
+- [Prerequisites](https://saw-docs.ndevuspace.com/latest/tutorial/first-scan/) — supported Python versions and install troubleshooting
 
 ## Where to take it
 
@@ -37,7 +37,7 @@ A finding in a repository that `saw` scanned is a report for the owner of **that
 for this one — unless you believe the finding itself is wrong, which is a false positive.
 
 While a false positive is open, you can suppress that one signature on that one path with your
-own config — see [configuration](docs/reference/configuration.md). The allowlist is yours and
+own config — see [configuration](https://saw-docs.ndevuspace.com/latest/reference/configuration/). The allowlist is yours and
 must name a signature, so it never silences whatever lands on that path next.
 
 This is a small project. Issues get read; there is no support SLA, and no commercial-support

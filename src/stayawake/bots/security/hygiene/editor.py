@@ -10,14 +10,14 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from stayawake.utils import docs_site
 from stayawake.utils.pathsafe import grade
 
 from . import editors, riskycommands
 from .models import HygieneIssue, could_not_read
 
 
-_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-machine.md"
-         "#what-a-clean-audit-does-and-does-not-mean")
+_DOCS = docs_site.WHAT_A_CLEAN_AUDIT_MEANS
 
 
 @dataclass(frozen=True)

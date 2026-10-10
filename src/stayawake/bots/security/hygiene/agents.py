@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stayawake.utils import docs_site
+
 from . import riskycommands
 from .models import HygieneIssue, could_not_read
 
@@ -20,8 +22,7 @@ APPROVES_RISKY_ID = "agent-approves-risky-commands"
 RUNS_WITHOUT_ASKING_ID = "agent-runs-without-asking"
 AGENTS_NOT_EXAMINED_ID = "agents-not-examined"
 
-_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-machine.md"
-         "#what-a-clean-audit-does-and-does-not-mean")
+_DOCS = docs_site.WHAT_A_CLEAN_AUDIT_MEANS
 
 _KNOWN = (
     ("Claude Code", "~/.claude/settings.json", JSON),
