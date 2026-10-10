@@ -160,7 +160,7 @@ class TestItKeepsGoing(unittest.TestCase):
 
     def test_it_makes_a_pass_sleeps_and_makes_another(self):
         slept = []
-        watch.keep_going(once=lambda: (exitcodes.CLEAN, "quiet"), sleep=slept.append, passes=3)
+        watch.keep_going(once=lambda: (exitcodes.CLEAN, (watch.QUIET,)), sleep=slept.append, passes=3)
         self.assertEqual(slept, [watch.BETWEEN_PASSES, watch.BETWEEN_PASSES])
 
     def test_one_bad_pass_does_not_end_the_watch(self):
@@ -177,15 +177,15 @@ class TestItKeepsGoing(unittest.TestCase):
 
     def test_a_quiet_pass_says_nothing(self):
         said = []
-        watch.keep_going(once=lambda: (exitcodes.CLEAN, "quiet"), sleep=lambda n: None,
+        watch.keep_going(once=lambda: (exitcodes.CLEAN, (watch.QUIET,)), sleep=lambda n: None,
                          passes=2, report=said.append)
         self.assertEqual(said, [], "a watch that speaks every pass is one nobody reads")
 
     def test_a_pass_that_found_something_does_say_it(self):
         said = []
-        watch.keep_going(once=lambda: (exitcodes.FINDINGS, "stopped something"),
+        watch.keep_going(once=lambda: (exitcodes.FINDINGS, (watch.ENDED,)),
                          sleep=lambda n: None, passes=1, report=said.append)
-        self.assertEqual(said, ["stopped something"])
+        self.assertEqual(said, [watch._ENDED])
 
 
 class TestItSchedulesItselfRatherThanBeingScheduled(unittest.TestCase):

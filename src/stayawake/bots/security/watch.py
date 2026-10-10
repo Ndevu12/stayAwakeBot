@@ -24,6 +24,7 @@ _UNNAMED = "Something is running that this machine cannot identify."
 _QUIET = "Nothing on this machine is running code it should not."
 _NOT_READ = "Running processes could not be examined, so nothing here covers one."
 _PASS_FAILED = "This machine could not check itself. Run `saw watch status`."
+_NOT_TOLD = "What this machine found could not be recorded or announced. Run `saw watch status`."
 _SCHEDULED = "This machine will keep checking itself from now on."
 _AT_LOGIN = "This machine will keep checking itself from your next login."
 _ALREADY = "This machine was already checking itself."
@@ -44,14 +45,27 @@ def _never_asks(pids, *, signatures):
     return elevate.CANNOT_ASK, []
 
 
-def watch_once(*, find=None, stop=end_live_code, load=liveledger.load,
-               save=liveledger.save, now=None, look=snapshot) -> tuple[int, str]:
+ENDED, RETURNED, LEFT, UNNAMED, QUIET = "ended", "returned", "left", "unnamed", "quiet"
+NOT_READ, PASS_FAILED = "not-read", "pass-failed"
+SENTENCE_FOR = {ENDED: _ENDED, RETURNED: _RETURNED, LEFT: _LEFT, UNNAMED: _UNNAMED, QUIET: _QUIET,
+                NOT_READ: _NOT_READ, PASS_FAILED: _PASS_FAILED}
+
+
+def watch_once(**collaborators) -> tuple[int, str]:
+    """Make one pass. Takes the collaborators `examine` takes. Returns the exit code and the lines
+    an operator would read."""
+    code, kinds = examine(**collaborators)
+    return code, "\n".join(SENTENCE_FOR[kind] for kind in kinds)
+
+
+def examine(*, find=None, stop=end_live_code, load=liveledger.load,
+            save=liveledger.save, now=None, look=snapshot) -> tuple[int, tuple[str, ...]]:
     """Make one pass. Takes the collaborators that read the processes, end them and keep the
-    ledger. Returns the exit code and the line an operator would read; a process table that could
-    not be read is a pass that could not complete."""
+    ledger. Returns the exit code and what the pass found, as event kinds; a process table that
+    could not be read is a pass that could not complete."""
     snap = look()
     if not snap.supported or not snap.processes:
-        return exitcodes.INCOMPLETE, _NOT_READ
+        return exitcodes.INCOMPLETE, (NOT_READ,)
     again = find or live_code_processes
     before = load()
     seen = find() if find is not None else live_code_processes(snap)
@@ -69,40 +83,44 @@ def watch_once(*, find=None, stop=end_live_code, load=liveledger.load,
     returning = any(before.returning(fingerprint(item.code)) for item in identified)
     unfinished = ending is not None and not ending.finished
 
-    lines = []
+    kinds = []
     if ending is not None:
-        lines.append(_ENDED)
+        kinds.append(ENDED)
         if returning:
-            lines.append(_RETURNED)
+            kinds.append(RETURNED)
         if unfinished:
-            lines.append(_LEFT)
+            kinds.append(LEFT)
     if len(seen) > len(identified):
-        lines.append(_UNNAMED)
-    if not lines:
-        lines.append(_QUIET)
+        kinds.append(UNNAMED)
+    if not kinds:
+        kinds.append(QUIET)
 
     if unfinished:
-        return exitcodes.INCOMPLETE, "\n".join(lines)
+        return exitcodes.INCOMPLETE, tuple(kinds)
     if identified:
-        return exitcodes.FINDINGS, "\n".join(lines)
-    return exitcodes.CLEAN, "\n".join(lines)
+        return exitcodes.FINDINGS, tuple(kinds)
+    return exitcodes.CLEAN, tuple(kinds)
 
 
-def keep_going(*, once=watch_once, sleep=time.sleep, between=BETWEEN_PASSES, passes=None,
-               report=print) -> int:
-    """Keep making the pass until stopped. Returns the code of the last pass that ran.
-
-    Takes an optional bound on how many passes to make; unbounded otherwise.
-    """
+def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes=None,
+               report=print, tell=None) -> int:
+    """Keep making the pass until stopped. Takes the pass, the pause between passes, an optional
+    bound on how many passes to make, where a pass's lines are printed, and an optional `tell`
+    called with each pass's event kinds. Returns the code of the last pass that ran."""
     code = exitcodes.CLEAN
     made = 0
     while passes is None or made < passes:
         try:
-            code, text = once()
+            code, kinds = once()
         except Exception:
-            code, text = exitcodes.INCOMPLETE, _PASS_FAILED
+            code, kinds = exitcodes.INCOMPLETE, (PASS_FAILED,)
         if code != exitcodes.CLEAN:
-            report(text)
+            report("\n".join(SENTENCE_FOR[kind] for kind in kinds))
+        if tell is not None:
+            try:
+                tell(kinds)
+            except Exception:
+                report(_NOT_TOLD)
         made += 1
         if passes is None or made < passes:
             sleep(between)
