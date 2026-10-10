@@ -53,6 +53,7 @@ class _Isolated(unittest.TestCase):
             "XDG_CACHE_HOME": str(self.home / ".cache"),
             "XDG_STATE_HOME": str(self.home / ".local" / "state"),
             "GIT_CONFIG_GLOBAL": str(self.home / "gitconfig"),   # isolate `git config --global`
+            "GIT_CONFIG_SYSTEM": os.devnull,
         })
         self.env.start()
         self.addCleanup(self.env.stop)
@@ -264,6 +265,52 @@ class TestTheHookJudgesAsTheScanDoes(_Isolated):
         with mock.patch.object(hook, "_scan_within_budget", return_value=result):
             self.assertEqual(self._clone_event(repo), 1)
 
+    def test_a_scan_that_hit_an_error_says_not_verified_and_what_to_run(self):
+        from stayawake.bots.security.models import ScanResult
+        repo = self._repo_here({"a.txt": "ok\n"})
+        result = ScanResult(target=str(repo), source="local", error="b.js could not be read")
+        err = io.StringIO()
+        with mock.patch.object(hook, "_scan_within_budget", return_value=result), \
+             contextlib.redirect_stderr(err):
+            code = hook.run_event("post-checkout", ["0" * 40, self._head(repo), "1"])
+        self.assertEqual(code, 2)
+        out = " ".join(err.getvalue().split())
+        self.assertIn("NOT verified", out)
+        self.assertIn("saw scan", out)
+
+    def test_a_repository_name_cannot_inject_into_the_line_or_the_command_to_run(self):
+        from stayawake.bots.security.models import ScanResult
+        parent = Path(tempfile.mkdtemp(prefix="hook-name-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(parent, ignore_errors=True))
+        repo = parent / "a b $(id) ##[error]x"
+        _repo({"a.txt": "ok\n"}).rename(repo)
+        self._in_repo(repo)
+        result = ScanResult(target=str(repo), source="local", error="b.js could not be read")
+        err = io.StringIO()
+        with mock.patch.object(hook, "_scan_within_budget", return_value=result), \
+             contextlib.redirect_stderr(err):
+            self.assertEqual(hook.run_event("post-checkout", ["0" * 40, self._head(repo), "1"]), 2)
+        self.assertNotIn("##[", err.getvalue())
+        command = [ln for ln in err.getvalue().splitlines() if "Scan it yourself:" in ln][0]
+        self.assertRegex(command, r"saw scan '[^']*a b \$\(id\)[^']*'$")
+
+    def test_an_infected_warning_quotes_the_commands_it_suggests(self):
+        from stayawake.bots.security.models import ScanResult
+        result = ScanResult(target="t", source="local")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            hook._warn_infected("shown", hook.shlex.quote("/w/x$(echo INJECTED)"), result)
+        self.assertIn("saw scan '/w/x$(echo INJECTED)'", err.getvalue())
+        self.assertIn("saw fix --path '/w/x$(echo INJECTED)'", err.getvalue())
+
+    def test_a_check_that_crashed_says_not_verified_without_its_exception(self):
+        err = io.StringIO()
+        with mock.patch.object(hook, "_run_event", side_effect=RuntimeError("\x1b[2Jboom")), \
+             contextlib.redirect_stderr(err):
+            self.assertEqual(hook.run_event("post-checkout", ["a", "b", "1"]), 2)
+        self.assertIn("NOT verified", err.getvalue())
+        self.assertNotIn("boom", err.getvalue())
+
     def test_an_infected_repository_is_reported_on_every_clone(self):
         repo = self._repo_here({".gitignore": _INFECTED})
         self.assertEqual(self._clone_event(repo), 1)
@@ -340,9 +387,78 @@ class TestInstallUninstall(_Isolated):
         hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(self.home / "hp")], context=hook.gitutil.OPERATOR_CONFIG)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            self.assertEqual(hook.install(), 0)
+            self.assertEqual(hook.install(), 3)
         self.assertIn(str(self.home / "hp"), buf.getvalue())
         self.assertIn("will not run", buf.getvalue())
+        self.assertNotIn("✓ scan-on-clone installed", buf.getvalue())
+
+
+class TestTheHooksSettingIsReadAsGitUsesIt(_Isolated):
+    def _install(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = hook.install()
+        return code, buf.getvalue()
+
+    def test_a_setting_brought_in_by_an_include_is_seen(self):
+        extra = self.home / "extra.gitconfig"
+        extra.write_text(f"[core]\n\thooksPath = {self.home / 'hp'}\n")
+        (self.home / "gitconfig").write_text(f"[include]\n\tpath = {extra}\n")
+        code, out = self._install()
+        self.assertEqual(code, 3)
+        self.assertIn("will not run", out)
+        self.assertNotIn("✓ scan-on-clone installed", out)
+
+    def test_a_setting_in_the_system_configuration_is_seen(self):
+        system = self.home / "system.gitconfig"
+        system.write_text(f"[core]\n\thooksPath = {self.home / 'hp'}\n")
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_SYSTEM": str(system)}):
+            code, out = self._install()
+        self.assertEqual(code, 3)
+        self.assertNotIn("✓ scan-on-clone installed", out)
+
+    def test_a_setting_that_cannot_be_read_is_not_verified(self):
+        real = hook.gitutil.run
+
+        def failing(repo, args, **kw):
+            if "core.hooksPath" in args and "--get-all" in args:
+                return None
+            return real(repo, args, **kw)
+        with mock.patch.object(hook.gitutil, "run", failing):
+            code, out = self._install()
+        self.assertEqual(code, 3)
+        self.assertIn("NOT verified", out)
+        self.assertNotIn("✓ scan-on-clone installed", out)
+
+    def test_a_setting_from_the_environment_is_seen(self):
+        hp = str(self.home / "hp")
+        for env in ({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath",
+                     "GIT_CONFIG_VALUE_0": hp},
+                    {"GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "user.name",
+                     "GIT_CONFIG_VALUE_0": "x", "GIT_CONFIG_KEY_1": "CORE.HOOKSPATH",
+                     "GIT_CONFIG_VALUE_1": hp},
+                    {"GIT_CONFIG_PARAMETERS": f"'core.hooksPath={hp}'"},
+                    {"GIT_CONFIG_COUNT": "not a number"}):
+            with self.subTest(env=sorted(env)):
+                with mock.patch.dict(os.environ, env):
+                    code, out = self._install()
+                self.assertEqual(code, 3)
+                self.assertNotIn("✓ scan-on-clone installed", out)
+
+    def test_an_empty_or_multi_line_setting_is_not_mistaken_for_none(self):
+        for value in ("", '"/a\\nb"'):
+            with self.subTest(value=value):
+                (self.home / "gitconfig").write_text(f"[core]\n\thooksPath = {value}\n")
+                code, out = self._install()
+                self.assertEqual(code, 3)
+                self.assertNotIn("✓ scan-on-clone installed", out)
+                self.assertIn("will not run", out)
+
+    def test_saws_own_setting_for_its_git_calls_is_not_mistaken_for_one(self):
+        self.assertEqual(hook._hookspath_git_uses(), (True, None))
+        code, out = self._install()
+        self.assertEqual(code, 0)
+        self.assertIn("✓ scan-on-clone installed", out)
 
 
 class TestNeverClobber(_Isolated):

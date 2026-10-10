@@ -113,6 +113,59 @@ class TestSarifBuild(unittest.TestCase):
         self.assertEqual(uri("l"), "x.js")             # local → workspace-relative
 
 
+class TestSarifSaysWhatWasNotScanned(unittest.TestCase):
+    def test_a_target_that_could_not_be_scanned_fails_the_run(self):
+        bad = dict(_result(target="repo-b"), error="clone failed")
+        run = sarif.build_sarif(_payload([_result(target="repo-a"), bad]))["runs"][0]
+        invocation = run["invocations"][0]
+        self.assertFalse(invocation["executionSuccessful"])
+        self.assertEqual(len(invocation["toolExecutionNotifications"]), 1)
+        note = invocation["toolExecutionNotifications"][0]
+        self.assertEqual(note["level"], "error")
+        self.assertIn("repo-b", note["message"]["text"])
+        self.assertIn("not clean", note["message"]["text"])
+
+    def test_a_target_that_could_not_be_scanned_is_an_alert_github_shows(self):
+        # Code scanning reads results only; a run with an unscanned target must not show zero.
+        bad = dict(_result(target="repo-b"), error="clone failed")
+        log = sarif.build_sarif(_payload([_result(target="repo-a"), bad]))
+        run = log["runs"][0]
+        alerts = [r for r in run["results"] if r["ruleId"] == sarif.NOT_SCANNED_ID]
+        self.assertEqual(len(alerts), 1)
+        alert = alerts[0]
+        self.assertEqual(alert["level"], "error")
+        self.assertTrue(alert["message"]["text"].startswith("repo-b could not be scanned and is "
+                                                            "not clean."))
+        self.assertEqual(run["tool"]["driver"]["rules"][alert["ruleIndex"]]["id"],
+                         sarif.NOT_SCANNED_ID)
+        self.assertEqual(alert["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+                         "repo-b")
+        self.assertTrue(alert["partialFingerprints"])
+
+    def test_the_alert_location_is_a_valid_uri(self):
+        bad = dict(_result(target="/Users/me/My Projects/app #1?x"), error="clone failed")
+        alert = [r for r in sarif.build_sarif(_payload([bad]))["runs"][0]["results"]
+                 if r["ruleId"] == sarif.NOT_SCANNED_ID][0]
+        self.assertEqual(alert["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+                         "/Users/me/My%20Projects/app%20%231%3Fx")
+
+    def test_a_long_reason_never_cuts_the_verdict(self):
+        bad = dict(_result(target="r" * 900), error="e" * 900)
+        text = [r for r in sarif.build_sarif(_payload([bad]))["runs"][0]["results"]
+                if r["ruleId"] == sarif.NOT_SCANNED_ID][0]["message"]["text"]
+        self.assertIn("could not be scanned and is not clean.", text)
+
+    def test_a_complete_run_has_no_such_alert_or_rule(self):
+        run = sarif.build_sarif(_payload([_result()]))["runs"][0]
+        self.assertFalse([r for r in run["results"] if r["ruleId"] == sarif.NOT_SCANNED_ID])
+        self.assertNotIn(sarif.NOT_SCANNED_ID, [r["id"] for r in run["tool"]["driver"]["rules"]])
+
+    def test_a_complete_run_succeeds_with_no_notifications(self):
+        run = sarif.build_sarif(_payload([_result()]))["runs"][0]
+        self.assertEqual(run["invocations"], [{"executionSuccessful": True,
+                                               "toolExecutionNotifications": []}])
+
+
 class TestSarifWiredIntoScan(unittest.TestCase):
     def test_scan_writes_sarif_only_at_requested_path(self):
         work = Path(tempfile.mkdtemp())

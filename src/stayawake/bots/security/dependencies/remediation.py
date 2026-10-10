@@ -125,7 +125,8 @@ def malware_fix(name: str, version: str = "", ecosystem: str = "") -> Dependency
     ecosystem. Returns a `DependencyFix` that removes it."""
     return DependencyFix(
         f"Remove {name} now — it is a known-malicious package, so upgrading does not help. Purge it "
-        "from your lockfile and installed tree, then rotate any credentials it could have read.",
+        "from your lockfile and installed tree, then run `saw audit`, and rotate the credentials it "
+        "could have read once the audit says rotating is safe.",
         MALICIOUS, _coordinate(name, version), name, removal_command(ecosystem, name))
 
 
