@@ -131,8 +131,7 @@ class TestItCapturesBeforeItEnds(unittest.TestCase):
     def test_one_record_covers_the_whole_population(self):
         held = {pid: (Identity(pid=pid, ppid=1, uid=501, start_time=5), "payload")
                 for pid in range(200, 335)}
-        with mock.patch.object(live.Path, "mkdir"), \
-             mock.patch.object(live.Path, "write_text") as written:
+        with mock.patch.object(live.atomicwrite, "replace", return_value=True) as written:
             out = live._capture(held, live.Path("/state"))
         self.assertEqual(written.call_count, 1, "it wrote one file per process")
         self.assertIn("live-code-", out)

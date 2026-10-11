@@ -754,14 +754,16 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         self.assertFalse(planted.exists())
 
     def test_a_hook_that_cannot_be_read_back_as_written_is_not_counted(self):
-        real_replace = os.replace
+        real_rename = os.rename
 
-        def tampered(src, dst):
-            real_replace(src, dst)
-            with open(dst, "ab") as fh:
-                fh.write(b"#\n")
+        def tampered(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+            real_rename(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+            if dst_dir_fd is not None and not dst.endswith(".json"):
+                fd = os.open(dst, os.O_WRONLY | os.O_APPEND, dir_fd=dst_dir_fd)
+                os.write(fd, b"#\n")
+                os.close(fd)
 
-        with mock.patch("os.replace", side_effect=tampered):
+        with mock.patch("os.rename", side_effect=tampered):
             code, text = self._quiet(hook.install)
         self.assertEqual(code, 3, text)
         self.assertIn("could not verify", text)

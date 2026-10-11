@@ -199,3 +199,59 @@ def every_file_arrived(source: Path, destination: Path) -> bool:
     except OSError:
         return False
     return not unread
+
+
+_FOLDER_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+_MAX_LINKS = 40
+
+
+class RedirectedPath(OSError):
+    """A path that reaches somewhere else through a link its writer does not trust."""
+
+
+def trusted_link_owners() -> set[int]:
+    """Name who may own a link a write follows: root, and the user writing. Returns their ids."""
+    return {0, os.geteuid()}
+
+
+def open_folder(folder: Path, *, create: bool = False, mode: int = 0o777) -> int:
+    """Open a folder for writing in, one step at a time, without being redirected. Takes the folder,
+    whether to make the missing parts, and their mode. Returns an open descriptor the caller closes.
+    Follows a link only when root or the user writing owns it, and raises `RedirectedPath` at any
+    other link and `OSError` when a part is missing or is not a folder."""
+    parts = list(Path(os.path.abspath(folder)).parts[1:])
+    owners = trusted_link_owners()
+    fd = os.open("/", _FOLDER_FLAGS)
+    links = 0
+    try:
+        while parts:
+            part = parts.pop(0)
+            if part in ("", "."):
+                continue
+            try:
+                found = os.stat(part, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                if not create or part == "..":
+                    raise
+                try:
+                    os.mkdir(part, mode, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                found = os.stat(part, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISLNK(found.st_mode):
+                links += 1
+                if found.st_uid not in owners or links > _MAX_LINKS:
+                    raise RedirectedPath(f"{folder} reaches elsewhere through a link at {part}")
+                target = os.readlink(part, dir_fd=fd)
+                if os.path.isabs(target):
+                    os.close(fd)
+                    fd = os.open("/", _FOLDER_FLAGS)
+                parts[:0] = list(Path(target).parts[1 if os.path.isabs(target) else 0:])
+                continue
+            following = os.open(part, _FOLDER_FLAGS | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = following
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise

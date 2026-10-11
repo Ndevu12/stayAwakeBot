@@ -11,13 +11,12 @@ import os
 import shlex
 import shutil
 import sys
-import tempfile
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from stayawake.utils import env
-from stayawake.utils import pathsafe
+from stayawake.utils import atomicwrite, env
+
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.utils import textsafe
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
@@ -42,10 +41,8 @@ _AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `p
 
 
 
-
 class HookError(Exception):
     """A hook saw would have to overwrite; the install stops and names it."""
-
 
 
 
@@ -199,25 +196,7 @@ def _write_verified(dest: Path, text: str, hooks_dir: Path) -> bool:
     back gives `text`."""
     if hooks_dir.is_symlink() or not is_safe_write_target(dest, hooks_dir):
         return False
-    staging = None
-    try:
-        fd, staging = tempfile.mkstemp(prefix=".saw-", dir=hooks_dir)
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-            fh.write(text)
-            os.fchmod(fh.fileno(), 0o755)
-        os.replace(staging, dest)
-        staging = None
-        if dest.is_symlink() or not pathsafe.is_regular_file(dest):
-            return False
-        return dest.read_bytes().decode("utf-8", "replace") == text and os.access(dest, os.X_OK)
-    except OSError:
-        return False
-    finally:
-        if staging is not None:
-            try:
-                os.unlink(staging)
-            except OSError:
-                pass
+    return atomicwrite.replace(dest, text, mode=0o755) and os.access(dest, os.X_OK)
 
 
 def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list[Action]:
@@ -229,7 +208,7 @@ def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list
         return [Action(UNVERIFIED, hooks_dir, "is a link, so nothing was written through it")]
     if not own and _inside_what_saw_keeps(hooks_dir):
         return [Action(UNVERIFIED, hooks_dir, "lies inside what saw keeps for itself, so nothing was written")]
-    hooks_dir.mkdir(parents=True, exist_ok=True)
+    atomicwrite.make_folder(hooks_dir)
     if not hooks_dir.is_dir():
         return [Action(UNVERIFIED, hooks_dir, "is not a directory")]
     if own:
@@ -279,7 +258,7 @@ def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list
             try:
                 dest.rename(preserved)
                 if not preserved.is_symlink():
-                    os.chmod(preserved, 0o755)
+                    atomicwrite.set_mode(preserved, 0o755)
             except OSError:
                 actions.append(Action(UNVERIFIED, dest, "could not be set aside as your own, so it was left as it is"))
                 continue
@@ -603,7 +582,7 @@ def _repair_repository(hooks_dir: Path, saw: str, config: str | None, *, restore
     if _inside_what_saw_keeps(hooks_dir):
         return [Action(UNVERIFIED, hooks_dir, "lies inside what saw keeps for itself, so nothing was written")]
     if restore:
-        hooks_dir.mkdir(parents=True, exist_ok=True)
+        atomicwrite.make_folder(hooks_dir)
     elif not hooks_dir.is_dir():
         return []
     for event in _HOOKS:
@@ -756,9 +735,7 @@ def _remember(root: Path, key: str) -> None:
     try:
         cache = {r: s for r, s in _load_cache().items() if os.path.isdir(r)}
         cache[os.path.realpath(root)] = key
-        path = _cache_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(cache))
+        atomicwrite.replace(_cache_path(), json.dumps(cache), mode=0o644)
     except OSError:
         pass
 

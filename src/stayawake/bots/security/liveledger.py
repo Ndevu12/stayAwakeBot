@@ -8,13 +8,12 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
-from stayawake.utils import env, pathsafe
+from stayawake.utils import atomicwrite, env, pathsafe
 
 
 ABSENT, LOADED, CORRUPT, EDITED = "absent", "loaded", "corrupt", "edited"
@@ -155,19 +154,4 @@ def save(ledger: Ledger, path: Path | None = None) -> bool:
             for k, v in ledger.entries.items()}
     payload = {"version": 2, "entries": rows, "last_pass": ledger.last_pass,
                "self_hash": _self_hash(rows, ledger.last_pass)}
-    try:
-        where.parent.mkdir(parents=True, exist_ok=True)
-        if where.is_symlink():
-            return False
-        fd, tmp = tempfile.mkstemp(dir=str(where.parent), prefix=".live-", suffix=".json")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f)
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, where)
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-    except OSError:
-        return False
-    return True
+    return atomicwrite.replace(where, json.dumps(payload))

@@ -11,11 +11,10 @@ import os
 import stat
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.utils import env, pathsafe, sessionbus
+from stayawake.utils import atomicwrite, env, pathsafe, sessionbus
 from stayawake.utils.systembin import system_binary
 
 
@@ -50,12 +49,7 @@ def record_path() -> Path:
 def declare(argv: list[str], path: Path | None = None) -> bool:
     """Record the argv the item was placed with. True if it was written."""
     where = path or record_path()
-    try:
-        where.parent.mkdir(parents=True, exist_ok=True)
-        where.write_text(json.dumps({"version": 1, "argv": list(argv)}), encoding="utf-8")
-    except OSError:
-        return False
-    return True
+    return atomicwrite.replace(where, json.dumps({"version": 1, "argv": list(argv)}), mode=0o644)
 
 
 def forget(path: Path | None = None) -> None:
@@ -310,23 +304,7 @@ class Scheduling:
 
 def _write(where: Path, text: str) -> bool:
     """Write `text` to `where` atomically, and read it back. True only when the read-back matches."""
-    try:
-        where.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(where.parent), prefix=".saw-", suffix=where.suffix)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(text)
-            os.chmod(tmp, 0o644)
-            os.replace(tmp, where)
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-    except OSError:
-        return False
-    try:                       # read back what was WRITTEN, never a re-derived expectation
-        return where.read_text(encoding="utf-8") == text
-    except OSError:
-        return False
+    return atomicwrite.replace(where, text, mode=0o644)
 
 
 def settle(path: Path | None = None, saw: list[str] | None = None, write=_write,

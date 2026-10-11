@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from stayawake.utils import elevate, env, procstop
+from stayawake.utils import atomicwrite, elevate, env, procstop
 from stayawake.utils.procsnap import parent_map, ps_signature
 from stayawake.bots.security.livecode import live_code_processes
 
@@ -76,11 +76,8 @@ def _capture(held: dict[int, tuple], where: Path, now=None) -> str | None:
         "code": code[:_CAPTURE_KEEP],
         "code_bytes": len(code),
     }
-    try:
-        where.mkdir(parents=True, exist_ok=True)
-        target = where / f"live-code-{stamp}-{pids[0]}.json"
-        target.write_text(json.dumps(record, indent=2), encoding="utf-8")
-    except OSError:
+    target = where / f"live-code-{stamp}-{pids[0]}.json"
+    if not atomicwrite.replace(target, json.dumps(record, indent=2), folder_mode=0o700):
         return None
     return str(target)
 

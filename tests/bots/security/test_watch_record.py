@@ -41,14 +41,14 @@ class TestStateFilesAreReadSafely(unittest.TestCase):
 
     def test_a_pipe_raced_in_after_a_write_is_not_waited_on(self):
         from stayawake.utils import atomicwrite
-        real_replace = os.replace
+        real_rename = os.rename
 
-        def replace_then_race(staged, where):
-            real_replace(staged, where)
-            os.unlink(where)
-            os.mkfifo(where)
+        def rename_then_race(staged, where, *, src_dir_fd=None, dst_dir_fd=None):
+            real_rename(staged, where, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+            os.unlink(where, dir_fd=dst_dir_fd)
+            os.mkfifo(where, dir_fd=dst_dir_fd)
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(atomicwrite.os, "replace", replace_then_race):
+                mock.patch.object(atomicwrite.os, "rename", rename_then_race):
             where = Path(d) / "w.json"
             self.assertFalse(self._within(lambda: watchrecord.save({"a": 1}, where)))
 

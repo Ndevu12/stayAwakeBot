@@ -13,7 +13,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Callable
 
-from stayawake.utils import env, pathsafe
+from stayawake.utils import atomicwrite, env, pathsafe
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.exec_surface import HOOK_NAMES  # noqa: F401  (re-export)
 
@@ -55,10 +55,9 @@ def declare(saw: str, config: str | None, hooks: Path | None = None) -> bool:
     path = declaration_path()
     where = str(hooks or hooks_dir())
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.is_symlink():
+        if not atomicwrite.replace(path, json.dumps({"saw": saw, "config": config, "hooks": where}),
+                                   mode=0o644):
             return False
-        path.write_text(json.dumps({"saw": saw, "config": config, "hooks": where}), encoding="utf-8")
         return installed() == (saw, config) and installed_into() == Path(where)
     except OSError:
         return False
@@ -328,25 +327,16 @@ def set_aside(path: Path) -> Path | None:
         digest = digest_file(path) if path.is_file() and not path.is_symlink() else None
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
         root = set_aside_dir()
-        root.mkdir(parents=True, exist_ok=True)
-        if root.is_symlink() or not root.is_dir():
+        if root.is_symlink():
             return None
-        name = _plain_name(path.name)
-        for n in range(1000):
-            folder = root / f"{stamp}-{name}" if n == 0 else root / f"{stamp}-{name}-{n}"
-            try:
-                folder.mkdir()
-                break
-            except FileExistsError:
-                continue
-        else:
-            return None
+        folder = atomicwrite.new_folder(root, f"{stamp}-{_plain_name(path.name)}")
         record = {"path": str(path), "sha256": digest, "size": stat.st_size,
                   "mode": oct(stat.st_mode), "mtime": stat.st_mtime, "when": stamp,
                   "symlink_target": os.readlink(path) if path.is_symlink() else None}
-        (folder / "origin.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
-        (folder / "kept").mkdir()
-        shutil.move(str(path), str(folder / "kept" / path.name))
+        if not atomicwrite.replace(folder / "origin.json", json.dumps(record, indent=2), mode=0o644):
+            return None
+        atomicwrite.new_folder(folder, "kept", tries=1)
+        atomicwrite.move_into(path, folder / "kept", path.name)
         moved = os.path.lexists(folder / "kept" / path.name) and not os.path.lexists(path)
         return folder if moved else None
     except (OSError, ValueError):

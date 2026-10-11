@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from stayawake.utils import env
+from stayawake.utils import atomicwrite, env
 from stayawake.bots.security.dependencies.corpus import AdvisoryCorpus
 from stayawake.bots.security.dependencies.ecosystems import PURL_TO_OSV
 from stayawake.bots.security.dependencies.osv import (
@@ -99,7 +99,7 @@ def update_ecosystem(eco: str, cache_dir: str | Path | None = None, *,
     bucket = _OSV_BUCKETS.get(eco)
     if bucket is None:
         raise ValueError(f"unsupported ecosystem: {eco!r} (supported: {supported_ecosystems()})")
-    (cache_dir / "records").mkdir(parents=True, exist_ok=True)
+    atomicwrite.make_folder(cache_dir / "records")
 
     records: list[dict[str, Any]] = []
     for raw in _iter_zip_records(fetch(bucket)):
@@ -109,7 +109,7 @@ def update_ecosystem(eco: str, cache_dir: str | Path | None = None, *,
     # hash incrementally — never materialize the whole file as a single string.
     records.sort(key=lambda r: (r["id"], r["affected"][0]["name"] if r["affected"] else ""))
     hasher = hashlib.sha256()
-    with _records_path(cache_dir, eco).open("w", encoding="utf-8") as fh:
+    with atomicwrite.staged(_records_path(cache_dir, eco), mode=0o644) as fh:
         for r in records:
             line = json.dumps(r, sort_keys=True, ensure_ascii=False) + "\n"
             fh.write(line)
@@ -125,7 +125,7 @@ def write_manifest(cache_dir: str | Path | None, results: list[dict[str, Any]]) 
     """Write the manifest that stitches the per-ecosystem cache files together, and invalidate the
     in-process corpus memo so the next scan sees the fresh data."""
     cache_dir = Path(cache_dir or default_cache_dir())
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    atomicwrite.make_folder(cache_dir)
     ecosystems = {r["ecosystem"]: {k: r[k] for k in
                                    ("count", "malicious", "vulnerabilities", "sha256", "source")}
                   for r in results}
@@ -137,8 +137,8 @@ def write_manifest(cache_dir: str | Path | None, results: list[dict[str, Any]]) 
                 "snapshot": snapshot_digest(ecosystems),
                 "generated_at": now_iso(),
                 "ecosystems": ecosystems}
-    _manifest_path(cache_dir).write_text(json.dumps(manifest, sort_keys=True, indent=2),
-                                         encoding="utf-8")
+    with atomicwrite.staged(_manifest_path(cache_dir), mode=0o644) as fh:
+        fh.write(json.dumps(manifest, sort_keys=True, indent=2))
     _CORPUS_MEMO.clear()
     return manifest
 

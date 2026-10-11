@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from stayawake.utils import env, scratch
+from stayawake.utils import atomicwrite, env, scratch
 
 
 def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Path:
@@ -25,7 +25,7 @@ def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Pa
     preferred = Path(preferred)
     for candidate in (preferred, Path(tempfile.gettempdir()) / "stayawake-reports"):
         try:
-            candidate.mkdir(parents=True, exist_ok=True)
+            atomicwrite.make_folder(candidate)
             fd, probe = tempfile.mkstemp(dir=str(candidate), prefix=".probe-")
             os.close(fd)
             os.remove(probe)
@@ -82,14 +82,6 @@ def read_json(path: str | Path, default: Any = None) -> Any:
 
 def write_json(path: str | Path, data: Any) -> None:
     """Atomic JSON write (temp file + rename) — never leaves a half-written file."""
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".tmp-", suffix=".json")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-            fh.write("\n")
-        os.replace(tmp, p)
-    finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+    with atomicwrite.staged(Path(path)) as fh:
+        json.dump(data, fh, indent=2)
+        fh.write("\n")
