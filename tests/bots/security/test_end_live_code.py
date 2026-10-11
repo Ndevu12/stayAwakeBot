@@ -339,5 +339,22 @@ class TestItGradesEachArgumentOnceAcrossItsRounds(unittest.TestCase):
         self.assertEqual(sorted(graded), [f"console.log({i})" for i in range(5)])
 
 
+    def test_an_injected_finder_is_used_whatever_its_truth_value(self):
+        class Falsy:
+            def __bool__(self):
+                return False
+
+            def __call__(self):
+                return [_held(1)]
+        frozen = []
+        from stayawake.bots.security import livecode
+        with mock.patch.object(livecode, "live_code_processes",
+                               side_effect=AssertionError("read the process table itself")):
+            live.end_live_code(find=Falsy(), freeze=lambda who: frozen.append(who.pid) or procstop.SIGNALLED,
+                               end=lambda who: procstop.SIGNALLED, ended=lambda who: True,
+                               capture=lambda held, where: None, protected=lambda: set(), rounds=2)
+        self.assertEqual(frozen, [1])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -167,6 +167,24 @@ class TestCodeRestartedInANewProcessCameBack(unittest.TestCase):
         self.assertEqual(sorted(asked), ["console.log(8)", "identified-code"])
 
 
+    def test_an_injected_finder_is_handed_to_the_ender_whatever_its_truth_value(self):
+        class Falsy:
+            def __bool__(self):
+                return False
+
+            def __call__(self):
+                return [_held(1, "x", True)]
+        from unittest import mock
+        from stayawake.bots.security import livecode
+        recorder = _Recorder()
+        elsewhere = Snapshot(processes=[Process(pid=999, argv=("node", "-e", "identified-code"))])
+        with mock.patch.object(livecode, "snapshot", lambda: elsewhere), \
+                mock.patch.object(livecode, "_known_loader", lambda code: True):
+            watch.examine(find=Falsy(), stop=recorder, look=lambda: _READABLE, load=liveledger.Ledger,
+                          save=lambda ledger: True)
+            self.assertEqual([item.process.pid for item in recorder.find()], [1])
+
+
 class TestTheLedgerNeverKeepsThePassFromEndingCode(unittest.TestCase):
     def test_a_ledger_that_cannot_be_read_still_lets_the_pass_end_identified_code(self):
         def boom():

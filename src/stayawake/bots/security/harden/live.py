@@ -104,7 +104,7 @@ def end_live_code(*, find=None, freeze=procstop.freeze, end=procstop.end,
     """Freeze everything holding live code until a pass finds nothing new, then end it. Takes the
     finder, one that grades each code argument once when None, the collaborators that freeze, end,
     capture and elevate, and the number of rounds. Returns what it did, as an Ending."""
-    find = find or live_code_finder()
+    find = find if find is not None else live_code_finder()
     keep_out = protected()
     held: dict[int, tuple] = {}
     held_done: set[int] = set()

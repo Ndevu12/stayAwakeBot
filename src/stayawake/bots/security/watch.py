@@ -52,7 +52,7 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     if not snap.supported or not snap.processes:
         return exitcodes.INCOMPLETE, (NOT_READ,)
     finder = live_code_finder()
-    again = find or finder
+    again = find if find is not None else finder
     try:
         before = load()
     except Exception:
