@@ -30,9 +30,9 @@ keeps them current on its own, and [`saw audit`](audit-a-machine.md) reports a h
 install or one that has been changed. With git 2.54 or later, repositories you already have are
 scanned as well; with an older git, `install` says to update it.
 
-**Limits worth knowing.** `git reset --hard` runs no hook, so scan that yourself. If git is set to
-run every repository's hooks from one folder, saw's hooks do not run there, and `install` and
-`status` say so. saw never stops a push: a push it could not check in full reads as not verified,
+**Limits worth knowing.** `git reset --hard` runs no hook, so scan that yourself. If git runs
+every repository's hooks from one folder that saw cannot use, `install` and `status` say so. saw
+never stops a push: a push it could not check in full reads as not verified,
 never clean.
 
 CI has no clone hook; the equivalent there is [gate CI](gate-ci.md).

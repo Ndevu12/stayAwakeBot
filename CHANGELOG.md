@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw hook install` also puts saw's hooks in the folder git runs every repository's hooks from**,
+  when that folder is yours alone, keeping your own hooks there running.
 - **`saw hook install` also scans the repositories you already have, with git 2.54 or later.**
   With an older git, it says to update git.
 - **`saw audit` names a hook set in your global git settings**, with the events it runs on, as it
