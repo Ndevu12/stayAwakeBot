@@ -13,8 +13,10 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
+from unittest import mock
 
 from stayawake.utils import procsnap
 
@@ -130,6 +132,37 @@ class TestARefusalIsReportedNotRenderedAsEmpty(unittest.TestCase):
 
     def test_a_clean_snapshot_has_no_scope_note(self):
         self.assertEqual(procsnap.Snapshot(processes=[procsnap.Process(pid=1, argv=("x",))]).scope_note(), "")
+
+
+@unittest.skipUnless(sys.platform == "darwin", "macOS lists processes with ps; Linux reads /proc")
+class TestTheProcessListComesFromTheSystemsOwnPs(unittest.TestCase):
+
+    def setUp(self):
+        folder = tempfile.mkdtemp(prefix="saw-fake-ps-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(folder, ignore_errors=True))
+        fake = os.path.join(folder, "ps")
+        with open(fake, "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\necho 999999 1\n")
+        os.chmod(fake, 0o755)
+        patched = mock.patch.dict(os.environ, {"PATH": folder + os.pathsep + os.environ.get("PATH", "")})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def test_a_ps_earlier_on_the_path_does_not_feed_the_pid_list(self):
+        pids = procsnap._live_pids()
+        self.assertNotIn(999999, pids)
+        self.assertIn(os.getpid(), pids)
+
+    def test_a_ps_earlier_on_the_path_does_not_feed_the_parent_map(self):
+        parents = procsnap.parent_map()
+        self.assertNotIn(999999, parents)
+        self.assertEqual(os.getppid(), parents.get(os.getpid()))
+
+    def test_no_ps_of_the_systems_own_lists_nothing(self):
+        with mock.patch.object(procsnap, "system_binary", return_value=None):
+            self.assertEqual([], procsnap._live_pids())
+            self.assertEqual({}, procsnap.parent_map())
+            self.assertIsNone(procsnap.ps_signature(os.getpid()))
 
 
 if __name__ == "__main__":
