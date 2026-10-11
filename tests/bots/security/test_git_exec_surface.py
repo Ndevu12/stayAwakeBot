@@ -635,6 +635,19 @@ class TestARepositoryInAScratchDirectoryIsItsOwn(ExecSurfaceSandbox):
             tiers = self.graded(repo)
         self.assertEqual([f.evidence for f in tiers[HEURISTIC]], [])
 
+    def test_its_git_directory_kept_apart_from_its_working_tree_is_not_scratch(self):
+        repo = self.repo()
+        apart = repo.parent / "repo.git"
+        (repo / ".git").rename(apart)
+        self.write(repo, ".git", f"gitdir: {apart}\n")
+        (apart / "team.cfg").write_text("[user]\n\tname = someone\n", encoding="utf-8")
+        self.append_config(repo, f"[core]\n\thooksPath = {apart / 'hooks'}\n"
+                                 f"[include]\n\tpath = {apart / 'team.cfg'}\n", rel="../repo.git/config")
+        from stayawake.bots.security.matchers import git_exec_surface
+        with mock.patch.object(git_exec_surface, "_under_scratch", lambda path: True):
+            tiers = self.graded(repo)
+        self.assertEqual([f.evidence for f in tiers[HEURISTIC]], [])
+
     def test_an_include_kept_in_its_own_git_directory_is_its_own(self):
         repo = self.repo()
         (repo / ".git" / "team.cfg").write_text("[user]\n\tname = someone\n", encoding="utf-8")
@@ -658,6 +671,19 @@ class TestARepositoryInAScratchDirectoryIsItsOwn(ExecSurfaceSandbox):
             tiers = self.graded(repo)
         flagged = sorted(f.evidence.split(" =")[0].lower() for f in tiers[HEURISTIC])
         self.assertEqual(flagged, ["core.hookspath", "include"])
+
+    def test_an_include_kept_in_a_submodules_git_directory_outside_the_repository_is_storage(self):
+        repo = self.repo()
+        elsewhere = self.repo("elsewhere") / ".git"
+        included = elsewhere / "inc.cfg"
+        included.write_text("[user]\n\tname = someone\n", encoding="utf-8")
+        self.append_config(repo, f"[include]\n\tpath = {included}\n")
+        self.write(repo, ".gitmodules", '[submodule "x"]\n\tpath = x\n\turl = ./x\n')
+        self.write(repo, "x/.git", f"gitdir: {elsewhere}\n")
+        from stayawake.bots.security.matchers import git_exec_surface
+        with mock.patch.object(git_exec_surface, "_under_scratch", lambda path: False):
+            tiers = self.graded(repo)
+        self.assertEqual([f.evidence for f in tiers[HEURISTIC]], [])
 
 
 class TestReadingNeverRunsTheConfiguration(ExecSurfaceSandbox):

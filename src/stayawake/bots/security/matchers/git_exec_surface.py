@@ -129,6 +129,9 @@ def _pointed_files(text: str, surface: ExecSurface, base: Path | None = None) ->
     return found
 
 
+_INSIDE_A_GIT_DIRECTORY = "inside the git directory, outside its hooks"
+
+
 def _in_git_dir_outside_hooks(path: Path, git_dirs: list[Path]) -> bool:
     """Tell whether a path sits inside one of the git directories, outside its hooks. Takes the path
     and the git directories. Returns the answer."""
@@ -158,7 +161,7 @@ def _unsafe_location(path: Path, surface: ExecSurface) -> str | None:
     if _other_writable(path) or _other_writable(path.parent):
         return "in a world-writable directory"
     if _in_git_dir_outside_hooks(path, surface.git_dirs):
-        return "inside the git directory, outside its hooks"
+        return _INSIDE_A_GIT_DIRECTORY
     return None
 
 
@@ -293,7 +296,8 @@ class _Grader:
         found = []
         for include in self.surface.includes:
             why = _unsafe_location(include.target, self.surface)
-            if why and not _in_git_dir_outside_hooks(include.target, _own_git_dirs(self.surface)):
+            if why and why != _INSIDE_A_GIT_DIRECTORY and not _in_git_dir_outside_hooks(
+                    include.target, _own_git_dirs(self.surface)):
                 found.append(Judgement(HEURISTIC, include.source, "include",
                                        f"pulls configuration from a file {why}",
                                        str(include.target)))
