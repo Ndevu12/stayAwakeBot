@@ -104,8 +104,8 @@ def forget() -> None:
 
 
 def global_template_dir() -> str | None:
-    """Return git's global `init.templateDir`, or None when unset."""
-    val = gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"],
+    """Return git's global `init.templateDir`, read with the files it includes, or None when unset."""
+    val = gitutil.stdout(None, ["config", "--global", "--includes", "--get", "init.templateDir"],
                          context=gitutil.OPERATOR_CONFIG).strip()
     return os.path.expanduser(val) if val else None
 
@@ -258,9 +258,11 @@ def hook_dirs(unread: list | None = None) -> list[Path]:
 
 
 def repository_redirects_hooks(repo: Path) -> bool:
-    """Return True if `repo` sets `core.hooksPath`, so git runs its hooks from somewhere other than
-    the directory saw's template seeded."""
-    return bool(_ask(repo, ["config", "--get", "core.hooksPath"]).strip())
+    """Return True if `repo` sets `core.hooksPath`, even to nothing, so git runs its hooks from
+    somewhere other than the directory saw's template seeded."""
+    env_ = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")}
+    res = gitutil.run(repo, ["config", "--get", "core.hooksPath"], env=env_)
+    return res is not None and res.returncode == 0
 
 
 def repository_hooks_dir(repo: Path) -> Path | None:
@@ -277,13 +279,6 @@ def _ask(repo: Path, args: list[str]) -> str:
     env_ = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")}
     res = gitutil.run(repo, args, env=env_)
     return res.stdout if res is not None and res.returncode == 0 else ""
-
-
-def global_hooks_path() -> str | None:
-    """Return git's global `core.hooksPath`, or None when unset."""
-    val = gitutil.stdout(None, ["config", "--global", "--get", "core.hooksPath"],
-                         context=gitutil.OPERATOR_CONFIG).strip()
-    return val or None
 
 
 def in_managed_dir(path: Path) -> bool:

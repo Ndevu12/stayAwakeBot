@@ -121,6 +121,11 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 
+- **`saw hook install` and `saw harden` read git's hook and template settings as git does.** A
+  template folder set in a file your git settings include is used, not replaced; a repository set to
+  run its hooks from no folder gets nothing written into its working tree; and when saw's hooks will
+  not run, because git runs hooks from another folder or this shell gives new clones another
+  template, both say so instead of saying clones will be scanned.
 - **Documentation links are short and open the hosted documentation.** `saw audit` and the issues
   saw opens link to short addresses such as `saw-docs.ndevuspace.com/go/clean-audit/`, which keep
   working when a page moves. The README and support guide link to saw-docs.ndevuspace.com instead

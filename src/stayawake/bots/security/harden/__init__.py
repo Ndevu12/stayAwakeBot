@@ -247,6 +247,8 @@ def run(*, live=check_live_processes, folders=_global_folders,
         lines.append(_HOOKS_REPAIRED)
     elif hooks_ok and hooks.changed:
         lines.append(_HOOKS_ON)
+    elif hooks is not None and hooks.may_not_run:
+        lines.append(hooks.may_not_run)
     elif not hooks_ok:
         lines.append(_HOOKS_OFF)
     if scheduled is not None and scheduled.settled:
