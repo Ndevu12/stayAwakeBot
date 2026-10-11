@@ -28,9 +28,8 @@ _EXACT_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 class StrixRef:
     """One `uses: Ndevu12/strix@<ref>` occurrence and what it tells us. `inputs` is the step's
     `with:` block and `job_permissions` the permissions in force for the job it sits in — both are
-    how the gate is CONFIGURED. `guards_changes` is true when this occurrence can actually run on a
-    change to the code: its workflow triggers on a pull request or a push, and its job runs on every
-    run of that workflow."""
+    how the gate is CONFIGURED. `guards_changes` is true when this occurrence runs on every change
+    to the code."""
     workflow: str
     job: str
     ref: str
@@ -126,8 +125,8 @@ _RUNS_ON_ITS_OWN = frozenset({"", "success()", "always()"})
 
 
 def _condition(job: dict) -> str:
-    """Read a job's `if:` condition without its `${{ }}` wrapper or spaces, in lower case. Takes the
-    job. Returns the condition, "" when there is none."""
+    """Read a job's `if:` condition in one normal form. Takes the job. Returns the condition, ""
+    when there is none."""
     text = str(job["if"]).strip() if "if" in job else ""
     if text.startswith("${{") and text.endswith("}}"):
         text = text[3:-2]
@@ -136,9 +135,7 @@ def _condition(job: dict) -> str:
 
 def _runs_on_every_run(job_id: str, jobs: dict, waiting: tuple = ()) -> bool:
     """Tell whether a job runs whenever its workflow runs on a change. Takes the job's id, the
-    workflow's jobs and the jobs already waiting on it. Returns True for a job that waits on no other
-    job and is not switched off, and for one that waits on others when its condition is absent,
-    `success()` or `always()` and, unless it is `always()`, every job it waits on runs too."""
+    workflow's jobs and the jobs already waiting on it. Returns the answer."""
     job = jobs.get(job_id)
     if not isinstance(job, dict) or job_id in waiting:
         return False
@@ -155,9 +152,9 @@ def _runs_on_every_run(job_id: str, jobs: dict, waiting: tuple = ()) -> bool:
 
 
 def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
-    """Every `uses: Ndevu12/strix@<ref>` across `{path: yaml_text}`, in sorted-path then document
-    order. Filename- and job-name-agnostic; malformed YAML files are skipped, not fatal. Returns an
-    empty list when the repository references the action nowhere."""
+    """Collect every `uses: Ndevu12/strix@<ref>` in a repository's workflows. Takes
+    `{path: yaml_text}`. Returns the occurrences in path then document order, an empty list when the
+    repository references the action nowhere."""
     found: list[StrixRef] = []
     for path in sorted(workflows):
         try:
@@ -189,10 +186,8 @@ def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
 
 
 def find_strix(workflows: dict[str, str]) -> StrixRef | None:
-    """The occurrence that answers whether this repository is gated. Takes `{path: yaml_text}`.
-    Prefers an occurrence that can run on a change to the code, and among those reports the
-    worst-configured one, so a decorative gate cannot answer for a live one. Returns None when the
-    repository references the action nowhere."""
+    """Pick the occurrence that answers whether this repository is gated. Takes `{path: yaml_text}`.
+    Returns that occurrence, or None when the repository references the action nowhere."""
     refs = find_strix_refs(workflows)
     if not refs:
         return None
@@ -230,10 +225,9 @@ class WormGate:
 
 
 def find_worm_gate(workflows: dict[str, str], *, read_action=None) -> WormGate | None:
-    """Detect a worm gate by any known mechanism. The packaged `Ndevu12/strix` action wins (it's the
-    one we can grade); otherwise look for a step that runs the scanner directly, or a local composite
-    action (`uses: ./…`) that does — resolved via the optional `read_action(uses) -> text|None`
-    (filesystem locally, the API for a remote repo; when absent, local-action gates aren't resolved)."""
+    """Find the step that gates this repository on the scanner. Takes `{path: yaml_text}` and an
+    optional `read_action(uses) -> text|None` that reads a local action. Returns the gate, or None
+    when there is none."""
     ref = find_strix(workflows)
     if ref is not None:
         return WormGate("strix", ref.workflow, f"Ndevu12/strix@{ref.ref}", strix=ref)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read a GitHub Actions workflow's triggers and jobs, every field checked for its type."""
+"""Read a GitHub Actions workflow's triggers and jobs."""
 from __future__ import annotations
 
 
