@@ -85,6 +85,8 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
+- **A repository's git settings are graded by where they really point.** Re-run `saw scan` on
+  repositories you scanned before this release.
 - **saw's own git commands run no git hooks, including hooks defined in git settings.**
 - **saw writes the files it keeps for itself only where they were named, including under `sudo`.**
   When it cannot, it writes nothing there and says so.

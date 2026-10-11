@@ -129,25 +129,35 @@ def _pointed_files(text: str, surface: ExecSurface, base: Path | None = None) ->
     return found
 
 
-def _in_git_dir_outside_hooks(path: Path, surface: ExecSurface) -> bool:
+def _in_git_dir_outside_hooks(path: Path, git_dirs: list[Path]) -> bool:
+    """Tell whether a path sits inside one of the git directories, outside its hooks. Takes the path
+    and the git directories. Returns the answer."""
     real = Path(os.path.realpath(path))
-    for git_dir in surface.git_dirs:
+    for git_dir in git_dirs:
         root = Path(os.path.realpath(git_dir))
         if _within(real, [root]) and not _within(real, [root / "hooks"]):
             return True
     return False
 
 
+def _own_git_dirs(surface: ExecSurface) -> list[Path]:
+    """List the git directories that are the repository's own: its own, and those stored inside it or
+    its working tree. Takes the surface. Returns them."""
+    own = [Path(os.path.realpath(p)) for p in (surface.work_tree, surface.git_dir, surface.common_dir)
+           if p is not None]
+    return [p for p in surface.git_dirs if _within(Path(os.path.realpath(p)), own)]
+
+
 def _unsafe_location(path: Path, surface: ExecSurface) -> str | None:
     """Say why a program or directory sits somewhere others can plant code. Takes the path and the
     surface. Returns the reason, or None."""
     inside = _within(Path(os.path.realpath(path)),
-                     [Path(os.path.realpath(p)) for p in [surface.work_tree, *surface.git_dirs]])
+                     [Path(os.path.realpath(p)) for p in [surface.work_tree, *_own_git_dirs(surface)]])
     if _under_scratch(path) and not inside:
         return "under a shared scratch directory"
     if _other_writable(path) or _other_writable(path.parent):
         return "in a world-writable directory"
-    if _in_git_dir_outside_hooks(path, surface):
+    if _in_git_dir_outside_hooks(path, surface.git_dirs):
         return "inside the git directory, outside its hooks"
     return None
 
@@ -283,7 +293,7 @@ class _Grader:
         found = []
         for include in self.surface.includes:
             why = _unsafe_location(include.target, self.surface)
-            if why and not _in_git_dir_outside_hooks(include.target, self.surface):
+            if why and not _in_git_dir_outside_hooks(include.target, _own_git_dirs(self.surface)):
                 found.append(Judgement(HEURISTIC, include.source, "include",
                                        f"pulls configuration from a file {why}",
                                        str(include.target)))
