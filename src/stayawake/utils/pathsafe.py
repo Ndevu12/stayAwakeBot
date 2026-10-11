@@ -252,24 +252,26 @@ def open_folder(folder: Path, *, create: bool = False, mode: int = 0o777, start:
     """Open a folder for writing in, one step at a time, without being redirected. Takes the folder,
     whether to make the missing parts, their mode, and an open folder a relative path starts from.
     Returns an open descriptor the caller closes. Follows a link only when root or the user writing
-    owns it and the folder holding it, and no one else can write in that folder; raises
-    `RedirectedPath` at any other link and `OSError` when a part is missing or is not a folder."""
+    owns it and the folder holding it, and no one else can write in that folder, resolves `..` where
+    the walk is, and makes nothing inside a link's target; raises `RedirectedPath` at any other link
+    and `OSError` when a part is missing or is not a folder."""
     folder = Path(folder)
     if start is not None and not folder.is_absolute():
-        parts, fd = list(folder.parts), os.dup(start)
+        parts, fd = [(p, False) for p in folder.parts], os.dup(start)
     else:
-        parts, fd = list(Path(os.path.abspath(folder)).parts[1:]), _open_dir("/", None, 0)
+        absolute = folder if folder.is_absolute() else Path(os.getcwd()) / folder
+        parts, fd = [(p, False) for p in absolute.parts[1:]], _open_dir("/", None, 0)
     owners = trusted_link_owners()
     links = 0
     try:
         while parts:
-            part = parts.pop(0)
+            part, inside_a_link = parts.pop(0)
             if part in ("", "."):
                 continue
             try:
                 found = os.stat(part, dir_fd=fd, follow_symlinks=False)
             except FileNotFoundError:
-                if not create or part == "..":
+                if not create or inside_a_link or part == "..":
                     raise
                 try:
                     os.mkdir(part, mode, dir_fd=fd)
@@ -284,7 +286,7 @@ def open_folder(folder: Path, *, create: bool = False, mode: int = 0o777, start:
                 if os.path.isabs(target):
                     os.close(fd)
                     fd = _open_dir("/", None, 0)
-                parts[:0] = list(Path(target).parts[1 if os.path.isabs(target) else 0:])
+                parts[:0] = [(p, True) for p in Path(target).parts[1 if os.path.isabs(target) else 0:]]
                 continue
             following = _enter(part, fd, found)
             os.close(fd)

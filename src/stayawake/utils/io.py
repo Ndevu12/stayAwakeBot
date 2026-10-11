@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from stayawake.utils import atomicwrite, env, scratch
+from stayawake.utils import atomicwrite, env, pathsafe, scratch
 
 
 def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Path:
@@ -23,20 +23,25 @@ def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Pa
     stderr (naming both paths) and never raises.
     """
     preferred = Path(preferred)
+    why = "is not writable"
     for candidate in (preferred, Path(tempfile.gettempdir()) / "stayawake-reports"):
         try:
             atomicwrite.make_folder(candidate)
             fd, probe = tempfile.mkstemp(dir=str(candidate), prefix=".probe-")
             os.close(fd)
             os.remove(probe)
+        except pathsafe.RedirectedPath:
+            if candidate == preferred:
+                why = "is reached through a link saw does not follow"
+            continue
         except OSError:
             continue
         if candidate != preferred:
-            print(f"warning: {label} directory {preferred} is not writable; "
+            print(f"warning: {label} directory {preferred} {why}; "
                   f"writing to {candidate} instead", file=sys.stderr)
         return candidate
     last = scratch.kept_dir("the reports directory")
-    print(f"warning: {label} directory {preferred} is not writable; "
+    print(f"warning: {label} directory {preferred} {why}; "
           f"writing to {last} instead", file=sys.stderr)
     return last
 

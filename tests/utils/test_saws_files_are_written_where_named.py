@@ -181,6 +181,61 @@ class TestOnlyWhatTheWriterNamedChanges(_Sandbox):
         self.assertEqual([], os.listdir(self.base / "kept"))
 
 
+class TestThePathMeansWhatTheKernelReadsIt(_Sandbox):
+
+    def test_dotdot_after_the_users_own_link_is_the_link_targets_parent(self):
+        (self.elsewhere / "deep" / "sub").mkdir(parents=True)
+        (self.base / "lnk").symlink_to(self.elsewhere / "deep" / "sub")
+        self.assertTrue(atomicwrite.replace(self.base / "lnk" / ".." / "state" / "record.json", "{}"))
+        self.assertEqual(b"{}", (self.elsewhere / "deep" / "state" / "record.json").read_bytes())
+        self.assertFalse((self.base / "state").exists())
+
+    def test_nothing_is_made_inside_a_link_to_a_folder_that_does_not_exist(self):
+        (self.base / "local").symlink_to(self.base / "not-yet")
+        self.assertFalse(atomicwrite.replace(self.base / "local" / "state" / "record.json", "{}"))
+        self.assertFalse((self.base / "not-yet").exists())
+
+
+class TestTheOperatorsHookIsSetAsideAsItWas(_Sandbox):
+
+    def settle(self, hooks):
+        with mock.patch.object(hook, "_inside_what_saw_keeps", return_value=False):
+            return hook._settle(hooks, "/usr/local/bin/saw", None, own=False)
+
+    def test_a_disabled_hook_in_a_folder_that_cannot_change_stays_disabled(self):
+        hooks = self.base / "hooks"
+        hooks.mkdir()
+        (hooks / "post-checkout").write_text("#!/bin/sh\n", encoding="utf-8")
+        os.chmod(hooks / "post-checkout", 0o644)
+        os.chmod(hooks, 0o555)
+        self.addCleanup(os.chmod, hooks, 0o755)
+        self.settle(hooks)
+        self.assertEqual(0o644, (hooks / "post-checkout").stat().st_mode & 0o777)
+
+    def test_a_runnable_hook_with_another_name_is_set_aside_and_sawss_installed(self):
+        hooks = self.base / "hooks"
+        hooks.mkdir()
+        (self.elsewhere / "post-checkout").write_text("#!/bin/sh\n", encoding="utf-8")
+        os.chmod(self.elsewhere / "post-checkout", 0o755)
+        os.link(self.elsewhere / "post-checkout", hooks / "post-checkout")
+        self.settle(hooks)
+        self.assertTrue((hooks / "post-checkout.local").exists())
+        self.assertIn("saw", (hooks / "post-checkout").read_text(encoding="utf-8"))
+        self.assertEqual(0o755, (self.elsewhere / "post-checkout").stat().st_mode & 0o777)
+
+    def test_a_hook_with_another_name_that_would_need_a_new_mode_is_put_back(self):
+        hooks = self.base / "hooks"
+        hooks.mkdir()
+        (self.elsewhere / "secret").write_text("x", encoding="utf-8")
+        os.chmod(self.elsewhere / "secret", 0o600)
+        os.link(self.elsewhere / "secret", hooks / "post-checkout")
+        actions = self.settle(hooks)
+        self.assertEqual(0o600, (self.elsewhere / "secret").stat().st_mode & 0o777)
+        self.assertTrue((hooks / "post-checkout").exists())
+        self.assertFalse((hooks / "post-checkout.local").exists())
+        self.assertIn("left as it is", " ".join(a.detail for a in actions))
+
+
 class TestAMoveBetweenDisksCopiesWhole(_Sandbox):
 
     def test_a_folder_with_a_link_inside_is_copied_and_the_source_removed(self):

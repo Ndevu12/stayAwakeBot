@@ -199,6 +199,18 @@ def _write_verified(dest: Path, text: str, hooks_dir: Path) -> bool:
     return atomicwrite.replace(dest, text, mode=0o755) and os.access(dest, os.X_OK)
 
 
+def _runnable_as_your_own(preserved: Path) -> bool:
+    """Make a hook set aside as the operator's own run as it did. Takes it. Returns False when its mode
+    had to change and could not."""
+    try:
+        if preserved.is_symlink() or os.lstat(preserved).st_mode & 0o777 == 0o755:
+            return True
+        atomicwrite.set_mode(preserved, 0o755)
+    except OSError:
+        return False
+    return True
+
+
 def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list[Action]:
     """Make `hooks_dir` carry the hooks saw installs, moving aside whatever stands in their way, and
     return what was done to each path. In saw's own directory (`own`) nothing foreign stays."""
@@ -256,10 +268,16 @@ def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list
         elif state == hookscript.FOREIGN:
             preserved = hooks_dir / f"{event}.local"
             try:
-                if not dest.is_symlink():
-                    atomicwrite.set_mode(dest, 0o755)
                 atomicwrite.rename_in(hooks_dir, dest.name, preserved.name)
             except OSError:
+                actions.append(Action(UNVERIFIED, dest, "could not be set aside as your own, so it was left as it is"))
+                continue
+            if not _runnable_as_your_own(preserved):
+                try:
+                    atomicwrite.rename_in(hooks_dir, preserved.name, dest.name)
+                except OSError:
+                    actions.append(Action(UNVERIFIED, preserved, "was set aside as your own but could not be made to run"))
+                    continue
                 actions.append(Action(UNVERIFIED, dest, "could not be set aside as your own, so it was left as it is"))
                 continue
             actions.append(Action(PRESERVED, preserved, "your hook, now run after saw's"))
