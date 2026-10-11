@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from stayawake.lib.git.contexts import (Context, UNTRUSTED, SAW_OWNED, OPERATOR_PUSH,
-                                        OPERATOR_CONFIG, KEYS_A_CALLER_MAY_NOT_SET)
+                                        OPERATOR_CONFIG, KEYS_A_CALLER_MAY_NOT_SET,
+                                        KEY_PREFIXES_A_CALLER_MAY_NOT_SET)
 
 _GLOBAL_OPTIONS_WITH_VALUE = frozenset({"-c", "-C", "--git-dir", "--work-tree", "--namespace",
                                         "--exec-path", "--config-env"})
@@ -163,7 +164,7 @@ def judge(context: Context, args: list[str], env: dict | None) -> Verdict:
     caller's environment. Returns the verdict."""
     global_options, sub, rest = split(args)
     for key in _config_keys_set(global_options):
-        if key == "*" or key in KEYS_A_CALLER_MAY_NOT_SET or key.startswith("protocol."):
+        if key == "*" or key in KEYS_A_CALLER_MAY_NOT_SET or key.startswith(KEY_PREFIXES_A_CALLER_MAY_NOT_SET):
             return Verdict(f"a caller may not set `{key}`", sub)
     if not sub:
         return Verdict("no git subcommand was named", sub)

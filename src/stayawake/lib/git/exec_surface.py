@@ -10,16 +10,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.lib.git.exec_keys import HOOKS_DIRECTORY, ExecKey, rule_for, subsection
+from stayawake.lib.git.hook_events import HOOK_NAMES
 from stayawake.lib.git.run import LOCAL_TIMEOUT, run
 from stayawake.lib.git.what_git_reads import RepositorySettings, gitlinks, repository_settings
 from stayawake.utils import pathsafe, scratch
 
-HOOK_NAMES = frozenset((
-    "applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit prepare-commit-msg "
-    "commit-msg post-commit pre-rebase post-checkout post-merge pre-push pre-receive update "
-    "proc-receive post-receive post-update reference-transaction push-to-checkout pre-auto-gc "
-    "post-rewrite sendemail-validate fsmonitor-watchman post-index-change p4-changelist "
-    "p4-prepare-changelist p4-post-changelist p4-pre-submit").split())
 
 MAX_INCLUDE_DEPTH = 10
 MAX_GIT_DIRS = 256

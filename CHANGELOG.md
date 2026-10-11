@@ -81,6 +81,7 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
+- **saw's own git commands run no git hooks, including hooks defined in git settings.**
 - **saw writes the files it keeps for itself only where they were named, including under `sudo`.**
   When it cannot, it writes nothing there and says so.
 - **On macOS, saw lists running processes with the system's own `ps`**, whatever is first on your
