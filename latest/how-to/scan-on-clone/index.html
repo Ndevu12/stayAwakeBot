@@ -1811,7 +1811,8 @@ git command. It is scanned against <em>your</em> allowlist, never the cloned rep
 <a href="../../explanation/trust-model/">trust model</a>.</p>
 <p><strong>What you are installing.</strong> Hooks that git runs, unprompted, in your repositories. Each repository
 keeps them current on its own, and <a href="../audit-a-machine/"><code>saw audit</code></a> reports a hook saw did not
-install or one that has been changed.</p>
+install or one that has been changed. With git 2.54 or later, repositories you already have are
+scanned as well; with an older git, <code>install</code> says to update it.</p>
 <p><strong>Limits worth knowing.</strong> <code>git reset --hard</code> runs no hook, so scan that yourself. If git is set to
 run every repository's hooks from one folder, saw's hooks do not run there, and <code>install</code> and
 <code>status</code> say so. saw never stops a push: a push it could not check in full reads as not verified,
