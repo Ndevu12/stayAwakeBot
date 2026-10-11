@@ -315,6 +315,76 @@ class TestNothingIsTakenForAViewItIsNot(ExecSurfaceSandbox):
         self.assertNotIn(tree / ".git" / "config", sources)
 
 
+class TestHooksRunWhereGitRunsThem(ExecSurfaceSandbox):
+
+    def test_the_scanned_repositorys_tree_named_by_its_settings(self):
+        repo = self.repo()
+        self.append_config(repo, f"[core]\n\tworktree = {repo / 'src'}\n\thooksPath = hk\n")
+        self.hook(repo / "src" / "hk", "pre-commit", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_submodules_tree_named_by_its_settings_away_from_its_path(self):
+        repo = self.repo()
+        library = self.repo("library")
+        self.git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library), "lib")
+        elsewhere = repo / "elsewhere"
+        elsewhere.mkdir()
+        module = repo / ".git" / "modules" / "lib" / "config"
+        text = module.read_text()
+        module.write_text("\n".join(line for line in text.splitlines() if "worktree" not in line)
+                          + f"\n[core]\n\tworktree = {elsewhere}\n\thooksPath = hk\n")
+        self.hook(elsewhere / "hk", "pre-commit", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_submodule_reached_through_a_linked_modules_directory(self):
+        repo = self.repo()
+        library = self.repo("library")
+        store = repo.parent / "store" / "mods"
+        store.mkdir(parents=True)
+        (repo / ".git" / "modules").symlink_to(store)
+        self.git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library), "lib")
+        with open(store / "lib" / "config", "a", encoding="utf-8") as fh:
+            fh.write("[core]\n\thooksPath = hk\n")
+        self.hook(repo / "lib" / "hk", "pre-commit", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+
+class TestGitsOwnRulesDecide(ExecSurfaceSandbox):
+
+    def test_a_submodule_kept_under_the_worktrees_directory(self):
+        repo = self.repo()
+        self.write(repo, ".gitmodules", '[submodule "sub"]\n\tpath = sub\n\turl = ./x\n')
+        module = repo / ".git" / "worktrees" / "sub"
+        module.mkdir(parents=True)
+        (module / "HEAD").write_text("ref: refs/heads/main\n")
+        (module / "config").write_text("")
+        (repo / "sub").mkdir()
+        (repo / "sub" / ".git").write_text(f"gitdir: {module}\n")
+        self.hook(module / "hooks", "post-checkout", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_submodules_tree_from_settings_git_does_not_read_changes_nothing(self):
+        repo = self.repo()
+        self.write(repo, ".gitmodules", '[submodule "sub"]\n\tpath = sub\n\turl = ./x\n')
+        module = repo / ".git" / "modules" / "sub"
+        module.mkdir(parents=True)
+        (module / "HEAD").write_text("ref: refs/heads/main\n")
+        (module / "config").write_text("[core]\n\tfsmonitor = sh payload.sh\n")
+        (module / "config.worktree").write_text(f"[core]\n\tworktree = {repo / 'elsewhere'}\n")
+        (repo / "sub").mkdir()
+        (repo / "sub" / ".git").write_text(f"gitdir: {module}\n")
+        self.hook(repo / "sub", "payload.sh", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_repository_git_refuses_is_read_as_before(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\trepositoryformatversion = 1\n\thooksPath = .husky\n"
+                                 "[extensions]\n\tnosuchextension = true\n")
+        self.hook(repo / ".git" / "hooks", "post-merge", SCRIPT)
+        confirmed = [f.path for f in self.graded(repo)[CONFIRMED]]
+        self.assertFalse(any(path.endswith("post-merge") for path in confirmed))
+
+
 class TestOnlyTheRepositorysOwnScopesAreTaken(unittest.TestCase):
 
     def test_other_scopes_in_gits_answer_are_left_out(self):
@@ -322,7 +392,8 @@ class TestOnlyTheRepositorysOwnScopesAreTaken(unittest.TestCase):
                    b"local\0file:.git/config\0core.hookspath\n.husky\0"
                    b"command\0command line:\0core.hookspath\n/saw/empty\0")
         expanded = b"global\0/home/me/hooks\0local\0.husky\0command\0/saw/empty\0"
-        with mock.patch.object(what_git_reads, "stdout_bytes", side_effect=[listing, expanded]):
+        with mock.patch.object(what_git_reads, "stdout_bytes",
+                               side_effect=[b"false\n/repo\n", listing, expanded]):
             answer = what_git_reads.repository_settings(Path("/repo"))
         self.assertEqual((Path("/repo/.git/config"),), answer.files)
         self.assertEqual((".husky",), answer.hooks_paths)

@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git.run import stdout_bytes
+from stayawake.lib.git.run import run, stdout_bytes
 
 REPOSITORY_SCOPES = (b"local", b"worktree")
 _HOOKS_PATH = "core.hookspath"
@@ -19,17 +19,36 @@ class RepositorySettings:
 
     `files` are the configuration files of the repository's own scopes, in the order git reads them;
     `hooks_paths` are the `core.hooksPath` values those scopes set, as git expands them, last one
-    effective; `sets_hooks_path` is True when those scopes set one at all.
+    effective; `sets_hooks_path` is True when those scopes set one at all; `toplevel` is the working
+    tree git runs hooks in, None for a repository without one; `git_runs_here` is False when git
+    refuses the repository, so runs nothing in it.
     """
 
     files: tuple[Path, ...]
     hooks_paths: tuple[str, ...]
     sets_hooks_path: bool
+    toplevel: Path | None = None
+    git_runs_here: bool = True
+
+
+GIT_REFUSES = RepositorySettings((), (), False, None, git_runs_here=False)
 
 
 def repository_settings(where: Path) -> RepositorySettings | None:
     """Ask git what it reads for the repository view at `where`. Takes a working tree, or a git
-    directory for a repository with none. Returns the answer, or None when git did not give one."""
+    directory for a repository with none. Returns the answer, `GIT_REFUSES` when git will not run in
+    the repository, or None when git did not give one."""
+    state = stdout_bytes(where, ["rev-parse", "--is-bare-repository", "--show-toplevel"])
+    if state is None:
+        bare = run(where, ["rev-parse", "--is-bare-repository"])
+        if bare is None:
+            return None
+        if bare.returncode != 0:
+            return GIT_REFUSES
+        top = None
+    else:
+        lines = state.split(b"\n")
+        top = Path(os.fsdecode(lines[1])) if len(lines) > 1 and lines[1] else None
     listed = stdout_bytes(where, ["config", "--list", "--show-origin", "--show-scope", "-z"])
     if listed is None:
         return None
@@ -51,4 +70,4 @@ def repository_settings(where: Path) -> RepositorySettings | None:
         parts = expanded.split(b"\0")
         hooks_paths = tuple(os.fsdecode(value) for scope, value in zip(parts[0::2], parts[1::2])
                             if scope in REPOSITORY_SCOPES)
-    return RepositorySettings(tuple(files), hooks_paths, sets_hooks_path)
+    return RepositorySettings(tuple(files), hooks_paths, sets_hooks_path, top)
