@@ -481,6 +481,45 @@ class TestEverySettingIsReadAsGitReadsIt(_GitSettingsCheckout):
         self.assertEqual(1, _said(result).count("core.fsmonitor"))
 
 
+class TestOnlyWhatGitReadsForThisRepositoryIsEdited(_GitSettingsCheckout):
+
+    def test_a_hooks_file_a_submodule_also_reads_is_left_and_git_still_works_there(self):
+        library = self.new_repo("library")
+        self.write(library, "lib.js", "export const x = 1;\n")
+        self.commit(library, "a library")
+        self.git(self.root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library),
+                 "sub")
+        (self.root / "hooks.cfg").write_text(self.payload_hook(), encoding="utf-8")
+        self.configure("[include]\n\tpath = ../hooks.cfg\n")
+        with open(self.root / ".git" / "modules" / "sub" / "config", "a", encoding="utf-8") as fh:
+            fh.write('[include]\n\tpath = ../../../hooks.cfg\n[hook "sync"]\n\tevent = post-checkout\n')
+        before = (self.root / "hooks.cfg").read_bytes()
+        result = self.checkout()
+        self.assertEqual(before, (self.root / "hooks.cfg").read_bytes())
+        self.assertIn("submodule", _said(result))
+        status = subprocess.run(["git", "-C", str(self.root / "sub"), "status"], capture_output=True)
+        self.assertEqual(0, status.returncode, status.stderr)
+
+    def test_a_file_git_cannot_open_is_never_edited(self):
+        phantom = self.root / ".git" / "phantom.cfg"
+        phantom.write_text('[hook "sync"]\n\tevent = post-checkout\n', encoding="utf-8")
+        self.configure(self.payload_hook() + "[include]\n\tpath = gone/../phantom.cfg\n")
+        before = phantom.read_bytes()
+        self.checkout()
+        self.assertEqual(before, phantom.read_bytes())
+        self.assertEqual([], [s for s in self.settings() if s.startswith("hook.sync.")])
+
+
+class TestAFilterGitRequiresKeepsItsCommands(_GitSettingsCheckout):
+
+    def test_its_payload_commands_are_left_and_named(self):
+        self.configure(f'[filter "x"]\n\tclean = node -e "{PAYLOAD}"\n\tsmudge = node -e "{PAYLOAD}"\n'
+                       "\trequired = true\n")
+        result = self.checkout()
+        self.assertEqual([f"node -e {PAYLOAD}"], self.values("filter.x.clean"))
+        self.assertIn("filter git requires", _said(result))
+
+
 class TestTheVerbIsDeclaredAsData(unittest.TestCase):
 
     def test_the_signature_names_the_verb_the_fix_carries_out(self):

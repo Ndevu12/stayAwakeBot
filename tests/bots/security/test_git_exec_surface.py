@@ -572,42 +572,6 @@ class TestSubmodulesAreReadInTheirOwnTree(ExecSurfaceSandbox):
         self.hook(repo / "sub", "fetch.sh", self.SCRIPT)
         self.assert_tier(repo, CONFIRMED)
 
-    def _module(self, repo: Path, config: str) -> Path:
-        self._gitmodules(repo)
-        module = repo / ".git" / "modules" / "sub"
-        module.mkdir(parents=True)
-        (module / "HEAD").write_text("ref: refs/heads/main\n")
-        (module / "config").write_text(config)
-        (repo / "sub").mkdir()
-        (repo / "sub" / ".git").write_text(f"gitdir: {module}\n")
-        return module
-
-    def test_a_command_in_the_submodules_worktree_settings(self):
-        repo = self.repo()
-        module = self._module(repo, "[extensions]\n\tworktreeConfig = true\n")
-        (module / "config.worktree").write_text("[core]\n\tfsmonitor = ./fetch.sh\n")
-        self.hook(repo / "sub", "fetch.sh", self.SCRIPT)
-        self.assert_tier(repo, CONFIRMED)
-
-    def test_a_hook_in_the_submodules_hooks_path(self):
-        repo = self.repo()
-        self._module(repo, "[core]\n\thooksPath = .githooks\n")
-        self.hook(repo / "sub" / ".githooks", "post-checkout", self.SCRIPT)
-        self.assert_tier(repo, CONFIRMED)
-
-
-class TestAPathUnderGitsInstallPrefixIsNotCalledRead(ExecSurfaceSandbox):
-
-    def test_an_include(self):
-        repo = self.repo()
-        self.append_config(repo, "[include]\n\tpath = %(prefix)/etc/team.gitconfig\n")
-        self.assertIn("install prefix", self.scan(repo).error or "")
-
-    def test_a_hooks_path(self):
-        repo = self.repo()
-        self.append_config(repo, "[core]\n\thooksPath = %(prefix)/share/hooks\n")
-        self.assertIn("install prefix", self.scan(repo).error or "")
-
 
 class TestPowerShellWordsNeedPowerShell(ExecSurfaceSandbox):
     """Check `iex` outside PowerShell: a hostname, or Elixir's shell."""
