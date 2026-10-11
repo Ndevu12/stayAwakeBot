@@ -127,8 +127,9 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 
 - **Scan-on-clone scans a repository's submodules when they are first checked out**, and a
-  repository that `git checkout` or `git switch` first fills after `git clone --no-checkout`. Run
-  `saw scan` on repositories with submodules you cloned before this release.
+  repository that a branch checkout (`git checkout <branch>` or `git switch`) first fills after
+  `git clone --no-checkout`. Run `saw scan` on repositories with submodules you cloned before this
+  release.
 - **`saw guard check` grades the gate that actually guards the branch** when a repository runs the
   scanner in more than one place. Re-run `saw guard check` on repositories you gate this way.
 - **`saw hook install` and `saw harden` read git's hook and template settings as git does.** A
