@@ -20,7 +20,8 @@ from unittest import mock
 from stayawake.lib import git as gitutil
 from stayawake.lib.git import allowlist, owned
 from stayawake.lib.git.borrowed import borrow
-from stayawake.lib.git.contexts import child_env, UNTRUSTED, OPERATOR_CONFIG, OPERATOR_PUSH
+from stayawake.lib.git.contexts import child_env, config_prefix, UNTRUSTED, OPERATOR_CONFIG, OPERATOR_PUSH
+from stayawake.lib.git.hook_events import HOOK_NAMES
 from stayawake.lib.git.merge.detect import evil_merge_paths
 from stayawake.lib.git.query import introduced_added_text, file_commits, tracked_under
 from stayawake.lib.git.run import GitRefused, run
@@ -191,6 +192,42 @@ class TestNoRepositoryProgramRuns(HostileRepo):
         self.assertEqual([], file_commits(repo, ":(glob)**"))
 
 
+def _git_runs_configured_hooks() -> bool:
+    """Tell whether the git on PATH runs hooks set in its settings (2.54 and later)."""
+    import re
+    import subprocess
+    found = re.search(r"(\d+)\.(\d+)", subprocess.run(["git", "--version"], capture_output=True,
+                                                     text=True).stdout)
+    return bool(found) and (int(found.group(1)), int(found.group(2))) >= (2, 54)
+
+
+class TestNoHookRunsInSawsGit(HostileRepo):
+
+    def test_every_hook_event_is_switched_off_in_every_context(self):
+        for context in (UNTRUSTED, OPERATOR_CONFIG, OPERATOR_PUSH):
+            prefix = config_prefix(context)
+            for event in HOOK_NAMES:
+                self.assertIn(f"hook.{event}.enabled=false", prefix, (context, event))
+
+    def test_saws_own_hooks_stand_down_in_its_git(self):
+        for context in (UNTRUSTED, OPERATOR_CONFIG, OPERATOR_PUSH):
+            self.assertEqual("1", child_env(context, None)["SAW_HOOK_DISABLED"])
+
+    @unittest.skipUnless(_git_runs_configured_hooks(), "this git does not run hooks set in its settings")
+    def test_a_hook_set_in_the_repositorys_settings_does_not_run_when_saw_moves_a_ref(self):
+        repo = self.new_repo()
+        self.write(repo, "a.txt", "a\n")
+        self.commit(repo, "a")
+        program = _sentinel_program(self.root, "reference-transaction")
+        self.configure(repo, f'[hook "mark"]\n\tcommand = {program}\n\tevent = reference-transaction\n')
+        self.git(repo, "update-ref", "refs/heads/control", self.rev(repo))
+        self.assertEqual(["reference-transaction"], self.ran())
+        (self.root / "ran" / "reference-transaction").unlink()
+        self.assertTrue(gitutil.run_ok(repo, ["update-ref", "refs/heads/moved", self.rev(repo)],
+                                       context=UNTRUSTED))
+        self.assertEqual([], self.ran())
+
+
 class TestContexts(HostileRepo):
 
     def test_an_inherited_repository_location_is_dropped(self):
@@ -220,6 +257,13 @@ class TestContexts(HostileRepo):
         repo = self.new_repo()
         with self.assertRaises(GitRefused):
             run(repo, ["-c", "core.fsmonitor=/bin/sh", "rev-parse", "HEAD"])
+
+    def test_a_caller_cannot_switch_a_hook_back_on_or_bring_settings_in(self):
+        repo = self.new_repo()
+        for key in ("hook.reference-transaction.enabled=true", "Hook.Mark.Command=/bin/sh",
+                    "include.path=/tmp/x", "includeIf.onbranch:main.path=/tmp/x"):
+            with self.subTest(key=key), self.assertRaises(GitRefused):
+                run(repo, ["-c", key, "rev-parse", "HEAD"])
 
 
 class TestBorrowed(HostileRepo):

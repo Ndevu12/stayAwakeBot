@@ -17,7 +17,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.utils import scratch
+from stayawake.lib.git.hook_events import HOOK_NAMES
+from stayawake.utils import env as saw_env, scratch
 
 GIT_LOCATION_VARS = frozenset({
     "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
@@ -103,6 +104,7 @@ KEYS_A_CALLER_MAY_NOT_SET = frozenset({
     "sequence.editor", "protocol.allow", "credential.helper", "core.askpass", "core.sshcommand",
     "gc.auto", "maintenance.auto", "submodule.recurse", "fetch.recursesubmodules",
 })
+KEY_PREFIXES_A_CALLER_MAY_NOT_SET = ("protocol.", "hook.", "include.", "includeif.")
 
 _hooks_dir: Path | None = None
 _neutral_dir: Path | None = None
@@ -128,6 +130,8 @@ def neutral_dir() -> Path:
 def config_prefix(context: Context) -> list[str]:
     """The `-c` arguments and global options `context` places before the caller's arguments."""
     out = ["-c", f"core.hooksPath={empty_hooks_dir()}"]
+    for event in sorted(HOOK_NAMES):
+        out += ["-c", f"hook.{event}.enabled=false"]
     for key, value in context.overrides:
         out += ["-c", f"{key}={value}"]
     if context is OPERATOR_PUSH:
@@ -168,6 +172,7 @@ def child_env(context: Context, env: dict | None, *, operator_scopes: bool | Non
         out["GIT_CONFIG_NOSYSTEM"] = "1"
         out["GIT_CONFIG_GLOBAL"] = os.devnull
     out["GIT_TERMINAL_PROMPT"] = "0"
+    out[saw_env.SAW_HOOK_DISABLED] = "1"
     out["GIT_ALLOW_PROTOCOL"] = ":".join(OPERATOR_TRANSPORTS) if context is OPERATOR_PUSH else ""
     out.update(_STORED_VIEW)
     if repository_less:
