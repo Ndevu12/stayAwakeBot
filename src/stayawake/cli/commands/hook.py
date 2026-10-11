@@ -26,7 +26,6 @@ def register(sub) -> None:
             ("saw hook install", "future clones/pulls are scanned"),
             ("saw hook status", "is it active? where is its state?"),
             ("saw hook uninstall", "stop scanning future clones"),
-            ("SAW_HOOK_DISABLED=1 git clone <url>", "one-off bypass, no uninstall"),
         ])
     p.set_defaults(func=lambda a: (p.print_help() or 0))
     hsub = p.add_subparsers(dest="hook_command", metavar="<subcommand>")
@@ -59,7 +58,6 @@ def register(sub) -> None:
                     "they ran before. Repositories already cloned keep the hooks they have.",
         examples=[
             ("saw hook uninstall", "stop scanning future clones"),
-            ("SAW_HOOK_DISABLED=1 git clone <url>", "one-off bypass; stays installed"),
         ])
     un.set_defaults(func=run_uninstall)
 

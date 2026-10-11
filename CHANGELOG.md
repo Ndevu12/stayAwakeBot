@@ -246,6 +246,8 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **The intro screen names the verdict rather than an exit code, and `saw hook install` no longer
+  suggests switching its hooks off.**
 - **`saw scan`, `saw fix` and the hooks use the same config:** the one you name with `-c`, or
   the one you installed the hooks with. A `config/security.yml` in the directory you run from
   is no longer read unless you name it.

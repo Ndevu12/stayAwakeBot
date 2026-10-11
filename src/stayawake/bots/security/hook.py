@@ -585,8 +585,7 @@ def install(config_path: str | None = None, *, no_stream: bool = False,
     _print_actions(actions, out)
     print(_paint("  repositories you clone or create from now on get the hooks too.", "dim", out),
           file=out)
-    print(_paint("  disable for one shell: SAW_HOOK_DISABLED=1   ·   remove: saw hook uninstall",
-                 "dim", out), file=out)
+    print(_paint("  remove: saw hook uninstall", "dim", out), file=out)
     _warn_hookspath(out)
     _advise_git_update(out)
     return 0 if settled else 3
