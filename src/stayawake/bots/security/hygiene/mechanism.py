@@ -252,8 +252,9 @@ def _list_global_config():
 
 
 def _git_global_config() -> list[tuple[str, str]]:
-    """(key, value) pairs from the GLOBAL git config only (never a scanned repo's local config).
-    Git-absent / no config → []. Uses -z framing so a multi-line value can't desync the parse."""
+    """(key, value) pairs from the GLOBAL git config only (never a scanned repo's local config), each
+    key as git lists it. Git-absent / no config → []. Uses -z framing so a multi-line value can't
+    desync the parse."""
     r = _list_global_config()
     if r is None or r.returncode != 0:
         return []
@@ -262,7 +263,7 @@ def _git_global_config() -> list[tuple[str, str]]:
         if not chunk:
             continue
         key, _, value = chunk.partition("\n")
-        pairs.append((key.lower(), value))
+        pairs.append((key, value))
     return pairs
 
 
@@ -316,7 +317,9 @@ def check_git_config_execution() -> list[HygieneIssue]:
     scratch dir, or any exec-capable key whose value fetch/decode-execs. Repo-borne `.git/config`
     RCE is the scan-side complement, deliberately out of scope here (host hygiene = global config)."""
     issues: list[HygieneIssue] = []
-    for key, value in _git_global_config():
+    pairs = _git_global_config()
+    hook_events, hooks_off = _configured_hook_events(pairs)
+    for key, value in pairs:
         val = value.strip()
         if not val:
             continue
@@ -376,4 +379,42 @@ def check_git_config_execution() -> list[HygieneIssue]:
                     remediation=f"Remove it: git config --global --unset {key} (or fix the alias). "
                                 "Treat the host as possibly compromised if you did not set it.",
                 ))
+            elif (hook := _configured_hook_command(key)) is not None and hook not in hooks_off:
+                events = ", ".join(hook_events.get(hook, [])) or "no event yet"
+                issues.append(HygieneIssue(
+                    id="git-hook-command-set",
+                    severity="info",
+                    title=f"git hook {hook} is set globally",
+                    detail=f"Global git config sets {key} = {val[:120]} — git 2.54 and later run it in "
+                           f"every repository on: {events}. Verify you set it up.",
+                    remediation=f'If unfamiliar, remove the [hook "{hook}"] section: '
+                                "git config --global --edit.",
+                ))
     return issues
+
+
+def _configured_hook_command(key: str) -> str | None:
+    """Name the hook a `hook.<name>.command` setting belongs to. Takes the setting's key. Returns the
+    name, or None for any other key."""
+    if not key.startswith("hook.") or not key.endswith(".command") or key.count(".") < 2:
+        return None
+    return key[len("hook."):-len(".command")]
+
+
+def _configured_hook_events(pairs) -> tuple[dict[str, list[str]], set[str]]:
+    """Gather the events each hook set in the git settings runs on, and the hooks switched off. Takes
+    the settings' key and value pairs. Returns the events by hook name and the names switched off."""
+    events: dict[str, list[str]] = {}
+    switched_off: set[str] = set()
+    for key, value in pairs:
+        if not key.startswith("hook.") or key.count(".") < 2:
+            continue
+        name, variable = key[len("hook."):key.rindex(".")], key[key.rindex(".") + 1:]
+        if variable == "event" and value.strip():
+            events.setdefault(name, []).append(value.strip())
+        elif variable == "enabled":
+            if value.strip().lower() in ("false", "no", "off", "0"):
+                switched_off.add(name)
+            else:
+                switched_off.discard(name)
+    return events, switched_off

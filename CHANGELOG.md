@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw audit` names a hook set in your global git settings**, with the events it runs on, as it
+  names a global `core.hooksPath`; one you switched off is not named.
 - **`saw watch` tells you on your desktop.** A notification appears when it stops code, when code it
   stopped before comes back, when code could not be stopped, and when it has not been able to
   check the machine for a while. Code that came back, and code that could not be stopped, are
