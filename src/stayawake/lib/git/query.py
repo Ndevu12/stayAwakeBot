@@ -97,6 +97,18 @@ def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
     return int(out) if out.isdigit() else None
 
 
+def head_moves(repo: str | Path, count: int) -> list[str] | None:
+    """Read why HEAD last moved. Takes the repo and how many moves to read. Returns each move's reason
+    as git recorded it, newest first, or None when git could not read them."""
+    out = stdout_bytes(repo, ["log", "-g", "-z", f"--max-count={count}", "--format=%gs", "HEAD", "--"])
+    if out is None:
+        return None
+    reasons = out.split(b"\0")
+    if reasons and reasons[-1] == b"":
+        reasons.pop()
+    return [os.fsdecode(reason) for reason in reasons]
+
+
 _TYPE_MASK, _LINK_TYPE, _TREE_TYPE, _FILE_TYPE = 0o170000, 0o120000, 0o040000, 0o100000
 _ENTRY_TYPES = (_FILE_TYPE, _LINK_TYPE, _TREE_TYPE, 0o160000)
 _OBJECT_ID_BYTES = 20

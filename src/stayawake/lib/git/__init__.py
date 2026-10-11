@@ -49,6 +49,7 @@ from stayawake.lib.git.query import (
     fetch_refs,
     FetchResult,
     commit_count,
+    head_moves,
     ref_counts,
     remote_branches_matching,
 )
@@ -81,7 +82,8 @@ __all__ = [
     "file_commits", "blob_paths", "path_versions", "introduced_added_text", "commit_meta", "remote_has_branch",
     "branches_matching", "branches_carrying", "unreadable_branch_refs", "listed_branch_refs", "branch_name_of",
     "fetch_refs", "FetchResult",
-    "remote_branches_matching", "ref_safe_segment", "choose_branch", "commit_count", "ref_counts",
+    "remote_branches_matching", "ref_safe_segment", "choose_branch", "commit_count", "head_moves",
+    "ref_counts",
     "merge_commits", "evil_merge_paths", "clean_merge_blob", "borrowed_or_none",
     "borrow", "Borrowed", "BorrowError",
     "add_worktree", "remove_worktree", "release_worktree", "stage_all", "unstage_cached",

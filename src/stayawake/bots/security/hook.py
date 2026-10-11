@@ -34,6 +34,7 @@ _MARKER = hookscript.MARKER
 _HOOKS = hookscript.HOOKS
 _YIELDS_TO_THE_OPERATOR = frozenset({"pre-push"})
 _NULL_REV = "0" * 40
+_HEAD_MOVED_BY_A_CLONE = "clone: "
 _AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `pnpm`), open it in "
           "your editor/IDE (auto-run tasks & extensions fire on open), or build or run it")
 
@@ -973,15 +974,22 @@ def _remember(root: Path, key: str) -> None:
         pass
 
 
-def _scan_scope(event: str, argv: list[str], root: Path):
-    """Decide what a hook event scans. Takes the event, its arguments and the repository root.
-    Returns `(include_only, label)`: `None` for the whole tree, a tuple of paths, or `(False, None)`
-    when there is nothing to scan."""
+def _scanned_clean(root: Path, key: str) -> bool:
+    """Tell whether saw remembers a complete clean scan of a repository. Takes the root and the clean
+    key. Returns the answer."""
+    return key in (_load_cache().get(os.path.realpath(root)), _settings_scans().get(os.path.realpath(root)))
+
+
+def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None = None):
+    """Decide what a hook event scans. Takes the event, its arguments, the repository root and the
+    operator config. Returns `(include_only, label)`: `None` for the whole tree, a tuple of paths, or
+    `(False, None)` when there is nothing to scan."""
     if event == "post-checkout":
         old, new, flag = (argv + ["", "", ""])[:3]
         if flag != "1":
             return False, None
-        if old == _NULL_REV:
+        if old == _NULL_REV or (_first_checkout_after_a_clone(root)
+                                and not _scanned_clean(root, _clean_key(old, config_path))):
             return None, "clone"
         changed = _changed_files(root, old, new)
         if changed is None:
@@ -1002,6 +1010,16 @@ def _scan_scope(event: str, argv: list[str], root: Path):
             return None, "rewrite"
         return (changed, "rewrite") if changed else (False, None)
     return False, None
+
+
+def _first_checkout_after_a_clone(root: Path) -> bool:
+    """Tell whether HEAD has moved at most once, by this checkout, since the repository was cloned.
+    Takes the root. Returns the answer, False when git could not say."""
+    moves = gitutil.head_moves(root, 2)
+    if not moves:
+        return False
+    return moves[0].startswith(_HEAD_MOVED_BY_A_CLONE) or (
+        len(moves) == 2 and moves[1].startswith(_HEAD_MOVED_BY_A_CLONE))
 
 
 def _changed_files(root: Path, base: str, head: str) -> tuple[str, ...] | None:
@@ -1096,7 +1114,7 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         return 0
     if not from_settings:
         _bring_up_to_date()
-    include, label = _scan_scope(event, argv, root)
+    include, label = _scan_scope(event, argv, root, config_path)
     if label is None:
         return 0
 
@@ -1106,8 +1124,7 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     rescan = "saw scan " + quoted_root
     head = gitutil.stdout(root, ["rev-parse", "HEAD"]).strip()
     clean_key = _clean_key(head, config_path) if head and include is None else None
-    if clean_key and clean_key in (_load_cache().get(os.path.realpath(root)),
-                                   _settings_scans().get(os.path.realpath(root))):
+    if clean_key and _scanned_clean(root, clean_key):
         return 0
 
     err = sys.stderr
