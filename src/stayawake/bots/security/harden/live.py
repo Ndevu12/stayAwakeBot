@@ -10,7 +10,7 @@ from pathlib import Path
 
 from stayawake.utils import atomicwrite, elevate, env, procstop
 from stayawake.utils.procsnap import parent_map, ps_signature
-from stayawake.bots.security.livecode import live_code_processes
+from stayawake.bots.security.livecode import live_code_finder
 
 _MAX_ROUNDS = 12
 _CAPTURE_KEEP = 20_000
@@ -97,11 +97,14 @@ def _deepest_first(held: dict[int, tuple]) -> list[int]:
     return sorted(held, key=lambda pid: (-depth(pid), pid))
 
 
-def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procstop.end,
+def end_live_code(*, find=None, freeze=procstop.freeze, end=procstop.end,
                   ended=procstop.has_ended, capture=_capture, where=None,
                   protected=_protected, elevated=procstop.end_as_root,
                   rounds: int = _MAX_ROUNDS) -> Ending:
-    """Freeze everything holding live code until a pass finds nothing new, then end it."""
+    """Freeze everything holding live code until a pass finds nothing new, then end it. Takes the
+    finder, one that grades each code argument once when None, the collaborators that freeze, end,
+    capture and elevate, and the number of rounds. Returns what it did, as an Ending."""
+    find = find or live_code_finder()
     keep_out = protected()
     held: dict[int, tuple] = {}
     held_done: set[int] = set()

@@ -248,6 +248,8 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **`saw harden` and the watcher finish sooner.** Every running program is still checked on every
+  pass.
 - **The intro screen names the verdict rather than an exit code, and `saw hook install` no longer
   suggests switching its hooks off.**
 - **`saw scan`, `saw fix` and the hooks use the same config:** the one you name with `-c`, or

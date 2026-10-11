@@ -311,5 +311,33 @@ def not_yet():
     return not_yet.calls == 1
 
 
+
+class TestItGradesEachArgumentOnceAcrossItsRounds(unittest.TestCase):
+    def test_a_process_seen_every_round_is_graded_once(self):
+        from stayawake.bots.security import livecode
+        from stayawake.utils.procsnap import Snapshot
+        looks, graded = [], []
+        real = livecode._obfuscation_verdict
+
+        def table():
+            looks.append(1)
+            return Snapshot(processes=[
+                Process(pid=100 + i, argv=("node", "-e", f"console.log({i})"),
+                        identity=Identity(pid=100 + i, ppid=1, uid=501, start_time=1000 + i))
+                for i in range(len(looks))], unreadable=0, supported=True)
+        with mock.patch.object(livecode, "snapshot", table), \
+                mock.patch.object(livecode, "program_is_gone", return_value=True), \
+                mock.patch.object(livecode, "_obfuscation_verdict",
+                                  lambda code: graded.append(code) or real(code)):
+            out = live.end_live_code(freeze=lambda who: procstop.SIGNALLED,
+                                     end=lambda who: procstop.SIGNALLED,
+                                     ended=lambda who: True,
+                                     capture=lambda held, where: None,
+                                     protected=lambda: {1}, rounds=4)
+        self.assertEqual(out.matched, 4)
+        self.assertEqual(len(looks), 5)
+        self.assertEqual(sorted(graded), [f"console.log({i})" for i in range(5)])
+
+
 if __name__ == "__main__":
     unittest.main()

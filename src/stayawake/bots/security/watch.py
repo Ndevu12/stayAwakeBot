@@ -13,7 +13,7 @@ from stayawake.bots.security import liveledger, schedule
 from stayawake.bots.security.watchevents import (
     ENDED, LEFT, NOT_READ, NOT_REMEMBERED, PASS_FAILED, QUIET, RETURNED, SENTENCE_FOR, UNNAMED)
 from stayawake.bots.security.harden.live import end_live_code
-from stayawake.bots.security.livecode import fingerprint, live_code_processes
+from stayawake.bots.security.livecode import fingerprint, live_code_finder
 from stayawake.utils import elevate, exitcodes
 from stayawake.utils.procsnap import snapshot
 
@@ -51,18 +51,19 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     snap = look()
     if not snap.supported or not snap.processes:
         return exitcodes.INCOMPLETE, (NOT_READ,)
-    again = find or live_code_processes
+    finder = live_code_finder()
+    again = find or finder
     try:
         before = load()
     except Exception:
         before = liveledger.Ledger(status=liveledger.CORRUPT)
-    seen = find() if find is not None else live_code_processes(snap)
+    seen = find() if find is not None else finder(snap)
     identified = [item for item in seen if item.confirmed]
 
     ending, outcome = None, StopOutcome()
     if identified:
         ending = stop(find=lambda: [i for i in again() if i.confirmed], elevated=_never_asks)
-        outcome = what_the_stop_did(identified, _look_again(find, look))
+        outcome = what_the_stop_did(identified, _look_again(find, look, finder))
 
     ended_something = ending is not None and ending.ended > 0
     try:
@@ -117,17 +118,17 @@ def what_the_stop_did(identified, after) -> StopOutcome:
     return StopOutcome(frozenset(gone - survived), frozenset(survived))
 
 
-def _look_again(find, look):
+def _look_again(find, look, finder):
     """Look again for identified code after a stop, never failing. Takes the injected finder, if
-    any, and the snapshot taker. Returns the identified code running, or None when the process
-    table could not be read."""
+    any, the snapshot taker and the finder this pass grades with. Returns the identified code
+    running, or None when the process table could not be read."""
     try:
         if find is not None:
             return [item for item in find() if item.confirmed]
         snap = look()
         if not snap.supported or not snap.processes:
             return None
-        return [item for item in live_code_processes(snap) if item.confirmed]
+        return [item for item in finder(snap) if item.confirmed]
     except Exception:
         return None
 
