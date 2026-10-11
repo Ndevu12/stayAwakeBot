@@ -184,7 +184,8 @@ class TestEveryViewIsFoundWhereGitKeepsIt(ExecSurfaceSandbox):
         (base / "store").mkdir()
         subprocess.run(["git", "init", "-q", "--separate-git-dir", str(base / "store" / "repo.git"),
                         str(main)], check=True, capture_output=True)
-        self.git(main, "commit", "-q", "--allow-empty", "-m", "a")
+        self.git(main, "-c", "user.name=saw", "-c", "user.email=saw@example.invalid", "commit", "-q",
+                 "--allow-empty", "-m", "a")
         tree = main / "trees" / "wt"
         self.git(main, "worktree", "add", "-q", str(tree))
         self.assertIn("main working tree", self.scan(tree).error or "")
