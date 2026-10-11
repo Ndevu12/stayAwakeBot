@@ -34,11 +34,26 @@ class TestEveryFileGitReadsIsRead(ExecSurfaceSandbox):
         self.append_config(repo, "[include]\n\tpath = lnk/../extra.inc\n")
         self.assert_tier(repo, CONFIRMED)
 
-    def test_an_include_git_cannot_open_is_not_read(self):
+    def test_an_include_through_a_missing_directory_is_still_read(self):
         repo = self.repo()
-        (repo / ".git" / "phantom.inc").write_text(COMMAND)
-        self.append_config(repo, "[include]\n\tpath = gone/../phantom.inc\n")
-        self.assertEqual([], [f.evidence for f in self.graded(repo)[CONFIRMED]])
+        (repo / ".git" / "evil.inc").write_text(COMMAND)
+        self.append_config(repo, "[include]\n\tpath = missing/../evil.inc\n")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_hooks_path_through_a_missing_directory_is_still_read(self):
+        repo = self.repo()
+        self.hook(repo / "myhooks", "pre-commit", SCRIPT)
+        self.append_config(repo, "[core]\n\thooksPath = missing/../myhooks\n")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_removed_submodule_left_behind_is_read_without_an_error(self):
+        repo = self.repo()
+        library = self.repo("library")
+        self.git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library), "lib")
+        self.commit(repo, "a library")
+        self.git(repo, "rm", "-q", "lib")
+        self.commit(repo, "no library")
+        self.assertIsNone(self.scan(repo).error)
 
     def test_a_file_only_git_finds_is_read(self):
         repo = self.repo()
@@ -132,6 +147,49 @@ class TestEveryHooksDirectoryGitRunsIsRead(ExecSurfaceSandbox):
                             for h in read_exec_surface(other).hooks))
 
 
+class TestEveryViewIsFoundWhereGitKeepsIt(ExecSurfaceSandbox):
+
+    def test_a_submodule_initialised_in_a_linked_worktree(self):
+        repo = self.repo()
+        library = self.repo("library")
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        self.git(tree, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library), "sub")
+        self.append_config(repo, COMMAND, rel=".git/worktrees/wt/modules/sub/config")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_deinitialised_submodule_of_a_linked_worktree(self):
+        repo = self.repo()
+        library = self.repo("library")
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        self.git(tree, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library), "sub")
+        self.git(tree, "submodule", "deinit", "-q", "-f", "sub")
+        self.append_config(repo, COMMAND, rel=".git/worktrees/wt/modules/sub/config")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_linked_worktree_recorded_with_a_relative_pointer(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\thooksPath = .husky\n")
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        pointer = repo / ".git" / "worktrees" / "wt" / "gitdir"
+        pointer.write_text(os.path.relpath(tree / ".git", pointer.parent) + "\n")
+        self.hook(tree / ".husky", "pre-commit", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_main_working_tree_the_repository_does_not_record_is_not_called_read(self):
+        base = self.repo().parent
+        main = base / "main"
+        (base / "store").mkdir()
+        subprocess.run(["git", "init", "-q", "--separate-git-dir", str(base / "store" / "repo.git"),
+                        str(main)], check=True, capture_output=True)
+        self.git(main, "commit", "-q", "--allow-empty", "-m", "a")
+        tree = main / "trees" / "wt"
+        self.git(main, "worktree", "add", "-q", str(tree))
+        self.assertIn("main working tree", self.scan(tree).error or "")
+
+
 class TestOnlyTheRepositorysOwnScopesAreTaken(unittest.TestCase):
 
     def test_other_scopes_in_gits_answer_are_left_out(self):
@@ -161,6 +219,12 @@ class TestEverySubmoduleIsRead(ExecSurfaceSandbox):
         repo = self.repo()
         module = self._module(repo, "[extensions]\n\tworktreeConfig = true\n")
         (module / "config.worktree").write_text(COMMAND)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_hook_in_a_submodules_default_directory_while_its_settings_name_another(self):
+        repo = self.repo()
+        module = self._module(repo, "[core]\n\thooksPath = .husky\n")
+        self.hook(module / "hooks", "post-checkout", SCRIPT)
         self.assert_tier(repo, CONFIRMED)
 
     def test_a_hook_in_a_submodules_hooks_path(self):
