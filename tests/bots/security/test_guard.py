@@ -1041,11 +1041,86 @@ class TestGradeConfig(unittest.TestCase):
         self.assertFalse(self._graded(wf).standing_write)
 
 
+BUILD_THEN_SCAN_WF = """name: CI
+on: { push: { branches: [main] }, pull_request: {} }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make build
+  scan:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: Ndevu12/strix@%s
+        with:
+          remediate: pr
+""" % ("a" * 40)
+
+
 class TestWhichOccurrenceAnswersForTheRepository(unittest.TestCase):
     """Which `uses: Ndevu12/strix` occurrence `saw guard check` answers for."""
 
     def _rendered(self):
         return guard.render_workflow(guard.Pin("c" * 40, "v0.1.4"), "main", "0.11.2")
+
+    def test_a_needs_gated_live_gate_answers_over_a_decorative_one(self):
+        ref = find_strix({".github/workflows/ci.yml": BUILD_THEN_SCAN_WF,
+                          guard.WORM_GUARD_FILE: self._rendered()})
+        self.assertEqual((ref.workflow, ref.job), (".github/workflows/ci.yml", "scan"))
+        self.assertTrue(guard_detect.grade_config(ref).degraded)
+
+    def test_the_needs_gated_gate_answers_regardless_of_file_order(self):
+        tidy = self._rendered()
+        early = find_strix({".github/workflows/a-ci.yml": BUILD_THEN_SCAN_WF,
+                            guard.WORM_GUARD_FILE: tidy})
+        late = find_strix({".github/workflows/zz-ci.yml": BUILD_THEN_SCAN_WF,
+                           guard.WORM_GUARD_FILE: tidy})
+        self.assertEqual((early.job, late.job), ("scan", "scan"))
+        self.assertTrue(guard_detect.grade_config(early).degraded)
+        self.assertTrue(guard_detect.grade_config(late).degraded)
+
+    def test_the_remediation_job_does_not_answer_though_it_needs_and_can_write(self):
+        refs = guard_detect.find_strix_refs({guard.WORM_GUARD_FILE: self._rendered()})
+        by_job = {r.job: r for r in refs}
+        self.assertTrue(guard_detect.grade_config(by_job["remediate"]).standing_write)
+        ref = find_strix({guard.WORM_GUARD_FILE: self._rendered()})
+        self.assertEqual(ref.job, "worm-guard")
+        self.assertFalse(guard_detect.grade_config(ref).degraded)
+
+    def _with_remediation(self, condition):
+        return self._rendered().rstrip("\n") + (
+            "\n  fix-after:\n    needs: worm-guard\n    if: %s\n    runs-on: ubuntu-latest\n"
+            "    permissions:\n      contents: write\n    steps:\n      - uses: Ndevu12/strix@%s\n"
+            "        with:\n          fail-on: never\n" % (condition, "b" * 40))
+
+    def test_a_job_that_runs_only_after_another_fails_or_on_its_outputs_does_not_answer(self):
+        for condition in ("failure()", "${{ needs.worm-guard.result == 'failure' }}",
+                          "${{ needs['worm-guard'].outputs.verdict == 'infected' }}",
+                          "${{ contains(needs.*.outputs.verdict, 'infected') }}"):
+            with self.subTest(condition=condition):
+                ref = find_strix({guard.WORM_GUARD_FILE: self._with_remediation(condition)})
+                self.assertEqual(ref.job, "worm-guard")
+                self.assertFalse(guard_detect.grade_config(ref).degraded)
+
+    def test_a_clean_job_that_may_not_run_does_not_hide_a_worse_one_that_runs(self):
+        worse = """name: Scan
+on: { workflow_call: {} }
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - uses: Ndevu12/strix@main
+"""
+        caller = BUILD_THEN_SCAN_WF.replace("    needs: build\n", "    needs: build\n    if: failure()\n")
+        ref = find_strix({".github/workflows/ci.yml": caller, ".github/workflows/scan-reusable.yml": worse})
+        self.assertTrue(guard_detect.grade_config(ref).degraded)
+        off = BUILD_THEN_SCAN_WF.replace("  build:\n", "  build:\n    if: false\n")
+        refs = guard_detect.find_strix_refs({".github/workflows/ci.yml": off})
+        self.assertFalse(refs[0].guards_changes)
 
     def test_the_generated_gate_answers_with_its_scanning_job(self):
         ref = find_strix({guard.WORM_GUARD_FILE: self._rendered()})
