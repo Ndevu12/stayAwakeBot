@@ -385,6 +385,66 @@ class TestGitsOwnRulesDecide(ExecSurfaceSandbox):
         self.assertFalse(any(path.endswith("post-merge") for path in confirmed))
 
 
+class TestWhatTheScanReadBeforeIsKept(ExecSurfaceSandbox):
+
+    def test_a_worktree_settings_file_with_no_worktree_behind_it(self):
+        repo = self.repo()
+        ghost = repo / ".git" / "worktrees" / "ghost"
+        ghost.mkdir(parents=True)
+        (ghost / "config.worktree").write_text(COMMAND)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_submodule_pointing_into_the_repositorys_own_worktree_directory(self):
+        repo = self.repo()
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        self.write(repo, ".gitmodules", '[submodule "sub"]\n\tpath = sub\n\turl = ./x\n')
+        (repo / "sub").mkdir()
+        (repo / "sub" / ".git").write_text(f"gitdir: {repo / '.git' / 'worktrees' / 'wt'}\n")
+        self.hook(repo / ".git" / "worktrees" / "wt" / "hooks", "post-checkout", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_hook_finding_keeps_the_path_it_had_through_a_linked_home(self):
+        real = self.repo()
+        home = real.parent / "home-link"
+        home.symlink_to(real)
+        self.append_config(real, "[core]\n\thooksPath = .husky/_\n")
+        self.hook(real / ".husky" / "_", "post-merge", SCRIPT)
+        confirmed = [f.path for f in self.graded(home)[CONFIRMED]]
+        self.assertIn(".husky/_/post-merge", confirmed)
+
+
+class TestWhatGitRunsRaisesTheGrade(ExecSurfaceSandbox):
+
+    def test_the_default_hooks_directory_named_as_an_optional_path(self):
+        repo = self.repo()
+        hooks = repo / ".git" / "hooks"
+        self.hook(hooks, "pre-commit", SCRIPT)
+        self.append_config(repo, f"[core]\n\thooksPath = :(optional){hooks}\n")
+        answer = subprocess.run(["git", "-C", str(repo), "config", "--type=path", "--get",
+                                 "core.hooksPath"], capture_output=True, text=True).stdout.strip()
+        running = {os.path.realpath(h.path.parent) for h in read_exec_surface(repo).hooks if h.runs}
+        self.assertEqual(os.path.realpath(answer) == os.path.realpath(hooks),
+                         os.path.realpath(hooks) in running)
+
+    def test_a_hooks_path_only_git_can_resolve_is_noted_when_git_does_not_answer(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\thooksPath = %(prefix)/share/hooks\n")
+        surface = read_exec_surface(repo, ask=lambda where: None)
+        self.assertTrue(any("core.hookspath" in why.lower() and "only git can resolve" in why
+                            for why in surface.unexamined))
+
+
+class TestAnEmptyHooksPathRunsNothing(ExecSurfaceSandbox):
+
+    def test_the_repository_root_is_not_taken_for_a_hooks_directory(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\thooksPath =\n")
+        self.hook(repo, "post-commit", SCRIPT)
+        confirmed = [f.path for f in self.graded(repo)[CONFIRMED]]
+        self.assertNotIn("post-commit", confirmed)
+
+
 class TestOnlyTheRepositorysOwnScopesAreTaken(unittest.TestCase):
 
     def test_other_scopes_in_gits_answer_are_left_out(self):
