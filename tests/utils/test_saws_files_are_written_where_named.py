@@ -255,6 +255,26 @@ class TestARefusedReportPathKeepsTheScan(_Sandbox):
         self.assertIn("reached through a link saw does not follow", said.getvalue())
 
 
+class TestANameIsOneEntry(_Sandbox):
+
+    def test_a_rename_move_or_new_folder_refuses_a_name_through_a_link(self):
+        (self.base / "hooks").mkdir()
+        (self.base / "hooks" / "pre-commit").write_text("x", encoding="utf-8")
+        (self.base / "hooks" / "u").symlink_to(self.elsewhere)
+        (self.elsewhere / "victim").write_text("v", encoding="utf-8")
+        self.as_root()
+        for attempt in (lambda: atomicwrite.rename_in(self.base / "hooks", "u/victim", "taken"),
+                        lambda: atomicwrite.rename_in(self.base / "hooks", "pre-commit", "u/planted"),
+                        lambda: atomicwrite.rename_in(self.base / "hooks", "pre-commit", "../elsewhere/x"),
+                        lambda: atomicwrite.move_into(self.base / "hooks" / "pre-commit",
+                                                      self.base / "hooks", "u/planted"),
+                        lambda: atomicwrite.new_folder(self.base / "hooks", "u/made")):
+            with self.assertRaises(OSError):
+                attempt()
+        self.assertEqual(["victim"], self.landed_elsewhere())
+        self.assertTrue((self.base / "hooks" / "pre-commit").exists())
+
+
 class TestAMoveBetweenDisksCopiesWhole(_Sandbox):
 
     def test_a_folder_with_a_link_inside_is_copied_and_the_source_removed(self):

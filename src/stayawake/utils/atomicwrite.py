@@ -129,6 +129,7 @@ def set_mode(where: Path, mode: int) -> None:
 def new_folder(parent: Path, stem: str, *, mode: int = 0o777, tries: int = 1000) -> Path:
     """Make a folder no one else made, named `stem` or `stem-<n>`. Takes the parent, the name, the mode
     and how many names to try. Returns its path. Raises `OSError` when none could be made."""
+    _one_entry(stem)
     folder = pathsafe.open_folder(Path(parent), create=True)
     try:
         for n in range(tries):
@@ -146,6 +147,8 @@ def new_folder(parent: Path, stem: str, *, mode: int = 0o777, tries: int = 1000)
 def rename_in(folder: Path, old: str, new: str) -> None:
     """Rename an entry of a folder, reached without following a link the writer does not trust. Takes
     the folder, the entry's name and its new name. Raises `OSError` when it could not be renamed."""
+    _one_entry(old)
+    _one_entry(new)
     opened = pathsafe.open_folder(Path(folder))
     try:
         os.rename(old, new, src_dir_fd=opened, dst_dir_fd=opened)
@@ -159,6 +162,7 @@ def move_into(source: Path, folder: Path, name: str) -> None:
     `OSError` when either is reached through such a link or the move could not be made; a copy that
     could not be made in full leaves the source in place."""
     source = Path(source)
+    _one_entry(name)
     origin = pathsafe.open_folder(source.parent)
     try:
         destination = pathsafe.open_folder(Path(folder))
@@ -238,6 +242,13 @@ def _is_link(name: str, folder: int) -> bool:
         return stat.S_ISLNK(os.stat(name, dir_fd=folder, follow_symlinks=False).st_mode)
     except FileNotFoundError:
         return False
+
+
+def _one_entry(name: str) -> None:
+    """Refuse a name that is not exactly one entry of a folder. Takes the name. Raises
+    `RedirectedPath` for an empty name, `.`, `..`, or one with a separator in it."""
+    if name in ("", ".", "..") or os.sep in name or (os.altsep and os.altsep in name):
+        raise pathsafe.RedirectedPath(f"{name!r} is not one entry of a folder")
 
 
 def _mode_of(name: str, folder: int) -> int | None:
