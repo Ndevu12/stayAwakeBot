@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security.models import CONFIRMED
-from stayawake.lib.git import what_git_reads
+from stayawake.lib.git import exec_surface, what_git_reads
 from stayawake.lib.git.exec_surface import read_exec_surface
 from stayawake.lib.git.what_git_reads import RepositorySettings, repository_settings
 from tests.bots.security.test_git_exec_surface import ExecSurfaceSandbox
@@ -168,6 +168,16 @@ class TestEveryViewIsFoundWhereGitKeepsIt(ExecSurfaceSandbox):
         self.append_config(repo, COMMAND, rel=".git/worktrees/wt/modules/sub/config")
         self.assert_tier(repo, CONFIRMED)
 
+    def test_a_linked_worktree_of_a_submodule(self):
+        repo = self.repo()
+        library = self.repo("library")
+        self.git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library), "sub")
+        tree = repo / "trees" / "sub-wt"
+        self.git(repo / "sub", "worktree", "add", "-q", str(tree))
+        self.git(repo / "sub", "config", "extensions.worktreeConfig", "true")
+        self.append_config(repo, COMMAND, rel=".git/modules/sub/worktrees/sub-wt/config.worktree")
+        self.assert_tier(repo, CONFIRMED)
+
     def test_a_linked_worktree_recorded_with_a_relative_pointer(self):
         repo = self.repo()
         self.append_config(repo, "[core]\n\thooksPath = .husky\n")
@@ -189,6 +199,74 @@ class TestEveryViewIsFoundWhereGitKeepsIt(ExecSurfaceSandbox):
         tree = main / "trees" / "wt"
         self.git(main, "worktree", "add", "-q", str(tree))
         self.assertIn("main working tree", self.scan(tree).error or "")
+
+
+class TestEverythingMainReadIsStillRead(ExecSurfaceSandbox):
+
+    def running(self, surface):
+        return {os.path.realpath(h.path.parent) for h in surface.hooks if h.runs}
+
+    def test_the_hooks_path_saws_reading_names_last_beside_a_file_only_git_finds(self):
+        repo = self.repo()
+        evil = repo / ".git" / "evil-hooks"
+        self.hook(evil, "pre-commit", SCRIPT)
+        (repo / ".git" / "rel.inc").write_text(f"[core]\n\thooksPath = {evil}\n")
+        self.append_config(repo, '[includeIf "onbranch:release"]\n\tpath = rel.inc\n')
+        extra = repo / ".git" / "found-by-git.cfg"
+        extra.write_text("[core]\n\thooksPath = good-hooks\n")
+
+        def ask(where):
+            settings = repository_settings(where)
+            return RepositorySettings(settings.files + (extra,), settings.hooks_paths,
+                                      settings.sets_hooks_path)
+        self.assertIn(os.path.realpath(evil), self.running(read_exec_surface(repo, ask=ask)))
+
+    def test_the_hooks_path_an_include_names_as_written_beside_the_file_it_opens(self):
+        repo = self.repo()
+        evil = repo / ".git" / "evil-hooks"
+        self.hook(evil, "pre-commit", SCRIPT)
+        (repo / ".git" / "x.inc").write_text(f"[core]\n\thooksPath = {evil}\n")
+        deep = repo / "elsewhere" / "deep"
+        deep.mkdir(parents=True)
+        (repo / "elsewhere" / "x.inc").write_text("[core]\n\thooksPath = good-hooks\n")
+        (repo / ".git" / "lnk").symlink_to(deep)
+        self.append_config(repo, "[include]\n\tpath = lnk/../x.inc\n")
+        self.assertIn(os.path.realpath(evil), self.running(read_exec_surface(repo)))
+
+    def test_main_s_submodules_come_first_within_the_bound(self):
+        repo = self.repo()
+        module = repo / ".git" / "modules" / "sub"
+        module.mkdir(parents=True)
+        (module / "HEAD").write_text("ref: refs/heads/main\n")
+        (module / "config").write_text(COMMAND)
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        for n in range(4):
+            many = repo / ".git" / "worktrees" / "wt" / "modules" / f"m{n}"
+            many.mkdir(parents=True)
+            (many / "HEAD").write_text("ref: refs/heads/main\n")
+            (many / "config").write_text("")
+        with mock.patch.object(exec_surface, "MAX_GIT_DIRS", 4):
+            sources = {c.entry.source for c in read_exec_surface(tree).commands}
+        self.assertIn(module / "config", sources)
+
+    def test_an_unreadable_include_is_noted_even_when_its_target_was_read_first(self):
+        repo = self.repo()
+        (repo / ".git" / "link.cfg").symlink_to(repo / ".git" / "target.cfg")
+        self.append_config(repo, "[include]\n\tpath = target.cfg\n\tpath = link.cfg\n")
+        self.assertTrue(any("link.cfg" in why for why in read_exec_surface(repo).unexamined))
+
+    def test_the_main_trees_own_submodule_when_a_linked_worktree_is_scanned(self):
+        repo = self.repo()
+        self.write(repo, ".gitmodules", '[submodule "inner"]\n\tpath = inner\n\turl = ./x\n')
+        inner = repo / "inner"
+        inner.mkdir()
+        subprocess.run(["git", "init", "-q", str(inner)], check=True, capture_output=True)
+        self.append_config(inner, COMMAND)
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        sources = {c.entry.source for c in read_exec_surface(tree).commands}
+        self.assertIn(inner / ".git" / "config", sources)
 
 
 class TestOnlyTheRepositorysOwnScopesAreTaken(unittest.TestCase):
