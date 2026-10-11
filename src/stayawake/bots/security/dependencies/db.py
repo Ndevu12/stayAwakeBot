@@ -109,7 +109,7 @@ def update_ecosystem(eco: str, cache_dir: str | Path | None = None, *,
     # hash incrementally — never materialize the whole file as a single string.
     records.sort(key=lambda r: (r["id"], r["affected"][0]["name"] if r["affected"] else ""))
     hasher = hashlib.sha256()
-    with atomicwrite.staged(_records_path(cache_dir, eco), mode=0o644) as fh:
+    with atomicwrite.staged(_records_path(cache_dir, eco), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK) as fh:
         for r in records:
             line = json.dumps(r, sort_keys=True, ensure_ascii=False) + "\n"
             fh.write(line)
@@ -137,7 +137,7 @@ def write_manifest(cache_dir: str | Path | None, results: list[dict[str, Any]]) 
                 "snapshot": snapshot_digest(ecosystems),
                 "generated_at": now_iso(),
                 "ecosystems": ecosystems}
-    with atomicwrite.staged(_manifest_path(cache_dir), mode=0o644) as fh:
+    with atomicwrite.staged(_manifest_path(cache_dir), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK) as fh:
         fh.write(json.dumps(manifest, sort_keys=True, indent=2))
     _CORPUS_MEMO.clear()
     return manifest

@@ -12,30 +12,36 @@ from pathlib import Path
 
 from stayawake.utils import pathsafe
 
+AS_A_PLAIN_WRITE = None
+REFUSE_A_LINK = "refuse"
+FOLLOW_A_TRUSTED_LINK = "follow"
+REPLACE_A_LINK = "replace"
 _CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
 _READ = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
 @contextlib.contextmanager
-def staged(where: Path, *, mode: int = 0o600, folder_mode: int = 0o777, binary: bool = False):
+def staged(where: Path, *, mode: int | None = 0o600, binary: bool = False,
+           at_a_link: str = REFUSE_A_LINK):
     """Stage a file's new contents beside it and put them in place when the block ends without an
-    error. Takes the file, its mode, the mode of folders made on the way, and whether the handle takes
-    bytes. Yields the handle. Raises `OSError` when the folder is reached through a link the writer
-    does not trust or the file's name is a link."""
-    where = Path(where)
-    folder = pathsafe.open_folder(where.parent, create=True, mode=folder_mode)
-    staging = f".saw-{secrets.token_hex(8)}{where.suffix}"
+    error. Takes the file, its mode (`AS_A_PLAIN_WRITE`: the mode the file has, or the umask's for a
+    new one), whether the handle takes bytes, and what to do when the file's name is a link: refuse,
+    write through it when the writer trusts it, or replace it. Yields the handle. Raises `OSError`
+    when a folder on the way, or a link at the name it may not replace, is one the writer does not
+    trust."""
+    folder, name = _open_target(Path(where), at_a_link, create=True)
+    staging = f".saw-{secrets.token_hex(8)}{Path(name).suffix}"
     try:
-        if _is_link(where.name, folder):
-            raise pathsafe.RedirectedPath(f"{where} is a link")
-        fd = os.open(staging, _CREATE, 0o600, dir_fd=folder)
+        kept = _mode_of(name, folder) if mode is AS_A_PLAIN_WRITE else mode
+        fd = os.open(staging, _CREATE, 0o666 if mode is AS_A_PLAIN_WRITE else 0o600, dir_fd=folder)
         try:
             with os.fdopen(fd, "wb" if binary else "w", **({} if binary else
                                                           {"encoding": "utf-8", "newline": ""})) as handle:
                 yield handle
                 handle.flush()
-                os.fchmod(handle.fileno(), mode)
-            os.rename(staging, where.name, src_dir_fd=folder, dst_dir_fd=folder)
+                if kept is not None:
+                    os.fchmod(handle.fileno(), kept)
+            os.rename(staging, name, src_dir_fd=folder, dst_dir_fd=folder)
             staging = None
         finally:
             if staging is not None:
@@ -45,28 +51,30 @@ def staged(where: Path, *, mode: int = 0o600, folder_mode: int = 0o777, binary: 
         os.close(folder)
 
 
-def replace(where: Path, text: str | bytes, *, mode: int = 0o600, folder_mode: int = 0o777) -> bool:
-    """Write `text` to `where` in one step. Takes the file, its contents, its mode and the mode of
-    folders made on the way. Returns True only when a read-back that never follows a link returns
-    exactly what was written."""
+def replace(where: Path, text: str | bytes, *, mode: int | None = 0o600,
+            at_a_link: str = REFUSE_A_LINK) -> bool:
+    """Write `text` to `where` in one step. Takes the file, its contents, its mode and what to do at a
+    link at its name, as for `staged`. Returns True only when a read-back that never follows an
+    untrusted link returns exactly what was written."""
     written = text.encode("utf-8") if isinstance(text, str) else text
     try:
-        with staged(where, mode=mode, folder_mode=folder_mode, binary=True) as handle:
+        with staged(where, mode=mode, binary=True, at_a_link=at_a_link) as handle:
             handle.write(written)
     except OSError:
         return False
-    return read_back(Path(where), len(written)) == written
+    return read_back(Path(where), len(written), at_a_link=at_a_link) == written
 
 
-def read_back(where: Path, limit: int) -> bytes | None:
-    """Read a file saw wrote, through the same folders it was written through. Takes the file and
-    how many bytes to read at most. Returns its bytes, or None when it is not a regular file there."""
+def read_back(where: Path, limit: int, *, at_a_link: str = REFUSE_A_LINK) -> bytes | None:
+    """Read a file saw wrote, through the same folders it was written through. Takes the file, how
+    many bytes to read at most, and how its name was written. Returns its bytes, or None when it is
+    not a regular file there."""
     try:
-        folder = pathsafe.open_folder(Path(where).parent)
+        folder, name = _open_target(Path(where), at_a_link)
     except OSError:
         return None
     try:
-        fd = os.open(Path(where).name, _READ, dir_fd=folder)
+        fd = os.open(name, _READ, dir_fd=folder)
     except OSError:
         os.close(folder)
         return None
@@ -88,25 +96,29 @@ def read_back(where: Path, limit: int) -> bytes | None:
         os.close(folder)
 
 
-def make_folder(where: Path, *, mode: int = 0o777, set_mode: bool = False) -> None:
-    """Make a folder and every missing folder above it. Takes the folder, the mode of what is made,
-    and whether to give the folder itself that mode when it already exists. Raises `OSError` when it
-    is reached through a link the writer does not trust."""
-    folder = pathsafe.open_folder(Path(where), create=True, mode=mode)
+def make_folder(where: Path, *, mode: int | None = None) -> None:
+    """Make a folder and every missing folder above it. Takes the folder and the mode to give it, or
+    None to make it as `mkdir` would. Raises `OSError` when it is reached through a link the writer
+    does not trust."""
+    folder = pathsafe.open_folder(Path(where), create=True)
     try:
-        if set_mode:
+        if mode is not None:
             os.fchmod(folder, mode)
     finally:
         os.close(folder)
 
 
 def set_mode(where: Path, mode: int) -> None:
-    """Give a file a mode, without following a link at its name or on the way to it. Takes the file
-    and the mode. Raises `OSError` when it is reached through a link or is one."""
-    folder = pathsafe.open_folder(Path(where).parent)
+    """Give a file a mode, without following an untrusted link at its name or on the way to it. Takes
+    the file and the mode. Raises `OSError` when it is reached through such a link, is not a regular
+    file, or shares its contents with another name."""
+    folder, name = pathsafe.open_parent(Path(where))
     try:
-        fd = os.open(Path(where).name, _READ, dir_fd=folder)
+        fd = os.open(name, _READ, dir_fd=folder)
         try:
+            found = os.fstat(fd)
+            if not stat.S_ISREG(found.st_mode) or found.st_nlink != 1:
+                raise pathsafe.RedirectedPath(f"{where} is not a file of its own")
             os.fchmod(fd, mode)
         finally:
             os.close(fd)
@@ -114,7 +126,7 @@ def set_mode(where: Path, mode: int) -> None:
         os.close(folder)
 
 
-def new_folder(parent: Path, stem: str, *, mode: int = 0o700, tries: int = 1000) -> Path:
+def new_folder(parent: Path, stem: str, *, mode: int = 0o777, tries: int = 1000) -> Path:
     """Make a folder no one else made, named `stem` or `stem-<n>`. Takes the parent, the name, the mode
     and how many names to try. Returns its path. Raises `OSError` when none could be made."""
     folder = pathsafe.open_folder(Path(parent), create=True)
@@ -131,48 +143,92 @@ def new_folder(parent: Path, stem: str, *, mode: int = 0o700, tries: int = 1000)
         os.close(folder)
 
 
-def move_into(source: Path, folder: Path, name: str) -> None:
-    """Move a file, link or folder, whole, into a folder under a new name. Takes the source, the folder
-    and the name. Raises `OSError` when the folder is reached through a link the writer does not trust
-    or the move could not be made; a copy that could not be made in full leaves the source in place."""
-    destination = pathsafe.open_folder(Path(folder))
+def rename_in(folder: Path, old: str, new: str) -> None:
+    """Rename an entry of a folder, reached without following a link the writer does not trust. Takes
+    the folder, the entry's name and its new name. Raises `OSError` when it could not be renamed."""
+    opened = pathsafe.open_folder(Path(folder))
     try:
-        try:
-            os.rename(source, name, dst_dir_fd=destination)
-            return
-        except OSError as error:
-            if error.errno != errno.EXDEV:
-                raise
-        _copy_into(Path(source), destination, name)
-        if Path(source).is_dir() and not Path(source).is_symlink():
-            shutil.rmtree(source)
-        else:
-            os.unlink(source)
+        os.rename(old, new, src_dir_fd=opened, dst_dir_fd=opened)
     finally:
-        os.close(destination)
+        os.close(opened)
 
 
-def _copy_into(source: Path, folder: int, name: str) -> None:
-    """Copy a file, link or folder into an open folder. Takes the source, the folder and the name."""
-    found = os.lstat(source)
-    if stat.S_ISLNK(found.st_mode):
-        os.symlink(os.readlink(source), name, dir_fd=folder)
-    elif stat.S_ISDIR(found.st_mode):
-        os.mkdir(name, stat.S_IMODE(found.st_mode) | stat.S_IRWXU, dir_fd=folder)
-        inner = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+def move_into(source: Path, folder: Path, name: str) -> None:
+    """Move a file, link or folder, whole, into a folder under a new name; both are reached without
+    following a link the writer does not trust. Takes the source, the folder and the name. Raises
+    `OSError` when either is reached through such a link or the move could not be made; a copy that
+    could not be made in full leaves the source in place."""
+    source = Path(source)
+    origin = pathsafe.open_folder(source.parent)
+    try:
+        destination = pathsafe.open_folder(Path(folder))
         try:
-            for entry in os.scandir(source):
-                _copy_into(Path(entry.path), inner, entry.name)
-            os.fchmod(inner, stat.S_IMODE(found.st_mode))
+            try:
+                os.rename(source.name, name, src_dir_fd=origin, dst_dir_fd=destination)
+                return
+            except OSError as error:
+                if error.errno != errno.EXDEV:
+                    raise
+            if _copy_into(origin, source.name, destination, name):
+                shutil.rmtree(source.name, dir_fd=origin)
+            else:
+                os.unlink(source.name, dir_fd=origin)
         finally:
-            os.close(inner)
-    elif stat.S_ISREG(found.st_mode):
-        fd = os.open(name, _CREATE, 0o600, dir_fd=folder)
-        with os.fdopen(fd, "wb") as out, open(source, "rb") as given:
-            shutil.copyfileobj(given, out)
-            os.fchmod(out.fileno(), stat.S_IMODE(found.st_mode))
-    else:
-        raise OSError(f"{source} is not a file, link or folder")
+            os.close(destination)
+    finally:
+        os.close(origin)
+
+
+def _copy_into(origin: int, entry: str, folder: int, name: str) -> bool:
+    """Copy an entry of an open folder, a file, link or folder, into another open folder, keeping its
+    mode and times. Takes the source folder, the entry, the destination folder and the new name.
+    Returns whether it was a folder."""
+    found = os.stat(entry, dir_fd=origin, follow_symlinks=False)
+    times = (found.st_atime_ns, found.st_mtime_ns)
+    if stat.S_ISLNK(found.st_mode):
+        os.symlink(os.readlink(entry, dir_fd=origin), name, dir_fd=folder)
+        return False
+    if stat.S_ISDIR(found.st_mode):
+        given = os.open(entry, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=origin)
+        try:
+            os.mkdir(name, stat.S_IMODE(found.st_mode) | stat.S_IRWXU, dir_fd=folder)
+            inner = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+            try:
+                for child in os.listdir(given):
+                    _copy_into(given, child, inner, child)
+                os.fchmod(inner, stat.S_IMODE(found.st_mode))
+                os.utime(inner, ns=times)
+            finally:
+                os.close(inner)
+        finally:
+            os.close(given)
+        return True
+    if stat.S_ISREG(found.st_mode):
+        given = os.open(entry, _READ, dir_fd=origin)
+        with os.fdopen(given, "rb") as reading:
+            if not stat.S_ISREG(os.fstat(reading.fileno()).st_mode):
+                raise OSError(f"{entry} is not a file")
+            fd = os.open(name, _CREATE, 0o600, dir_fd=folder)
+            with os.fdopen(fd, "wb") as out:
+                shutil.copyfileobj(reading, out)
+                out.flush()
+                os.fchmod(out.fileno(), stat.S_IMODE(found.st_mode))
+                os.utime(out.fileno(), ns=times)
+        return False
+    raise OSError(f"{entry} is not a file, link or folder")
+
+
+def _open_target(where: Path, at_a_link: str, *, create: bool = False) -> tuple[int, str]:
+    """Open the folder a file is written in and name the file there. Takes the file, what to do at a
+    link at its name, and whether to make missing folders. Returns the open folder, which the caller
+    closes, and the name. Raises `RedirectedPath` at a link at the name it may not use."""
+    if at_a_link == FOLLOW_A_TRUSTED_LINK:
+        return pathsafe.open_parent(where, create=create)
+    folder = pathsafe.open_folder(where.parent, create=create)
+    if at_a_link == REFUSE_A_LINK and _is_link(where.name, folder):
+        os.close(folder)
+        raise pathsafe.RedirectedPath(f"{where} is a link")
+    return folder, where.name
 
 
 def _is_link(name: str, folder: int) -> bool:
@@ -182,3 +238,13 @@ def _is_link(name: str, folder: int) -> bool:
         return stat.S_ISLNK(os.stat(name, dir_fd=folder, follow_symlinks=False).st_mode)
     except FileNotFoundError:
         return False
+
+
+def _mode_of(name: str, folder: int) -> int | None:
+    """Name the mode of a regular file in an open folder. Takes its name and the folder. Returns the
+    mode, or None when there is no regular file of that name."""
+    try:
+        found = os.stat(name, dir_fd=folder, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    return stat.S_IMODE(found.st_mode) if stat.S_ISREG(found.st_mode) else None

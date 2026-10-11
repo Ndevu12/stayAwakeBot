@@ -59,8 +59,8 @@ def _read_config_file(path: Path) -> dict | None:
 def _write_private_config(path: Path, data: bytes) -> None:
     """Write App credentials, which include the App private key, readable by their owner alone from
     the moment they exist, in a folder only the owner can open. Takes the file and its bytes."""
-    atomicwrite.make_folder(path.parent, mode=stat.S_IRWXU, set_mode=True)
-    with atomicwrite.staged(path, mode=stat.S_IRUSR | stat.S_IWUSR, binary=True) as fh:
+    atomicwrite.make_folder(path.parent, mode=stat.S_IRWXU)
+    with atomicwrite.staged(path, mode=stat.S_IRUSR | stat.S_IWUSR, binary=True, at_a_link=atomicwrite.REPLACE_A_LINK) as fh:
         fh.write(data)
 
 

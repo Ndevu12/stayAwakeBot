@@ -24,7 +24,7 @@ class FileSink(Sink):
     def emit(self, report: ScanReport) -> None:
         payload = redact_payload(report.to_payload())
         write_json(self.dir / "latest.json", payload)
-        with atomicwrite.staged(self.dir / "latest.md", mode=0o644) as fh:
+        with atomicwrite.staged(self.dir / "latest.md", mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK) as fh:
             fh.write(render_markdown(payload))
         # The report PATH is surfaced by the orchestrator (service.scan), which alone knows the full
         # context — a spilled sweep vs. a plain -d copy vs. a remote run — so the message is uniform

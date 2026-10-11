@@ -38,11 +38,57 @@ class _Sandbox(unittest.TestCase):
 
 class TestTheWriterStaysWhereItWasNamed(_Sandbox):
 
-    def test_a_link_at_the_files_own_name_is_refused(self):
+    def test_as_root_a_users_link_at_the_files_own_name_is_refused(self):
         (self.base / "state").mkdir()
         (self.base / "state" / "record.json").symlink_to(self.elsewhere / "made-through-the-link")
+        self.as_root()
         self.assertFalse(atomicwrite.replace(self.base / "state" / "record.json", "{}"))
         self.assertEqual([], self.landed_elsewhere())
+
+    def test_as_the_user_their_own_link_at_the_files_name_is_written_through(self):
+        (self.base / "state").mkdir()
+        (self.base / "state" / "record.json").symlink_to(self.elsewhere / "dotfiles-record.json")
+        self.assertTrue(atomicwrite.replace(self.base / "state" / "record.json", "{}",
+                                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
+        self.assertTrue((self.base / "state" / "record.json").is_symlink())
+        self.assertEqual(b"{}", (self.elsewhere / "dotfiles-record.json").read_bytes())
+
+    def test_as_root_a_users_link_at_the_name_is_followed_by_no_writer(self):
+        (self.base / "state").mkdir()
+        (self.base / "state" / "record.json").symlink_to(self.elsewhere / "made-through-the-link")
+        self.as_root()
+        self.assertFalse(atomicwrite.replace(self.base / "state" / "record.json", "{}",
+                                             at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
+        self.assertTrue(atomicwrite.replace(self.base / "state" / "record.json", "{}",
+                                            at_a_link=atomicwrite.REPLACE_A_LINK))
+        self.assertFalse((self.base / "state" / "record.json").is_symlink())
+        self.assertEqual([], self.landed_elsewhere())
+
+    def test_a_folder_that_can_be_passed_through_but_not_listed_is_passed_through(self):
+        (self.base / "passage" / "inner").mkdir(parents=True)
+        os.chmod(self.base / "passage", 0o111)
+        self.addCleanup(os.chmod, self.base / "passage", 0o755)
+        self.assertTrue(atomicwrite.replace(self.base / "passage" / "inner" / "record.json", "{}"))
+
+    def test_a_plain_write_keeps_the_umask_and_an_existing_files_mode(self):
+        before = os.umask(0o077)
+        self.addCleanup(os.umask, before)
+        fresh = self.base / "state" / "fresh.json"
+        self.assertTrue(atomicwrite.replace(fresh, "{}", mode=atomicwrite.AS_A_PLAIN_WRITE))
+        self.assertEqual(0o600, fresh.stat().st_mode & 0o777)
+        existing = self.base / "state" / "existing.json"
+        existing.write_text("old", encoding="utf-8")
+        os.chmod(existing, 0o640)
+        self.assertTrue(atomicwrite.replace(existing, "{}", mode=atomicwrite.AS_A_PLAIN_WRITE))
+        self.assertEqual(0o640, existing.stat().st_mode & 0o777)
+
+    def test_a_folders_mode_is_given_to_that_folder_alone(self):
+        before = os.umask(0o022)
+        self.addCleanup(os.umask, before)
+        atomicwrite.make_folder(self.base / "a" / "b" / "saw", mode=0o700)
+        self.assertEqual(0o755, (self.base / "a").stat().st_mode & 0o777)
+        self.assertEqual(0o755, (self.base / "a" / "b").stat().st_mode & 0o777)
+        self.assertEqual(0o700, (self.base / "a" / "b" / "saw").stat().st_mode & 0o777)
 
     def test_as_root_a_folder_reached_through_a_users_link_is_refused(self):
         (self.base / "state").symlink_to(self.elsewhere)
@@ -96,6 +142,45 @@ class TestTheWriterStaysWhereItWasNamed(_Sandbox):
         self.assertEqual(self.base / "kept" / "x-1", atomicwrite.new_folder(self.base / "kept", "x"))
 
 
+class TestOnlyWhatTheWriterNamedChanges(_Sandbox):
+
+    def test_as_root_a_root_owned_link_placed_in_a_users_folder_is_refused(self):
+        (self.base / "state").symlink_to(self.elsewhere)
+        real_stat = os.stat
+
+        def link_owned_by_root(path, *args, **kwargs):
+            found = real_stat(path, *args, **kwargs)
+            if path == "state" and kwargs.get("follow_symlinks") is False:
+                fields = list(found)[:10]
+                fields[4] = 0
+                return os.stat_result(fields)
+            return found
+        self.as_root()
+        with mock.patch.object(pathsafe.os, "stat", side_effect=link_owned_by_root):
+            self.assertFalse(atomicwrite.replace(self.base / "state" / "record.json", "{}"))
+        self.assertEqual([], self.landed_elsewhere())
+
+    def test_a_file_with_another_name_keeps_its_mode(self):
+        other = self.elsewhere / "secret"
+        other.write_text("x", encoding="utf-8")
+        os.chmod(other, 0o600)
+        (self.base / "hooks").mkdir()
+        os.link(other, self.base / "hooks" / "post-checkout.local")
+        with self.assertRaises(OSError):
+            atomicwrite.set_mode(self.base / "hooks" / "post-checkout.local", 0o755)
+        self.assertEqual(0o600, other.stat().st_mode & 0o777)
+
+    def test_as_root_a_move_whose_source_is_reached_through_a_users_link_moves_nothing(self):
+        (self.elsewhere / "victim").write_text("x", encoding="utf-8")
+        (self.base / "hooks").symlink_to(self.elsewhere)
+        (self.base / "kept").mkdir()
+        self.as_root()
+        with self.assertRaises(OSError):
+            atomicwrite.move_into(self.base / "hooks" / "victim", self.base / "kept", "victim")
+        self.assertEqual(["victim"], self.landed_elsewhere())
+        self.assertEqual([], os.listdir(self.base / "kept"))
+
+
 class TestAMoveBetweenDisksCopiesWhole(_Sandbox):
 
     def test_a_folder_with_a_link_inside_is_copied_and_the_source_removed(self):
@@ -103,12 +188,13 @@ class TestAMoveBetweenDisksCopiesWhole(_Sandbox):
         (source / "inner").mkdir(parents=True)
         (source / "inner" / "pre-commit").write_text("#!/bin/sh\n", encoding="utf-8")
         os.chmod(source / "inner" / "pre-commit", 0o755)
+        os.utime(source / "inner" / "pre-commit", (1_600_000_000, 1_600_000_000))
         (source / "inner" / "link").symlink_to("pre-commit")
         (self.base / "kept").mkdir()
         real_rename = os.rename
 
         def across_disks(src, dst, *args, **kwargs):
-            if kwargs.get("dst_dir_fd") is not None and kwargs.get("src_dir_fd") is None:
+            if kwargs.get("dst_dir_fd") is not None:
                 raise OSError(errno.EXDEV, "cross-device")
             return real_rename(src, dst, *args, **kwargs)
         with mock.patch.object(atomicwrite.os, "rename", side_effect=across_disks):
@@ -117,6 +203,7 @@ class TestAMoveBetweenDisksCopiesWhole(_Sandbox):
         self.assertFalse(source.exists())
         self.assertEqual("#!/bin/sh\n", (moved / "pre-commit").read_text(encoding="utf-8"))
         self.assertEqual(0o755, (moved / "pre-commit").stat().st_mode & 0o777)
+        self.assertEqual(1_600_000_000, int((moved / "pre-commit").stat().st_mtime))
         self.assertEqual("pre-commit", os.readlink(moved / "link"))
 
 

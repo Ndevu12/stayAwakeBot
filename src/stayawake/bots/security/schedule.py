@@ -49,7 +49,8 @@ def record_path() -> Path:
 def declare(argv: list[str], path: Path | None = None) -> bool:
     """Record the argv the item was placed with. True if it was written."""
     where = path or record_path()
-    return atomicwrite.replace(where, json.dumps({"version": 1, "argv": list(argv)}), mode=0o644)
+    return atomicwrite.replace(where, json.dumps({"version": 1, "argv": list(argv)}),
+                               mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
 
 
 def forget(path: Path | None = None) -> None:
@@ -304,7 +305,7 @@ class Scheduling:
 
 def _write(where: Path, text: str) -> bool:
     """Write `text` to `where` atomically, and read it back. True only when the read-back matches."""
-    return atomicwrite.replace(where, text, mode=0o644)
+    return atomicwrite.replace(where, text, mode=0o644, at_a_link=atomicwrite.REPLACE_A_LINK)
 
 
 def settle(path: Path | None = None, saw: list[str] | None = None, write=_write,

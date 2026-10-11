@@ -77,7 +77,8 @@ def _capture(held: dict[int, tuple], where: Path, now=None) -> str | None:
         "code_bytes": len(code),
     }
     target = where / f"live-code-{stamp}-{pids[0]}.json"
-    if not atomicwrite.replace(target, json.dumps(record, indent=2), folder_mode=0o700):
+    if not atomicwrite.replace(target, json.dumps(record, indent=2), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                               at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK):
         return None
     return str(target)
 

@@ -209,4 +209,4 @@ def save_baseline(entries, base: Baseline, listing: dict) -> tuple[bool, int]:
         "removed": gone,
         "self_hash": _self_hash(mapping, gone),
     }
-    return atomicwrite.replace(baseline_path(), json.dumps(payload)), dropped
+    return atomicwrite.replace(baseline_path(), json.dumps(payload), at_a_link=atomicwrite.REPLACE_A_LINK), dropped

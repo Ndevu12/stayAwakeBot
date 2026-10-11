@@ -82,6 +82,6 @@ def read_json(path: str | Path, default: Any = None) -> Any:
 
 def write_json(path: str | Path, data: Any) -> None:
     """Atomic JSON write (temp file + rename) — never leaves a half-written file."""
-    with atomicwrite.staged(Path(path)) as fh:
+    with atomicwrite.staged(Path(path), at_a_link=atomicwrite.REPLACE_A_LINK) as fh:
         json.dump(data, fh, indent=2)
         fh.write("\n")

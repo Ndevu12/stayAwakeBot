@@ -56,7 +56,7 @@ def declare(saw: str, config: str | None, hooks: Path | None = None) -> bool:
     where = str(hooks or hooks_dir())
     try:
         if not atomicwrite.replace(path, json.dumps({"saw": saw, "config": config, "hooks": where}),
-                                   mode=0o644):
+                                   mode=atomicwrite.AS_A_PLAIN_WRITE):
             return False
         return installed() == (saw, config) and installed_into() == Path(where)
     except OSError:
@@ -333,7 +333,8 @@ def set_aside(path: Path) -> Path | None:
         record = {"path": str(path), "sha256": digest, "size": stat.st_size,
                   "mode": oct(stat.st_mode), "mtime": stat.st_mtime, "when": stamp,
                   "symlink_target": os.readlink(path) if path.is_symlink() else None}
-        if not atomicwrite.replace(folder / "origin.json", json.dumps(record, indent=2), mode=0o644):
+        if not atomicwrite.replace(folder / "origin.json", json.dumps(record, indent=2),
+                                   mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK):
             return None
         atomicwrite.new_folder(folder, "kept", tries=1)
         atomicwrite.move_into(path, folder / "kept", path.name)

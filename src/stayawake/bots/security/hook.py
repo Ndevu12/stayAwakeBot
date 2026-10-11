@@ -256,9 +256,9 @@ def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list
         elif state == hookscript.FOREIGN:
             preserved = hooks_dir / f"{event}.local"
             try:
-                dest.rename(preserved)
-                if not preserved.is_symlink():
-                    atomicwrite.set_mode(preserved, 0o755)
+                if not dest.is_symlink():
+                    atomicwrite.set_mode(dest, 0o755)
+                atomicwrite.rename_in(hooks_dir, dest.name, preserved.name)
             except OSError:
                 actions.append(Action(UNVERIFIED, dest, "could not be set aside as your own, so it was left as it is"))
                 continue
@@ -735,7 +735,7 @@ def _remember(root: Path, key: str) -> None:
     try:
         cache = {r: s for r, s in _load_cache().items() if os.path.isdir(r)}
         cache[os.path.realpath(root)] = key
-        atomicwrite.replace(_cache_path(), json.dumps(cache), mode=0o644)
+        atomicwrite.replace(_cache_path(), json.dumps(cache), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
