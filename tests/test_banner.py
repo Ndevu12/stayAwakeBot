@@ -29,7 +29,7 @@ class TestBanner(unittest.TestCase):
     def test_intro_covers_the_tour(self):
         out = render_intro(ColorLevel.NONE, "1.0.0")
         for needle in ("What it is", "Four verbs", "Why it's safe", "Gate CI",
-                       "saw fix", "saw harden", "--pr", "the exit code IS the verdict"):
+                       "saw fix", "saw harden", "--pr", "one clear verdict"):
             self.assertIn(needle, out)
 
     def test_truecolor_uses_24bit_sequences(self):

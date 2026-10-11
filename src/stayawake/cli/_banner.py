@@ -106,7 +106,7 @@ def render_intro(level: ColorLevel, version: str) -> str:
         C('  auto-run tasks, and stealth "evil merges".', _DIM),
         "", C("Four verbs", _WHITE, bold=True),
         "  " + C("saw scan  ", _CYAN, bold=True) + C("  hunt worms (read-only) — ", _DIM)
-        + C("the exit code IS the verdict", _FG),
+        + C("one clear verdict", _FG),
         "  " + C("saw fix   ", _CYAN, bold=True) + C("  recover from git onto a clean branch; ", _DIM)
         + C("--pr", _MINT) + C(" opens a PR", _DIM),
         "  " + C("saw audit ", _CYAN, bold=True) + C("  credential · editor · CI hygiene", _DIM),
