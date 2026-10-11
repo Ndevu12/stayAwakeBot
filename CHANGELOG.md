@@ -81,6 +81,8 @@ reader, not the mechanism or the weakness it closed.
 ### Security
 - **saw writes the files it keeps for itself only where they were named, including under `sudo`.**
   When it cannot, it writes nothing there and says so.
+- **On macOS, saw lists running processes with the system's own `ps`**, whatever is first on your
+  `PATH`.
 - **`saw scan` reports a merge commit it could not read as not read, never as clean**, and reads
   file content that a ref names directly.
 - **saw's git commands read each repository as it stores it, and never fetch from it on their own.**
