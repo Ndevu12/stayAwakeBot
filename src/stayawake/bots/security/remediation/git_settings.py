@@ -25,6 +25,7 @@ from stayawake.utils import pathsafe
 NOT_A_KNOWN_PAYLOAD = "is not a known payload on its own — review it"
 NOT_READ = "could not be read in full, so it was left"
 NOT_TAKEN_OUT = "could not be taken out"
+IN_YOUR_OWN_SETTINGS = "is also set in your own git settings, which saw fix does not change — remove it yourself"
 A_HOOKS_DIRECTORY_FILE = ("is a file in the hooks directory, which saw fix does not remove — remove "
                           "it yourself")
 NAMED_AFTER_AN_EVENT = "is named after a hook event, so saw fix does not change it — remove it yourself"
@@ -74,6 +75,7 @@ def take_out_payload_settings(root: Path, findings, signatures, opts) -> Setting
         return removal
     every = every_signature(signatures)
     known_payload = grading.payload_check_for(every, holding_anywhere=True)
+    read_by_git = _read_by_git(root, surface)
     matched, hooks_handled = set(), set()
     for judgement in grading.judge(surface, grading.payload_check_for(every),
                                    getattr(opts, "max_file_bytes", 2_000_000)):
@@ -88,24 +90,37 @@ def take_out_payload_settings(root: Path, findings, signatures, opts) -> Setting
         entry = judgement.command.entry
         hook = _configured_hook_name(entry.key)
         if hook is None:
-            _take_out_setting_value(root, entry, shown, known_payload, removal)
-        elif hook not in hooks_handled:
-            hooks_handled.add(hook)
-            _take_out_configured_hook(root, surface, entry, shown, reported, known_payload, removal)
+            _take_out_setting_value(root, entry, shown, known_payload, removal, read_by_git)
+        elif (_repository_of(entry, read_by_git), hook) not in hooks_handled:
+            hooks_handled.add((_repository_of(entry, read_by_git), hook))
+            _take_out_configured_hook(root, surface, entry, shown, reported, known_payload, removal,
+                                      read_by_git)
     removal.absent += sorted({path for path, _ in reported - matched})
     return removal
 
 
 def _take_out_setting_value(root: Path, entry: ConfigEntry, shown: str, known_payload,
-                            removal: SettingsRemoval) -> None:
+                            removal: SettingsRemoval, read_by_git: "_ReadByGit | None") -> None:
     """Take one value of a setting out of the file it is set in, when the value itself carries a
-    known payload. Takes the checkout, the entry, its file as the finding names it, the payload
-    check and the record."""
+    known payload, the file is one git reads for this repository and no submodule reads, and the
+    value is not a command of a filter any view requires. Takes the checkout, the entry, its file as
+    the finding names it, the payload check, the record and what git reads."""
     if not known_payload(entry.value or ""):
         removal.record_left(shown, entry.key, NOT_A_KNOWN_PAYLOAD)
         return
+    own_settings_files = operator_config.config_files()
+    if read_by_git is None or own_settings_files is None:
+        removal.record_left(shown, entry.key, NOT_READ)
+        removal.unread.append(shown)
+        return
+    if read_by_git.identity_of(entry.source) in read_by_git.submodules:
+        removal.record_left(shown, entry.key, IN_A_SUBMODULE)
+        return
+    if read_by_git.identity_of(entry.source) not in read_by_git.repository_ids:
+        removal.record_left(shown, entry.key, NOT_READ_HERE)
+        return
     driver = _filter_driver(entry.key)
-    if driver is not None and _filter_is_required(root, driver):
+    if driver is not None and _filter_is_required(read_by_git.places, driver):
         removal.record_left(shown, entry.key, A_REQUIRED_FILTER)
         return
     source = Path(entry.source)
@@ -121,34 +136,39 @@ def _take_out_setting_value(root: Path, entry: ConfigEntry, shown: str, known_pa
             removal.unread.append(grading.shown_path(source, root))
         return
     removal.stripped.append(grading.shown_path(source, root))
+    for own in own_settings_files:
+        own_pairs, own_unreadable = list_config_file(Path(own))
+        if own_unreadable is not None or (entry.key, entry.value) in own_pairs:
+            removal.record_left(grading.shown_path(Path(own), root), entry.key,
+                                NOT_READ if own_unreadable is not None else IN_YOUR_OWN_SETTINGS)
 
 
 def _take_out_configured_hook(root: Path, surface: ExecSurface, judged: ConfigEntry, shown: str,
-                              reported, known_payload, removal: SettingsRemoval) -> None:
+                              reported, known_payload, removal: SettingsRemoval,
+                              read_by_git: "_ReadByGit | None") -> None:
     """Take a hook configured in git's settings out key by key, events first, when every entry of it in
     the files git reads for the repository's views and for the operator is in the checkout, none of
     those files is also read by a submodule, and every command it names carries a known payload and
     was reported. Takes the checkout, the surface, the entry the finding names, its file as the
-    finding names it, the reported findings, the payload check and the record."""
+    finding names it, the reported findings, the payload check, the record and what git reads."""
     hook = _configured_hook_name(judged.key)
     subject = f"hook.{hook}"
+    already_left = removal.confirmed_hook_left
     removal.confirmed_hook_left = True
     if hook.lower() in HOOK_NAMES:
         removal.record_left(shown, subject, NAMED_AFTER_AN_EVENT)
         return
-    repository_files = _files_git_reads(repository_views(root))
-    submodule_files = _files_git_reads(_submodule_places(surface))
     operator_files = operator_config.config_files()
-    if repository_files is None or submodule_files is None or operator_files is None:
+    if read_by_git is None or operator_files is None:
         removal.record_left(shown, subject, NOT_READ)
         removal.unread.append(shown)
         return
-    read_by_submodules = {file_identity(f) for f in submodule_files}
-    if file_identity(Path(judged.source)) not in {file_identity(f) for f in repository_files}:
-        removal.record_left(shown, subject, IN_A_SUBMODULE if file_identity(Path(judged.source))
+    read_by_submodules = read_by_git.submodules
+    if read_by_git.identity_of(judged.source) not in read_by_git.repository_ids:
+        removal.record_left(shown, subject, IN_A_SUBMODULE if read_by_git.identity_of(judged.source)
                             in read_by_submodules else NOT_READ_HERE)
         return
-    entries, unreadable = _entries_in(dict.fromkeys([*repository_files, *operator_files]))
+    entries, unreadable = _entries_in(dict.fromkeys([*read_by_git.repository, *operator_files]))
     if unreadable:
         removal.record_left(shown, subject, NOT_READ)
         removal.unread.append(shown)
@@ -192,8 +212,53 @@ def _take_out_configured_hook(root: Path, surface: ExecSurface, judged: ConfigEn
             removal.record_left(shown, subject, why)
             removal.unread += [grading.shown_path(f, root) for f in unreadable]
             return
-    removal.confirmed_hook_left = False
+    removal.confirmed_hook_left = already_left
     removal.stripped += [grading.shown_path(f, root) for f in files]
+
+
+@dataclass(frozen=True)
+class _ReadByGit:
+    """The settings files git reads for a repository's views, and those its submodules read.
+
+    `repository` are the files themselves, `repository_ids` and `submodules` their identities,
+    `places` where git runs for each of the repository's views, and `before_changes` the identity of
+    every file the scan read settings from, taken before saw fix changed any of them.
+    """
+
+    repository: tuple[Path, ...]
+    repository_ids: frozenset
+    submodules: frozenset
+    places: tuple[Path, ...]
+    before_changes: dict
+
+    def identity_of(self, path) -> tuple | str:
+        """Name a settings file as it was before saw fix changed it. Takes its path. Returns its
+        identity."""
+        return self.before_changes.get(str(path)) or file_identity(Path(path))
+
+
+def _read_by_git(root: Path, surface: ExecSurface) -> _ReadByGit | None:
+    """Ask git which settings files it reads for every view of the repository at a checkout, and for
+    each of its submodules. Takes the checkout and its surface. Returns the answer, or None when git
+    did not answer for every place."""
+    places = repository_views(root)
+    repository = _files_git_reads(places)
+    submodules = _files_git_reads(_submodule_places(surface))
+    if repository is None or submodules is None:
+        return None
+    before_changes = {str(c.entry.source): file_identity(Path(c.entry.source)) for c in surface.commands}
+    return _ReadByGit(tuple(repository), frozenset(file_identity(f) for f in repository),
+                      frozenset(file_identity(f) for f in submodules), tuple(places), before_changes)
+
+
+def _repository_of(entry: ConfigEntry, read_by_git: "_ReadByGit | None") -> tuple | str:
+    """Name the repository a settings entry belongs to, for telling same-named hooks apart. Takes the
+    entry and what git reads. Returns one name for every file of this repository, and the entry's
+    file for any other."""
+    if read_by_git is None:
+        return file_identity(Path(entry.source))
+    source = read_by_git.identity_of(entry.source)
+    return "this repository" if source in read_by_git.repository_ids else source
 
 
 def _submodule_places(surface: ExecSurface) -> list[Path]:
@@ -238,13 +303,14 @@ def _filter_driver(key: str) -> str | None:
     return driver if dot and variable.lower() in ("clean", "smudge", "process") else None
 
 
-def _filter_is_required(root: Path, driver: str) -> bool:
-    """Ask git whether a filter driver is required in a checkout. Takes the checkout and the driver.
-    Returns the answer, True when git could not say."""
-    res = run(root, ["config", "--type=bool", "--get", f"filter.{driver}.required"])
-    if res is None or res.returncode not in (0, 1):
-        return True
-    return res.stdout.strip() == "true"
+def _filter_is_required(places, driver: str) -> bool:
+    """Ask git whether a filter driver is required in any view of a repository. Takes where git runs
+    for each view and the driver. Returns the answer, True when git could not say."""
+    for place in places:
+        res = run(place, ["config", "--type=bool", "--get", f"filter.{driver}.required"])
+        if res is None or res.returncode not in (0, 1) or res.stdout.strip() == "true":
+            return True
+    return False
 
 
 def _hook_keys_left(files: list[Path], hook: str, in_this_pass) -> tuple[list[Path], list[Path]]:

