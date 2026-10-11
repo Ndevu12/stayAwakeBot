@@ -74,3 +74,17 @@ def repository_settings(where: Path) -> RepositorySettings | None:
         hooks_paths = tuple(os.fsdecode(value) for scope, value in zip(parts[0::2], parts[1::2])
                             if scope in REPOSITORY_SCOPES)
     return RepositorySettings(tuple(files), hooks_paths, sets_hooks_path, top)
+
+
+def gitlinks(where: Path) -> list[str] | None:
+    """Ask git which paths its index records as submodules. Takes a working tree. Returns the paths,
+    relative to it, or None when git did not answer."""
+    listed = stdout_bytes(where, ["ls-files", "--stage", "-z"])
+    if listed is None:
+        return None
+    found = []
+    for record in listed.split(b"\0"):
+        meta, tab, path = record.partition(b"\t")
+        if tab and meta.startswith(b"160000 "):
+            found.append(os.fsdecode(path))
+    return found

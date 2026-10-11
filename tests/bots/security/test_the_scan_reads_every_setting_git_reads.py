@@ -84,6 +84,13 @@ class TestEveryFileGitReadsIsRead(ExecSurfaceSandbox):
                 os.environ["GIT_CONFIG_GLOBAL"] = previous
         self.assertNotIn(own, sources)
 
+    def test_without_an_answer_from_git_a_worktree_settings_file_is_still_read(self):
+        repo = self.repo()
+        self.git(repo, "config", "extensions.worktreeConfig", "true")
+        self.append_config(repo, COMMAND, rel=".git/config.worktree")
+        surface = read_exec_surface(repo, ask=lambda where: None)
+        self.assertIn(repo / ".git" / "config.worktree", [c.entry.source for c in surface.commands])
+
     def test_without_an_answer_from_git_a_path_through_a_link_is_still_read(self):
         repo = self.repo()
         inner = repo / ".git" / "deep" / "inner"
@@ -481,6 +488,72 @@ class TestTheReadingWithGitOnlyAdds(ExecSurfaceSandbox):
         self.assertIsNone(self.scan(repo).error)
 
 
+class TestRoundSevenLayouts(ExecSurfaceSandbox):
+
+    def test_default_hooks_another_worktree_runs_while_this_one_names_its_own(self):
+        repo = self.repo()
+        self.git(repo, "config", "extensions.worktreeConfig", "true")
+        self.git(repo, "worktree", "add", "-q", str(repo / "trees" / "wt"))
+        self.git(repo, "config", "--worktree", "core.hooksPath", "safehooks")
+        self.hook(repo / ".git" / "hooks", "pre-commit", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_submodule_git_tracks_without_a_gitmodules_entry(self):
+        repo = self.repo()
+        sub = repo / "sub"
+        subprocess.run(["git", "init", "-q", str(sub)], check=True, capture_output=True)
+        self.write(sub, "lib.js", "export const x = 1;\n")
+        self.git(sub, "add", "-A")
+        self.git(sub, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "lib")
+        self.git(repo, "add", "sub")
+        self.hook(sub / ".git" / "hooks", "pre-commit", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_bare_repository_read_at_its_own_path(self):
+        repo = self.repo()
+        bare = repo.parent / "bare.git"
+        subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(bare)], check=True,
+                       capture_output=True)
+        self.hook(bare / "hooks", "pre-receive", SCRIPT)
+        surface = read_exec_surface(bare)
+        self.assertIsNotNone(surface)
+        self.assertIn(os.path.realpath(bare / "hooks" / "pre-receive"),
+                      [os.path.realpath(h.path) for h in surface.hooks if h.runs])
+
+
+def _case_insensitive(path: Path) -> bool:
+    return os.path.exists(str(path).swapcase()) or os.path.exists(path.parent / path.name.swapcase())
+
+
+class TestOneFileIsReadOnceHoweverItIsSpelled(ExecSurfaceSandbox):
+
+    def test_a_repository_scanned_through_another_letter_case(self):
+        repo = self.repo("shop")
+        if not _case_insensitive(repo):
+            self.skipTest("this file system tells letter case apart")
+        self.append_config(repo, "[core]\n\thooksPath = .husky/_\n")
+        self.hook(repo / ".husky" / "_", "pre-commit", "#!/bin/sh\necho ok\n")
+        self.git(repo, "worktree", "add", "-q", str(repo / "trees" / "wt"))
+        on_disk = self.scan(repo)
+        other_case = self.scan(repo.parent / "Shop")
+        self.assertEqual(on_disk.verdict, other_case.verdict)
+        self.assertEqual(len(on_disk.findings + on_disk.informational),
+                         len(other_case.findings + other_case.informational))
+
+
+class TestAViewGitRefusesRunsNothing(ExecSurfaceSandbox):
+
+    def test_another_views_hooks_are_not_graded_running(self):
+        repo = self.repo()
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        self.hook(tree / ".husky" / "_", "pre-commit", SCRIPT)
+        self.append_config(repo, "[core]\n\trepositoryformatversion = 1\n\thooksPath = .husky/_\n"
+                                 "[extensions]\n\tnosuchextension = true\n")
+        confirmed = [f.path for f in self.graded(repo)[CONFIRMED]]
+        self.assertFalse(any("trees" in path for path in confirmed))
+
+
 class TestAnEmptyHooksPathRunsNothing(ExecSurfaceSandbox):
 
     def test_the_repository_root_is_not_taken_for_a_hooks_directory(self):
@@ -511,8 +584,9 @@ class TestEverySubmoduleIsRead(ExecSurfaceSandbox):
         self.write(repo, ".gitmodules", '[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n')
         module = repo / ".git" / "modules" / "sub"
         module.mkdir(parents=True)
-        (module / "HEAD").write_text("ref: refs/heads/main\n")
-        (module / "config").write_text(config)
+        subprocess.run(["git", "init", "-q", "--bare", str(module)], check=True, capture_output=True)
+        with open(module / "config", "a", encoding="utf-8") as fh:
+            fh.write("[core]\n\tbare = false\n" + config)
         (repo / "sub").mkdir()
         (repo / "sub" / ".git").write_text(f"gitdir: {module}\n")
         return module
