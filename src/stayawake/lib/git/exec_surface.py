@@ -3,6 +3,7 @@
 and attributes that decide which of them apply. Reads configuration as data and never runs it."""
 from __future__ import annotations
 
+import dataclasses
 import os
 import stat
 from dataclasses import dataclass, field
@@ -10,6 +11,7 @@ from pathlib import Path
 
 from stayawake.lib.git.exec_keys import HOOKS_DIRECTORY, ExecKey, rule_for, subsection
 from stayawake.lib.git.run import LOCAL_TIMEOUT, run
+from stayawake.lib.git.what_git_reads import RepositorySettings, gitlinks, repository_settings
 from stayawake.utils import pathsafe, scratch
 
 HOOK_NAMES = frozenset((
@@ -20,11 +22,11 @@ HOOK_NAMES = frozenset((
     "p4-prepare-changelist p4-post-changelist p4-pre-submit").split())
 
 MAX_INCLUDE_DEPTH = 10
-INSTALL_PREFIX = "%(prefix)/"
 MAX_GIT_DIRS = 256
 MAX_CONFIG_BYTES = 4 << 20
 MAX_WAIT_FILES = 256
 _INCLUDE_NAMES = ("include.path",)
+_EXPANDED_BY_GIT = ("%(", ":(")
 @dataclass(frozen=True)
 class ConfigEntry:
     """One key set in a configuration file."""
@@ -75,7 +77,6 @@ class ExecSurface:
     work_trees: dict[Path, Path] = field(default_factory=dict)
     hooks_dir: Path | None = None
     commands: list[Command] = field(default_factory=list)
-    entries: list[ConfigEntry] = field(default_factory=list)
     includes: list[Include] = field(default_factory=list)
     hooks: list[Hook] = field(default_factory=list)
     unexamined: list[str] = field(default_factory=list)
@@ -112,18 +113,23 @@ def list_config_file(path: Path) -> tuple[list[tuple[str, str | None]], str | No
 
 
 def _resolve(base: Path, value: str) -> Path:
-    """Resolve a path git reads from configuration to the file the system opens for it. Takes the
-    directory it is relative to and the value. Returns the path, `~` expanded."""
+    """Resolve a path git reads from configuration. Takes the directory it is relative to and the
+    value. Returns the path, `~` expanded."""
+    expanded = os.path.expanduser(value)
+    return Path(os.path.normpath(expanded if os.path.isabs(expanded) else base / expanded))
+
+
+def _opened_instead(base: Path, value: str) -> Path | None:
+    """Find the file the system opens for a path git reads from configuration, when it is not the one
+    `_resolve` names. Takes the directory it is relative to and the value. Returns that file, or None
+    when they are the same or the system opens nothing."""
     expanded = os.path.expanduser(value)
     joined = expanded if os.path.isabs(expanded) else os.path.join(base, expanded)
-    lexical = os.path.normpath(joined)
     try:
-        opened = os.path.realpath(joined)
-        if opened != os.path.realpath(lexical):
-            return Path(opened)
+        opened = os.path.realpath(joined, strict=True)
     except (OSError, ValueError):
-        pass
-    return Path(lexical)
+        return None
+    return None if opened == os.path.realpath(os.path.normpath(joined)) else Path(opened)
 
 
 def _is_include(key: str) -> bool:
@@ -133,11 +139,22 @@ def _is_include(key: str) -> bool:
 
 
 def read_config(path: Path, surface: ExecSurface, _chain: tuple[Path, ...] = (),
-                _seen: frozenset = frozenset()) -> list[ConfigEntry]:
+                _seen: frozenset = frozenset(), *, unsure: list[str] | None = None,
+                files_read: dict | None = None,
+                opened: list[ConfigEntry] | None = None) -> list[ConfigEntry]:
     """Read a configuration file and every file it includes, treating each conditional include as
-    taken. Takes the file and the surface that collects includes and what could not be read.
-    Returns the entries in the order git applies them."""
-    pairs, why = list_config_file(path)
+    taken. Takes the file, the surface that collects includes and what could not be read, `unsure`,
+    which collects the includes only git can resolve, `files_read`, the files already read in this
+    pass, and `opened`, which collects what is read where the system opens an include rather than as
+    it is written (None to read each include only as it is written). Returns the entries in the
+    order git applies them, with those `opened` collects left out."""
+    if files_read is None:
+        pairs, why = list_config_file(path)
+    else:
+        written = os.path.abspath(path)
+        if written not in files_read:
+            files_read[written] = list_config_file(path)
+        pairs, why = files_read[written]
     if why is not None:
         surface.unexamined.append(f"{path}: {why}")
         return []
@@ -147,17 +164,22 @@ def read_config(path: Path, surface: ExecSurface, _chain: tuple[Path, ...] = (),
         entries.append(ConfigEntry(key, value, path, _chain))
         if not _is_include(key) or not value:
             continue
-        if value.startswith(INSTALL_PREFIX):
-            surface.unexamined.append(f"{path}: {key} names a file under git's install prefix")
-            continue
         target = _resolve(path.parent, value)
         surface.includes.append(Include(path, target, key.lower() != "include.path"))
+        if value.startswith(_EXPANDED_BY_GIT) and unsure is not None:
+            unsure.append(f"{path}: {key} names a path only git can resolve")
         if len(_chain) + 1 >= MAX_INCLUDE_DEPTH:
             surface.unexamined.append(f"{target}: includes nest deeper than {MAX_INCLUDE_DEPTH}")
             continue
-        if os.path.realpath(target) in _seen | {real}:
-            continue
-        entries += read_config(target, surface, _chain + (path,), _seen | {real})
+        for each, as_opened in ((target, False), (_opened_instead(path.parent, value), True)):
+            if each is None or (as_opened and opened is None) or os.path.realpath(each) in _seen | {real}:
+                continue
+            read = read_config(each, surface, _chain + (path,), _seen | {real}, unsure=unsure,
+                               files_read=files_read, opened=opened)
+            if as_opened:
+                opened += read
+            else:
+                entries += read
     return entries
 
 
@@ -318,11 +340,11 @@ def _include_target(including: Path, value: str) -> Path | None:
     return Path(os.path.join(os.path.dirname(str(including)), value))
 
 
-def _module_git_dirs(common_dir: Path, surface: ExecSurface) -> list[Path]:
-    """Walk the git directories of submodules stored under `modules/`. Takes the common directory
-    and the surface. Returns them, shallowest first."""
+def _module_git_dirs(git_dir: Path, surface: ExecSurface) -> list[Path]:
+    """Walk the git directories of submodules stored under a git directory's `modules/`. Takes the
+    git directory and the surface. Returns them, shallowest first."""
     found: list[Path] = []
-    pending = [common_dir / "modules"]
+    pending = [git_dir / "modules"]
     while pending and len(found) < MAX_GIT_DIRS:
         here = pending.pop(0)
         try:
@@ -344,7 +366,7 @@ def _module_git_dirs(common_dir: Path, surface: ExecSurface) -> list[Path]:
             except OSError as exc:
                 surface.unexamined.append(f"{child}: {type(exc).__name__}")
     if pending:
-        surface.unexamined.append(f"{common_dir / 'modules'}: more than {MAX_GIT_DIRS} submodules")
+        surface.unexamined.append(f"{git_dir / 'modules'}: more than {MAX_GIT_DIRS} submodules")
     return found
 
 
@@ -397,12 +419,17 @@ def _hooks(hooks_dir: Path, runs: bool, git_dir: Path | None, surface: ExecSurfa
     return found
 
 
-def _repo_config(git_dir: Path, common_dir: Path, surface: ExecSurface) -> list[ConfigEntry]:
+def _repo_config(git_dir: Path, common_dir: Path, surface: ExecSurface,
+                 unsure: list[str] | None = None, files_read: dict | None = None,
+                 opened: list[ConfigEntry] | None = None) -> list[ConfigEntry]:
     """Read the configuration of one repository in the order git applies it. Takes its git
-    directory, its common directory and the surface. Returns the entries."""
-    entries = read_config(common_dir / "config", surface)
+    directory, its common directory, the surface, where to collect the includes only git can
+    resolve, the files already read in this pass, and where to collect what is read where the system
+    opens an include. Returns the entries."""
+    entries = read_config(common_dir / "config", surface, unsure=unsure, files_read=files_read,
+                          opened=opened)
     for extra in dict.fromkeys([common_dir / "config.worktree", git_dir / "config.worktree"]):
-        entries += read_config(extra, surface)
+        entries += read_config(extra, surface, unsure=unsure, files_read=files_read, opened=opened)
     return entries
 
 
@@ -416,39 +443,223 @@ def _commands(entries: list[ConfigEntry], git_dir: Path) -> list[Command]:
 
 
 def _hooks_dir(work_tree: Path, common_dir: Path, entries: list[ConfigEntry],
-               surface: ExecSurface) -> Path:
-    """Find the directory git runs a repository's hooks from. Takes its working tree, its common
-    directory, its entries and the surface. Returns the directory."""
+               unsure: list[str]) -> Path:
+    """Find the hooks directory a repository's parsed settings name. Takes its working tree, its
+    common directory, its entries and where to note a value only git can resolve. Returns it."""
     configured = next((e for e in reversed(entries)
                        if rule_for(e.key) is not None and rule_for(e.key).runs == HOOKS_DIRECTORY
                        and e.value), None)
     if configured is None:
         return common_dir / "hooks"
-    if configured.value.startswith(INSTALL_PREFIX):
-        surface.unexamined.append(f"{configured.source}: {configured.key} names a directory under "
-                                  "git's install prefix")
+    if configured.value.startswith(_EXPANDED_BY_GIT):
+        unsure.append(f"{configured.source}: {configured.key} names a path only git can resolve")
     return _resolve(work_tree, configured.value)
 
 
-def _collect_what_runs(surface: ExecSurface, entries: list[ConfigEntry], work_tree: Path,
-                       common_dir: Path) -> Path:
-    """Collect the commands one repository's configuration names and the hooks git runs for it.
-    Takes the surface, the repository's entries, its working tree and its common directory.
-    Returns the directory git runs its hooks from."""
-    surface.commands += _commands(entries, common_dir)
-    hooks_dir = _hooks_dir(work_tree, common_dir, entries, surface)
-    surface.hooks += _hooks(hooks_dir, True, common_dir, surface)
-    default_hooks = common_dir / "hooks"
-    if os.path.normpath(hooks_dir) != os.path.normpath(default_hooks):
-        surface.hooks += _hooks(default_hooks, False, common_dir, surface)
-    return hooks_dir
+def _read_view(surface: ExecSurface, tree: Path, common_dir: Path, entries: list[ConfigEntry],
+               unsure: list[str], ask, collected: set[str]) -> Path | None:
+    """Collect what git runs for one view of a repository: the commands its settings name and the
+    hooks it runs, from saw's reading joined with every file git reports it reads. Takes the surface,
+    the view's working tree (its git directory when it has none), its common directory, the entries
+    saw read for it, what only git can resolve in them, the function that asks git (None when git
+    cannot run in the view), and the real paths of the files and hooks directories of this
+    repository already collected. Returns the hooks directory git runs hooks from, None when it runs
+    none."""
+    entries = list(entries)
+    identity_of = {source: _identity(source) for source in dict.fromkeys(e.source for e in entries)}
+    answer: RepositorySettings | None = ask(tree) if ask is not None else None
+    refused = answer is not None and not answer.git_runs_here
+    git_can_run_here = ask is not None and not refused
+    if refused:
+        answer = None
+    if answer is not None:
+        known = set(identity_of.values())
+        for path in answer.files:
+            if _identity(path) not in known:
+                added = read_config(path, surface, _seen=frozenset(os.path.realpath(p) for p in
+                                                                   dict.fromkeys(e.source for e in entries)))
+                entries += added
+                identity_of.update({e.source: _identity(e.source) for e in added})
+                known.add(_identity(path))
+    fresh = [e for e in entries if identity_of[e.source] not in collected]
+    collected.update(identity_of.values())
+    surface.commands += _commands(fresh, common_dir)
+    if refused:
+        effective: Path | None = None
+    elif answer is None:
+        effective = _hooks_dir(tree, common_dir, entries, unsure)
+        if git_can_run_here:
+            surface.unexamined += unsure
+            surface.unexamined.append(f"{tree}: git did not report which settings it reads")
+    elif not answer.hooks_paths:
+        effective = common_dir / "hooks"
+    else:
+        effective = (_resolve(answer.toplevel or tree, answer.hooks_paths[-1])
+                     if answer.hooks_paths[-1] else None)
+    for directory, runs in ((effective, True), (common_dir / "hooks", False)):
+        if directory is None:
+            continue
+        same_directory = _identity(directory)
+        if (same_directory, True) not in collected and (same_directory, runs) not in collected:
+            collected.add((same_directory, runs))
+            surface.hooks += _hooks(directory, runs, common_dir, surface)
+    return effective
 
 
-def read_exec_surface(work_tree: Path) -> ExecSurface | None:
-    """Read what git would execute for a working tree. Takes the tree. Returns the surface, with
-    everything that could not be read listed in `unexamined`, or None when it is not a git
-    working tree."""
-    work_tree = Path(work_tree)
+def _linked_worktrees(common_dir: Path, surface: ExecSurface) -> list[tuple[Path, Path]]:
+    """Find every linked worktree of a repository. Takes its common directory and the surface.
+    Returns each worktree's git directory with its working tree, or with the git directory itself
+    when the working tree is gone."""
+    found = []
+    try:
+        listed = sorted(p for p in (common_dir / "worktrees").iterdir() if p.is_dir())
+    except FileNotFoundError:
+        return found
+    except OSError as exc:
+        surface.unexamined.append(f"{common_dir / 'worktrees'}: {type(exc).__name__}")
+        return found
+    for git_dir in listed:
+        pointer = pathsafe.read_regular_text(git_dir / "gitdir")
+        tree = _resolve(git_dir, pointer.strip()).parent if pointer and pointer.strip() else None
+        found.append((git_dir, tree if tree is not None and tree.is_dir() else git_dir))
+    return found
+
+
+def _main_worktree(common_dir: Path, entries: list[ConfigEntry]) -> Path | None:
+    """Find a repository's main working tree. Takes its common directory and its settings. Returns
+    the tree, the common directory itself for a bare repository, or None when the repository does not
+    record where the tree is."""
+    if common_dir.name == ".git":
+        return common_dir.parent
+    configured = _last(entries, "core.worktree")
+    if configured is not None:
+        return _resolve(common_dir, configured.value)
+    bare = _last(entries, "core.bare")
+    if bare is not None and bare.value.lower() in ("true", "yes", "on", "1"):
+        return common_dir
+    return None
+
+
+def _identity(path: Path) -> tuple | str:
+    """Name the file or directory a path reaches, the same for every spelling of it. Takes the path.
+    Returns its device and inode, or its real path when it does not exist."""
+    try:
+        found = os.stat(path)
+        return found.st_dev, found.st_ino
+    except (OSError, ValueError):
+        return os.path.realpath(path)
+
+
+def _belongs(tree: Path, git_dir: Path) -> bool:
+    """Tell whether a working tree is a view of a git directory: its `.git` leads back to it. Takes
+    the tree and the git directory. Returns the answer."""
+    try:
+        found = _git_dir_of(tree)
+        return found is not None and _identity(found) == _identity(git_dir)
+    except (OSError, ValueError):
+        return False
+
+
+def _read_repository(surface: ExecSurface, tree: Path | None, git_dir: Path, ask, files_read: dict,
+                     as_a_submodule: bool) -> tuple[Path | None, list[tuple[Path, Path | None]]]:
+    """Collect what git runs for one repository in every view of it: the view at `git_dir`, its main
+    working tree and every linked worktree. Takes the surface, the view's working tree (None for a
+    submodule whose tree its settings or `.gitmodules` name), its git directory, the function that
+    asks git, the settings files already read in this pass, and whether it is a submodule. Returns the
+    hooks directory of the view at `git_dir`, and the git directory of every submodule its views
+    hold, each with its working tree when one is known."""
+    common_dir = _common_dir_of(git_dir)
+    collected: set[str] = set()
+    unsure: list[str] = []
+    opened: list[ConfigEntry] = []
+    entries = _repo_config(git_dir, common_dir, surface, unsure, files_read, opened)
+    configured = _last(entries, "core.worktree") if as_a_submodule else None
+    if configured is not None:
+        surface.work_trees[git_dir] = _resolve(git_dir, configured.value)
+    recorded = surface.work_trees.get(git_dir, tree) if as_a_submodule else tree
+    tree = recorded if recorded is not None else git_dir
+    git_can_run = (tree == git_dir or _belongs(tree, git_dir)) and os.path.isdir(tree)
+    answer = ask(tree) if git_can_run else None
+
+    def as_this_view(_where: Path):
+        return answer
+    hooks_dir = _read_view(surface, tree, common_dir, [*entries, *opened], unsure,
+                           as_this_view if git_can_run else None, collected)
+    main_worktree = _main_worktree(common_dir, entries)
+    if main_worktree is None and os.path.realpath(git_dir) != os.path.realpath(common_dir):
+        surface.unexamined.append(f"{common_dir}: the repository does not record where its main "
+                                  "working tree is, so what git runs there was not read")
+    views = [(view_git_dir, view_tree if _belongs(view_tree, view_git_dir) else view_git_dir)
+             for view_git_dir, view_tree in [(git_dir, tree), (common_dir, main_worktree or common_dir),
+                                             *_linked_worktrees(common_dir, surface)]]
+    submodules: list[tuple[Path, Path | None]] = _submodules_of(surface, common_dir, tree)
+    read_views: set[str] = set()
+    for position, (view_git_dir, view_tree) in enumerate(views):
+        if _identity(view_git_dir) in read_views:
+            continue
+        read_views.add(_identity(view_git_dir))
+        if position:
+            unsure, opened = [], []
+            entries = _repo_config(view_git_dir, common_dir, surface, unsure, files_read, opened)
+            _read_view(surface, view_tree, common_dir, [*entries, *opened], unsure, ask, collected)
+        holds_its_own_modules = os.path.realpath(view_git_dir) != os.path.realpath(common_dir)
+        if position:
+            submodules += _submodules_of(surface, view_git_dir if holds_its_own_modules else None,
+                                         view_tree)
+    return hooks_dir, submodules
+
+
+def _submodules_of(surface: ExecSurface, git_dir: Path | None,
+                   tree: Path) -> list[tuple[Path, Path | None]]:
+    """Find the submodules one view of a repository holds: the git directories under its `modules/`
+    and those its tree's `.gitmodules` places, recording each tree found. Takes the surface, the
+    view's git directory (None to leave its `modules/` to another view) and its working tree. Returns
+    each git directory with its tree when known."""
+    found: list[tuple[Path, Path | None]] = (
+        [(module, None) for module in _module_git_dirs(git_dir, surface)] if git_dir is not None else [])
+    if tree != git_dir and os.path.isdir(tree):
+        for module, module_tree in _submodule_pointers(tree, surface):
+            surface.work_trees.setdefault(module, module_tree)
+            found.append((module, module_tree))
+        for path in gitlinks(tree) or ():
+            module_tree = tree / path
+            module = _git_dir_of(module_tree) if module_tree.is_dir() else None
+            if module is not None:
+                surface.work_trees.setdefault(module, module_tree)
+                found.append((module, module_tree))
+    return found
+
+
+def read_exec_surface(work_tree: Path, ask=repository_settings) -> ExecSurface | None:
+    """Read what git would execute for a working tree: by parsing the repository's settings, and then
+    with git for the repository and every submodule at any depth, each in every view of it. Takes the
+    tree, and the function that asks git which settings it reads. Returns the surface, with everything
+    that could not be read listed in `unexamined`, or None when it is not a git working tree."""
+    root = Path(work_tree)
+    files_read: dict = {}
+    surface = _read_by_parsing(root, files_read)
+    if surface is None and not _is_git_dir(root):
+        return None
+    if surface is not None and not surface.git_dirs:
+        return surface
+    try:
+        with_git = _read_with_git(root, ask, files_read)
+    except Exception as exc:  # the reading with git only adds; its failure must not lose the first
+        surface = surface or ExecSurface(root, root, root)
+        surface.unexamined.append(f"{work_tree}: reading the settings with git stopped "
+                                  f"({type(exc).__name__}), so what it adds was not read")
+        return surface
+    if surface is None:
+        return with_git
+    if with_git is not None:
+        _join(surface, with_git)
+    return surface
+
+
+def _read_by_parsing(work_tree: Path, files_read: dict) -> ExecSurface | None:
+    """Read what git would execute for a working tree by parsing the repository's settings files, its
+    other worktrees' settings and its submodules' settings. Takes the tree and the settings files
+    already read in this pass. Returns the surface, or None when it is not a git working tree."""
     git_dir = _git_dir_of(work_tree)
     if git_dir is None:
         return None
@@ -461,15 +672,17 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
     except OSError as exc:
         surface.unexamined.append(f"{git_dir}: {type(exc).__name__}")
         return surface
-    entries = _repo_config(git_dir, common_dir, surface)
-    surface.entries += entries
+    entries = _repo_config(git_dir, common_dir, surface, files_read=files_read)
     surface.git_dirs = list(dict.fromkeys([git_dir, common_dir]))
-    surface.hooks_dir = _collect_what_runs(surface, entries, work_tree, common_dir)
+    surface.commands = _commands(entries, common_dir)
+    surface.hooks_dir = _hooks_dir(work_tree, common_dir, entries, [])
+    surface.hooks = _hooks(surface.hooks_dir, True, common_dir, surface)
+    default_hooks = common_dir / "hooks"
+    if os.path.normpath(surface.hooks_dir) != os.path.normpath(default_hooks):
+        surface.hooks += _hooks(default_hooks, False, common_dir, surface)
     others = list(common_dir.glob("worktrees/*/config.worktree"))
     for config in others:
-        worktree_entries = read_config(config, surface)
-        surface.entries += worktree_entries
-        surface.commands += _commands(worktree_entries, common_dir)
+        surface.commands += _commands(read_config(config, surface, files_read=files_read), common_dir)
     pointed = _submodule_pointers(work_tree, surface)
     for module, tree in pointed:
         surface.work_trees.setdefault(module, tree)
@@ -478,9 +691,76 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
         if module in surface.git_dirs or len(surface.git_dirs) >= MAX_GIT_DIRS:
             continue
         surface.git_dirs.append(module)
-        module_entries = _repo_config(module, module, surface)
+        module_entries = read_config(module / "config", surface, files_read=files_read)
         configured = _last(module_entries, "core.worktree")
         if configured is not None and configured.value:
             surface.work_trees[module] = _resolve(module, configured.value)
-        _collect_what_runs(surface, module_entries, surface.work_trees.get(module, module), module)
+        surface.commands += _commands(module_entries, module)
+        surface.hooks += _hooks(module / "hooks", True, module, surface)
+    return surface
+
+
+def _join(surface: ExecSurface, with_git: ExecSurface) -> None:
+    """Add to a reading what a reading with git found that it lacks: commands from a setting not yet
+    read, hooks not yet listed or now found to run, includes, a working tree for a git directory none
+    of its commands are graded against, and what could not be read. Takes the reading and the reading
+    with git."""
+    graded_against = {c.git_dir for c in surface.commands}
+    read = {(_identity(c.entry.source), c.entry.key, c.entry.value) for c in surface.commands}
+    for command in with_git.commands:
+        key = (_identity(command.entry.source), command.entry.key, command.entry.value)
+        if key not in read:
+            read.add(key)
+            surface.commands.append(command)
+    listed = {_identity(h.path): at for at, h in enumerate(surface.hooks)}
+    for hook in with_git.hooks:
+        at = listed.get(_identity(hook.path))
+        if at is None:
+            listed[_identity(hook.path)] = len(surface.hooks)
+            surface.hooks.append(hook)
+        elif hook.runs and not surface.hooks[at].runs:
+            surface.hooks[at] = dataclasses.replace(surface.hooks[at], runs=True)
+    included = {(_identity(i.source), _identity(i.target), i.conditional) for i in surface.includes}
+    for include in with_git.includes:
+        key = (_identity(include.source), _identity(include.target), include.conditional)
+        if key not in included:
+            included.add(key)
+            surface.includes.append(include)
+    for git_dir, tree in with_git.work_trees.items():
+        if git_dir not in surface.work_trees and git_dir not in graded_against:
+            surface.work_trees[git_dir] = tree
+    surface.unexamined = list(dict.fromkeys([*surface.unexamined, *with_git.unexamined]))
+
+
+def _read_with_git(work_tree: Path, ask, files_read: dict) -> ExecSurface | None:
+    """Read what git would execute for a working tree with git's own answer: for the repository and
+    every submodule at any depth, each in every view of it. Takes the tree, the function that asks git
+    which settings it reads, and the settings files already read in this pass. Returns the surface,
+    or None when it is neither a git working tree nor a bare repository."""
+    git_dir = _git_dir_of(work_tree) or (work_tree if _is_git_dir(work_tree) else None)
+    if git_dir is None:
+        return None
+    common_dir = _common_dir_of(git_dir)
+    surface = ExecSurface(work_tree, git_dir, common_dir)
+    try:
+        if not git_dir.is_dir():
+            surface.unexamined.append(f"{git_dir}: not a directory")
+            return surface
+    except OSError as exc:
+        surface.unexamined.append(f"{git_dir}: {type(exc).__name__}")
+        return surface
+    surface.git_dirs = list(dict.fromkeys([git_dir, common_dir]))
+    surface.hooks_dir, pending = _read_repository(surface, work_tree, git_dir, ask, files_read, False)
+    while pending:
+        module, module_tree = pending.pop(0)
+        if module in surface.git_dirs:
+            continue
+        if module_tree is not None:
+            surface.work_trees.setdefault(module, module_tree)
+        if len(surface.git_dirs) >= MAX_GIT_DIRS:
+            surface.unexamined.append(f"{module}: more than {MAX_GIT_DIRS} repositories")
+            break
+        surface.git_dirs.append(module)
+        _, nested = _read_repository(surface, module_tree, module, ask, files_read, True)
+        pending += nested
     return surface

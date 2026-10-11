@@ -89,6 +89,7 @@ def exec_keys(path: Path = KEYS_FILE) -> tuple[ExecKey, ...]:
     return tuple(_entry(raw) for raw in data.get("keys") or ())
 
 
+@functools.lru_cache(maxsize=4096)
 def rule_for(key: str) -> ExecKey | None:
     """Look up a key as git lists it. Returns its entry, or None when git does not execute it."""
     return next((rule for rule in exec_keys() if rule.matches(key)), None)
