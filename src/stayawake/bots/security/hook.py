@@ -132,27 +132,30 @@ def _tape(no_stream: bool, dest=None):
     return Tape()
 
 
-def _hooks_overridden() -> bool:
-    """Tell whether saw's hooks may not run. Returns True when git runs every repository's hooks
-    from a folder other than saw's, or when that setting could not be read."""
+def why_saws_hooks_may_not_run() -> str | None:
+    """Say why saw's hooks will not run, or may not: git runs hooks from another folder, that setting
+    could not be read, or this shell gives new clones another template. Returns the sentence, or None
+    when nothing stands in their way."""
     read, hp = _hookspath_git_uses()
-    return not read or (hp is not None and not _is_saws_hooks_folder(hp))
+    if not read:
+        return "git's hooks setting could not be read, so whether saw's hooks run is NOT verified."
+    if hp == "":
+        return "git is set to run every repository's hooks from its top folder, so saw's hooks will not run."
+    if hp is not None and not _is_saws_hooks_folder(hp):
+        return (f"git is set to run every repository's hooks from {textsafe.plain(hp, limit=4096)}, "
+                "so saw's hooks will not run.")
+    template = os.environ.get("GIT_TEMPLATE_DIR")
+    if template is not None and not _same_path(os.path.expanduser(template), template_dir()):
+        return (f"GIT_TEMPLATE_DIR in this shell gives new clones {textsafe.plain(template, limit=4096)}, "
+                "so clones made here do not get saw's hooks.")
+    return None
 
 
 def _warn_hookspath(stream) -> None:
-    """Warn that saw's hooks will not run, or may not, when git runs hooks from another folder or
-    that setting could not be read. Takes the stream to print to."""
-    read, hp = _hookspath_git_uses()
-    if not read:
-        print(_paint("  ⚠ git's hooks setting could not be read, so whether saw's hooks run is NOT "
-                     "verified.", "warn", stream), file=stream)
-    elif hp == "":
-        print(_paint("  ⚠ git is set to run every repository's hooks from its top folder, so saw's "
-                     "hooks will not run.", "warn", stream), file=stream)
-    elif hp is not None and not _is_saws_hooks_folder(hp):
-        print(_paint(f"  ⚠ git is set to run every repository's hooks from "
-                     f"{textsafe.plain(hp, limit=4096)}, so saw's hooks will not run.", "warn", stream),
-              file=stream)
+    """Warn that saw's hooks will not run, or may not. Takes the stream to print to."""
+    why = why_saws_hooks_may_not_run()
+    if why is not None:
+        print(_paint(f"  ⚠ {why}", "warn", stream), file=stream)
 
 
 def _is_saws_hooks_folder(folder: str) -> bool:
@@ -315,10 +318,12 @@ class Settling:
     target: str | None = None
     problem: str | None = None
     code: int = 0
+    may_not_run: str | None = None
 
     @property
     def settled(self) -> bool:
-        return not self.problem and all(a.state in _SETTLED for a in self.actions)
+        return (not self.problem and not self.may_not_run
+                and all(a.state in _SETTLED for a in self.actions))
 
     @property
     def changed(self) -> bool:
@@ -372,7 +377,7 @@ def settle_hooks(config_path: str | None = None, *, repositories: list[Path] | N
         actions += _keep_seeded_current(saw, config, handled)
     except OSError as exc:
         return Settling(code=3, problem=textsafe.plain(str(exc)))
-    return Settling(actions=actions, target=target)
+    return Settling(actions=actions, target=target, may_not_run=why_saws_hooks_may_not_run())
 
 
 def _repositories_named(patterns: list[str]) -> list[Path]:
@@ -427,7 +432,7 @@ def install(config_path: str | None = None, *, no_stream: bool = False,
         return done.code
     config = os.path.abspath(config_path) if config_path else None
     actions, target = done.actions, done.target
-    settled = done.settled and not _hooks_overridden()
+    settled = done.settled
 
     out = _tape(no_stream)
     if settled:

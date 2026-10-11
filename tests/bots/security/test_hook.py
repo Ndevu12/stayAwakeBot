@@ -454,6 +454,38 @@ class TestTheHooksSettingIsReadAsGitUsesIt(_Isolated):
                 self.assertNotIn("✓ scan-on-clone installed", out)
                 self.assertIn("will not run", out)
 
+    def test_a_repository_set_to_run_hooks_from_nowhere_gets_nothing_in_its_working_tree(self):
+        repo = self.home / "repo"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", ""],
+                            context=hook.gitutil.OPERATOR_CONFIG)
+        done = hook.settle_hooks(repositories=[repo])
+        self.assertEqual([".git"], sorted(p.name for p in repo.iterdir()))
+        self.assertIn(hook.LEFT, [a.state for a in done.actions if a.path == repo])
+
+    def test_a_template_folder_brought_in_by_an_include_is_used_not_replaced(self):
+        mine = self.home / "my-template"
+        extra = self.home / "extra.gitconfig"
+        extra.write_text(f"[init]\n\ttemplateDir = {mine}\n")
+        (self.home / "gitconfig").write_text(f"[include]\n\tpath = {extra}\n")
+        self._install()
+        self.assertTrue((mine / "hooks" / "post-checkout").exists())
+        self.assertNotIn("templateDir", (self.home / "gitconfig").read_text())
+
+    def test_a_template_folder_this_shell_sets_is_named_and_not_called_installed(self):
+        with mock.patch.dict(os.environ, {"GIT_TEMPLATE_DIR": str(self.home / "env-template")}):
+            code, out = self._install()
+        self.assertEqual(code, 3)
+        self.assertIn("GIT_TEMPLATE_DIR", out)
+        self.assertNotIn("✓ scan-on-clone installed", out)
+
+    def test_a_global_hooks_folder_leaves_the_settling_unsettled_with_the_reason(self):
+        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(self.home / "hp")],
+                            context=hook.gitutil.OPERATOR_CONFIG)
+        done = hook.settle_hooks()
+        self.assertFalse(done.settled)
+        self.assertIn(str(self.home / "hp"), done.may_not_run)
+
     def test_saws_own_setting_for_its_git_calls_is_not_mistaken_for_one(self):
         self.assertEqual(hook._hookspath_git_uses(), (True, None))
         code, out = self._install()

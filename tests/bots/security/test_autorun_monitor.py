@@ -844,7 +844,7 @@ class TestHookScript(unittest.TestCase):
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(home / ".config")}):
             own = hookscript.hooks_dir() / "pre-commit"
             for adopted in (None, str(hookscript.hooks_dir())):
-                with mock.patch("stayawake.bots.security.hookscript.global_hooks_path", return_value=adopted):
+                with mock.patch("stayawake.bots.security.hookscript.gitutil.stdout", return_value=adopted or ""):
                     self.assertTrue(hookscript.in_managed_dir(own), adopted)
             self.assertFalse(hookscript.in_managed_dir(home / "elsewhere" / "pre-commit"))
 

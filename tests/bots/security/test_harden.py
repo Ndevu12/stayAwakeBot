@@ -144,6 +144,19 @@ def tearDownModule():
 
 
 class TestRunContract(unittest.TestCase):
+    def test_hooks_that_will_not_run_are_named_not_called_scanning(self):
+        class _Installed:
+            state = hook.UPDATED
+        why = "git is set to run every repository's hooks from /home/op/hp, so saw's hooks will not run."
+        code, text = harden.run(editor_pass=_EDITORS_OK, agent_pass=_AGENTS_OK, live=lambda: [],
+                                settle_hooks=lambda: hook.Settling(actions=[_Installed()], target="/t",
+                                                                   may_not_run=why),
+                                stop=lambda: None, schedule_pass=lambda: None,
+                                apply=lambda p: harden.PathOutcome(harden.NOT_HERE_YET, p, ''))
+        self.assertIn(why, text)
+        self.assertNotIn(harden._HOOKS_ON, text)
+        self.assertNotIn(harden._HOOKS_OFF, text)
+
     def test_not_implemented_is_not_success(self):
         code, text = harden.run(editor_pass=_EDITORS_OK, agent_pass=_AGENTS_OK, supported=lambda: False, live=lambda: [], settle_hooks=_hooks_already_there, stop=lambda: None, apply=lambda p: harden.PathOutcome(harden.NOT_HERE_YET, p, ''), schedule_pass=lambda: None)
         self.assertEqual(code, 2)
