@@ -34,6 +34,11 @@ def hooks_dir() -> Path:
     return template_dir() / "hooks"
 
 
+def settings_scan_path() -> Path:
+    """Return the file of clean scans saw's hook in git's settings made, by repository."""
+    return Path(env.xdg_cache_home()) / "saw" / "hook-settings-scans.json"
+
+
 def cache_path() -> Path:
     """Return the per-repository last-scanned-SHA cache file."""
     return Path(env.xdg_cache_home()) / "saw" / "hook-scan-cache.json"
@@ -108,6 +113,19 @@ def global_template_dir() -> str | None:
     val = gitutil.stdout(None, ["config", "--global", "--includes", "--get", "init.templateDir"],
                          context=gitutil.OPERATOR_CONFIG).strip()
     return os.path.expanduser(val) if val else None
+
+
+def settings_hook(event: str) -> str:
+    """Name the hook saw sets in git's settings for an event. Takes the event. Returns the name."""
+    return f"saw-{event}"
+
+
+def settings_command(event: str, saw: str, config: str | None) -> str:
+    """Write the command saw's hook in git's settings runs for an event. Takes the event, the `saw`
+    executable and the operator config. Returns the command line."""
+    cfg = f" --config {shlex.quote(config)}" if config else ""
+    quoted = shlex.quote(saw)
+    return f'[ ! -f {quoted} ] || [ ! -x {quoted} ] || {quoted} hook run{cfg} --from-settings {event} "$@" || true; :'
 
 
 def render(event: str, saw: str, config: str | None) -> str:

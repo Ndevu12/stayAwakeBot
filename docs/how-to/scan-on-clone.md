@@ -27,7 +27,8 @@ git command. It is scanned against *your* allowlist, never the cloned repository
 
 **What you are installing.** Hooks that git runs, unprompted, in your repositories. Each repository
 keeps them current on its own, and [`saw audit`](audit-a-machine.md) reports a hook saw did not
-install or one that has been changed.
+install or one that has been changed. With git 2.54 or later, repositories you already have are
+scanned as well; with an older git, `install` says to update it.
 
 **Limits worth knowing.** `git reset --hard` runs no hook, so scan that yourself. If git is set to
 run every repository's hooks from one folder, saw's hooks do not run there, and `install` and

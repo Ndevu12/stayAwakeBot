@@ -379,7 +379,8 @@ def check_git_config_execution() -> list[HygieneIssue]:
                     remediation=f"Remove it: git config --global --unset {key} (or fix the alias). "
                                 "Treat the host as possibly compromised if you did not set it.",
                 ))
-            elif (hook := _configured_hook_command(key)) is not None and hook not in hooks_off:
+            elif ((hook := _configured_hook_command(key)) is not None and hook not in hooks_off
+                  and not _is_saws_own_hook(hook, val, hook_events.get(hook, []))):
                 events = ", ".join(hook_events.get(hook, [])) or "no event yet"
                 issues.append(HygieneIssue(
                     id="git-hook-command-set",
@@ -391,6 +392,18 @@ def check_git_config_execution() -> list[HygieneIssue]:
                                 "git config --global --edit.",
                 ))
     return issues
+
+
+def _is_saws_own_hook(hook: str, command: str, events: list[str]) -> bool:
+    """Tell whether a hook set in the global git settings is the one `saw hook install` set. Takes its
+    name, command and events. Returns True only when all three are exactly what saw recorded."""
+    from stayawake.bots.security import hookscript
+    recorded = hookscript.installed()
+    if recorded is None:
+        return False
+    return any(hook == hookscript.settings_hook(event) and events == [event]
+               and command == hookscript.settings_command(event, *recorded)
+               for event in hookscript.HOOKS)
 
 
 def _configured_hook_command(key: str) -> str | None:
