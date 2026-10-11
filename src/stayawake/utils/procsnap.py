@@ -9,11 +9,15 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stayawake.utils.systembin import system_binary
+
 _CTL_KERN = 1
 _KERN_ARGMAX = 8
 _KERN_PROCARGS2 = 49
 _ARGMAX_FALLBACK = 256 * 1024
 _PS_TIMEOUT = 10
+_PS = ("/bin/ps", "/usr/bin/ps")
+_PS_ENV = {"LC_ALL": "C", "PATH": "/usr/bin:/bin"}
 
 _PROC_PIDTBSDINFO = 3
 _PROC_PIDPATHINFO_MAXSIZE = 4096
@@ -212,6 +216,19 @@ def identify(pid: int) -> tuple["Identity | None", str]:
     return None, UNSUPPORTED
 
 
+def _run_ps(*args: str) -> str | None:
+    """Run the system's own `ps`. Takes its arguments. Returns what it printed, or None when the
+    system has no `ps` of its own or it could not run."""
+    binary = system_binary(_PS)
+    if binary is None:
+        return None
+    try:
+        return subprocess.run([binary, *args], capture_output=True, text=True, timeout=_PS_TIMEOUT,
+                              env=_PS_ENV).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _live_pids() -> list[int]:
     """Just the pid list — the one thing `ps` is safe for, because a pid has no quoting to lose."""
     if sys.platform.startswith("linux"):
@@ -219,10 +236,8 @@ def _live_pids() -> list[int]:
             return sorted(int(p.name) for p in Path("/proc").iterdir() if p.name.isdigit())
         except OSError:
             return []
-    try:                                # macOS has no /proc; listing pids needs no privilege
-        out = subprocess.run(["ps", "-axo", "pid="], capture_output=True, text=True,
-                             timeout=_PS_TIMEOUT).stdout
-    except (OSError, subprocess.SubprocessError):
+    out = _run_ps("-axo", "pid=")      # macOS has no /proc; listing pids needs no privilege
+    if out is None:
         return []
     return sorted(int(tok) for tok in out.split() if tok.isdigit())
 
@@ -269,13 +284,10 @@ def ps_signature(pid: int) -> str | None:
             return f"{fields[1]}|{fields[19]}"
         except (OSError, ValueError, IndexError):
             return None
-    try:
-        out = subprocess.run(["ps", "-o", "ppid=,uid=,lstart=", "-p", str(pid)],
-                             capture_output=True, text=True, timeout=_PS_TIMEOUT,
-                             env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"})
-    except (OSError, subprocess.SubprocessError):
+    out = _run_ps("-o", "ppid=,uid=,lstart=", "-p", str(pid))
+    if out is None:
         return None
-    line = " ".join(out.stdout.split())
+    line = " ".join(out.split())
     return line or None
 
 
@@ -294,10 +306,8 @@ def parent_map() -> dict[int, int]:
             except (OSError, ValueError, IndexError):
                 continue
         return out
-    try:
-        text = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True,
-                              timeout=_PS_TIMEOUT).stdout
-    except (OSError, subprocess.SubprocessError):
+    text = _run_ps("-axo", "pid=,ppid=")
+    if text is None:
         return {}
     pairs: dict[int, int] = {}
     for line in text.splitlines():
