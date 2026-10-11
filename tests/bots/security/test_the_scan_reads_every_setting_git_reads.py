@@ -136,6 +136,20 @@ class TestEveryHooksDirectoryGitRunsIsRead(ExecSurfaceSandbox):
         self.assertEqual(os.path.realpath(answer) == os.path.realpath(hooks),
                          any(os.path.realpath(p.parent) == os.path.realpath(hooks) for p in running))
 
+    def test_a_linked_worktrees_branch_include_reached_through_a_link(self):
+        repo = self.repo()
+        deep = repo / ".git" / "deep" / "inner"
+        deep.mkdir(parents=True)
+        (repo / ".git" / "lnk").symlink_to(deep)
+        (repo / ".git" / "deep" / "real.inc").write_text(
+            '[includeIf "onbranch:feat-a"]\n\tpath = ../a.inc\n')
+        (repo / ".git" / "a.inc").write_text("[core]\n\thooksPath = hooksA\n")
+        self.append_config(repo, "[include]\n\tpath = lnk/../real.inc\n")
+        tree = repo / "trees" / "wt-a"
+        self.git(repo, "worktree", "add", "-q", "-b", "feat-a", str(tree))
+        self.hook(tree / "hooksA", "pre-commit", SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
     def test_the_main_worktrees_view_when_a_linked_worktree_is_scanned(self):
         repo = self.repo()
         self.git(repo, "config", "extensions.worktreeConfig", "true")
@@ -267,6 +281,38 @@ class TestEverythingMainReadIsStillRead(ExecSurfaceSandbox):
         self.git(repo, "worktree", "add", "-q", str(tree))
         sources = {c.entry.source for c in read_exec_surface(tree).commands}
         self.assertIn(inner / ".git" / "config", sources)
+
+
+class TestNothingIsTakenForAViewItIsNot(ExecSurfaceSandbox):
+
+    def test_a_submodule_pointer_back_into_the_repository_changes_nothing(self):
+        repo = self.repo()
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        self.write(repo, ".gitmodules", '[submodule "self"]\n\tpath = .\n\turl = ./x\n')
+        self.append_config(repo, "[core]\n\tfsmonitor = ./mon.sh\n")
+        self.hook(tree, "mon.sh", SCRIPT)
+        self.assertEqual("infected", self.assert_tier(tree, CONFIRMED)["result"].verdict)
+
+    def test_the_main_tree_is_not_graded_with_a_linked_worktrees_hooks_path(self):
+        repo = self.repo()
+        self.git(repo, "config", "extensions.worktreeConfig", "true")
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        self.git(tree, "config", "--worktree", "core.hooksPath", ".githooks")
+        self.hook(repo / ".githooks", "pre-commit", SCRIPT)
+        confirmed = [f.path for f in self.graded(tree)[CONFIRMED]]
+        self.assertFalse(any(".githooks" in path and "trees" not in path for path in confirmed))
+
+    def test_an_unrelated_repository_at_a_stale_worktree_path_is_not_read(self):
+        repo = self.repo()
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        subprocess.run(["rm", "-rf", str(tree)], check=True)
+        subprocess.run(["git", "init", "-q", str(tree)], check=True, capture_output=True)
+        self.append_config(tree, COMMAND)
+        sources = {c.entry.source for c in read_exec_surface(repo).commands}
+        self.assertNotIn(tree / ".git" / "config", sources)
 
 
 class TestOnlyTheRepositorysOwnScopesAreTaken(unittest.TestCase):

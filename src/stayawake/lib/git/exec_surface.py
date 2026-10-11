@@ -462,7 +462,7 @@ def _read_view(surface: ExecSurface, tree: Path, common_dir: Path, entries: list
     hooks it runs, from saw's reading joined with every file git reports it reads. Takes the surface,
     the view's working tree (its git directory when it has none), its common directory, the entries
     saw read for it as written, those read where the system opens an include, what only git can
-    resolve in them, the function that asks git, the realpaths
+    resolve in them, the function that asks git (None when git cannot run in the view), the realpaths
     of the files and hooks directories of this repository already collected, and whether the default
     hooks directory is graded as running when the settings name another. Returns the hooks directory
     git runs hooks from."""
@@ -470,7 +470,7 @@ def _read_view(surface: ExecSurface, tree: Path, common_dir: Path, entries: list
     entries = [*as_written, *opened]
     real_path_of = {source: os.path.realpath(source)
                     for source in dict.fromkeys(e.source for e in entries)}
-    git_can_run_here = os.path.isdir(tree)
+    git_can_run_here = ask is not None and os.path.isdir(tree)
     answer: RepositorySettings | None = ask(tree) if git_can_run_here else None
     if answer is None and git_can_run_here:
         surface.unexamined += unsure
@@ -536,14 +536,22 @@ def _main_worktree(common_dir: Path, entries: list[ConfigEntry]) -> Path | None:
     return None
 
 
+def _belongs(tree: Path, git_dir: Path) -> bool:
+    """Tell whether a working tree is a view of a git directory: its `.git` leads back to it. Takes
+    the tree and the git directory. Returns the answer."""
+    found = _git_dir_of(tree)
+    return found is not None and os.path.realpath(found) == os.path.realpath(git_dir)
+
+
 def _read_repository(surface: ExecSurface, tree: Path | None, git_dir: Path, ask, files_read: dict,
-                     as_a_submodule: bool) -> tuple[Path, list[tuple[Path, Path | None]]]:
+                     as_a_submodule: bool) -> tuple[Path, list[tuple[Path, Path | None]], set[str]]:
     """Collect what git runs for one repository in every view of it: the view at `git_dir`, its main
     working tree and every linked worktree. Takes the surface, the view's working tree (None for a
     submodule whose tree its settings or `.gitmodules` name), its git directory, the function that
     asks git, the settings files already read in this pass, and whether it is a submodule. Returns the
-    hooks directory of the view at `git_dir`, and the git directory of every submodule its views hold,
-    each with its working tree when one is known."""
+    hooks directory of the view at `git_dir`, the git directory of every submodule its views hold,
+    each with its working tree when one is known, and the real paths of its own views' git
+    directories."""
     common_dir = _common_dir_of(git_dir)
     collected: set[str] = set()
     unsure: list[str] = []
@@ -552,21 +560,25 @@ def _read_repository(surface: ExecSurface, tree: Path | None, git_dir: Path, ask
     configured = _last(entries, "core.worktree") if as_a_submodule else None
     if configured is not None:
         surface.work_trees[git_dir] = _resolve(git_dir, configured.value)
-    tree = surface.work_trees.get(git_dir, tree) if as_a_submodule else tree
-    tree = tree if tree is not None else git_dir
-    answer = ask(tree) if os.path.isdir(tree) else None
+    recorded = surface.work_trees.get(git_dir, tree) if as_a_submodule else tree
+    git_can_run = recorded is None or recorded == git_dir or _belongs(recorded, git_dir)
+    tree = recorded if recorded is not None and git_can_run else git_dir
+    answer = ask(tree) if git_can_run and os.path.isdir(tree) else None
 
     def as_this_view(_where: Path):
         return answer
-    hooks_dir = _read_view(surface, tree, common_dir, entries, opened, unsure, as_this_view,
-                           collected, default_hooks_run=as_a_submodule)
+    hooks_dir = _read_view(surface, tree, common_dir, entries, opened, unsure,
+                           as_this_view if git_can_run else None, collected,
+                           default_hooks_run=as_a_submodule)
     main_worktree = _main_worktree(common_dir, entries)
     if main_worktree is None and os.path.realpath(git_dir) != os.path.realpath(common_dir):
         surface.unexamined.append(f"{common_dir}: the repository does not record where its main "
                                   "working tree is, so what git runs there was not read")
-    views = [(git_dir, tree), (common_dir, main_worktree or common_dir),
-             *_linked_worktrees(common_dir, surface)]
-    submodules: list[tuple[Path, Path | None]] = _submodules_of(surface, common_dir, tree)
+    views = [(view_git_dir, view_tree if _belongs(view_tree, view_git_dir) else view_git_dir)
+             for view_git_dir, view_tree in [(git_dir, tree), (common_dir, main_worktree or common_dir),
+                                             *_linked_worktrees(common_dir, surface)]]
+    own_views = {os.path.realpath(view_git_dir) for view_git_dir, _ in views}
+    submodules: list[tuple[Path, Path | None]] = _submodules_of(surface, common_dir, tree, own_views)
     read_views: set[str] = set()
     for position, (view_git_dir, view_tree) in enumerate(views):
         if os.path.realpath(view_git_dir) in read_views:
@@ -575,28 +587,28 @@ def _read_repository(surface: ExecSurface, tree: Path | None, git_dir: Path, ask
         if position:
             unsure, opened = [], []
             entries = _repo_config(view_git_dir, common_dir, surface, unsure, files_read, opened)
-            can_differ = (os.path.lexists(view_git_dir / "config.worktree")
-                          or any(e.key.lower().startswith("includeif.") for e in entries))
-            _read_view(surface, view_tree, common_dir, entries, opened, unsure,
-                       ask if can_differ else as_this_view, collected,
+            _read_view(surface, view_tree, common_dir, entries, opened, unsure, ask, collected,
                        default_hooks_run=as_a_submodule)
         holds_its_own_modules = os.path.realpath(view_git_dir) != os.path.realpath(common_dir)
         if position:
             submodules += _submodules_of(surface, view_git_dir if holds_its_own_modules else None,
-                                         view_tree)
-    return hooks_dir, submodules
+                                         view_tree, own_views)
+    return hooks_dir, submodules, own_views
 
 
-def _submodules_of(surface: ExecSurface, git_dir: Path | None,
-                   tree: Path) -> list[tuple[Path, Path | None]]:
+def _submodules_of(surface: ExecSurface, git_dir: Path | None, tree: Path,
+                   own_views: set[str]) -> list[tuple[Path, Path | None]]:
     """Find the submodules one view of a repository holds: the git directories under its `modules/`
     and those its tree's `.gitmodules` places, recording each tree found. Takes the surface, the
-    view's git directory (None to leave its `modules/` to another view) and its working tree. Returns
-    each git directory with its tree when known."""
+    view's git directory (None to leave its `modules/` to another view), its working tree, and the
+    real paths of the repository's own views, which are never taken for a submodule. Returns each git
+    directory with its tree when known."""
     found: list[tuple[Path, Path | None]] = (
         [(module, None) for module in _module_git_dirs(git_dir, surface)] if git_dir is not None else [])
     if tree != git_dir and os.path.isdir(tree):
         for module, module_tree in _submodule_pointers(tree, surface):
+            if os.path.realpath(module) in own_views:
+                continue
             surface.work_trees.setdefault(module, module_tree)
             found.append((module, module_tree))
     return found
@@ -622,18 +634,20 @@ def read_exec_surface(work_tree: Path, ask=repository_settings) -> ExecSurface |
         return surface
     surface.git_dirs = list(dict.fromkeys([git_dir, common_dir]))
     files_read: dict = {}
-    surface.hooks_dir, pending = _read_repository(surface, work_tree, git_dir, ask, files_read,
-                                                  as_a_submodule=False)
+    surface.hooks_dir, pending, views_read = _read_repository(surface, work_tree, git_dir, ask,
+                                                              files_read, as_a_submodule=False)
     while pending:
         module, module_tree = pending.pop(0)
+        if module in surface.git_dirs or os.path.realpath(module) in views_read:
+            continue
         if module_tree is not None:
             surface.work_trees.setdefault(module, module_tree)
-        if module in surface.git_dirs:
-            continue
         if len(surface.git_dirs) >= MAX_GIT_DIRS:
             surface.unexamined.append(f"{module}: more than {MAX_GIT_DIRS} repositories")
             break
         surface.git_dirs.append(module)
-        _, nested = _read_repository(surface, module_tree, module, ask, files_read, as_a_submodule=True)
+        _, nested, own_views = _read_repository(surface, module_tree, module, ask, files_read,
+                                                as_a_submodule=True)
+        views_read |= own_views
         pending += nested
     return surface
