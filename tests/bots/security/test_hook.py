@@ -503,6 +503,94 @@ class TestGitRunsSawsScanFromItsSettings(_Isolated):
         self.assertEqual(0, done.returncode)
 
 
+class TestSawsHooksGoInTheHooksFolder(_Isolated):
+    """A folder git runs every repository's hooks from gets saw's hooks when it is the operator's alone."""
+
+    def setUp(self):
+        super().setUp()
+        self.folder = self.home / "githooks"
+        self.folder.mkdir()
+        self.folder.chmod(0o755)
+        self._point_at(self.folder)
+
+    def _point_at(self, folder):
+        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(folder)],
+                            context=hook.gitutil.OPERATOR_CONFIG)
+
+    def _install(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = hook.install()
+        return code, buf.getvalue()
+
+    def _yours(self, name="pre-push"):
+        (self.folder / name).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (self.folder / name).chmod(0o755)
+
+    def test_install_puts_saws_hooks_there_and_keeps_yours(self):
+        self._yours()
+        code, out = self._install()
+        self.assertEqual(0, code, out)
+        for event in hook._HOOKS:
+            self.assertTrue(hookscript.is_ours(self.folder / event), event)
+        self.assertTrue((self.folder / "pre-push.local").exists())
+        self.assertNotIn("will not run", out)
+
+    def test_repair_keeps_it_and_uninstall_puts_the_folder_back_as_it_was(self):
+        self._yours()
+        self._install()
+        (self.folder / "post-merge").unlink()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, hook.repair())
+        self.assertTrue(hookscript.is_ours(self.folder / "post-merge"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            hook.uninstall()
+        self.assertEqual(["pre-push"], sorted(p.name for p in self.folder.iterdir()))
+
+    def test_a_folder_others_can_write_a_link_or_one_in_a_repository_is_left(self):
+        self.folder.chmod(0o777)
+        code, out = self._install()
+        self.assertIn("can be written by others", out)
+        self.assertFalse((self.folder / "post-checkout").exists())
+        self.folder.chmod(0o755)
+        tree = self.home / "dotfiles"
+        subprocess.run(["git", "init", "-q", str(tree)], check=True)
+        (tree / "githooks").mkdir()
+        self._point_at(tree / "githooks")
+        code, out = self._install()
+        self.assertIn("inside a git", out)
+        self.assertFalse((tree / "githooks" / "post-checkout").exists())
+        with open(tree / ".git" / "config", "a", encoding="utf-8") as fh:
+            fh.write("[core]\n\trepositoryformatversion = 1\n[extensions]\n\tnoSuchExtension = true\n")
+        code, out = self._install()
+        self.assertFalse((tree / "githooks" / "post-checkout").exists())
+        link = self.home / "linked-hooks"
+        link.symlink_to(self.folder)
+        self._point_at(link)
+        code, out = self._install()
+        self.assertIn("is a link", out)
+        self.assertFalse((self.folder / "post-checkout").exists())
+
+    def test_repair_writes_nothing_once_the_folder_is_no_longer_the_operators_alone(self):
+        self._install()
+        (self.folder / "post-merge").unlink()
+        subprocess.run(["git", "init", "-q", str(self.folder)], check=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            hook.repair()
+        self.assertFalse((self.folder / "post-merge").exists())
+
+    def test_a_folder_saw_wrote_into_is_never_forgotten_and_uninstall_cleans_it(self):
+        self._yours("post-merge")
+        self._install()
+        self.folder.chmod(0o777)
+        self._install()
+        self.folder.chmod(0o755)
+        self.assertEqual([self.folder], hookscript.installed_hooks_folders())
+        with contextlib.redirect_stdout(io.StringIO()):
+            hook.uninstall()
+        self.assertEqual(["post-merge"], sorted(p.name for p in self.folder.iterdir()))
+
+
 class TestInstallUninstall(_Isolated):
     def _global_template(self):
         return hook.gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"], context=hook.gitutil.OPERATOR_CONFIG).strip()
@@ -1694,7 +1782,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         code, text = self._quiet(hook.install)
         self.assertEqual(code, 0, text)
         self.assertFalse((managed / "post-checkout.local").exists())
-        self.assertEqual(hook._template_dirs()[1:], [])
+        self.assertEqual(hook._installed_hooks_dirs()[1:], [])
         self.assertEqual(len(_set_aside(self.home)), 1)
 
     def test_a_relative_template_path_is_refused_before_anything_is_written(self):

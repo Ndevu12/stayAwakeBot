@@ -163,6 +163,29 @@ def _settings_hook_state(event: str) -> tuple[str | None, list[str], str | None]
 _NOT_IN_SETTINGS = "could not be set in your git settings, so saw's scan runs where its folder hooks do"
 
 
+def _settle_hooks_folder(saw: str, config: str | None) -> tuple[Path | None, list[Action]]:
+    """Put saw's hooks in the folder git runs every repository's hooks from, when that folder is the
+    operator's alone. Takes the saw executable and the operator config. Returns the folder saw's hooks
+    are in, or None, and what was done."""
+    read, hp = _hookspath_git_uses()
+    if not read or not hp or _same_path(os.path.expanduser(hp), _hooks_dir()):
+        return None, []
+    folder = os.path.expanduser(hp)
+    problem = _hooks_folder_problem(folder)
+    if problem is not None:
+        return None, [Action(NOTED, Path(folder), f"{problem}, so saw's hooks were not put there")]
+    return Path(folder), _settle(Path(folder), saw, config, own=False)
+
+
+def _hooks_folders_to_record(settled: Path | None) -> list[Path]:
+    """List every folder git runs every repository's hooks from that saw has installed into. Takes the
+    one settled now, or None. Returns them, the earlier ones first."""
+    held = hookscript.installed_hooks_folders()
+    if settled is not None and not any(_same_path(settled, f) for f in held):
+        held.append(settled)
+    return held
+
+
 def _settle_settings_hooks(saw: str, config: str | None) -> list[Action]:
     """Set saw's scan as a hook in the global git settings for each event saw serves, unless one has
     been switched off there. Takes the saw executable and the operator config. Returns what was done."""
@@ -239,7 +262,8 @@ def why_saws_hooks_may_not_run() -> str | None:
         return "git is set to run every repository's hooks from its top folder, so saw's hooks will not run." + also
     if hp is not None and not _is_saws_hooks_folder(hp):
         return (f"git is set to run every repository's hooks from {textsafe.plain(hp, limit=4096)}, "
-                "so saw's hooks will not run." + also)
+                "so saw's hooks will not run." + (also or ("" if git_runs_settings_hooks() else
+                                                           " Update git to 2.54 or later.")))
     template = os.environ.get("GIT_TEMPLATE_DIR")
     if template is not None and not _same_path(os.path.expanduser(template), template_dir()):
         return (f"GIT_TEMPLATE_DIR in this shell gives new clones {textsafe.plain(template, limit=4096)}, "
@@ -265,8 +289,13 @@ def _warn_hookspath(stream) -> None:
 
 
 def _is_saws_hooks_folder(folder: str) -> bool:
-    """Tell whether a hooks folder git is set to use is saw's own. Takes the folder. Returns the
-    answer; an empty setting is never saw's."""
+    """Tell whether a hooks folder git is set to use is saw's own, or one saw installed its hooks
+    into. Takes the folder. Returns the answer; an empty setting is never saw's."""
+    for installed_into in hookscript.installed_hooks_folders() if folder else []:
+        if _same_path(os.path.expanduser(folder), installed_into):
+            recorded = hookscript.installed()
+            return all(hookscript.verdict(installed_into / event, recorded) == hookscript.PRISTINE
+                       for event in _HOOKS)
     return folder != "" and _same_path(os.path.expanduser(folder), _hooks_dir())
 
 
@@ -448,8 +477,9 @@ class Settling:
 
 
 def settle_hooks(config_path: str | None = None, *, repositories: list[Path] | None = None) -> Settling:
-    """Put saw's hooks in place for new clones, the repositories named and every repository saw
-    knows. Takes the operator config and the repository roots. Returns what was done."""
+    """Put saw's hooks in place for new clones, the repositories named, every repository saw knows
+    and the folder git runs every repository's hooks from when it is the operator's alone. Takes the
+    operator config and the repository roots. Returns what was done."""
     saw = _saw_executable()
     config = os.path.abspath(config_path) if config_path else None
     if config and resolve_config(config_path) is None:
@@ -472,11 +502,13 @@ def settle_hooks(config_path: str | None = None, *, repositories: list[Path] | N
                 return Settling(code=2, problem="could not set git to give new clones saw's hooks.")
             target = str(template_dir())
         actions += _settle_settings_hooks(saw, config)
+        hooks_folder, folder_actions = _settle_hooks_folder(saw, config)
+        actions += folder_actions
     except HookError as exc:
         return Settling(code=2, problem=str(exc))
     except OSError as exc:
         return Settling(code=3, problem=textsafe.plain(str(exc)))
-    if not hookscript.declare(saw, config, Path(target) / "hooks"):
+    if not hookscript.declare(saw, config, Path(target) / "hooks", _hooks_folders_to_record(hooks_folder)):
         actions.append(Action(UNVERIFIED, hookscript.declaration_path(),
                               "the record of what was installed could not be written"))
     handled = [Path(target) / "hooks", _hooks_dir()]
@@ -575,14 +607,46 @@ def _settle_own_only() -> list[Action]:
     return actions
 
 
-def _template_dirs() -> list[tuple[Path, bool]]:
-    """Return the hooks directories saw installs into: its own, and the one the record names when
-    that is the operator's template directory."""
+def _installed_hooks_dirs(*, with_hooks_folders: bool = False) -> list[tuple[Path, bool]]:
+    """Return the hooks directories saw installs into: its own and the operator's template directory
+    the record names, and with `with_hooks_folders` every folder git runs every repository's hooks
+    from that saw installed into. Each comes with whether it is saw's own."""
     dirs = [(_hooks_dir(), True)]
     recorded = hookscript.installed_into()
     if recorded is not None and not _same_path(recorded, _hooks_dir()):
         dirs.append((recorded, False))
+    for folder in hookscript.installed_hooks_folders() if with_hooks_folders else []:
+        if not any(_same_path(folder, d) for d, _ in dirs):
+            dirs.append((folder, False))
     return dirs
+
+
+def _hooks_folder_problem(folder: str) -> str | None:
+    """Say why saw may not put its hooks in a folder git runs every repository's hooks from. Takes the
+    folder. Returns the reason, or None when it is an absolute, real folder of the operator's that no
+    one else can write and that lies outside any git working tree."""
+    import stat as _stat
+    path = Path(folder)
+    if not path.is_absolute():
+        return "is not an absolute path"
+    try:
+        found = os.lstat(path)
+    except OSError:
+        return "does not exist"
+    if _stat.S_ISLNK(found.st_mode):
+        return "is a link"
+    if not _stat.S_ISDIR(found.st_mode):
+        return "is not a folder"
+    if found.st_uid != os.geteuid():
+        return "is not yours"
+    if found.st_mode & 0o022:
+        return "can be written by others"
+    if any(os.path.lexists(above / ".git") for above in (path, *path.parents)):
+        return "lies inside a git working tree"
+    inside = gitutil.run(path, ["rev-parse", "--is-inside-work-tree"])
+    if inside is None or inside.returncode == 0:
+        return "lies inside a git repository"
+    return None
 
 
 def repair(*, no_stream: bool = False) -> int:
@@ -590,7 +654,7 @@ def repair(*, no_stream: bool = False) -> int:
     was found in its place or in saw's own directory."""
     recorded = hookscript.installed()
     if recorded is None:
-        if not any(d.is_dir() for d, _ in _template_dirs()) and not hookscript.seeded_repositories():
+        if not any(d.is_dir() for d, _ in _installed_hooks_dirs()) and not hookscript.seeded_repositories():
             print("scan-on-clone has not seeded anything on this account; nothing to repair.",
                   file=_tape(no_stream))
             return 0
@@ -603,7 +667,7 @@ def repair(*, no_stream: bool = False) -> int:
         print(f"error: the config recorded at install, {textsafe.plain(config, limit=4096)}, is gone. "
               "Run `saw hook install -c` with its new location, then repair.", file=sys.stderr)
         return 2
-    template_dirs = _template_dirs()
+    template_dirs = _installed_hooks_dirs()
     actions: list[Action] = []
     seeded_by = [d for d, _ in template_dirs]
     try:
@@ -617,13 +681,15 @@ def repair(*, no_stream: bool = False) -> int:
                 actions += _repair_repository(Path(configured) / "hooks", saw, config, restore=False)
             actions += _keep_seeded_current(saw, config, seeded_by)
             actions += _settle_settings_hooks(saw, config)
+            hooks_folder, folder_actions = _settle_hooks_folder(saw, config)
+            actions += folder_actions
     except HookError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except OSError as exc:
         print(f"error: {textsafe.plain(str(exc))}", file=sys.stderr)
         return 3
-    if not hookscript.declare(saw, config, hookscript.installed_into()):
+    if not hookscript.declare(saw, config, hookscript.installed_into(), _hooks_folders_to_record(hooks_folder)):
         actions.append(Action(UNVERIFIED, hookscript.declaration_path(), "the record of what was installed could not be written"))
     out = _tape(no_stream)
     settled = all(a.state in _SETTLED for a in actions)
@@ -752,7 +818,7 @@ def uninstall(*, no_stream: bool = False) -> int:
     expected = hookscript.installed()
     try:
         with busy("removing scan-on-clone…", no_stream=no_stream):
-            for hooks_dir, own in _template_dirs():
+            for hooks_dir, own in _installed_hooks_dirs(with_hooks_folders=True):
                 if hooks_dir.is_symlink() or not hooks_dir.is_dir():
                     continue
                 for event in _HOOKS:

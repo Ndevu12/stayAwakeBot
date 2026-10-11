@@ -54,16 +54,22 @@ def saw_executable() -> str:
     return shutil.which("saw") or os.path.realpath(sys.argv[0])
 
 
-def declare(saw: str, config: str | None, hooks: Path | None = None) -> bool:
-    """Record the `saw`, operator config and hooks directory the hooks were installed with; True
-    if read back. `hooks` defaults to saw's own directory."""
+def declare(saw: str, config: str | None, hooks: Path | None = None,
+            hooks_folders: list[Path] | None = None) -> bool:
+    """Record the `saw`, operator config, template hooks directory and every folder git runs every
+    repository's hooks from that saw installed into. Takes them; `hooks` defaults to saw's own
+    directory. Returns True when the record reads back."""
     path = declaration_path()
     where = str(hooks or hooks_dir())
+    folders = [str(f) for f in hooks_folders or []]
+    record = {"saw": saw, "config": config, "hooks": where}
+    if folders:
+        record["hooks_folders"] = folders
     try:
-        if not atomicwrite.replace(path, json.dumps({"saw": saw, "config": config, "hooks": where}),
-                                   mode=atomicwrite.AS_A_PLAIN_WRITE):
+        if not atomicwrite.replace(path, json.dumps(record), mode=atomicwrite.AS_A_PLAIN_WRITE):
             return False
-        return installed() == (saw, config) and installed_into() == Path(where)
+        return (installed() == (saw, config) and installed_into() == Path(where)
+                and [str(f) for f in installed_hooks_folders()] == folders)
     except OSError:
         return False
 
@@ -95,6 +101,13 @@ def installed_into() -> Path | None:
     data = _record()
     where = data.get("hooks") if data else None
     return Path(where) if isinstance(where, str) and os.path.isabs(where) else (hooks_dir() if data else None)
+
+
+def installed_hooks_folders() -> list[Path]:
+    """Return every folder git runs every repository's hooks from that saw installed into."""
+    data = _record()
+    held = data.get("hooks_folders") if data else None
+    return [Path(f) for f in held if isinstance(f, str) and os.path.isabs(f)] if isinstance(held, list) else []
 
 
 def forget() -> None:
@@ -263,6 +276,7 @@ def hook_dirs(unread: list | None = None) -> list[Path]:
     dirs: list[Path] = [hooks_dir()]
     configured = global_template_dir()
     candidates = [Path(os.path.expanduser(configured)) / "hooks"] if configured else []
+    candidates += installed_hooks_folders()
     for repo in seeded_repositories():
         found = repository_hooks_dir(repo)
         if found is not None:
