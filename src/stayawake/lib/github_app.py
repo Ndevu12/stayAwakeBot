@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import os
 import stat
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 
 from stayawake.lib.adapters import github_api
+from stayawake.utils import atomicwrite
 
 APP_ID_ENV = "GH_APP_ID"
 PRIVATE_KEY_ENV = "GH_APP_PRIVATE_KEY"
@@ -57,28 +57,11 @@ def _read_config_file(path: Path) -> dict | None:
 
 
 def _write_private_config(path: Path, data: bytes) -> None:
-    """Write App credentials — which include the App PRIVATE KEY — with NO world-readable window. `write_text(...)` then `chmod(0600)` creates the file under the process umask (often
-    0644) and leaves the secret group/world-readable until the chmod lands. Instead: ensure the
-    parent dir is 0700, write to a same-dir temp that is 0600 FROM BIRTH (`mkstemp`), then atomically
-    `os.replace` it into place — no window, torn write, or leftover, and an existing 0644 file is
-    replaced by the 0600 temp inode. Same-dir temp keeps the rename atomic (one filesystem)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        path.parent.chmod(stat.S_IRWXU)                     # 0700 — dir must not be world-traversable
-    except OSError:
-        pass
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".github-app-", suffix=".tmp")
-    try:
-        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)          # 0600 (mkstemp already restricts; explicit)
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, path)                               # atomic; dest inherits the 0600 temp
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    """Write App credentials, which include the App private key, readable by their owner alone from
+    the moment they exist, in a folder only the owner can open. Takes the file and its bytes."""
+    atomicwrite.make_folder(path.parent, mode=stat.S_IRWXU)
+    with atomicwrite.staged(path, mode=stat.S_IRUSR | stat.S_IWUSR, binary=True, at_a_link=atomicwrite.REPLACE_A_LINK) as fh:
+        fh.write(data)
 
 
 def _migrate_legacy_config() -> Path | None:

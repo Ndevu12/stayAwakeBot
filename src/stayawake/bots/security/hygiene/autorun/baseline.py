@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
-from stayawake.utils import env
+from stayawake.utils import atomicwrite, env
 from .surface import LOCATIONS, STAYS_REMOVED
 
 VERSION = 2
@@ -211,17 +209,4 @@ def save_baseline(entries, base: Baseline, listing: dict) -> tuple[bool, int]:
         "removed": gone,
         "self_hash": _self_hash(mapping, gone),
     }
-    try:
-        path = baseline_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".autorun-", suffix=".json")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f)
-            os.replace(tmp, path)
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-    except OSError:
-        return False, dropped
-    return True, dropped
+    return atomicwrite.replace(baseline_path(), json.dumps(payload), at_a_link=atomicwrite.REPLACE_A_LINK), dropped

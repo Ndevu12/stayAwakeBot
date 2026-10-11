@@ -98,9 +98,6 @@ def write_state(where: Path, data: dict) -> bool:
     if owned_by_another_account(where):
         return False
     try:
-        where.parent.mkdir(parents=True, exist_ok=True)
-        if where.is_symlink():
-            return False
         return atomicwrite.replace(where, json.dumps(data, sort_keys=True), mode=0o600)
     except Exception:
         return False

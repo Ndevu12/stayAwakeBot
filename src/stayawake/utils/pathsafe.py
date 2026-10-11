@@ -199,3 +199,129 @@ def every_file_arrived(source: Path, destination: Path) -> bool:
     except OSError:
         return False
     return not unread
+
+
+_FOLDER_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+_SEARCH_ONLY = getattr(os, "O_SEARCH", 0) or getattr(os, "O_PATH", 0)
+_MAX_LINKS = 40
+
+
+class RedirectedPath(OSError):
+    """A path that reaches somewhere else through a link its writer does not trust."""
+
+
+def trusted_link_owners() -> set[int]:
+    """Name who may own a link a write follows: root, and the user writing. Returns their ids."""
+    return {0, os.geteuid()}
+
+
+def _placed_by_trusted(link: os.stat_result, holder: os.stat_result, owners: set[int]) -> bool:
+    """Tell whether only a trusted account could have put a link where it is. Takes the link, the
+    folder holding it and the trusted owners. Returns True when both belong to a trusted owner and no
+    one else can write in the folder, its group included when only root is trusted."""
+    writable_by_others = 0o002 | (0o020 if owners == {0} else 0)
+    return (link.st_uid in owners and holder.st_uid in owners
+            and not holder.st_mode & writable_by_others)
+
+
+def _open_dir(name: str, dir_fd: int | None, extra: int) -> int:
+    """Open a folder to look up names in, even one the writer may pass through but not list. Takes
+    its name, the folder it is in and extra flags. Returns the descriptor."""
+    try:
+        return os.open(name, _FOLDER_FLAGS | extra, dir_fd=dir_fd)
+    except PermissionError:
+        if not _SEARCH_ONLY:
+            raise
+        return os.open(name, _SEARCH_ONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+                       | extra, dir_fd=dir_fd)
+
+
+def _enter(name: str, holder: int, seen: os.stat_result) -> int:
+    """Open a folder inside an open folder without following a link. Takes its name, the folder and
+    what a look at the name found. Returns the descriptor. Raises `RedirectedPath` when what opened is
+    not the folder that was looked at."""
+    entered = _open_dir(name, holder, os.O_NOFOLLOW)
+    found = os.fstat(entered)
+    if not stat.S_ISDIR(found.st_mode) or (found.st_dev, found.st_ino) != (seen.st_dev, seen.st_ino):
+        os.close(entered)
+        raise RedirectedPath(f"{name} changed while it was opened")
+    return entered
+
+
+def open_folder(folder: Path, *, create: bool = False, mode: int = 0o777, start: int | None = None) -> int:
+    """Open a folder for writing in, one step at a time, without being redirected. Takes the folder,
+    whether to make the missing parts, their mode, and an open folder a relative path starts from.
+    Returns an open descriptor the caller closes. Follows a link only when root or the user writing
+    owns it and the folder holding it, and no one else can write in that folder, resolves `..` where
+    the walk is, and makes nothing inside a link's target; raises `RedirectedPath` at any other link
+    and `OSError` when a part is missing or is not a folder."""
+    folder = Path(folder)
+    if start is not None and not folder.is_absolute():
+        parts, fd = [(p, False) for p in folder.parts], os.dup(start)
+    else:
+        absolute = folder if folder.is_absolute() else Path(os.getcwd()) / folder
+        parts, fd = [(p, False) for p in absolute.parts[1:]], _open_dir("/", None, 0)
+    owners = trusted_link_owners()
+    links = 0
+    try:
+        while parts:
+            part, inside_a_link = parts.pop(0)
+            if part in ("", "."):
+                continue
+            try:
+                found = os.stat(part, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                if not create or inside_a_link or part == "..":
+                    raise
+                try:
+                    os.mkdir(part, mode, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                found = os.stat(part, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISLNK(found.st_mode):
+                links += 1
+                if not _placed_by_trusted(found, os.fstat(fd), owners) or links > _MAX_LINKS:
+                    raise RedirectedPath(f"{folder} reaches elsewhere through a link at {part}")
+                target = os.readlink(part, dir_fd=fd)
+                if os.path.isabs(target):
+                    os.close(fd)
+                    fd = _open_dir("/", None, 0)
+                parts[:0] = [(p, True) for p in Path(target).parts[1 if os.path.isabs(target) else 0:]]
+                continue
+            following = _enter(part, fd, found)
+            os.close(fd)
+            fd = following
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def open_parent(where: Path, *, create: bool = False, mode: int = 0o777) -> tuple[int, str]:
+    """Open the folder a file is named in, following a link at the file's own name by the same rule.
+    Takes the file, whether to make missing folders on the way to it, and their mode. Returns the open
+    folder, which the caller closes, and the file's name in it. Raises `RedirectedPath` at a link the
+    writer does not trust."""
+    where = Path(where)
+    fd = open_folder(where.parent, create=create, mode=mode)
+    name = where.name
+    try:
+        for _ in range(_MAX_LINKS):
+            try:
+                found = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return fd, name
+            if not stat.S_ISLNK(found.st_mode):
+                return fd, name
+            if not _placed_by_trusted(found, os.fstat(fd), trusted_link_owners()):
+                raise RedirectedPath(f"{where} is a link")
+            target = Path(os.readlink(name, dir_fd=fd))
+            if target.name in ("", ".", ".."):
+                raise RedirectedPath(f"{where} is a link to a folder")
+            following = open_folder(target.parent, start=fd)
+            os.close(fd)
+            fd, name = following, target.name
+        raise RedirectedPath(f"{where} reaches elsewhere through too many links")
+    except BaseException:
+        os.close(fd)
+        raise

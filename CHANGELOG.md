@@ -79,6 +79,8 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
+- **saw writes the files it keeps for itself only where they were named, including under `sudo`.**
+  When it cannot, it writes nothing there and says so.
 - **On macOS, saw lists running processes with the system's own `ps`**, whatever is first on your
   `PATH`.
 - **`saw scan` reports a merge commit it could not read as not read, never as clean**, and reads
