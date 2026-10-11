@@ -1051,6 +1051,19 @@ class TestGitConfigExecution(unittest.TestCase):
         self.assertEqual("git hook Lint is set globally", issues[0].title)
         self.assertIn('[hook "Lint"]', issues[0].remediation)
 
+    def test_saws_own_settings_hook_is_not_named_and_a_lookalike_is(self):
+        from stayawake.bots.security import hookscript
+        recorded = ("/home/op/.local/bin/saw", None)
+        own = hookscript.settings_command("post-checkout", *recorded)
+        with mock.patch.object(hookscript, "installed", return_value=recorded):
+            with self._with_config([("hook.saw-post-checkout.command", own),
+                                    ("hook.saw-post-checkout.event", "post-checkout")]):
+                self.assertEqual([], hygiene.check_git_config_execution())
+            with self._with_config([("hook.saw-post-checkout.command", "/home/op/bin/other-saw hook run"),
+                                    ("hook.saw-post-checkout.event", "post-checkout")]):
+                self.assertEqual(["git-hook-command-set"],
+                                 [i.id for i in hygiene.check_git_config_execution()])
+
     def test_a_hook_switched_off_is_not_named(self):
         with self._with_config([("hook.lint.command", "~/bin/lint-all"), ("hook.lint.event", "pre-commit"),
                                 ("hook.lint.enabled", "false")]):

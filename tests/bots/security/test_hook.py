@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.bots.security import hook, hook_report
+from stayawake.bots.security import hook, hook_report, hookscript
 
 _INFECTED = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"   # confirmed worm markers
 
@@ -58,6 +58,9 @@ class _Isolated(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         os.environ.pop("SAW_HOOK_DISABLED", None)
+        before_settings_hooks = mock.patch.object(hook, "git_runs_settings_hooks", return_value=False)
+        before_settings_hooks.start()
+        self.addCleanup(before_settings_hooks.stop)
 
     def _in_repo(self, repo: Path):
         cwd = os.getcwd()
@@ -340,9 +343,175 @@ class TestTheHookJudgesAsTheScanDoes(_Isolated):
         self.assertIn(os.path.realpath(repo), [str(r) for r in hook.hookscript.seeded_repositories()])
 
 
+class TestGitRunsSawsScanFromItsSettings(_Isolated):
+    """git 2.54 and later run hooks set in git's settings, whatever folder git runs hooks from."""
+
+    def setUp(self):
+        super().setUp()
+        patched = mock.patch.object(hook, "git_runs_settings_hooks", return_value=True)
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def _install(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = hook.install()
+        return code, buf.getvalue()
+
+    def _setting(self, *args):
+        return subprocess.run(["git", "config", "--global", *args], capture_output=True, text=True).stdout
+
+    def test_install_sets_saws_scan_for_each_event_once(self):
+        self._install()
+        self._install()
+        for event in hook._HOOKS:
+            self.assertIn("--from-settings " + event, self._setting("--get", f"hook.saw-{event}.command"))
+            self.assertEqual(f"{event}\n", self._setting("--get-all", f"hook.saw-{event}.event"))
+
+    def test_a_global_hooks_folder_is_still_named_beside_the_scan_in_the_settings(self):
+        saw = self.home / "saw"
+        saw.write_text("#!/bin/sh\n", encoding="utf-8")
+        saw.chmod(0o755)
+        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(self.home / "hp")],
+                            context=hook.gitutil.OPERATOR_CONFIG)
+        with mock.patch.object(hook, "_saw_executable", return_value=str(saw)):
+            code, out = self._install()
+        self.assertEqual(code, 3, out)
+        self.assertIn("will not run", out)
+        self.assertIn("in your git settings still runs", out)
+        self.assertNotIn("update git", out)
+
+    def test_one_switched_off_in_the_settings_is_left_off(self):
+        hook.gitutil.run_ok(None, ["config", "--global", "hook.saw-pre-push.enabled", "false"],
+                            context=hook.gitutil.OPERATOR_CONFIG)
+        self._install()
+        self.assertEqual("", self._setting("--get", "hook.saw-pre-push.command"))
+        self.assertEqual("false\n", self._setting("--get", "hook.saw-pre-push.enabled"))
+
+    def test_a_settings_hook_left_off_is_not_a_change_on_the_next_run(self):
+        hook.gitutil.run_ok(None, ["config", "--global", "hook.saw-pre-push.enabled", "false"],
+                            context=hook.gitutil.OPERATOR_CONFIG)
+        hook.settle_hooks()
+        self.assertFalse(hook.settle_hooks().changed)
+
+    def test_uninstall_names_a_settings_hook_it_could_not_take_out(self):
+        self._install()
+        real_run_ok = hook.gitutil.run_ok
+        with mock.patch.object(hook.gitutil, "run_ok", side_effect=lambda repo, args, **k:
+                               False if "--remove-section" in args else real_run_ok(repo, args, **k)):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = hook.uninstall()
+        self.assertEqual(3, code)
+        self.assertIn("is still set in your git settings", buf.getvalue())
+        self.assertIsNotNone(hookscript.installed())
+
+    def test_uninstall_takes_them_out(self):
+        self._install()
+        hook.uninstall()
+        self.assertEqual("", self._setting("--get-regexp", r"^hook\.saw-"))
+
+    def test_both_runs_check_and_a_clean_full_scan_is_not_repeated_for_the_same_commit(self):
+        repo = self.home / "repo"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                        "--allow-empty", "-m", "one"], check=True)
+        self._in_repo(repo)
+        clone = ["0" * 40, "1" * 40, "1"]
+        clean = mock.Mock(infected=False, error=None, suspicious=False, residue=False, findings=[])
+        with mock.patch.object(hook, "_scan_within_budget", return_value=clean) as scanned, \
+                mock.patch.object(hook, "_bring_up_to_date"):
+            hook.run_event("post-checkout", clone, from_settings=True, no_stream=True)
+            self.assertNotIn(os.path.realpath(repo), hook._load_cache())
+            hook.run_event("post-checkout", clone, no_stream=True)
+            self.assertEqual(1, scanned.call_count)
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit",
+                            "-q", "--allow-empty", "-m", "two"], check=True)
+            hook.run_event("post-checkout", clone, no_stream=True)
+            self.assertEqual(2, scanned.call_count)
+
+    def test_a_folder_run_after_a_settings_run_still_keeps_the_repository_current(self):
+        repo = self.home / "repo"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        self._in_repo(repo)
+        args = ["0" * 40, "1" * 40, "1"]
+        with mock.patch.object(hook, "_scan_scope", return_value=(None, None)), \
+                mock.patch.object(hook, "_bring_up_to_date") as updated:
+            hook.run_event("post-checkout", args, from_settings=True, no_stream=True)
+            hook.run_event("post-checkout", args, no_stream=True)
+        updated.assert_called_once()
+
+    def test_a_settings_hook_run_leaves_the_repositorys_hooks_and_the_seeded_list_alone(self):
+        repo = self.home / "repo"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        self._in_repo(repo)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                        "--allow-empty", "-m", "one"], check=True)
+        clean = mock.Mock(infected=False, error=None, suspicious=False, residue=False, findings=[])
+        with mock.patch.object(hook, "_bring_up_to_date") as updated, \
+                mock.patch.object(hook, "_remember") as remembered, \
+                mock.patch.object(hook, "_scan_within_budget", return_value=clean):
+            hook.run_event("post-checkout", ["0" * 40, "1" * 40, "1"], from_settings=True, no_stream=True)
+            hook.run_event("pre-push", ["origin", "x"], from_settings=True, no_stream=True)
+        updated.assert_not_called()
+        remembered.assert_not_called()
+
+    def test_a_switched_off_event_or_a_saw_that_cannot_run_is_not_called_set(self):
+        saw = self.home / "saw"
+        saw.write_text("#!/bin/sh\n", encoding="utf-8")
+        saw.chmod(0o755)
+        with mock.patch.object(hook, "_saw_executable", return_value=str(saw)):
+            self._install()
+        self.assertTrue(hook._settings_hooks_set())
+        hook.gitutil.run_ok(None, ["config", "--global", "hook.post-checkout.enabled", "false"],
+                            context=hook.gitutil.OPERATOR_CONFIG)
+        self.assertFalse(hook._settings_hooks_set())
+        hook.gitutil.run_ok(None, ["config", "--global", "--unset", "hook.post-checkout.enabled"],
+                            context=hook.gitutil.OPERATOR_CONFIG)
+        self.assertTrue(hook._settings_hooks_set())
+        saw.unlink()
+        saw.mkdir()
+        self.assertFalse(hook._settings_hooks_set())
+
+    def test_a_missing_saw_or_one_that_is_a_folder_is_quiet(self):
+        repo = self.home / "repo"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (self.home / "a-folder").mkdir()
+        for saw in (self.home / "no-such-saw", self.home / "a-folder"):
+            command = hookscript.settings_command("post-checkout", str(saw), None)
+            done = subprocess.run(["sh", "-c", command + ' "$@"', command, "0" * 40, "1" * 40, "1"],
+                                  cwd=repo, capture_output=True)
+            self.assertEqual((0, b""), (done.returncode, done.stderr), saw)
+
+    def test_settings_that_cannot_be_written_leave_the_install_settled(self):
+        with mock.patch.object(hook.gitutil, "run_ok", side_effect=lambda repo, args, **k:
+                               not (args[:2] == ["config", "--global"] and args[2].startswith(("hook.", "--replace-all")))
+                               and subprocess.run(["git", *args], capture_output=True).returncode == 0):
+            done = hook.settle_hooks()
+        self.assertTrue(done.settled, [a for a in done.actions if a.state not in hook._SETTLED])
+        self.assertIn(hook.NOTED, [a.state for a in done.actions if str(a.path).startswith("hook.saw-")])
+
+    def test_the_settings_hook_never_fails_git(self):
+        repo = self.home / "repo"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        failing = self.home / "failing-saw"
+        failing.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        failing.chmod(0o755)
+        command = hookscript.settings_command("post-checkout", str(failing), None)
+        done = subprocess.run(["sh", "-c", command + ' "$@"', command, "0" * 40, "1" * 40, "1"],
+                              cwd=repo, capture_output=True)
+        self.assertEqual(0, done.returncode)
+
+
 class TestInstallUninstall(_Isolated):
     def _global_template(self):
         return hook.gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"], context=hook.gitutil.OPERATOR_CONFIG).strip()
+
+    def test_an_older_git_is_told_to_update(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            hook.install()
+        self.assertIn("update git to 2.54 or later", buf.getvalue())
 
     def test_install_sets_templatedir_and_writes_executable_hooks(self):
         self.assertEqual(hook.install(), 0)
@@ -1039,7 +1208,7 @@ class TestRepairLeavesWhatIsNotSaws(_Isolated):
         cache.write_text(json.dumps({str(main): "abc", str(linked): "abc"}))
         code, text = self._quiet(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertEqual(text.count("post-checkout"), 2, text)
+        self.assertEqual(text.count("/post-checkout\n"), 2, text)
         self.assertNotIn("moved-aside", text)
 
 

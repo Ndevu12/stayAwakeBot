@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw hook install` also scans the repositories you already have, with git 2.54 or later.**
+  With an older git, it says to update git.
 - **`saw audit` names a hook set in your global git settings**, with the events it runs on, as it
   names a global `core.hooksPath`; one you switched off is not named.
 - **`saw watch` tells you on your desktop.** A notification appears when it stops code, when code it

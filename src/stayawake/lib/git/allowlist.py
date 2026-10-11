@@ -62,7 +62,7 @@ class GitRefused(RuntimeError):
 
 
 NETWORK_SUBCOMMANDS = frozenset({"push", "fetch", "ls-remote", "clone", "pull"})
-OPERATOR_CONFIG_SUBCOMMANDS = frozenset({"config", "credential"})
+OPERATOR_CONFIG_SUBCOMMANDS = frozenset({"config", "credential", "version"})
 
 
 @dataclass(frozen=True)

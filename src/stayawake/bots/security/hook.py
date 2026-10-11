@@ -132,23 +132,129 @@ def _tape(no_stream: bool, dest=None):
     return Tape()
 
 
+_FIRST_GIT_RUNNING_SETTINGS_HOOKS = (2, 54)
+
+
+def git_runs_settings_hooks() -> bool:
+    """Tell whether the git on PATH runs hooks set in its settings. Returns True for 2.54 and later."""
+    import re
+    res = gitutil.run(None, ["version"], context=gitutil.OPERATOR_CONFIG)
+    found = re.search(r"(\d+)\.(\d+)", res.stdout) if res is not None and res.returncode == 0 else None
+    return bool(found) and (int(found.group(1)), int(found.group(2))) >= _FIRST_GIT_RUNNING_SETTINGS_HOOKS
+
+
+def _settings_hook_state(event: str) -> tuple[str | None, list[str], str | None]:
+    """Read saw's hook for an event from the global git settings. Takes the event. Returns its command,
+    its events and its enabled setting, each as git reads them, None when unset."""
+    name = hookscript.settings_hook(event)
+
+    def get(*args: str) -> list[str] | None:
+        res = gitutil.run(None, ["config", "--includes", *args], context=gitutil.OPERATOR_CONFIG)
+        if res is None or res.returncode not in (0, 1):
+            raise HookError(f"git's settings for hook.{name} could not be read")
+        return res.stdout.split("\n")[:-1] if res.returncode == 0 else None
+
+    command = get("--get", f"hook.{name}.command")
+    events = get("--get-all", f"hook.{name}.event") or []
+    enabled = get("--type=bool", "--get", f"hook.{name}.enabled")
+    return (command[0] if command else None), events, (enabled[0] if enabled else None)
+
+
+_NOT_IN_SETTINGS = "could not be set in your git settings, so saw's scan runs where its folder hooks do"
+
+
+def _settle_settings_hooks(saw: str, config: str | None) -> list[Action]:
+    """Set saw's scan as a hook in the global git settings for each event saw serves, unless one has
+    been switched off there. Takes the saw executable and the operator config. Returns what was done."""
+    actions: list[Action] = []
+    for event in _HOOKS:
+        name = hookscript.settings_hook(event)
+        where = Path(f"hook.{name}")
+        wanted = hookscript.settings_command(event, saw, config)
+        try:
+            command, events, enabled = _settings_hook_state(event)
+        except HookError:
+            actions.append(Action(NOTED, where, _NOT_IN_SETTINGS))
+            continue
+        if enabled == "false":
+            actions.append(Action(NOTED, where, "switched off in your git settings, so it was left off"))
+            continue
+        if command == wanted and events == [event]:
+            actions.append(Action(IN_PLACE, where, "saw's scan, run by git 2.54 and later"))
+            continue
+        if not (gitutil.run_ok(None, ["config", "--global", f"hook.{name}.command", wanted],
+                               context=gitutil.OPERATOR_CONFIG)
+                and gitutil.run_ok(None, ["config", "--global", "--replace-all", f"hook.{name}.event", event],
+                                   context=gitutil.OPERATOR_CONFIG)):
+            actions.append(Action(NOTED, where, _NOT_IN_SETTINGS))
+            continue
+        try:
+            command, events, _ = _settings_hook_state(event)
+        except HookError:
+            command, events = None, []
+        actions.append(Action(UPDATED, where, "saw's scan, run by git 2.54 and later")
+                       if command == wanted and events == [event] else Action(NOTED, where, _NOT_IN_SETTINGS))
+    return actions
+
+
+def _settings_hooks_set() -> bool:
+    """Tell whether saw's scan is set in git's settings for every event saw serves, switched on, with
+    the recorded saw a runnable file and a git that runs settings hooks. Returns the answer; False when
+    that could not be read."""
+    recorded = hookscript.installed()
+    if (recorded is None or not os.path.isfile(recorded[0]) or not os.access(recorded[0], os.X_OK)
+            or not git_runs_settings_hooks()):
+        return False
+    try:
+        for event in _HOOKS:
+            command, events, enabled = _settings_hook_state(event)
+            if (command != hookscript.settings_command(event, *recorded) or events != [event]
+                    or enabled == "false" or _event_switched_off(event)):
+                return False
+    except HookError:
+        return False
+    return True
+
+
+def _event_switched_off(event: str) -> bool:
+    """Tell whether git's settings switch off every hook for an event. Takes the event. Returns the
+    answer; True when it could not be read."""
+    res = gitutil.run(None, ["config", "-z", "--includes", "--show-scope", "--type=bool", "--get-all",
+                             f"hook.{event}.enabled"], context=gitutil.OPERATOR_CONFIG)
+    if res is None or res.returncode not in (0, 1):
+        return True
+    fields = res.stdout.split("\0")
+    values = [value for scope, value in zip(fields[0::2], fields[1::2]) if scope != "command"]
+    return bool(values) and values[-1] == "false"
+
+
 def why_saws_hooks_may_not_run() -> str | None:
-    """Say why saw's hooks will not run, or may not: git runs hooks from another folder, that setting
-    could not be read, or this shell gives new clones another template. Returns the sentence, or None
-    when nothing stands in their way."""
+    """Say why saw's hooks will not run, or may not. Returns the sentence, or None when nothing stands
+    in their way."""
+    also = " saw's scan in your git settings still runs." if _settings_hooks_set() else ""
     read, hp = _hookspath_git_uses()
     if not read:
         return "git's hooks setting could not be read, so whether saw's hooks run is NOT verified."
     if hp == "":
-        return "git is set to run every repository's hooks from its top folder, so saw's hooks will not run."
+        return "git is set to run every repository's hooks from its top folder, so saw's hooks will not run." + also
     if hp is not None and not _is_saws_hooks_folder(hp):
         return (f"git is set to run every repository's hooks from {textsafe.plain(hp, limit=4096)}, "
-                "so saw's hooks will not run.")
+                "so saw's hooks will not run." + also)
     template = os.environ.get("GIT_TEMPLATE_DIR")
     if template is not None and not _same_path(os.path.expanduser(template), template_dir()):
         return (f"GIT_TEMPLATE_DIR in this shell gives new clones {textsafe.plain(template, limit=4096)}, "
-                "so clones made here do not get saw's hooks.")
+                "so clones made here do not get saw's hooks." + also)
     return None
+
+
+_OLDER_GIT = "  update git to 2.54 or later so the repositories you already have are scanned too."
+
+
+def _advise_git_update(stream) -> None:
+    """Tell the operator to update git when it does not run saw's scan from its settings. Takes the
+    stream to print to."""
+    if not git_runs_settings_hooks():
+        print(_paint(_OLDER_GIT, "warn", stream), file=stream)
 
 
 def _warn_hookspath(stream) -> None:
@@ -174,6 +280,7 @@ def _same_path(a: str | Path, b: str | Path) -> bool:
 
 
 IN_PLACE = "in place"
+NOTED = "noted"
 UPDATED = "updated"
 RESTORED = "restored"
 REPAIRED = "repaired"
@@ -183,7 +290,7 @@ LEFT = "left"
 CHAINED = "chained"
 UNVERIFIED = "could not verify"
 UNREAD = "could not read"
-_SETTLED = frozenset({IN_PLACE, UPDATED, RESTORED, REPAIRED, SET_ASIDE, PRESERVED, LEFT, CHAINED})
+_SETTLED = frozenset({IN_PLACE, NOTED, UPDATED, RESTORED, REPAIRED, SET_ASIDE, PRESERVED, LEFT, CHAINED})
 
 
 @dataclass(frozen=True)
@@ -302,7 +409,7 @@ def _kept(state: str, folder: Path) -> tuple[str, str]:
 
 def _print_actions(actions: list[Action], stream) -> None:
     for a in actions:
-        level = "ok" if a.state in (IN_PLACE, UPDATED, LEFT) else "warn" if a.state in (UNVERIFIED, UNREAD) else "dim"
+        level = "ok" if a.state in (IN_PLACE, NOTED, UPDATED, LEFT) else "warn" if a.state in (UNVERIFIED, UNREAD) else "dim"
         line = (f"  {a.state}: {textsafe.plain(str(a.path), limit=4096)}"
                 + (f" — {textsafe.plain(a.detail, limit=4096)}" if a.detail else ""))
         print(_paint(line, level, stream), file=stream)
@@ -328,7 +435,7 @@ class Settling:
     @property
     def changed(self) -> bool:
         """Whether anything on the machine is different for having run this."""
-        return any(a.state != IN_PLACE for a in self.actions)
+        return any(a.state not in (IN_PLACE, NOTED) for a in self.actions)
 
     @property
     def repaired(self) -> bool:
@@ -364,6 +471,7 @@ def settle_hooks(config_path: str | None = None, *, repositories: list[Path] | N
                                          str(template_dir())], context=gitutil.OPERATOR_CONFIG):
                 return Settling(code=2, problem="could not set git to give new clones saw's hooks.")
             target = str(template_dir())
+        actions += _settle_settings_hooks(saw, config)
     except HookError as exc:
         return Settling(code=2, problem=str(exc))
     except OSError as exc:
@@ -448,6 +556,7 @@ def install(config_path: str | None = None, *, no_stream: bool = False,
     print(_paint("  disable for one shell: SAW_HOOK_DISABLED=1   ·   remove: saw hook uninstall",
                  "dim", out), file=out)
     _warn_hookspath(out)
+    _advise_git_update(out)
     return 0 if settled else 3
 
 
@@ -507,6 +616,7 @@ def repair(*, no_stream: bool = False) -> int:
                 seeded_by.append(Path(configured) / "hooks")
                 actions += _repair_repository(Path(configured) / "hooks", saw, config, restore=False)
             actions += _keep_seeded_current(saw, config, seeded_by)
+            actions += _settle_settings_hooks(saw, config)
     except HookError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -674,7 +784,20 @@ def uninstall(*, no_stream: bool = False) -> int:
         gitutil.run_ok(None, ["config", "--global", "--unset", "init.templateDir"],
                        context=gitutil.OPERATOR_CONFIG)
         removed = True
-    hookscript.forget()
+    for event in _HOOKS:
+        name = hookscript.settings_hook(event)
+        if gitutil.run_ok(None, ["config", "--global", "--remove-section", f"hook.{name}"],
+                          context=gitutil.OPERATOR_CONFIG):
+            removed = True
+        try:
+            still_set = _settings_hook_state(event)[0] is not None
+        except HookError:
+            still_set = True
+        if still_set:
+            actions.append(Action(UNVERIFIED, Path(f"hook.{name}"), "is still set in your git settings; remove it "
+                                  f"with `git config --global --remove-section hook.{name}`"))
+    if not any(a.state == UNVERIFIED and str(a.path).startswith("hook.saw-") for a in actions):
+        hookscript.forget()
     out = _tape(no_stream)
     print(_paint("✓ scan-on-clone uninstalled.", "ok", out) if removed
           else "scan-on-clone was not installed.", file=out)
@@ -696,12 +819,17 @@ def status(*, no_stream: bool = False) -> int:
         config_gone = bool(recorded and recorded[1] and resolve_config(recorded[1]) is None)
         altered = hookscript.altered_hooks()
         disabled = env.hook_disabled()
+        settings_hooks_set = _settings_hooks_set()
     out = _tape(no_stream)
     if present:
         print(_paint("scan-on-clone: INSTALLED", "ok", out) + f" ({', '.join(present)})", file=out)
     else:
         print(_paint("scan-on-clone: not installed", "dim", out)
               + "  ·  enable with `saw hook install`", file=out)
+    if present and settings_hooks_set:
+        print(_paint("  saw's scan is also set in your git settings.", "dim", out), file=out)
+    if present:
+        _advise_git_update(out)
     if present and recorded is None:
         print(_paint("  saw has no record of what it installed here; run `saw hook install` once "
                      "(with -c if you used one) so `saw hook repair` knows what to put back.", "warn", out),
@@ -750,6 +878,23 @@ def _clean_key(head: str, config_path: str | None) -> str:
     digest = push_record.policy_digest(policy.signatures, policy.allowlist,
                                        getattr(policy.opts, "max_file_bytes", 0))
     return f"{head}:{digest}"
+
+
+def _settings_scans() -> dict:
+    """Read the clean scans a run from git's settings remembers. Returns them by repository."""
+    try:
+        held = json.loads(hookscript.settings_scan_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return held if isinstance(held, dict) else {}
+
+
+def _remember_settings_scan(root: Path, key: str) -> None:
+    """Remember a clean scan a run from git's settings made, apart from saw's list of repositories it
+    keeps current. Takes the root and the clean key. A write that fails is skipped."""
+    held = {r: k for r, k in _settings_scans().items() if os.path.isdir(r)}
+    held[os.path.realpath(root)] = key
+    atomicwrite.replace(hookscript.settings_scan_path(), json.dumps(held))
 
 
 def _remember(root: Path, key: str) -> None:
@@ -859,17 +1004,18 @@ def _warn_infected(display: str, quoted_root: str, result) -> None:
 
 
 def run_event(event: str, argv: list[str], config_path: str | None = None,
-              *, no_stream: bool = False) -> int:
-    """Run the check for one git hook event. Takes the event, its arguments and the operator config.
-    Returns 0 clean or skipped, 1 infected, 2 not verified."""
+              *, no_stream: bool = False, from_settings: bool = False) -> int:
+    """Run the check for one git hook event. Takes the event, its arguments, the operator config and
+    whether git ran it from its settings. Returns 0 clean or skipped, 1 infected, 2 not verified."""
     try:
         if event == outbound.EVENT:
             if env.hook_disabled():
                 return 0
             refs_text = "" if sys.stdin.isatty() else sys.stdin.read()
-            _bring_up_to_date()
+            if not from_settings:
+                _bring_up_to_date()
             return outbound.check_push(argv, refs_text, config_path, no_stream=no_stream)
-        return _run_event(event, argv, config_path, no_stream=no_stream)
+        return _run_event(event, argv, config_path, no_stream=no_stream, from_settings=from_settings)
     except BaseException:                   # noqa: BLE001 — last-resort: never break/confuse git
         print(_paint(f"⚠  {_BRAND}: the scan did not complete — NOT verified. Run `saw scan` in "
                      "this repository.", "warn", sys.stderr), file=sys.stderr)
@@ -877,13 +1023,14 @@ def run_event(event: str, argv: list[str], config_path: str | None = None,
 
 
 def _run_event(event: str, argv: list[str], config_path: str | None,
-               *, no_stream: bool = False) -> int:
+               *, no_stream: bool = False, from_settings: bool = False) -> int:
     if env.hook_disabled():
         return 0
     root = _repo_root()
     if root is None:
         return 0
-    _bring_up_to_date()
+    if not from_settings:
+        _bring_up_to_date()
     include, label = _scan_scope(event, argv, root)
     if label is None:
         return 0
@@ -894,7 +1041,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     rescan = "saw scan " + quoted_root
     head = gitutil.stdout(root, ["rev-parse", "HEAD"]).strip()
     clean_key = _clean_key(head, config_path) if head and include is None else None
-    if clean_key and _load_cache().get(os.path.realpath(root)) == clean_key:
+    if clean_key and clean_key in (_load_cache().get(os.path.realpath(root)),
+                                   _settings_scans().get(os.path.realpath(root))):
         return 0
 
     err = sys.stderr
@@ -909,7 +1057,7 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
               file=err)
         return 2
     result = scanned
-    if clean_key:
+    if clean_key and not from_settings:
         _remember(root, "")
     if result.infected:
         _warn_infected(shown, quoted_root, result)
@@ -930,7 +1078,9 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
                      "would not carry.", "warn", err), file=err)
         print("   " + _paint("Review:", "dim", err) + " " + _cmd(rescan, err), file=err)
         return 0
-    if clean_key:
+    if clean_key and from_settings:
+        _remember_settings_scan(root, clean_key)
+    elif clean_key:
         _remember(root, clean_key)
     if label == "clone":
         print(_paint(f"✓ {_BRAND}: {shown} scanned clean.", "ok", err), file=err)

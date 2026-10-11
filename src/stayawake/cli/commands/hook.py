@@ -88,6 +88,7 @@ def register(sub) -> None:
     declare_streaming(rn, True)
     rn.add_argument("-c", "--config", default=None)
     add_no_stream_arg(rn)
+    rn.add_argument("--from-settings", action="store_true", help=argparse.SUPPRESS)
     rn.add_argument("event")
     rn.add_argument("args", nargs=argparse.REMAINDER)
     rn.set_defaults(func=run_run)
@@ -117,4 +118,4 @@ def run_status(a: argparse.Namespace) -> int:
 def run_run(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
     return hook.run_event(a.event, list(a.args), config_path=a.config,
-                          no_stream=no_stream_requested(a))
+                          no_stream=no_stream_requested(a), from_settings=a.from_settings)
