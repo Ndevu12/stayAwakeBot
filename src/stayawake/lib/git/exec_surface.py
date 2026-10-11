@@ -540,8 +540,11 @@ def _main_worktree(common_dir: Path, entries: list[ConfigEntry]) -> Path | None:
 def _belongs(tree: Path, git_dir: Path) -> bool:
     """Tell whether a working tree is a view of a git directory: its `.git` leads back to it. Takes
     the tree and the git directory. Returns the answer."""
-    found = _git_dir_of(tree)
-    return found is not None and os.path.realpath(found) == os.path.realpath(git_dir)
+    try:
+        found = _git_dir_of(tree)
+        return found is not None and os.path.realpath(found) == os.path.realpath(git_dir)
+    except (OSError, ValueError):
+        return False
 
 
 def _read_repository(surface: ExecSurface, tree: Path | None, git_dir: Path, ask, files_read: dict,
@@ -617,7 +620,12 @@ def read_exec_surface(work_tree: Path, ask=repository_settings) -> ExecSurface |
     surface = _read_by_parsing(Path(work_tree), files_read)
     if surface is None or not surface.git_dirs:
         return surface
-    with_git = _read_with_git(Path(work_tree), ask, files_read)
+    try:
+        with_git = _read_with_git(Path(work_tree), ask, files_read)
+    except Exception as exc:  # the reading with git only adds; its failure must not lose the first
+        surface.unexamined.append(f"{work_tree}: reading the settings with git stopped "
+                                  f"({type(exc).__name__}), so what it adds was not read")
+        return surface
     if with_git is not None:
         _join(surface, with_git)
     return surface
@@ -669,9 +677,9 @@ def _read_by_parsing(work_tree: Path, files_read: dict) -> ExecSurface | None:
 
 def _join(surface: ExecSurface, with_git: ExecSurface) -> None:
     """Add to a reading what a reading with git found that it lacks: commands from a setting not yet
-    read, hooks not yet listed or now found to run, includes, git directories, a working tree for a
-    git directory none of its commands are graded against, and what could not be read. Takes the
-    reading and the reading with git."""
+    read, hooks not yet listed or now found to run, includes, a working tree for a git directory none
+    of its commands are graded against, and what could not be read. Takes the reading and the reading
+    with git."""
     graded_against = {c.git_dir for c in surface.commands}
     read = {(os.path.realpath(c.entry.source), c.entry.key, c.entry.value) for c in surface.commands}
     for command in with_git.commands:
@@ -688,7 +696,6 @@ def _join(surface: ExecSurface, with_git: ExecSurface) -> None:
         elif hook.runs and not surface.hooks[at].runs:
             surface.hooks[at] = dataclasses.replace(surface.hooks[at], runs=True)
     surface.includes += [i for i in with_git.includes if i not in surface.includes]
-    surface.git_dirs += [d for d in with_git.git_dirs if d not in surface.git_dirs]
     for git_dir, tree in with_git.work_trees.items():
         if git_dir not in surface.work_trees and git_dir not in graded_against:
             surface.work_trees[git_dir] = tree

@@ -8,7 +8,9 @@ submodules at any depth. git's own answer is the oracle.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -433,6 +435,50 @@ class TestWhatGitRunsRaisesTheGrade(ExecSurfaceSandbox):
         surface = read_exec_surface(repo, ask=lambda where: None)
         self.assertTrue(any("core.hookspath" in why.lower() and "only git can resolve" in why
                             for why in surface.unexamined))
+
+
+class TestTheReadingWithGitOnlyAdds(ExecSurfaceSandbox):
+
+    def test_a_failure_in_it_keeps_the_first_reading(self):
+        repo = self.repo()
+        self.append_config(repo, COMMAND)
+
+        def broken(where):
+            raise RuntimeError("no answer")
+        surface = read_exec_surface(repo, ask=broken)
+        self.assertIn(repo / ".git" / "config", [c.entry.source for c in surface.commands])
+        self.assertTrue(any("stopped" in why for why in surface.unexamined))
+
+    def test_a_pointer_that_cannot_be_followed_does_not_stop_it(self):
+        repo = self.repo()
+        self.append_config(repo, COMMAND)
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        (tree / ".git").write_bytes(b"gitdir: \x00\n")
+        result = self.scan(repo)
+        self.assertEqual("infected", result.verdict)
+        self.assertIsNone(result.error)
+
+    def test_its_git_directories_do_not_change_how_the_first_reading_is_graded(self):
+        repo = self.repo()
+        elsewhere = Path(tempfile.mkdtemp(dir="/tmp"))
+        self.addCleanup(shutil.rmtree, elsewhere, True)
+        (elsewhere / "hooks").mkdir(parents=True)
+        self.append_config(repo, f"[core]\n\thooksPath = {elsewhere / 'hooks'}\n")
+        before = {f.evidence: f.confidence for f in self.scan(repo).findings}
+        tree = repo / "trees" / "wt"
+        self.git(repo, "worktree", "add", "-q", str(tree))
+        self.write(tree, ".gitmodules", '[submodule "x"]\n\tpath = x\n\turl = ./x\n')
+        (tree / "x").mkdir()
+        (tree / "x" / ".git").write_text(f"gitdir: {elsewhere}\n")
+        after = {f.evidence: f.confidence for f in self.scan(repo).findings}
+        self.assertEqual({k: v for k, v in before.items() if "hookspath" in k},
+                         {k: v for k, v in after.items() if "hookspath" in k})
+
+    def test_a_hooks_path_git_answers_is_not_set_is_an_answer(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\thooksPath = :(optional)/nonexistent/hooks\n")
+        self.assertIsNone(self.scan(repo).error)
 
 
 class TestAnEmptyHooksPathRunsNothing(ExecSurfaceSandbox):

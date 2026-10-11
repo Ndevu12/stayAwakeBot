@@ -66,7 +66,10 @@ def repository_settings(where: Path) -> RepositorySettings | None:
         expanded = stdout_bytes(where, ["config", "--type=path", "--show-scope", "-z", "--get-all",
                                         _HOOKS_PATH])
         if expanded is None:
-            return None
+            unset = run(where, ["config", "--type=path", "--get-all", _HOOKS_PATH])
+            if unset is None or unset.returncode != 1:
+                return None
+            expanded = b""
         parts = expanded.split(b"\0")
         hooks_paths = tuple(os.fsdecode(value) for scope, value in zip(parts[0::2], parts[1::2])
                             if scope in REPOSITORY_SCOPES)
