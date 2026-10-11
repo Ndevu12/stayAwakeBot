@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+from stayawake.lib import github_workflow
 from stayawake.lib.adapters import github_api
 from stayawake.lib import auth
 from stayawake.lib import git as gitutil
@@ -28,8 +29,8 @@ class StrixRef:
     """One `uses: Ndevu12/strix@<ref>` occurrence and what it tells us. `inputs` is the step's
     `with:` block and `job_permissions` the permissions in force for the job it sits in — both are
     how the gate is CONFIGURED. `guards_changes` is true when this occurrence can actually run on a
-    change to the code: its workflow triggers on a pull request or a push, its job waits on no other
-    job, and its job is not switched off."""
+    change to the code: its workflow triggers on a pull request or a push, and its job runs on every
+    run of that workflow."""
     workflow: str
     job: str
     ref: str
@@ -116,18 +117,41 @@ def classify_pin(ref: str) -> str:
 
 
 def _triggers_on_a_change(doc: dict) -> bool:
-    on = doc.get("on", doc.get(True))
-    if isinstance(on, str):
-        return on in _TRIGGERS_ON_A_CHANGE
-    if isinstance(on, list):
-        return any(str(e) in _TRIGGERS_ON_A_CHANGE for e in on)
-    if isinstance(on, dict):
-        return any(str(k) in _TRIGGERS_ON_A_CHANGE for k in on)
-    return False
+    """Tell whether a workflow runs on a pull request or a push. Takes the parsed workflow. Returns
+    the answer."""
+    return bool(github_workflow.triggers(doc) & set(_TRIGGERS_ON_A_CHANGE))
 
 
-def _switched_off(job: dict) -> bool:
-    return str(job.get("if", "")).strip().lower().strip("${} ") == "false"
+_RUNS_ON_ITS_OWN = frozenset({"", "success()", "always()"})
+
+
+def _condition(job: dict) -> str:
+    """Read a job's `if:` condition without its `${{ }}` wrapper or spaces, in lower case. Takes the
+    job. Returns the condition, "" when there is none."""
+    text = str(job["if"]).strip() if "if" in job else ""
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2]
+    return "".join(text.split()).lower()
+
+
+def _runs_on_every_run(job_id: str, jobs: dict, waiting: tuple = ()) -> bool:
+    """Tell whether a job runs whenever its workflow runs on a change. Takes the job's id, the
+    workflow's jobs and the jobs already waiting on it. Returns True for a job that waits on no other
+    job and is not switched off, and for one that waits on others when its condition is absent,
+    `success()` or `always()` and, unless it is `always()`, every job it waits on runs too."""
+    job = jobs.get(job_id)
+    if not isinstance(job, dict) or job_id in waiting:
+        return False
+    condition = _condition(job)
+    needs = job.get("needs") or []
+    needs = [needs] if isinstance(needs, str) else needs
+    if not needs:
+        return condition != "false"
+    if condition not in _RUNS_ON_ITS_OWN or not isinstance(needs, list):
+        return False
+    if condition == "always()":
+        return True
+    return all(_runs_on_every_run(str(n), jobs, waiting + (job_id,)) for n in needs)
 
 
 def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
@@ -142,18 +166,14 @@ def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
             continue
         if not isinstance(doc, dict):
             continue
-        jobs = doc.get("jobs")
-        if not isinstance(jobs, dict):
-            continue
+        jobs = github_workflow.jobs(doc)
         on_a_change = _triggers_on_a_change(doc)
         for job_id, job in jobs.items():
-            if not isinstance(job, dict):
-                continue
             steps = job.get("steps")
             if not isinstance(steps, list):
                 continue
             granted = job["permissions"] if "permissions" in job else doc.get("permissions")
-            guards = on_a_change and not job.get("needs") and not _switched_off(job)
+            guards = on_a_change and _runs_on_every_run(str(job_id), jobs)
             for step in steps:
                 if not isinstance(step, dict):
                     continue
@@ -174,18 +194,16 @@ def find_strix(workflows: dict[str, str]) -> StrixRef | None:
     worst-configured one, so a decorative gate cannot answer for a live one. Returns None when the
     repository references the action nowhere."""
     refs = find_strix_refs(workflows)
-    live = [r for r in refs if r.guards_changes]
-    candidates = live or refs
-    if not candidates:
+    if not refs:
         return None
 
-    def worst_first(item):
+    def rank(item):
         index, ref = item
         cfg = grade_config(ref)
-        return (not cfg.standing_write, not cfg.reports_nothing, not cfg.ignored_inputs,
-                not cfg.unknown, index)
+        return (not ref.guards_changes, not cfg.standing_write, not cfg.reports_nothing,
+                not cfg.ignored_inputs, not cfg.unknown, index)
 
-    return min(enumerate(candidates), key=worst_first)[1]
+    return min(enumerate(refs), key=rank)[1]
 
 
 _RUNS_SAW = re.compile(r"(?:^|[\s;&|(])saw\s+(?:scan|audit)\b|\bstayawakebot\b", re.IGNORECASE)
@@ -224,11 +242,10 @@ def find_worm_gate(workflows: dict[str, str], *, read_action=None) -> WormGate |
             doc = yaml.safe_load(workflows[path])
         except yaml.YAMLError:
             continue
-        jobs = doc.get("jobs") if isinstance(doc, dict) else None
-        if not isinstance(jobs, dict):
+        if not isinstance(doc, dict):
             continue
-        for job in jobs.values():
-            steps = job.get("steps") if isinstance(job, dict) else None
+        for job in github_workflow.jobs(doc).values():
+            steps = job.get("steps")
             if not isinstance(steps, list):
                 continue
             for step in steps:

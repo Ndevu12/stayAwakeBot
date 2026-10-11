@@ -6,6 +6,7 @@ import re
 
 import yaml
 
+from stayawake.lib import github_workflow
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, REMOTE_FETCH_INTO_INTERPRETER
 
@@ -72,26 +73,9 @@ class WorkflowYamlMatcher(Matcher):
     def _is_workflow(rel: str) -> bool:
         return "/.github/workflows/" in f"/{rel}" and rel.lower().endswith((".yml", ".yaml"))
 
-    # ── YAML shape helpers (every field is attacker-shaped, so type-guard everything) ──
-    @staticmethod
-    def _triggers(data: dict) -> set[str]:
-        raw = data.get("on")
-        if raw is None:
-            raw = data.get(True)
-        if isinstance(raw, str):
-            return {raw}
-        if isinstance(raw, (list, dict)):
-            return {t for t in raw if isinstance(t, str)}
-        return set()
-
-    @staticmethod
-    def _jobs(data: dict):
-        jobs = data.get("jobs")
-        return [j for j in jobs.values() if isinstance(j, dict)] if isinstance(jobs, dict) else []
-
     def _run_steps(self, data: dict) -> list[str]:
         out = []
-        for job in self._jobs(data):
+        for job in github_workflow.jobs(data).values():
             steps = job.get("steps")
             if isinstance(steps, list):
                 out += [s["run"] for s in steps if isinstance(s, dict) and isinstance(s.get("run"), str)]
@@ -99,7 +83,7 @@ class WorkflowYamlMatcher(Matcher):
 
     def _runs_on_labels(self, data: dict) -> list[str]:
         out = []
-        for job in self._jobs(data):
+        for job in github_workflow.jobs(data).values():
             ro = job.get("runs-on")
             if isinstance(ro, str):
                 out.append(ro)
@@ -114,7 +98,7 @@ class WorkflowYamlMatcher(Matcher):
 
         sig = by_kind.get("dangerous-trigger-run-injection")
         if sig:
-            triggers = self._triggers(data) & DANGEROUS_TRIGGERS
+            triggers = github_workflow.triggers(data) & DANGEROUS_TRIGGERS
             expr = next((e for e in (untrusted_expr(r) for r in runs) if e), None)
             if triggers and expr is not None:
                 out.append(self._emit(sig, rel,
