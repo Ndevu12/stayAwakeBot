@@ -236,6 +236,25 @@ class TestTheOperatorsHookIsSetAsideAsItWas(_Sandbox):
         self.assertIn("left as it is", " ".join(a.detail for a in actions))
 
 
+class TestARefusedReportPathKeepsTheScan(_Sandbox):
+
+    def test_a_sarif_path_through_a_refused_link_is_written_elsewhere_and_said(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from stayawake.bots.security.models import ScanReport
+        from stayawake.bots.security.sinks.sarif_sink import SarifSink
+        (self.base / "out").symlink_to(self.elsewhere)
+        self.as_root()
+        said = StringIO()
+        kept = self.base / "kept"
+        kept.mkdir()
+        with mock.patch("stayawake.utils.scratch.kept_dir", return_value=kept), redirect_stderr(said):
+            SarifSink(self.base / "out" / "results.sarif").emit(ScanReport(results=[], generated_at="2026-10-11T00:00:00Z"))
+        self.assertEqual([], self.landed_elsewhere())
+        self.assertTrue((kept / "results.sarif").is_file())
+        self.assertIn("reached through a link saw does not follow", said.getvalue())
+
+
 class TestAMoveBetweenDisksCopiesWhole(_Sandbox):
 
     def test_a_folder_with_a_link_inside_is_copied_and_the_source_removed(self):

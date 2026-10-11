@@ -13,6 +13,7 @@ from pathlib import Path
 from stayawake.bots.security import sarif
 from stayawake.bots.security.models import ScanReport
 from stayawake.bots.security.sinks.base import Sink
+from stayawake.utils import pathsafe, scratch
 
 
 class SarifSink(Sink):
@@ -20,5 +21,12 @@ class SarifSink(Sink):
         self.path = Path(path)
 
     def emit(self, report: ScanReport) -> None:
-        sarif.write_sarif(report.to_payload(), self.path)
+        try:
+            sarif.write_sarif(report.to_payload(), self.path)
+        except pathsafe.RedirectedPath:
+            kept = scratch.kept_dir("the SARIF log") / self.path.name
+            sarif.write_sarif(report.to_payload(), kept)
+            print(f"warning: SARIF path {self.path} is reached through a link saw does not follow; "
+                  f"writing it to {kept} instead", file=sys.stderr)
+            return
         print(f"SARIF written to {self.path}", file=sys.stderr)
