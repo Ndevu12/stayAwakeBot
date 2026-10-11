@@ -89,10 +89,13 @@ reader, not the mechanism or the weakness it closed.
 - **A scan now examines the programs a repository's own git settings and hooks would run.** It
   covers every worktree and every submodule of the repository and every settings file your git reads
   for them; when it cannot be sure what your git reads, the repository is reported as not read in
-  full rather than clean. One that is confirmed malicious is reported as an infection, and `saw fix`
-  removes that setting or hook and the file it runs. A program git would run on its own is reported
-  for you to review; accept one you set up yourself with an allowlist entry that names its
-  `evidence`.
+  full rather than clean. One that is confirmed malicious is reported as an infection. When it
+  carries a known payload, `saw fix` removes it: a hook set in your git settings as its whole
+  definition, any other setting as that one value. Anything else it reports, and anything set in a
+  file outside your checkout, is named for you to review. While a confirmed hook is still in place,
+  `saw fix` leaves your uncommitted work and staged changes as they are and says so; remove the hook,
+  then run `saw fix` again. A program git would run on its own is reported for you to review; accept
+  one you set up yourself with an allowlist entry that names its `evidence`.
 - **Scanning or fixing a repository no longer runs programs that repository's own git settings name.**
   The signing program and credentials a fix uses come from your own git settings, never the scanned
   repository's. `saw fix amend` leaves a checked-out branch where it is, with the reason, when a

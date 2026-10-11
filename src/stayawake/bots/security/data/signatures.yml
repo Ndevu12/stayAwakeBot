@@ -507,7 +507,7 @@ signatures:
     severity: critical
     matcher: git-exec-surface
     description: "Something git runs for this repository carries or runs malicious code."
-    remediation: manual
+    remediation: remove-git-exec-payload
     confidence: confirmed
 
   - id: git-exec-suspicious

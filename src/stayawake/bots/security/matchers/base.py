@@ -96,10 +96,15 @@ def build_any_loader_check(signatures: list[dict[str, Any]]):
     return _content_check(signatures, confirmed_only=False)
 
 
-def build_any_payload_check(signatures: list[dict[str, Any]]):
+def build_any_payload_check(signatures: list[dict[str, Any]], *, holding_anywhere: bool = False):
     """`check(text) -> signature_id | None` over every confirmed content fingerprint, all
-    categories. Takes the signatures; returns the check."""
-    return _content_check(signatures, confirmed_only=True, categories=None)
+    categories. Takes the signatures and `holding_anywhere`, which keeps only the fingerprints that
+    hold in text from anywhere, none limited to some files, each held to its declared corroborator;
+    returns the check."""
+    if holding_anywhere:
+        signatures = [s for s in signatures if not s.get("file_globs")]
+    return _content_check(signatures, confirmed_only=True, corroborated=holding_anywhere,
+                          categories=None)
 
 
 class Matcher:

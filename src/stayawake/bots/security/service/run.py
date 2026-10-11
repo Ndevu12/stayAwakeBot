@@ -24,7 +24,7 @@ from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
 from stayawake.bots.security import scanner
 from stayawake.bots.security.matchers import REGISTRY
-from stayawake.bots.security.signatures import load_signatures
+from stayawake.bots.security.signatures import every_signature, load_signatures
 from stayawake.bots.security.models import ScanResult, ScanReport
 from stayawake.bots.security.sinks import (
     Sink, TerminalSink, JsonSink, SarifSink, FileSink, IssueSink, SlackSink)
@@ -151,7 +151,7 @@ def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: 
     # so every scoping rule applied to the sequential path only, and a `-j 4` run answered about
     # the enclosing repository where `-j 1` did not.
     scoped = scan_workers.matchers_for_target(sigs, scope)
-    all_sigs = [s for group in sigs.values() for s in group]
+    all_sigs = every_signature(sigs)
     order = list(scoped.keys())
     part_names = tuple(n for n in order if n in REGISTRY and REGISTRY[n].partitionable)
     whole_names = [n for n in order if n in REGISTRY and not REGISTRY[n].partitionable]

@@ -107,7 +107,7 @@ def _gitignore_marker_patterns():
     if _GITIGNORE_MARKER_PATTERNS is None:
         from stayawake.bots.security import signatures as _sigs
         from stayawake.bots.security.remediation import footprint
-        flat = [s for group in _sigs.load_signatures().values() for s in group]
+        flat = _sigs.every_signature(_sigs.load_signatures())
         _GITIGNORE_MARKER_PATTERNS = footprint._marker_patterns(".gitignore", flat)
     return _GITIGNORE_MARKER_PATTERNS
 
