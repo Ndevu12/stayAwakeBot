@@ -1861,8 +1861,8 @@
 
 
 <h1 id="saw-hook"><code>saw hook</code><a class="headerlink" href="#saw-hook" title="Permanent link">&para;</a></h1>
-<p><strong>Scan on clone, and before you push.</strong> saw's git hooks scan what lands in a repository (a clone,
-a pull, a branch switch, a rebase) and warn you <em>before</em> a dependency install, a build or an editor
+<p><strong>Scan on clone, and before you push.</strong> saw's git hooks scan what lands in a repository (a clone
+and its submodules, a pull, a branch switch, a rebase) and warn you <em>before</em> a dependency install, a build or an editor
 task runs it. A <code>git push</code> is checked for everything it would publish <em>before</em> the code leaves your
 machine. The hooks warn and point at <a href="../fix/"><code>saw fix</code></a>; they never change your code, never break a
 git command, and never stop a push. See <a href="../../../how-to/scan-on-clone/">scan on clone</a>.</p>

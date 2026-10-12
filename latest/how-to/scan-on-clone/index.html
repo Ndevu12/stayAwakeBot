@@ -1795,8 +1795,8 @@
 <p>A worm fires when you install dependencies, run a build, or open the folder in an editor — not when
 you clone. And a worm spreads when you push it on to a shared remote, where it reaches your
 collaborators and your CI.
-<code>saw hook</code> puts a scan in between on both sides: a fresh clone, a pull, a branch switch or a rebase
-is scanned and you are warned <em>before</em> you run anything, and a <code>git push</code> is checked for every file
+<code>saw hook</code> puts a scan in between on both sides: a fresh clone and its submodules, a pull, a branch
+switch or a rebase is scanned and you are warned <em>before</em> you run anything, and a <code>git push</code> is checked for every file
 version it would publish, and reported, <em>before</em> the code leaves your machine. Flags:
 <a href="../../reference/cli/hook/">CLI reference</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w">                       </span><span class="c1"># new clones and this repository are scanned automatically</span>
