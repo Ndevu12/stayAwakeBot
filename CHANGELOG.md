@@ -137,6 +137,9 @@ reader, not the mechanism or the weakness it closed.
 - **Scan-on-clone scans what a file checkout writes** (`git checkout <rev> -- <paths>`,
   `git checkout -- <paths>`, `git restore`), and reports a clone scanned clean only when all of its
   files are on disk. Run `saw scan` on repositories where you checked out files before this release.
+- **After `saw db update`, saw's hooks and the pre-push check read again what they had already
+  checked**, so a package the updated database lists as malicious is reported on the next push or
+  checkout.
 - **`saw guard check` grades the gate that actually guards the branch** when a repository runs the
   scanner in more than one place. Re-run `saw guard check` on repositories you gate this way.
 - **`saw hook install` and `saw harden` read git's hook and template settings as git does.** A

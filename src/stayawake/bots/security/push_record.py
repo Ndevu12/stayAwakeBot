@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from stayawake.bots.security.dependencies import db
 from stayawake.utils import atomicwrite, env
 
 MAX_VERIFIED = 200_000
@@ -18,13 +19,14 @@ MAX_PENDING = 200_000
 
 def policy_digest(signatures, allowlist, max_file_bytes: int) -> str:
     """Name the policy a verdict was reached under. Takes the signatures, the allowlist and the
-    per-file read cap. Returns a digest that changes when any of them, or saw, changes."""
+    per-file read cap. Returns a digest that changes when any of them, saw, or the advisory
+    database changes."""
     try:
         saw = version("stayawakebot")
     except PackageNotFoundError:
         saw = "unknown"
-    text = json.dumps([saw, signatures, allowlist or [], max_file_bytes], sort_keys=True,
-                      default=str)
+    text = json.dumps([saw, signatures, allowlist or [], max_file_bytes, db.snapshot_in_use()],
+                      sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest()
 
 

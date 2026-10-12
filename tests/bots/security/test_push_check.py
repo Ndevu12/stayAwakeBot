@@ -15,11 +15,13 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security import hookscript, outbound, push_record, version_scan
+from stayawake.bots.security.dependencies import db
 from stayawake.bots.security.matchers import git_history
 from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
 from stayawake.bots.security.targets import HistoryTarget, LocalRepoTarget, PushedTarget, ScanOptions
 from stayawake.lib.git import objects, pushed
 from stayawake.utils import env
+from tests.bots.security._osv_fixtures import mal_record, osv_zip
 
 _PAYLOAD = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"
 _ZERO = "0" * 40
@@ -687,6 +689,27 @@ class TestAVersionCheckedCleanIsNotCheckedAgain(_Sandbox):
         refs = self.line("refs/heads/main")
         self.assertEqual(self.check(refs)[0], 1)
         self.assertEqual(self.check(refs)[0], 1)
+
+    def _list_as_malicious(self, name: str) -> None:
+        cache = self.home / ".cache" / "saw" / "advisories"
+        listed = osv_zip({"MAL.json": mal_record(name, ["1.0.0"])})
+        db._CORPUS_MEMO.clear()
+        db.write_manifest(cache, [db.update_ecosystem("npm", cache, fetch=lambda bucket: listed)])
+        self.addCleanup(db._CORPUS_MEMO.clear)
+
+    def _declare(self, name: str) -> str:
+        self.commit({"package.json": f'{{\n  "name": "a",\n  "dependencies": {{\n    "{name}": "1.0.0"\n  }}\n}}\n'})
+        return self.line("refs/heads/main")
+
+    def test_a_package_the_advisory_database_lists_is_reported(self):
+        self._list_as_malicious("late-evil")
+        self.assertEqual(1, self.check(self._declare("late-evil"))[0])
+
+    def test_a_newer_advisory_database_reads_everything_again(self):
+        refs = self._declare("late-evil")
+        self.assertEqual(0, self.check(refs)[0])
+        self._list_as_malicious("late-evil")
+        self.assertEqual(1, self.check(refs)[0])
 
     def test_a_different_policy_reads_everything_again(self):
         self.commit({"more.js": "export const y = 2;\n"})

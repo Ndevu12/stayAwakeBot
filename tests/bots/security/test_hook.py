@@ -18,7 +18,9 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security import hook, hook_report, hookscript
+from stayawake.bots.security.dependencies import db
 from stayawake.bots.security.models import ScanResult
+from tests.bots.security._osv_fixtures import mal_record, osv_zip
 
 _INFECTED = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"   # confirmed worm markers
 
@@ -1248,6 +1250,14 @@ class TestTheCleanMemoryFollowsThePolicy(_Isolated):
         config = self.home / "saw.yml"
         config.write_text("settings:\n  exclude_dirs: ['.git']\n")
         self.assertNotEqual(hook._clean_key("c0ffee", None), hook._clean_key("c0ffee", str(config)))
+
+    def test_it_changes_with_the_advisory_database(self):
+        before = hook._clean_key("c0ffee", None)
+        cache = self.home / ".cache" / "saw" / "advisories"
+        listed = osv_zip({"MAL.json": mal_record("late-evil", ["1.0.0"])})
+        db.write_manifest(cache, [db.update_ecosystem("npm", cache, fetch=lambda bucket: listed)])
+        self.addCleanup(db._CORPUS_MEMO.clear)
+        self.assertNotEqual(before, hook._clean_key("c0ffee", None))
 
 
 def _set_aside(home: Path) -> list[Path]:
