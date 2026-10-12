@@ -1812,6 +1812,11 @@ to restore them; whatever installed them can install them again.</p>
 resolver writes there is removed. A generated output directory goes whole, including what your
 repository commits inside it: nothing reads those directories, so nothing in one can be called
 clean. Name it under <code>keep_dirs</code> to keep it.</p>
+<p><strong>A known-malicious package your project declares stays declared unless you say otherwise.</strong> On a
+terminal, <code>saw fix</code> names each one and the <code>package.json</code> files that declare it, and asks: <code>yes</code>
+removes it from your checkout and from the branch it prepares, Enter keeps it, since your code may
+rely on it. Without a terminal it is never removed: it is named with the command to remove it, and
+your checkout is not called clean while it is still declared.</p>
 <p><strong>The directories a scan leaves out are read too</strong>, at any depth, and what they confirm is
 removed. An installed tree is read once the others have confirmed an infection, after it is removed. When part of your checkout cannot
 be read, the confirmed files are still removed one by one, but the installed trees are left and
