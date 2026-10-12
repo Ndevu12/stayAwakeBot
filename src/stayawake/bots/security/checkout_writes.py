@@ -31,11 +31,19 @@ def git_started_ns() -> int | None:
     return None
 
 
+def _identity(path: Path) -> tuple[int, int] | None:
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return info.st_dev, info.st_ino
+
+
 def written(root: Path, opts: ScanOptions, since_ns: int) -> tuple[str, ...] | None:
-    """List the files written into a working tree since a moment, among those a scan of the tree
-    reads and those the repository tracks inside a folder that scan skips, with every link that leads
-    to one of them. Takes the root, the scan options and the moment. Returns the paths, or None when
-    the tree or git's list of tracked files could not be read in full."""
+    """List the files and links written into a working tree since a moment, among those a scan of
+    the tree reads and those the repository tracks, with every link that leads to a written file, or
+    every link when one was written. Takes the root, the scan options and the moment. Returns the
+    paths, or None when the tree or git's list of tracked files could not be read in full."""
     target = LocalRepoTarget(str(root), "", opts)
     names = set(target.iter_files())
     if target.read_errors:
@@ -43,21 +51,25 @@ def written(root: Path, opts: ScanOptions, since_ns: int) -> tuple[str, ...] | N
     tracked = stdout_bytes(root, ["ls-files", "-z"])
     if tracked is None:
         return None
-    for raw in tracked.split(b"\0"):
-        rel = os.fsdecode(raw)
-        if raw and any(part in opts.exclude_dirs for part in Path(rel).parts[:-1]):
-            names.add(rel)
-    fresh, links = set(), []
+    names.update(os.fsdecode(raw) for raw in tracked.split(b"\0") if raw)
+    fresh, links, link_written = set(), [], False
     for rel in names:
         try:
             info = os.lstat(root / rel)
         except OSError:
             continue
+        if stat.S_ISDIR(info.st_mode):
+            continue
+        is_link = stat.S_ISLNK(info.st_mode)
         if info.st_ctime_ns >= since_ns - _CLOCK_SLACK_NS:
             fresh.add(rel)
-        elif stat.S_ISLNK(info.st_mode):
+            link_written = link_written or is_link
+        elif is_link:
             links.append(rel)
     if fresh and links:
-        targets = {os.path.realpath(root / rel) for rel in fresh}
-        fresh.update(rel for rel in links if os.path.realpath(root / rel) in targets)
+        if link_written:
+            fresh.update(links)
+        else:
+            targets = {_identity(root / rel) for rel in fresh} - {None}
+            fresh.update(rel for rel in links if _identity(root / rel) in targets)
     return tuple(sorted(fresh))

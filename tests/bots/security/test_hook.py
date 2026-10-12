@@ -1129,6 +1129,17 @@ class TestAFileCheckoutScansWhatItWrote(_Clones):
         self._file_checkout(clone, "checkout", "origin/pr", "--", "plain.txt")
         self.assertEqual(self._scanned_by_file_checkout(clone), (1, (".gitignore", "plain.txt")))
 
+    def test_a_written_link_into_the_hooks_folder_is_reported(self):
+        source = self._source({"a.js": "a\n"})
+        _run(source, "checkout", "-qb", "pr")
+        os.symlink(".git/hooks", source / "hk")
+        _run(source, "add", "hk")
+        _run(source, "commit", "-qm", "pr")
+        _run(source, "checkout", "-q", "-")
+        clone = self._cloned_and_read(source)
+        self._file_checkout(clone, "checkout", "origin/pr", "--", "hk")
+        self.assertEqual(self._file_checkout_event(clone), 1)
+
     def test_a_file_rewritten_with_a_finding_is_reported_again(self):
         clone = self._clone(self._source({"a.js": "a\n", ".gitignore": _INFECTED}))
         self.assertEqual(self._checkout_event(clone, hook._NULL_REV), 1)

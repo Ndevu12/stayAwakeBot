@@ -85,6 +85,46 @@ class TestTheFilesWrittenSinceAMoment(_Repo):
         self._write("other.txt", "rewritten\n")
         self.assertEqual(self._written(since), ("other.txt",))
 
+    def test_a_link_naming_a_written_file_with_another_spelling_is_listed(self):
+        self._write("plain.txt")
+        if not (self.root / "PLAIN.txt").exists():
+            self.skipTest("this filesystem tells names apart by case")
+        os.symlink("PLAIN.txt", self.root / "link")
+        since = self._now_on_disk()
+        self._write("plain.txt", "rewritten\n")
+        self.assertEqual(self._written(since), ("link", "plain.txt"))
+
+    def test_a_written_link_to_a_folder_is_listed(self):
+        (self.root / "sub").mkdir()
+        self._write("sub/a.js")
+        os.symlink("sub", self.root / "folder")
+        _run(self.root, "add", "folder")
+        since = self._now_on_disk()
+        os.unlink(self.root / "folder")
+        os.symlink("sub", self.root / "folder")
+        self.assertEqual(self._written(since), ("folder",))
+
+    def test_when_a_link_is_written_every_link_is_listed(self):
+        (self.root / "a").mkdir()
+        (self.root / "b").mkdir()
+        self._write("b/x")
+        os.symlink("a", self.root / "d")
+        os.symlink("d/x", self.root / "old")
+        _run(self.root, "add", "d", "old")
+        since = self._now_on_disk()
+        os.unlink(self.root / "d")
+        os.symlink("b", self.root / "d")
+        self.assertEqual(self._written(since), ("d", "old"))
+
+    def test_a_folder_git_tracks_is_not_listed(self):
+        self._write("a.js")
+        _run(self.root, "add", "a.js")
+        blob = subprocess.run(["git", "-C", str(self.root), "hash-object", "a.js"], capture_output=True,
+                              text=True, check=True, env={**os.environ, **_ISOLATED}).stdout.strip()
+        _run(self.root, "update-index", "--add", "--cacheinfo", f"160000,{blob},sub")
+        (self.root / "sub").mkdir()
+        self.assertEqual(self._written(0), ("a.js",))
+
     @unittest.skipIf(os.geteuid() == 0, "root enters every folder")
     def test_a_tree_with_a_folder_it_cannot_enter_lists_nothing(self):
         self._write("shut/a.js")
