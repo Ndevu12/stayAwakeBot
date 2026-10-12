@@ -9,16 +9,16 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from stayawake.bots.security.pr.resolve import DeliveryQuestion, Resolver
-from stayawake.cli.resolve.ask import ask_delivery, ask_resolution
+from stayawake.bots.security.pr.resolve import DeliveryQuestion, DependencyQuestion, Resolver
+from stayawake.cli.resolve.ask import ask_delivery, ask_dependency, ask_resolution
 from stayawake.utils import env, prompt
 
 
 def build_resolver(stdin: TextIO | None = None,
                    stderr: TextIO | None = None) -> Resolver | None:
-    """Build a resolver that asks the operator about each uncertain file and each delivery. Takes
-    the input and prompt streams, the process's own by default. Returns it, or None when the
-    terminal is not interactive or the run is automated."""
+    """Build a resolver that asks the operator about each uncertain file, each delivery and each
+    known-malicious package. Takes the input and prompt streams, the process's own by default.
+    Returns it, or None when the terminal is not interactive or the run is automated."""
     stdin = sys.stdin if stdin is None else stdin
     stderr = sys.stderr if stderr is None else stderr
     if not prompt.attended(stdin, stderr):
@@ -27,6 +27,8 @@ def build_resolver(stdin: TextIO | None = None,
     def resolve(question):
         if isinstance(question, DeliveryQuestion):
             return ask_delivery(question, stdin=stdin, stderr=stderr)
+        if isinstance(question, DependencyQuestion):
+            return ask_dependency(question, stdin=stdin, stderr=stderr)
         return ask_resolution(question, stdin=stdin, stderr=stderr)
 
     return resolve

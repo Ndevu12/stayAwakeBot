@@ -77,10 +77,12 @@ reader, not the mechanism or the weakness it closed.
   entry still stores what it removed, or a payload your commit holds that your staged changes or
   the file on disk no longer show, the run names where and the remedy — the fix pull request, or
   `saw fix amend` for your own commits — and says your checkout is cleaned.
-- **`saw fix` removes a known-malicious dependency from `package.json`**, so reinstalling does not
-  bring it back. A package with an advisory is never removed — that stays your call. Other
-  ecosystems declare dependencies only in a lockfile, so there saw removes the lockfile and the
-  installed tree and names the package for you.
+- **On a terminal, `saw fix` asks before removing a known-malicious dependency from `package.json`.**
+  It names the package and the files that declare it; `yes` removes it from your checkout and from
+  the branch saw prepares, and Enter keeps it, since your code may rely on it. Without a terminal
+  nothing is removed: the package is named with the command to remove it, and your checkout is not
+  called clean while it is still declared. A package with an advisory is never removed, and in other
+  ecosystems saw names the package and the command to remove it.
 - **saw now lists the compromised dependency versions** — once at the end of a scan, at the top of a
   saved report, and in the remediation pull request, with the command to remove each one.
 

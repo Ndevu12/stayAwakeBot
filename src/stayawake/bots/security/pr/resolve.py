@@ -2,8 +2,9 @@
 """Data passed between amend's core and an injected interactive resolver.
 
 The core asks an injected `resolve(question)` about each `UncertainItem` it does not act on itself,
-answered with a `Resolution`, and about each `DeliveryQuestion`, answered with a `DeliveryAnswer`. A
-resolver of `None` means nothing is asked.
+answered with a `Resolution`, about each `DeliveryQuestion`, answered with a `DeliveryAnswer`, and
+about each `DependencyQuestion`, answered with a `DependencyAnswer`. A resolver of `None` means
+nothing is asked.
 """
 from __future__ import annotations
 
@@ -108,4 +109,29 @@ class DeliveryAnswer:
     chosen: tuple[str, ...] = ()
 
 
-Resolver = Callable[[UncertainItem | DeliveryQuestion], Resolution | DeliveryAnswer]
+@dataclass(frozen=True)
+class DependencyQuestion:
+    """One known-malicious package the project declares.
+
+    `name` is the package, `versions` the versions found, and `declared_in` every file that
+    declares it.
+    """
+
+    name: str
+    versions: tuple[str, ...]
+    declared_in: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DependencyAnswer:
+    """The operator's answer for one known-malicious package.
+
+    `action` is `TAKE_OUT` (remove it from the project's manifests), `KEEP` (leave it declared), or
+    `UNANSWERED` (no answer was given; it stays declared).
+    """
+
+    action: str = UNANSWERED
+
+
+Resolver = Callable[[UncertainItem | DeliveryQuestion | DependencyQuestion],
+                    Resolution | DeliveryAnswer | DependencyAnswer]

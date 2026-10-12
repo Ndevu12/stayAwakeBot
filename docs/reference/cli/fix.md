@@ -26,6 +26,12 @@ resolver writes there is removed. A generated output directory goes whole, inclu
 repository commits inside it: nothing reads those directories, so nothing in one can be called
 clean. Name it under `keep_dirs` to keep it.
 
+**A known-malicious package your project declares stays declared unless you say otherwise.** On a
+terminal, `saw fix` names each one and the `package.json` files that declare it, and asks: `yes`
+removes it from your checkout and from the branch it prepares, Enter keeps it, since your code may
+rely on it. Without a terminal it is never removed: it is named with the command to remove it, and
+your checkout is not called clean while it is still declared.
+
 **The directories a scan leaves out are read too**, at any depth, and what they confirm is
 removed. An installed tree is read once the others have confirmed an infection, after it is removed. When part of your checkout cannot
 be read, the confirmed files are still removed one by one, but the installed trees are left and
