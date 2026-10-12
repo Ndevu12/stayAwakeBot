@@ -79,11 +79,12 @@ def _records(entries: dict) -> dict[str, Seen] | None:
 
 def _restored_from_version_1(data: dict, entries: dict) -> Baseline:
     """Load a snapshot written in the version-1 format. Takes the parsed file and its entry map;
-    returns a Baseline, tampered when the stamp does not match."""
-    normalised = {str(k): str(v) for k, v in entries.items()}
-    if data.get("self_hash") != _hash_of_version_1(normalised):
+    returns a Baseline, tampered when an entry is not text or the stamp does not match."""
+    if not all(isinstance(v, str) for v in entries.values()):
         return Baseline(status="tampered")
-    return Baseline(entries={k: Seen(v, "") for k, v in normalised.items()}, status="loaded")
+    if data.get("self_hash") != _hash_of_version_1(entries):
+        return Baseline(status="tampered")
+    return Baseline(entries={k: Seen(v, "") for k, v in entries.items()}, status="loaded")
 
 
 def load_baseline() -> Baseline:

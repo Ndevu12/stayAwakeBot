@@ -1266,6 +1266,19 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(self._run(), [])
         self.assertEqual(json.loads(path.read_text())["version"], baseline.VERSION)
 
+    def test_an_older_format_snapshot_holding_more_than_text_is_replaced(self):
+        self._plant()
+        self._run()
+        path = baseline.baseline_path()
+        captured = json.loads(path.read_text())["captured"]
+        deep = "[" * 100_000 + "]" * 100_000
+        for value, untrusted in (('["x"]', {"tampered"}), (deep, {"tampered", "corrupt"})):
+            path.write_text(f'{{"version": 1, "captured": "{captured}", "entries": {{"k": {value}}}, '
+                            f'"self_hash": "x"}}')
+            self.assertIn(baseline.load_baseline().status, untrusted)
+            self._run()
+            self.assertEqual(baseline.load_baseline().status, "loaded")
+
     def test_the_removal_record_is_bounded(self):
         removed = {f"/gone/{i}": f"2026-09-09T00:00:{i % 60:02d}+00:00"
                    for i in range(baseline.MAX_REMEMBERED + 10)}
