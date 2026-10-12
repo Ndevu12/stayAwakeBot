@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Render what saw puts to the operator into safe text: one uncertain file, or the files one
-delivery commit added. Every attacker-controlled field goes through `textsafe.plain`.
+"""Render what saw puts to the operator into safe text: one uncertain file, the files one
+delivery commit added, or a known-malicious package the project declares. Every
+attacker-controlled field goes through `textsafe.plain`.
 """
 from __future__ import annotations
 
 import posixpath
 import unicodedata
 
-from stayawake.bots.security.pr.resolve import DeliveryQuestion, UncertainItem
+from stayawake.bots.security.pr.resolve import DeliveryQuestion, DependencyQuestion, UncertainItem
 from stayawake.utils import textsafe
 
 _READ_CAP = 4096
@@ -88,6 +89,8 @@ _DELIVERY_HEADER = ("─── files added in the same commit as the malware saw
 FOLDERS_LISTED = 20
 NAMES_LISTED_PER_FOLDER = 8
 _TOP_LEVEL = "(top level)"
+_DEPENDENCY_HEADER = "─── a known-malicious package your project declares ───"
+_DECLARING_FILES_SHOWN = 5
 
 
 def delivery_groups(question: DeliveryQuestion) -> list[tuple[str, list[str]]]:
@@ -160,3 +163,19 @@ def render_delivery(question: DeliveryQuestion) -> str:
                      + (f" and {hidden} more" if hidden else ""))
     lines.append(_DIVIDER)
     return "\n".join(lines)
+
+
+def render_dependency(question: DependencyQuestion) -> str:
+    """Render one known-malicious package the project declares. Takes the question. Returns the
+    text; the caller adds the prompt."""
+    versions = ", ".join(textsafe.plain(v) for v in question.versions)
+    package = textsafe.plain(question.name) + (f" {versions}" if versions else "")
+    shown = question.declared_in[:_DECLARING_FILES_SHOWN]
+    hidden = len(question.declared_in) - len(shown)
+    return "\n".join([
+        _DEPENDENCY_HEADER,
+        f"  {package} is a known-malicious package.",
+        "  your project declares it in: " + ", ".join(textsafe.plain(p) for p in shown)
+        + (f" and {hidden} more" if hidden else ""),
+        "  removing it can break code that uses it; keeping it means the next install brings it back.",
+        _DIVIDER])

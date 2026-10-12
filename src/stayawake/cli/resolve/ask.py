@@ -5,7 +5,8 @@ one delivery commit added.
 For a file, `remove`/`r`/`yes`/`y` removes it, `restore`/`re` and `supply`/`su` keep it with a
 clean version where offered, and anything else keeps it. For a delivery, `all` or the numbers choose
 files, then `yes` takes them out; Enter keeps them all; end of input or unclear answers leave the
-question unanswered.
+question unanswered. For a known-malicious package, `yes` removes it from the project's manifests;
+Enter keeps it.
 """
 from __future__ import annotations
 
@@ -14,9 +15,11 @@ from typing import TextIO
 
 from stayawake.bots.security.pr.resolve import (KEEP, REMOVE, RESTORE, SUPPLY, TAKE_OUT,
                                                 UNANSWERED, DeliveryAnswer, DeliveryQuestion,
-                                                Resolution, UncertainItem)
+                                                DependencyAnswer, DependencyQuestion, Resolution,
+                                                UncertainItem)
 from stayawake.cli.resolve.render import (FOLDERS_LISTED, NAMES_LISTED_PER_FOLDER,
-                                         delivery_groups, render_delivery, render_item)
+                                         delivery_groups, render_delivery, render_dependency,
+                                         render_item)
 from stayawake.utils import prompt, textsafe
 
 _REMOVE = frozenset({"remove", "r", "yes", "y"})
@@ -80,6 +83,7 @@ _HABITUAL_YES = frozenset({"yes", "y", "remove", "r"})
 _CHOOSE = ("type 'all' to take out every file listed, or the numbers to take out (e.g. 1 2.3), "
            "or press Enter to keep them all > ")
 _CONFIRM = "type 'yes' to take them out, or press Enter to keep them all > "
+_REMOVE_DEPENDENCY = "type 'yes' to remove it from your project, or press Enter to keep it > "
 _SHOWN_IN_CONFIRMATION = 3
 
 
@@ -161,3 +165,24 @@ def ask_delivery(question: DeliveryQuestion, *, stdin: TextIO | None = None,
         decision = _confirmed(chosen, stdin, stderr)
         return DeliveryAnswer(decision, tuple(chosen) if decision == TAKE_OUT else ())
     return DeliveryAnswer(UNANSWERED)
+
+
+def ask_dependency(question: DependencyQuestion, *, stdin: TextIO | None = None,
+                   stderr: TextIO | None = None) -> DependencyAnswer:
+    """Show one known-malicious package and read whether the operator removes it from the
+    project's manifests. Takes the question and the streams. Returns the `DependencyAnswer`:
+    `TAKE_OUT` on 'yes', `KEEP` on Enter, `UNANSWERED` at end of input or after unclear answers."""
+    stderr = sys.stderr if stderr is None else stderr
+    print(render_dependency(question), file=stderr)
+    hint = ""
+    for _ in range(_MAX_TRIES):
+        answer = prompt.ask_line("  " + hint + _REMOVE_DEPENDENCY, stdin=stdin, stderr=stderr)
+        if answer is None:
+            return DependencyAnswer(UNANSWERED)
+        choice = answer.strip().lower()
+        if choice == "yes":
+            return DependencyAnswer(TAKE_OUT)
+        if choice in _DELIVERY_KEEP:
+            return DependencyAnswer(KEEP)
+        hint = f"'{textsafe.plain(choice)}' is not an answer here — "
+    return DependencyAnswer(UNANSWERED)

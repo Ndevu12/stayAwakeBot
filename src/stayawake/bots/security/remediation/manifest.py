@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 
+from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.jsonc import load_jsonc
 from stayawake.bots.security.models import SAW_DIR
 from stayawake.utils.pathsafe import is_safe_write_target
@@ -57,6 +58,59 @@ def drop_from_manifest(text: str, names: set[str]) -> str | None:
     return out
 
 
+def declared_malicious(findings) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Collect the known-malicious packages the findings name in a manifest. Takes the findings.
+    Returns each package name with the versions found and the manifests that declare it."""
+    versions: dict[str, set[str]] = {}
+    paths: dict[str, set[str]] = {}
+    for f in findings:
+        name = getattr(f, "package_name", None)
+        path = getattr(f, "path", "") or ""
+        if getattr(f, "dependency_state", None) != MALICIOUS or not name:
+            continue
+        if Path(path).name != MANIFEST:
+            continue
+        package = getattr(f, "package", "") or ""
+        versions.setdefault(name, set())
+        if package.rfind("@") > 0:
+            versions[name].add(package[package.rfind("@") + 1:])
+        paths.setdefault(name, set()).add(path)
+    return {name: (tuple(sorted(versions[name])), tuple(sorted(paths[name]))) for name in sorted(paths)}
+
+
+def dropping(findings, chosen: set[str]) -> dict[str, set[str]]:
+    """Map each manifest to the chosen packages found malicious in it. Takes the findings and the
+    chosen package names. Returns the names by manifest path."""
+    within: dict[str, set[str]] = {}
+    for name, (_, paths) in declared_malicious(findings).items():
+        if name in chosen:
+            for path in paths:
+                within.setdefault(path, set()).add(name)
+    return within
+
+
+def manifests_cleared(root: Path, findings, rewritten) -> list[str]:
+    """Name the rewritten manifests that no longer declare any known-malicious package found in
+    them. Takes the root, the findings and the manifests rewritten. Returns those manifests."""
+    named: dict[str, set[str]] = {}
+    for name, (_, paths) in declared_malicious(findings).items():
+        for path in paths:
+            named.setdefault(path, set()).add(name)
+    return sorted(p for p in rewritten if p in named and not _declares(root / p, named[p]))
+
+
+def _declares(path: Path, names: set[str]) -> bool:
+    """Tell whether a manifest still declares any of the names. Takes the manifest and the names.
+    Returns the answer, True when it cannot be read."""
+    try:
+        data = load_jsonc(path.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return True
+    if not isinstance(data, dict):
+        return True
+    return any(isinstance(data.get(field), dict) and names & set(data[field]) for field in _DEP_FIELDS)
+
+
 def manifests(root: Path) -> list[Path]:
     """Takes a repository root. Returns every manifest saw may rewrite, deepest last."""
     found: list[Path] = []
@@ -78,32 +132,36 @@ def manifests(root: Path) -> list[Path]:
     return found
 
 
-def drop_dependencies(root: Path, names: set[str]) -> list[str]:
-    """Remove `names` from every manifest under `root`.
+def drop_dependencies(root: Path, names: set[str],
+                      within: dict[str, set[str]] | None = None) -> list[str]:
+    """Remove packages from the manifests under `root`.
 
-    Takes the repository root and the known-malicious package names. Returns the paths rewritten,
-    relative to the root. A manifest saw cannot rewrite exactly is left untouched.
+    Takes the repository root, the known-malicious package names, and optionally the names to remove
+    from each manifest path, which limits the removal to those manifests. Returns the paths
+    rewritten, relative to the root. A manifest saw cannot rewrite exactly is left untouched.
     """
     if not names:
         return []
     rewritten: list[str] = []
     for path in manifests(root):
-        if not is_safe_write_target(path, root):
+        rel = str(path.relative_to(root))
+        here = names if within is None else names & within.get(rel, set())
+        if not here or not is_safe_write_target(path, root):
             continue
         try:
             if path.stat().st_size > _MAX_MANIFEST_BYTES or path.stat().st_nlink > 1:
                 continue
-            text = path.read_text(encoding="utf-8")
+            text = path.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        out = drop_from_manifest(text, names)
+        out = drop_from_manifest(text, here)
         if out is None:
             continue
         try:
-            path.write_text(out, encoding="utf-8")
-            if path.read_text(encoding="utf-8") != out:
+            path.write_bytes(out.encode("utf-8"))
+            if path.read_bytes() != out.encode("utf-8"):
                 continue
         except OSError:
             continue
-        rewritten.append(str(path.relative_to(root)))
+        rewritten.append(rel)
     return sorted(rewritten)
