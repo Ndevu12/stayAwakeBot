@@ -14,7 +14,7 @@ from stayawake.lib.git.objects import own_view
 from stayawake.lib.git.query import reachable_blobs
 from stayawake.lib.git.run import open_stdout
 
-from .base import SOURCE_EXTS, TRUNCATION_MARKER, Target, _ext, stream_windows
+from .base import TRUNCATION_MARKER, Target, _ext, stream_runs_of_text, stream_windows
 
 _CHUNK = 1 << 20
 
@@ -123,10 +123,6 @@ class HistoryTarget(Target):
         size = self._size(sha)
         if size is None:
             self.read_errors.append(rel)
-        ext = _ext(rel)
-        if size is None or (ext not in SOURCE_EXTS and not self.content_was_read(ext, data)):
-            if size is not None:
-                self.read_in_part.add(rel)
             text = self.read_text(rel)
             if text:
                 yield 0, text
@@ -140,7 +136,9 @@ class HistoryTarget(Target):
                     data = proc.stdout.read(n) or b""
                     read += len(data)
                     return data
-                yield from stream_windows(chunk, size, self.opts.max_file_bytes)
+                was_read = self.content_was_read(_ext(rel), data)
+                walk = stream_windows if was_read else stream_runs_of_text
+                yield from walk(chunk, size, self.opts.max_file_bytes)
         except (OSError, subprocess.SubprocessError):
             self.read_errors.append(rel)
             return

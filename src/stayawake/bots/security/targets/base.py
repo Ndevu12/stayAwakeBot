@@ -7,6 +7,7 @@ through, so local and cloned repositories look the same to every matcher.
 from __future__ import annotations
 
 import os
+import re
 import stat as _stat
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,7 @@ SOURCE_EXTS = CODE_EXTS | {
 
 
 _SOURCE_WINDOW_OVERLAP = 65_536
+_RUN_OF_TEXT = re.compile(r"[\t\n\r\x20-\x7e]{16,}")
 
 # Between a head and a tail, so no pattern can match across the join and report a
 # signature that is nowhere in the file.
@@ -39,11 +41,11 @@ def _ext(rel: str) -> str:
     return rel[i:].lower() if i != -1 else ""
 
 
-def stream_windows(read: Callable[[int], bytes], size: int,
-                   window: int) -> Iterator[tuple[int, str]]:
+def _byte_windows(read: Callable[[int], bytes], size: int,
+                  window: int) -> Iterator[tuple[int, bytes]]:
     """Walk a byte stream in overlapping windows, the last one a full window ending at the end of
     the stream. Takes a `read(n)` function, the stream's size and the window size. Yields
-    `(line_offset, text)` per window, NUL bytes dropped."""
+    `(line_offset, window)` with NUL bytes dropped."""
     step = max(1, window - min(_SOURCE_WINDOW_OVERLAP, window // 2))
     buf, pos, nl_before, ended = b"", 0, 0, False
     while True:
@@ -53,12 +55,32 @@ def stream_windows(read: Callable[[int], bytes], size: int,
             buf += chunk or b""
         if not buf:
             return
-        yield nl_before, buf.replace(b"\x00", b"").decode("utf-8", errors="replace")
+        yield nl_before, buf.replace(b"\x00", b"")
         if ended or pos + len(buf) >= size:
             return
         advance = min(step, size - window - pos)
         nl_before += buf.count(b"\n", 0, advance)
         buf, pos = buf[advance:], pos + advance
+
+
+def stream_windows(read: Callable[[int], bytes], size: int,
+                   window: int) -> Iterator[tuple[int, str]]:
+    """Walk a byte stream in overlapping windows, the last one a full window ending at the end of
+    the stream. Takes a `read(n)` function, the stream's size and the window size. Yields
+    `(line_offset, text)` per window, NUL bytes dropped."""
+    for line_offset, chunk in _byte_windows(read, size, window):
+        yield line_offset, chunk.decode("utf-8", errors="replace")
+
+
+def stream_runs_of_text(read: Callable[[int], bytes], size: int,
+                        window: int) -> Iterator[tuple[int, str]]:
+    """Walk a binary byte stream in overlapping windows and keep its runs of text. Takes a
+    `read(n)` function, the stream's size and the window size. Yields `(line_offset, text)` per
+    window that holds any, its runs joined by newlines."""
+    for line_offset, chunk in _byte_windows(read, size, window):
+        runs = _RUN_OF_TEXT.findall(chunk.decode("latin-1"))
+        if runs:
+            yield line_offset, "\n".join(runs)
 
 
 def is_source_path(rel: str) -> bool:
@@ -282,7 +304,7 @@ class Target:
         """Read a file for the confirmed content checks. Takes the path. Yields
         `(line_offset, text)`: one window, as `read_text` reads it or with NUL bytes dropped for a
         non-source file, when the file fits in `max_file_bytes`; otherwise overlapping windows over
-        every byte of a text file, or the two ends of a binary one. `line_offset` counts the
+        every byte, keeping only the runs of text of a binary file. `line_offset` counts the
         newlines before the window."""
         p = self.root / rel
         ext = _ext(rel)
@@ -306,17 +328,12 @@ class Target:
             if fh is None:
                 return
             with fh:
-                if self.content_was_read(ext, fh.read(self.BINARY_SNIFF_BYTES)):
-                    fh.seek(0)
-                    yield from stream_windows(fh.read, size, self.opts.max_file_bytes)
-                    return
+                was_read = self.content_was_read(ext, fh.read(self.BINARY_SNIFF_BYTES))
+                fh.seek(0)
+                walk = stream_windows if was_read else stream_runs_of_text
+                yield from walk(fh.read, size, self.opts.max_file_bytes)
         except OSError as exc:
             self._note_unreadable(rel, p, exc)    # unreadable oversized file — a gap (unless a symlink)
-            return
-        raw = self._head_tail(p, max(1, self.opts.max_file_bytes // 2))
-        if raw:
-            yield (0, raw.replace(b"\x00", b"").decode("utf-8", errors="replace"))
-            return
 
     def cleanup(self) -> None:
         pass

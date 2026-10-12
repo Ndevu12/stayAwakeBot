@@ -93,20 +93,30 @@ class TestTheSameWindowsOnDiskAndInTheStore(_Store):
             self.assertGreater(len(stored), 1)
 
 
-class TestABinaryIsReadAtItsEnds(_Store):
+class TestALargeFileIsReadInFull(_Store):
 
-    def test_a_large_binary_is_read_at_its_ends_and_text_in_full(self):
+    def test_a_large_binary_and_a_large_text_file_are_read_across_every_byte(self):
         opts = ScanOptions()
         opts.max_file_bytes = 4096
         binary = b"\x89PNG\x00\x00" + b"ab\n" * 6000
         text = b"ab\n" * 6000
         oids = self.store({"img.dat": binary, "notes.dat": text})
-        for rel, many in (("img.dat", False), ("notes.dat", True)):
+        for rel in ("img.dat", "notes.dat"):
             on_disk = list(Target(self.repo, "repo", opts).read_source_windows(rel))
             stored = list(HistoryTarget(self.repo, "repo", opts, {rel: [oids[rel]]})
                           .read_source_windows(rel))
-            self.assertEqual(many, len(on_disk) > 1, rel)
+            self.assertGreater(len(on_disk), 1, rel)
             self.assertEqual(on_disk, stored, rel)
+
+    def test_the_middle_of_a_large_binary_is_read(self):
+        opts = ScanOptions()
+        opts.max_file_bytes = 4096
+        binary = b"\x89PNG\x00\x00" + b"\x00" * 20_000 + b"the-middle-marker" + b"\x00" * 20_000
+        oids = self.store({"img.png": binary})
+        for target in (Target(self.repo, "repo", opts),
+                       HistoryTarget(self.repo, "repo", opts, {"img.png": [oids["img.png"]]})):
+            text = "".join(window for _, window in target.read_source_windows("img.png"))
+            self.assertIn("the-middle-marker", text)
 
 
 class TestGitLfsContentIsRead(_Store):
