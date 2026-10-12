@@ -30,6 +30,17 @@ class TestScannerEvasions(unittest.TestCase):
         (self.d / "nul.mjs").write_bytes(b"/*\x00*/ var _$_1e42 = sfL(0); export default {};")
         self.assertIn("loader-seed-var", _scan(self.d))
 
+    def test_a_loader_in_the_middle_of_a_large_binary_is_found(self):
+        filler = b"\x00" * 1_500_000
+        body = b"\x89PNG\r\n\x1a\n" + filler + b"\nglobal['_V']='8-12';\n" + filler
+        (self.d / "hero.png").write_bytes(body)
+        self.assertIn("loader-global-v-marker", _scan(self.d))
+
+    def test_a_large_genuine_binary_is_clean(self):
+        noise = bytes((i * 7919 + 13) % 251 for i in range(3_000_000))
+        (self.d / "photo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + noise)
+        self.assertEqual(_scan(self.d), set())
+
     def test_genuine_binary_without_source_ext_is_clean(self):
         # A genuine binary asset (real PNG magic, no payload) → no false positive, even though the
         # confirmed content tier now head-scans non-source files and the magic-byte masquerade check

@@ -171,6 +171,8 @@ reader, not the mechanism or the weakness it closed.
   of your checkout reads the same file.**
 - **`saw scan`, `saw audit --verify`, the pre-push check and `saw fix amend` read every text file in
   full, whatever its size or name.**
+- **`saw scan`, the pre-push check, `saw scan --history` and `saw fix amend` read large binary files
+  in full too**, such as images and fonts. Re-scan repositories you rely on.
 - **The pre-push check, `saw scan --history` and `saw fix amend` read a file kept in Git LFS when the
   repository holds its content, and name it when it does not.**
 - **`saw fix amend` reads the repository's past commits when the checkout is clean.** Malware

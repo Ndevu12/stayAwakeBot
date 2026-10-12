@@ -471,9 +471,9 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertTrue(outcome.needs_review)
 
-    def test_a_large_binary_is_named_and_a_large_binary_program_is_named_for_review(self):
+    def test_a_large_binary_and_a_large_binary_program_are_read_in_full(self):
         binary = "\x00\x01" + "\x7f" * 2_200_000
-        for path, mode, review in (("assets/blob.bin", 0o644, False), ("bin/tool", 0o755, True)):
+        for path, mode in (("assets/blob.bin", 0o644), ("bin/tool", 0o755)):
             with self.subTest(path=path):
                 self.setUp()
                 self.evil_merge()
@@ -482,9 +482,9 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
                 self.commit(self.d, "a large binary")
                 outcome = self.run_amend()
                 self.assertTrue(outcome.completed, self._causes(outcome))
-                self.assertEqual(review, outcome.needs_review, self._causes(outcome))
-                self.assertIn(Cause.HISTORY_PARTLY_READ if review
-                              else Cause.LARGE_FILES_NOT_READ_IN_FULL, self._causes(outcome))
+                self.assertFalse(outcome.needs_review, self._causes(outcome))
+                self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+                self.assertNotIn(Cause.LARGE_FILES_NOT_READ_IN_FULL, self._causes(outcome))
 
     def test_data_kept_outside_git_is_named_without_review(self):
         self.evil_merge()
@@ -554,15 +554,13 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         self.assertIn(Cause.PAST_COMMITS_READ_IN_PART, self._causes(outcome))
         self.assertTrue(outcome.needs_review)
 
-    def test_past_versions_read_in_part_are_named(self):
+    def test_past_versions_whose_content_is_elsewhere_are_named_and_large_binaries_are_read(self):
         binary = "\x00\x01" + "\x7f" * 2_200_000
         pointer = ("version https://git-lfs.github.com/spec/v1\noid sha256:" + "0" * 64
                    + "\nsize 3000000\n")
-        for path, text, mode, cause in (("bin/tool", binary, 0o755, Cause.HISTORY_PARTLY_READ),
-                                        ("assets/a.png", binary, 0o644,
-                                         Cause.LARGE_FILES_NOT_READ_IN_FULL),
-                                        ("assets/m.bin", pointer, 0o644,
-                                         Cause.LARGE_FILES_NOT_READ_IN_FULL)):
+        for path, text, mode, named in (("bin/tool", binary, 0o755, False),
+                                        ("assets/a.png", binary, 0o644, False),
+                                        ("assets/m.bin", pointer, 0o644, True)):
             with self.subTest(path=path):
                 self.setUp()
                 self.write(self.d, path, text)
@@ -571,8 +569,9 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
                 self.git(self.d, "rm", "-q", path)
                 self.commit(self.d, "remove it")
                 outcome = self.run_amend()
-                self.assertIn(cause, self._causes(outcome))
-                self.assertEqual(cause is Cause.HISTORY_PARTLY_READ, outcome.needs_review)
+                self.assertEqual(named, Cause.LARGE_FILES_NOT_READ_IN_FULL in self._causes(outcome))
+                self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+                self.assertFalse(outcome.needs_review)
 
     def test_a_detached_checkout_on_no_branch_is_read(self):
         self.add_then_remove("vendor/x/loader.js")
