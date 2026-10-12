@@ -954,6 +954,82 @@ class TestRunEventScope(_Isolated):
         self.assertEqual(hook._load_cache(), {os.path.realpath(repo): "fresh"})
 
 
+class TestTheFirstCheckoutAfterAClone(_Isolated):
+    """The checkout that first writes a cloned repository's files scans every file it wrote."""
+
+    def _kept(self, path: Path) -> Path:
+        self.addCleanup(lambda: __import__("shutil").rmtree(path, ignore_errors=True))
+        return path
+
+    def _source(self, files: dict[str, str]) -> Path:
+        return self._kept(_repo(files))
+
+    def _clone(self, source: Path, *flags: str) -> Path:
+        dest = self._kept(Path(tempfile.mkdtemp(prefix="hook-clone-"))) / "c"
+        subprocess.run(["git", "-c", "protocol.file.allow=always", "clone", "-q", *flags, str(source),
+                        str(dest)], check=True, capture_output=True)
+        return dest
+
+    def _head(self, repo: Path) -> str:
+        return hook.gitutil.stdout(repo, ["rev-parse", "HEAD"]).strip()
+
+    def _checkout_event(self, repo: Path, old: str) -> int:
+        self._in_repo(repo)
+        with contextlib.redirect_stderr(io.StringIO()):
+            return hook.run_event("post-checkout", [old, self._head(repo), "1"])
+
+    def test_a_submodule_cloned_with_its_superproject_is_scanned(self):
+        sub = self._source({".gitignore": _INFECTED})
+        superproject = self._source({"f": "s\n"})
+        _run(superproject, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "sub")
+        _run(superproject, "commit", "-qm", "sub")
+        inner = self._clone(superproject, "--recurse-submodules") / "sub"
+        self.assertEqual(self._checkout_event(inner, self._head(inner)), 1)
+
+    def test_a_checkout_after_a_clone_that_wrote_no_files_is_scanned(self):
+        clone = self._clone(self._source({".gitignore": _INFECTED}), "--no-checkout")
+        branch = hook.gitutil.stdout(clone, ["rev-parse", "--abbrev-ref", "HEAD"]).strip()
+        _run(clone, "checkout", "-q", branch)
+        self.assertEqual(self._checkout_event(clone, self._head(clone)), 1)
+
+    def test_a_file_the_first_checkout_writes_unchanged_is_scanned(self):
+        source = self._source({".gitignore": _INFECTED, "README": "a\n"})
+        default = self._head(source)
+        _run(source, "checkout", "-qb", "next")
+        (source / "README").write_text("b\n")
+        _run(source, "commit", "-qam", "next")
+        _run(source, "checkout", "-q", "-")
+        clone = self._clone(source, "--no-checkout")
+        _run(clone, "checkout", "-q", "origin/next")
+        self.assertEqual(self._checkout_event(clone, default), 1)
+
+    def test_a_checkout_that_moves_nothing_after_a_clone_that_wrote_no_files_is_scanned(self):
+        clone = self._clone(self._source({".gitignore": _INFECTED}), "--no-checkout")
+        _run(clone, "checkout", "-q")
+        self.assertEqual(self._checkout_event(clone, self._head(clone)), 1)
+
+    def test_a_clone_scanned_clean_scans_only_what_its_first_switch_changed(self):
+        source = self._source({"a.txt": "a\n"})
+        _run(source, "checkout", "-qb", "dev")
+        (source / "b.txt").write_text("b\n")
+        _run(source, "add", "b.txt")
+        _run(source, "commit", "-qm", "b")
+        _run(source, "checkout", "-q", "-")
+        clone = self._clone(source)
+        cloned = self._head(clone)
+        self.assertEqual(self._checkout_event(clone, hook._NULL_REV), 0)
+        _run(clone, "checkout", "-q", "dev")
+        self.assertEqual(hook._scan_scope("post-checkout", [cloned, self._head(clone), "1"], clone),
+                         (("b.txt",), "checkout"))
+
+    def test_a_second_new_branch_at_the_same_commit_scans_nothing(self):
+        clone = self._clone(self._source({".gitignore": _INFECTED}))
+        _run(clone, "checkout", "-qb", "one")
+        _run(clone, "checkout", "-qb", "two")
+        head = self._head(clone)
+        self.assertEqual(hook._scan_scope("post-checkout", [head, head, "1"], clone), (False, None))
+
+
 def _set_aside(home: Path) -> list[Path]:
     root = home / ".local" / "state" / "saw" / "set-aside" / "hooks"
     return sorted(root.iterdir()) if root.is_dir() else []
