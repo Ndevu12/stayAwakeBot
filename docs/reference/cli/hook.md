@@ -4,8 +4,8 @@ description: saw hook — install global git hooks that scan code as it lands an
 
 # `saw hook`
 
-**Scan on clone, and before you push.** saw's git hooks scan what lands in a repository (a clone,
-a pull, a branch switch, a rebase) and warn you *before* a dependency install, a build or an editor
+**Scan on clone, and before you push.** saw's git hooks scan what lands in a repository (a clone
+and its submodules, a pull, a branch switch, a rebase) and warn you *before* a dependency install, a build or an editor
 task runs it. A `git push` is checked for everything it would publish *before* the code leaves your
 machine. The hooks warn and point at [`saw fix`](fix.md); they never change your code, never break a
 git command, and never stop a push. See [scan on clone](../../how-to/scan-on-clone.md).
