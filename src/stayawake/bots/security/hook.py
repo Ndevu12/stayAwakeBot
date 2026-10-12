@@ -1032,9 +1032,8 @@ def _is_a_file_checkout(event: str, argv: list[str]) -> bool:
 
 def _file_checkout_scope(root: Path, config_path: str | None):
     """Decide what a file checkout scans. Takes the root and the operator config. Returns
-    `(include_only, label, checked)`: the files the git command that ran the hook wrote whose content
-    was not scanned clean at that path, with what was seen of them; the whole tree when saw cannot
-    tell which files were written; or `(False, None, None)` when none is left to scan."""
+    `(include_only, label, checked)`: the files to scan with what was seen of them, `None` for the
+    whole tree, or `(False, None, None)` when there is nothing to scan."""
     since = checkout_writes.git_started_ns()
     opts = operator_policy(config_path).opts
     fresh = None if since is None else checkout_writes.written(root, opts, since)

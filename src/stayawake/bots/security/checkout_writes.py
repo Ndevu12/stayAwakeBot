@@ -40,10 +40,9 @@ def _identity(path: Path) -> tuple[int, int] | None:
 
 
 def written(root: Path, opts: ScanOptions, since_ns: int) -> tuple[str, ...] | None:
-    """List the files and links written into a working tree since a moment, among those a scan of
-    the tree reads and those the repository tracks, with every link that leads to a written file, or
-    every link when one was written. Takes the root, the scan options and the moment. Returns the
-    paths, or None when the tree or git's list of tracked files could not be read in full."""
+    """List the files and links written into a working tree since a moment. Takes the root, the
+    scan options and the moment. Returns the paths, or None when the tree or git's list of tracked
+    files could not be read in full."""
     target = LocalRepoTarget(str(root), "", opts)
     names = set(target.iter_files())
     if target.read_errors:
