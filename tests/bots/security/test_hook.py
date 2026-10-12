@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security import hook, hook_report, hookscript
+from stayawake.bots.security.models import ScanResult
 
 _INFECTED = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"   # confirmed worm markers
 
@@ -832,12 +833,10 @@ class TestRunEventScope(_Isolated):
              mock.patch.dict(os.environ, {"SAW_HOOK_TIMEOUT": "0.2"}):
             self.assertEqual(hook.run_event("post-checkout", [hook._NULL_REV, head, "1"]), 2)
 
-    def test_file_checkout_is_skipped(self):
+    def test_a_file_checkout_in_a_repository_saw_has_not_read_reads_it(self):
         repo = _repo({".gitignore": _INFECTED})
         self._in_repo(repo)
-        with mock.patch.object(hook, "scan_target") as m:
-            self.assertEqual(hook.run_event("post-checkout", [hook._NULL_REV, "x", "0"]), 0)
-            m.assert_not_called()
+        self.assertEqual(hook.run_event("post-checkout", [hook._NULL_REV, "x", "0"]), 1)
 
     def test_pull_diff_scans_only_changed_files(self):
         repo = _repo({"app.js": "export const x = 1;\n"})
@@ -954,9 +953,7 @@ class TestRunEventScope(_Isolated):
         self.assertEqual(hook._load_cache(), {os.path.realpath(repo): "fresh"})
 
 
-class TestTheFirstCheckoutAfterAClone(_Isolated):
-    """The checkout that first writes a cloned repository's files scans every file it wrote."""
-
+class _Clones(_Isolated):
     def _kept(self, path: Path) -> Path:
         self.addCleanup(lambda: __import__("shutil").rmtree(path, ignore_errors=True))
         return path
@@ -977,6 +974,31 @@ class TestTheFirstCheckoutAfterAClone(_Isolated):
         self._in_repo(repo)
         with contextlib.redirect_stderr(io.StringIO()):
             return hook.run_event("post-checkout", [old, self._head(repo), "1"])
+
+    def _file_checkout_event(self, repo: Path) -> int:
+        self._in_repo(repo)
+        with contextlib.redirect_stderr(io.StringIO()):
+            return hook.run_event("post-checkout", [self._head(repo), self._head(repo), "0"])
+
+    def _with_a_branch(self, files: dict[str, str], branch: dict[str, str]) -> Path:
+        source = self._source(files)
+        _run(source, "checkout", "-qb", "pr")
+        for rel, text in branch.items():
+            (source / rel).parent.mkdir(parents=True, exist_ok=True)
+            (source / rel).write_text(text)
+        _run(source, "add", "-A")
+        _run(source, "commit", "-qm", "pr")
+        _run(source, "checkout", "-q", "-")
+        return source
+
+    def _cloned_and_read(self, source: Path) -> Path:
+        clone = self._clone(source)
+        self.assertEqual(self._checkout_event(clone, hook._NULL_REV), 0)
+        return clone
+
+
+class TestTheFirstCheckoutAfterAClone(_Clones):
+    """The checkout that first writes a cloned repository's files scans every file it wrote."""
 
     def test_a_submodule_cloned_with_its_superproject_is_scanned(self):
         sub = self._source({".gitignore": _INFECTED})
@@ -1028,6 +1050,116 @@ class TestTheFirstCheckoutAfterAClone(_Isolated):
         _run(clone, "checkout", "-qb", "two")
         head = self._head(clone)
         self.assertEqual(hook._scan_scope("post-checkout", [head, head, "1"], clone), (False, None))
+
+    def test_a_commit_only_partly_on_disk_is_not_remembered_as_scanned_clean(self):
+        clone = self._clone(self._source({"a.js": "a\n", ".gitignore": _INFECTED}), "--no-checkout")
+        _run(clone, "checkout", "HEAD", "--", "a.js")
+        _run(clone, "checkout", "-qb", "x")
+        self._in_repo(clone)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(hook.run_event("post-checkout", [self._head(clone), self._head(clone), "1"]), 0)
+        self.assertNotIn("scanned clean", err.getvalue())
+        self.assertFalse(hook._scanned_clean(clone, hook._clean_key(self._head(clone), None)))
+        _run(clone, "checkout", "HEAD", "--", ".")
+        self.assertEqual(self._file_checkout_event(clone), 1)
+
+    def test_a_clone_on_disk_in_full_is_remembered_as_scanned_clean(self):
+        clone = self._cloned_and_read(self._source({"a.js": "a\n"}))
+        self.assertTrue(hook._scanned_clean(clone, hook._clean_key(self._head(clone), None)))
+
+
+class TestAFileCheckoutScansWhatItWrote(_Clones):
+    """A file checkout scans every file it wrote that saw has not judged as it now is."""
+
+    def test_a_clone_without_a_checkout_then_a_file_checkout_of_everything_is_scanned(self):
+        clone = self._clone(self._source({"a.js": "a\n", ".gitignore": _INFECTED}), "--no-checkout")
+        _run(clone, "checkout", "HEAD", "--", ".")
+        self.assertEqual(self._file_checkout_event(clone), 1)
+
+    def test_a_file_from_another_revision_is_scanned(self):
+        clone = self._cloned_and_read(self._with_a_branch({"a.js": "a\n"}, {".gitignore": _INFECTED}))
+        _run(clone, "checkout", "origin/pr", "--", ".gitignore")
+        self.assertEqual(self._file_checkout_event(clone), 1)
+
+    def test_a_file_restored_from_another_revision_that_git_does_not_track_is_scanned(self):
+        clone = self._cloned_and_read(self._with_a_branch({"a.js": "a\n"}, {".gitignore": _INFECTED}))
+        _run(clone, "restore", "--source=origin/pr", ".gitignore")
+        self.assertEqual(self._file_checkout_event(clone), 1)
+
+    def test_files_written_after_the_commit_moved_without_a_hook_are_scanned(self):
+        clone = self._cloned_and_read(self._with_a_branch({"a.js": "a\n"}, {".gitignore": _INFECTED}))
+        _run(clone, "reset", "-q", "origin/pr")
+        _run(clone, "checkout", "--", ".")
+        self.assertEqual(self._file_checkout_event(clone), 1)
+
+    def test_a_tracked_file_in_a_folder_a_whole_read_skips_is_scanned_when_written(self):
+        clone = self._cloned_and_read(self._with_a_branch({"a.js": "a\n"}, {"dist/.gitignore": _INFECTED}))
+        _run(clone, "checkout", "origin/pr", "--", "dist")
+        self.assertEqual(self._file_checkout_event(clone), 1)
+
+    def test_a_file_rewritten_with_a_finding_is_reported_again(self):
+        clone = self._clone(self._source({"a.js": "a\n", ".gitignore": _INFECTED}))
+        self.assertEqual(self._checkout_event(clone, hook._NULL_REV), 1)
+        (clone / ".gitignore").unlink()
+        _run(clone, "checkout", "--", ".gitignore")
+        self.assertEqual(self._file_checkout_event(clone), 1)
+
+    def test_a_file_with_a_finding_left_untouched_is_not_scanned_again(self):
+        clone = self._clone(self._source({"a.js": "a\n", ".gitignore": _INFECTED}))
+        self.assertEqual(self._checkout_event(clone, hook._NULL_REV), 1)
+        (clone / "a.js").write_text("edit\n")
+        _run(clone, "checkout", "--", "a.js")
+        with mock.patch.object(hook, "_operator_scan") as scan:
+            self.assertEqual(self._file_checkout_event(clone), 0)
+        scan.assert_not_called()
+
+    def test_restoring_content_already_judged_clean_scans_nothing(self):
+        clone = self._cloned_and_read(self._source({"a.js": "a\n"}))
+        (clone / "a.js").write_text("edit\n")
+        _run(clone, "checkout", "--", "a.js")
+        with mock.patch.object(hook, "_operator_scan") as scan:
+            self.assertEqual(self._file_checkout_event(clone), 0)
+        scan.assert_not_called()
+
+    def test_a_judgement_made_under_another_policy_is_not_trusted(self):
+        clone = self._cloned_and_read(self._source({"a.js": "a\n"}))
+        (clone / "a.js").write_text("edit\n")
+        _run(clone, "checkout", "--", "a.js")
+        with mock.patch.object(hook, "_policy_digest", return_value="another"), \
+                mock.patch.object(hook, "_operator_scan", wraps=hook._operator_scan) as scan:
+            self.assertEqual(self._file_checkout_event(clone), 0)
+        self.assertEqual(scan.call_args.args[1], ("a.js",))
+
+    def test_a_file_checkout_does_not_read_the_history(self):
+        clone = self._cloned_and_read(self._with_a_branch({"a.js": "a\n"}, {"b.js": "b\n"}))
+        _run(clone, "checkout", "origin/pr", "--", "b.js")
+        with mock.patch.object(hook, "_operator_scan", wraps=hook._operator_scan) as scan:
+            self.assertEqual(self._file_checkout_event(clone), 0)
+        self.assertEqual(scan.call_args.args[1], ("b.js",))
+        self.assertEqual(scan.call_args.args[4], [])
+
+    def test_a_tree_it_cannot_look_at_is_read_whole(self):
+        clone = self._cloned_and_read(self._with_a_branch({"a.js": "a\n"}, {".gitignore": _INFECTED}))
+        _run(clone, "checkout", "origin/pr", "--", ".gitignore")
+        with mock.patch.object(hook.checkout_record, "look", return_value=None):
+            self.assertEqual(self._file_checkout_event(clone), 1)
+
+    def test_a_scan_that_could_not_finish_judges_nothing(self):
+        clone = self._cloned_and_read(self._with_a_branch({"a.js": "a\n"}, {"b.js": "b\n"}))
+        _run(clone, "checkout", "origin/pr", "--", "b.js")
+        unfinished = ScanResult(target="t", source="local", error="a file could not be read")
+        with mock.patch.object(hook, "_operator_scan", return_value=unfinished):
+            self.assertEqual(self._file_checkout_event(clone), 2)
+        head = self._head(clone)
+        self.assertEqual(hook._scan_scope("post-checkout", [head, head, "0"], clone), (("b.js",), "files"))
+
+
+class TestTheCleanMemoryFollowsThePolicy(_Isolated):
+    def test_it_changes_with_the_folders_a_walk_skips(self):
+        config = self.home / "saw.yml"
+        config.write_text("settings:\n  exclude_dirs: ['.git']\n")
+        self.assertNotEqual(hook._clean_key("c0ffee", None), hook._clean_key("c0ffee", str(config)))
 
 
 def _set_aside(home: Path) -> list[Path]:

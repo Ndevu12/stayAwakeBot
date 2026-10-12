@@ -44,6 +44,11 @@ def cache_path() -> Path:
     return Path(env.xdg_cache_home()) / "saw" / "hook-scan-cache.json"
 
 
+def checkout_records_dir() -> Path:
+    """Return the folder of records of what saw's hook judged in each working tree."""
+    return Path(env.xdg_cache_home()) / "saw" / "hook-checkout-records"
+
+
 def declaration_path() -> Path:
     """Return the file where `saw hook install` records what it installed."""
     return Path(env.xdg_config_home()) / "saw" / "hook-install.json"

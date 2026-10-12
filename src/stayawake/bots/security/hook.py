@@ -6,6 +6,7 @@ pull is checked before anything in it is executed.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -22,8 +23,9 @@ from stayawake.utils import textsafe
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.contexts import empty_hooks_dir
-from stayawake.bots.security import hookscript, outbound, push_record
+from stayawake.bots.security import checkout_record, hookscript, outbound, push_record
 from stayawake.lib.git.run import stdout_bytes
+from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.hook_report import BRAND as _BRAND, command as _cmd, paint_at as _paint
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
@@ -35,6 +37,7 @@ _HOOKS = hookscript.HOOKS
 _YIELDS_TO_THE_OPERATOR = frozenset({"pre-push"})
 _NULL_REV = "0" * 40
 _HEAD_MOVED_BY_A_CLONE = "clone: "
+_FILES_WRITTEN = "files"
 _AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `pnpm`), open it in "
           "your editor/IDE (auto-run tasks & extensions fire on open), or build or run it")
 
@@ -937,13 +940,22 @@ def _load_cache() -> dict:
         return {}
 
 
+def _policy_digest(config_path: str | None) -> str:
+    """Name the policy a hook scan judges under. Takes the operator config. Returns the digest of its
+    signatures, allowlist, file size limit and the folders a walk of the tree reads or skips."""
+    policy = operator_policy(config_path)
+    opts = policy.opts
+    digest = push_record.policy_digest(policy.signatures, policy.allowlist,
+                                       getattr(opts, "max_file_bytes", 0))
+    walked = json.dumps([sorted(getattr(opts, "exclude_dirs", ())), sorted(getattr(opts, "keep_dirs", ())),
+                         bool(getattr(opts, "scan_build_outputs", False))])
+    return f"{digest}:{hashlib.sha256(walked.encode()).hexdigest()}"
+
+
 def _clean_key(head: str, config_path: str | None) -> str:
     """Name a complete clean scan of a repository's tree. Takes the commit and the operator config.
     Returns the commit joined to the digest of the policy it was judged under."""
-    policy = operator_policy(config_path)
-    digest = push_record.policy_digest(policy.signatures, policy.allowlist,
-                                       getattr(policy.opts, "max_file_bytes", 0))
-    return f"{head}:{digest}"
+    return f"{head}:{_policy_digest(config_path)}"
 
 
 def _settings_scans() -> dict:
@@ -987,7 +999,7 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
     if event == "post-checkout":
         old, new, flag = (argv + ["", "", ""])[:3]
         if flag != "1":
-            return False, None
+            return _file_checkout_scope(root, config_path)[:2]
         if old == _NULL_REV or (_first_checkout_after_a_clone(root)
                                 and not _scanned_clean(root, _clean_key(old, config_path))):
             return None, "clone"
@@ -1012,6 +1024,37 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
     return False, None
 
 
+def _is_a_file_checkout(event: str, argv: list[str]) -> bool:
+    """Tell whether a hook event is a file checkout rather than a branch checkout. Takes the event and
+    its arguments. Returns the answer."""
+    return event == "post-checkout" and (argv + ["", "", ""])[2] != "1"
+
+
+def _file_checkout_scope(root: Path, config_path: str | None):
+    """Decide what a file checkout scans. Takes the root and the operator config. Returns
+    `(include_only, label, look, plan)`: the files on disk saw has not judged as they now are, the
+    whole tree with no look when the tree could not be looked at, or `(False, None, look, plan)`
+    when every file is as saw judged it."""
+    now = checkout_record.look(root, operator_policy(config_path).opts)
+    if now is None:
+        return None, _FILES_WRITTEN, None, None
+    laid_out = checkout_record.plan(root, now, checkout_record.load(root, _policy_digest(config_path)))
+    if not laid_out.to_scan:
+        return False, None, now, laid_out
+    return laid_out.to_scan, _FILES_WRITTEN, now, laid_out
+
+
+def _holds_its_commit(root: Path, head: str) -> bool:
+    """Tell whether a working tree holds every file of its commit as the commit records it. Takes the
+    root and the commit. Returns the answer, False when git could not say."""
+    differing = uncommitted_paths(root)
+    listed = stdout_bytes(root, ["ls-tree", "-r", "--name-only", "-z", head])
+    if differing is None or listed is None:
+        return False
+    committed = set(listed.split(b"\0"))
+    return not any(path in committed for path in differing)
+
+
 def _first_checkout_after_a_clone(root: Path) -> bool:
     """Tell whether HEAD has moved at most once, by this checkout, since the repository was cloned.
     Takes the root. Returns the answer, False when git could not say."""
@@ -1032,28 +1075,33 @@ def _changed_files(root: Path, base: str, head: str) -> tuple[str, ...] | None:
     return tuple(name for name in names if (root / name).is_file())
 
 
-def _operator_scan(root: Path, include, config_path: str | None, display: str):
+def _operator_scan(root: Path, include, config_path: str | None, display: str, merges=None):
     """Scan what just landed with the operator's policy: saw's signatures and the allowlist from the
-    config named at install, never the repository's own config. Returns the scan result."""
+    config named at install, never the repository's own config. Takes the root, the files to read or
+    None for the whole tree, the operator config, the name to show and the merges the history check
+    reads, None for all of them. Returns the scan result."""
     policy = operator_policy(config_path)
     with LocalRepoTarget(str(root), display, policy.opts, include_only=include) as target:
+        if merges is not None:
+            target.merge_scope = list(merges)
         return scan_target(target, policy.signatures, policy.allowlist)
 
 
 _TIMED_OUT = object()
 
 
-def _scan_within_budget(root: Path, include, config_path: str | None, display: str):
-    """Run the scan within the hook's time budget (`SAW_HOOK_TIMEOUT`). Returns the scan result,
-    `_TIMED_OUT` when the budget ran out, or re-raises the scan's error."""
+def _scan_within_budget(root: Path, include, config_path: str | None, display: str, merges=None):
+    """Run the scan within the hook's time budget (`SAW_HOOK_TIMEOUT`). Takes what `_operator_scan`
+    takes. Returns the scan result, `_TIMED_OUT` when the budget ran out, or re-raises the scan's
+    error."""
     budget = env.hook_timeout()
     if budget <= 0:                                  # cap disabled → run inline
-        return _operator_scan(root, include, config_path, display)
+        return _operator_scan(root, include, config_path, display, merges)
     box: dict = {}
 
     def work():
         try:
-            box["result"] = _operator_scan(root, include, config_path, display)
+            box["result"] = _operator_scan(root, include, config_path, display, merges)
         except BaseException as exc:                 # noqa: BLE001 — surfaced on the calling thread
             box["error"] = exc
 
@@ -1114,8 +1162,13 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         return 0
     if not from_settings:
         _bring_up_to_date()
-    include, label = _scan_scope(event, argv, root, config_path)
+    if _is_a_file_checkout(event, argv):
+        include, label, now, laid_out = _file_checkout_scope(root, config_path)
+    else:
+        (include, label), now, laid_out = _scan_scope(event, argv, root, config_path), None, None
     if label is None:
+        if laid_out is not None:
+            _record_judgements(root, now, laid_out, set(), config_path)
         return 0
 
     display = str(root).replace(os.path.expanduser("~"), "~")
@@ -1123,14 +1176,19 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     quoted_root = shlex.quote(textsafe.plain(str(root), limit=4096))
     rescan = "saw scan " + quoted_root
     head = gitutil.stdout(root, ["rev-parse", "HEAD"]).strip()
-    clean_key = _clean_key(head, config_path) if head and include is None else None
+    whole_tree = include is None and label != _FILES_WRITTEN
+    clean_key = _clean_key(head, config_path) if head and whole_tree else None
     if clean_key and _scanned_clean(root, clean_key):
         return 0
+    if whole_tree:
+        now = checkout_record.look(root, operator_policy(config_path).opts)
+        laid_out = checkout_record.whole_read(now) if now is not None else None
 
     err = sys.stderr
     with spin_status(f"{_BRAND}: scanning {shown} for supply-chain worms…",
                      enabled=stream_enabled(err, force_off=no_stream)):
-        scanned = _scan_within_budget(root, include, config_path, display)
+        scanned = _scan_within_budget(root, include, config_path, display,
+                                      [] if label == _FILES_WRITTEN else None)
     if scanned is _TIMED_OUT:
         budget = env.hook_timeout()
         print(_paint(f"⚠  {_BRAND}: scan of {shown} aborted after {budget:.0f}s (large tree) — "
@@ -1141,6 +1199,26 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     result = scanned
     if clean_key and not from_settings:
         _remember(root, "")
+    found = _tell(result, shown, rescan, quoted_root)
+    if found is None:
+        found = 0
+        if clean_key and _holds_its_commit(root, head):
+            if from_settings:
+                _remember_settings_scan(root, clean_key)
+            else:
+                _remember(root, clean_key)
+            if label == "clone":
+                print(_paint(f"✓ {_BRAND}: {shown} scanned clean.", "ok", err), file=err)
+    if laid_out is not None and not result.error:
+        _record_judgements(root, now, laid_out, {f.path for f in result.findings}, config_path)
+    return found
+
+
+def _tell(result, shown: str, rescan: str, quoted_root: str) -> int | None:
+    """Print what a hook scan found. Takes the result, the repository as shown, the command that
+    rescans it and the repository quoted for a shell. Returns 1 infected, 2 not verified, 0 for a
+    finding to review, or None when it found nothing."""
+    err = sys.stderr
     if result.infected:
         _warn_infected(shown, quoted_root, result)
         return 1
@@ -1160,10 +1238,14 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
                      "would not carry.", "warn", err), file=err)
         print("   " + _paint("Review:", "dim", err) + " " + _cmd(rescan, err), file=err)
         return 0
-    if clean_key and from_settings:
-        _remember_settings_scan(root, clean_key)
-    elif clean_key:
-        _remember(root, clean_key)
-    if label == "clone":
-        print(_paint(f"✓ {_BRAND}: {shown} scanned clean.", "ok", err), file=err)
-    return 0
+    return None
+
+
+def _record_judgements(root: Path, now, laid_out, flagged: set[str], config_path: str | None) -> None:
+    """Record what a file checkout or a whole read judged in a working tree. Takes the root, the
+    look, the plan, the paths of the findings and the operator config. A record that cannot be
+    written is skipped."""
+    try:
+        checkout_record.remember(root, now, laid_out, flagged, _policy_digest(config_path))
+    except (OSError, ValueError):
+        pass
