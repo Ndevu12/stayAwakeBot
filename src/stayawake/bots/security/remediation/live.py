@@ -10,7 +10,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
 from stayawake.bots.security.models import CONFIRMED, SAW_DIR
-from stayawake.bots.security.remediation import changes as ch, git_settings, installed, preserve
+from stayawake.bots.security.remediation import (changes as ch, git_settings, installed, manifest,
+                                                  preserve)
 from stayawake.bots.security.remediation.oracle import (ABSENT, REFUSED, UNREADABLE,
                                                         content_confirms, payload_matchers,
                                                         still_condemned)
@@ -126,16 +127,18 @@ class CheckoutResult:
 
 def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(),
                    lockfile_root: Path | None = None, base_confirmed: bool = False,
-                   remove_lockfiles: bool = True) -> CheckoutResult:
+                   remove_lockfiles: bool = True, choose_dependencies=None) -> CheckoutResult:
     """Scan the checkout the operator is standing in and clear what it confirms.
 
     Takes the checkout, the scan options, the by-matcher signatures, the allowlist, the scan to
     run, the directories to keep, the tree the lockfiles are read from, whether the branch this
-    fix is prepared against is confirmed too, and whether the lockfile goes. Returns what was found
-    and what was done. The staged changes are read as well as the files on disk, and on a
-    confirmed infection every directory the scan leaves out is read once the installed trees are
-    gone. Once the checkout has been changed, what the operator had not committed is put on a
-    branch of its own, as it stands after the change.
+    fix is prepared against is confirmed too, whether the lockfile goes, and
+    `choose_dependencies(findings) -> names`, the known-malicious packages the operator said to
+    remove from the manifests, or None when none is removed. Returns what was found and what was
+    done. The staged changes are read as well as the files on disk, and on a confirmed infection
+    every directory the scan leaves out is read once the installed trees are gone. Once the
+    checkout has been changed, what the operator had not committed is put on a branch of its own,
+    as it stands after the change.
     """
     from stayawake.bots.security.targets import LocalRepoTarget
     if scan is None:
@@ -194,6 +197,12 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
                  if f.path not in {g.path for g in findings}]
     payload_digests |= _digests(repo, findings, limit)
     removed = clean(repo, findings, signatures, allowlist, opts)
+    if choose_dependencies is not None:
+        every = [f for read in (*reads, *later) for f in read.findings]
+        chosen = choose_dependencies(every)
+        rewritten = manifest.drop_dependencies(repo, chosen, manifest.dropping(every, chosen))
+        removed.stripped += [p for p in manifest.manifests_cleared(repo, every, rewritten)
+                             if _tracked_as_committed(repo, p)]
     removed.stripped += settings_taken.stripped
     removed.absent += settings_taken.absent
     removed.unread += settings_taken.unread
@@ -241,6 +250,18 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
                           unstaged=unstaged,
                           index_unread=unasked or index_unread,
                           settings_left=settings_taken.left_reasons)
+
+
+def _tracked_as_committed(repo: Path, rel: str) -> bool:
+    """Tell whether git's index tracks a path at the same version as the current commit. Takes the
+    checkout and the path. Returns the answer, False when git could not say."""
+    staged = stdout_bytes(repo, ["ls-files", "-s", "-z", "--", rel])
+    committed = stdout_bytes(repo, ["ls-tree", "-z", "HEAD", "--", rel])
+    if staged is None or committed is None:
+        return False
+    staged_ids = [entry.split(b"\t", 1)[0].split()[1] for entry in staged.split(b"\0") if entry]
+    committed_ids = [entry.split(b"\t", 1)[0].split()[2] for entry in committed.split(b"\0") if entry]
+    return bool(staged_ids) and staged_ids == committed_ids
 
 
 def _index_payloads(repo: Path, stored) -> tuple[list[str], list[str], str]:
