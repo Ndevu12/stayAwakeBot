@@ -44,6 +44,11 @@ def cache_path() -> Path:
     return Path(env.xdg_cache_home()) / "saw" / "hook-scan-cache.json"
 
 
+def clean_contents_dir() -> Path:
+    """Return the folder of the contents saw's hook scanned clean in each working tree."""
+    return Path(env.xdg_cache_home()) / "saw" / "hook-clean-contents"
+
+
 def declaration_path() -> Path:
     """Return the file where `saw hook install` records what it installed."""
     return Path(env.xdg_config_home()) / "saw" / "hook-install.json"

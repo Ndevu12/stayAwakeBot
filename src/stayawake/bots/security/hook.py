@@ -23,7 +23,7 @@ from stayawake.utils import textsafe
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.contexts import empty_hooks_dir
-from stayawake.bots.security import checkout_writes, hookscript, outbound, push_record
+from stayawake.bots.security import checkout_writes, clean_contents, hookscript, outbound, push_record
 from stayawake.lib.git.run import stdout_bytes
 from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.bots.security.hook_policy import operator_policy
@@ -999,7 +999,7 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
     if event == "post-checkout":
         old, new, flag = (argv + ["", "", ""])[:3]
         if flag != "1":
-            return _file_checkout_scope(root, config_path)
+            return _file_checkout_scope(root, config_path)[:2]
         if old == _NULL_REV or (_first_checkout_after_a_clone(root)
                                 and not _scanned_clean(root, _clean_key(old, config_path))):
             return None, "clone"
@@ -1024,15 +1024,24 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
     return False, None
 
 
+def _is_a_file_checkout(event: str, argv: list[str]) -> bool:
+    """Tell whether a hook event is a file checkout rather than a branch checkout. Takes the event and
+    its arguments. Returns the answer."""
+    return event == "post-checkout" and (argv + ["", "", ""])[2] != "1"
+
+
 def _file_checkout_scope(root: Path, config_path: str | None):
     """Decide what a file checkout scans. Takes the root and the operator config. Returns
-    `(include_only, label)`: the files the git command that ran the hook wrote, the whole tree when
-    saw cannot tell which, or `(False, None)` when it wrote none."""
+    `(include_only, label, checked)`: the files the git command that ran the hook wrote whose content
+    was not scanned clean at that path, with what was seen of them; the whole tree when saw cannot
+    tell which files were written; or `(False, None, None)` when none is left to scan."""
     since = checkout_writes.git_started_ns()
-    fresh = None if since is None else checkout_writes.written(root, operator_policy(config_path).opts, since)
+    opts = operator_policy(config_path).opts
+    fresh = None if since is None else checkout_writes.written(root, opts, since)
     if fresh is None:
-        return None, _FILES_WRITTEN
-    return (fresh, _FILES_WRITTEN) if fresh else (False, None)
+        return None, _FILES_WRITTEN, None
+    to_scan, checked = clean_contents.unknown(root, fresh, opts.max_file_bytes, _policy_digest(config_path))
+    return (to_scan, _FILES_WRITTEN, checked) if to_scan else (False, None, None)
 
 
 def _holds_its_commit(root: Path, head: str) -> bool:
@@ -1153,7 +1162,10 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         return 0
     if not from_settings:
         _bring_up_to_date()
-    include, label = _scan_scope(event, argv, root, config_path)
+    if _is_a_file_checkout(event, argv):
+        include, label, checked = _file_checkout_scope(root, config_path)
+    else:
+        (include, label), checked = _scan_scope(event, argv, root, config_path), None
     if label is None:
         return 0
 
@@ -1192,7 +1204,18 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
                 _remember(root, clean_key)
             if label == "clone":
                 print(_paint(f"✓ {_BRAND}: {shown} scanned clean.", "ok", err), file=err)
+        if checked is not None:
+            _remember_clean_contents(root, checked, config_path)
     return found
+
+
+def _remember_clean_contents(root: Path, checked, config_path: str | None) -> None:
+    """Record the contents a clean file-checkout scan read. Takes the root, what was seen before the
+    scan and the operator config. A store that cannot be written is skipped."""
+    try:
+        clean_contents.remember(root, checked, _policy_digest(config_path))
+    except (OSError, ValueError):
+        pass
 
 
 def _tell(result, shown: str, rescan: str, quoted_root: str) -> int | None:

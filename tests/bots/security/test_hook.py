@@ -1157,6 +1157,54 @@ class TestAFileCheckoutScansWhatItWrote(_Clones):
         self._file_checkout(clone, "checkout", "--", "a.js")
         self.assertEqual(self._scanned_by_file_checkout(clone), (0, ("a.js",)))
 
+    def _restored_after_an_edit(self, clone: Path, text: str) -> None:
+        (clone / "a.js").write_text(text)
+        self._file_checkout(clone, "checkout", "--", "a.js")
+
+    def test_restoring_content_already_scanned_clean_scans_nothing(self):
+        clone = self._cloned_and_read(self._source({"a.js": "a\n"}))
+        self._restored_after_an_edit(clone, "edit\n")
+        self.assertEqual(self._scanned_by_file_checkout(clone), (0, ("a.js",)))
+        self._restored_after_an_edit(clone, "edit again\n")
+        self.assertEqual(self._scanned_by_file_checkout(clone), (0, "not scanned"))
+
+    def test_content_scanned_clean_under_another_policy_is_scanned_again(self):
+        clone = self._cloned_and_read(self._source({"a.js": "a\n"}))
+        self._restored_after_an_edit(clone, "edit\n")
+        self.assertEqual(self._scanned_by_file_checkout(clone), (0, ("a.js",)))
+        self._restored_after_an_edit(clone, "edit again\n")
+        with mock.patch.object(hook, "_policy_digest", return_value="another"):
+            self.assertEqual(self._scanned_by_file_checkout(clone), (0, ("a.js",)))
+
+    def test_a_scan_with_a_finding_remembers_nothing(self):
+        clone = self._cloned_and_read(self._with_a_branch({"a.js": "a\n"}, {".gitignore": _INFECTED, "b.js": "b\n"}))
+        self._file_checkout(clone, "checkout", "origin/pr", "--", ".gitignore", "b.js")
+        self.assertEqual(self._file_checkout_event(clone), 1)
+        (clone / "b.js").write_text("edit\n")
+        (clone / ".gitignore").unlink()
+        self._file_checkout(clone, "checkout", "--", "b.js", ".gitignore")
+        self.assertEqual(self._scanned_by_file_checkout(clone), (1, (".gitignore", "b.js")))
+
+    def test_a_file_changed_while_it_was_scanned_is_not_remembered(self):
+        clone = self._cloned_and_read(self._source({"a.js": "a\n"}))
+        self._restored_after_an_edit(clone, "edit\n")
+        real = hook._operator_scan
+
+        def changed_during_the_scan(*args, **kwargs):
+            os.utime(clone / "a.js", ns=(1, 1))
+            return real(*args, **kwargs)
+
+        with mock.patch.object(hook, "_operator_scan", side_effect=changed_during_the_scan):
+            self.assertEqual(self._file_checkout_event(clone), 0)
+        self._restored_after_an_edit(clone, "edit again\n")
+        self.assertEqual(self._scanned_by_file_checkout(clone), (0, ("a.js",)))
+
+    def test_a_store_that_cannot_be_written_leaves_the_verdict_as_it_is(self):
+        clone = self._cloned_and_read(self._source({"a.js": "a\n"}))
+        self._restored_after_an_edit(clone, "edit\n")
+        with mock.patch.object(hook.clean_contents, "remember", side_effect=OSError):
+            self.assertEqual(self._file_checkout_event(clone), 0)
+
     def test_a_file_checkout_does_not_read_the_history(self):
         clone = self._cloned_and_read(self._with_a_branch({"a.js": "a\n"}, {"b.js": "b\n"}))
         self._file_checkout(clone, "checkout", "origin/pr", "--", "b.js")
