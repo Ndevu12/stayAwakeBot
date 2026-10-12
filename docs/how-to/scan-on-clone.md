@@ -1,5 +1,5 @@
 ---
-description: Scan code the moment it lands — a clone, pull, branch switch or rebase — so you are warned before you install, build or open it.
+description: Scan code the moment it lands — a clone, pull, branch switch, rebase or file checkout — so you are warned before you install, build or open it.
 ---
 
 # Scan on clone
@@ -8,7 +8,7 @@ A worm fires when you install dependencies, run a build, or open the folder in a
 you clone. And a worm spreads when you push it on to a shared remote, where it reaches your
 collaborators and your CI.
 `saw hook` puts a scan in between on both sides: a fresh clone and its submodules, a pull, a branch
-switch or a rebase is scanned and you are warned *before* you run anything, and a `git push` is checked for every file
+switch, a rebase or a file checkout (`git checkout <rev> -- <paths>`, `git restore`) is scanned and you are warned *before* you run anything, and a `git push` is checked for every file
 version it would publish, and reported, *before* the code leaves your machine. Flags:
 [CLI reference](../reference/cli/hook.md).
 
