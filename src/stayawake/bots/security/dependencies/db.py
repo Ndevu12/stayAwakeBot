@@ -250,6 +250,14 @@ def _schema_compatible(manifest: dict[str, Any]) -> bool:
     return manifest.get("schema") == _SCHEMA
 
 
+def snapshot_in_use(cache_dir: str | Path | None = None) -> str:
+    """Name the advisory database a scan reads. Takes the cache location, the default one when
+    None. Returns its snapshot, or "" when there is no database that can be read."""
+    manifest = _load_manifest(_manifest_path(Path(cache_dir or default_cache_dir())))
+    snapshot = manifest.get("snapshot") if manifest else None
+    return snapshot if isinstance(snapshot, str) else ""
+
+
 def _load_manifest(manifest_path: Path) -> dict[str, Any] | None:
     """Parse the manifest, or None if it's missing, unparseable, or not a JSON object. A corrupt
     manifest — including valid-JSON-but-not-a-dict (`null`, `[…]`, `42`, from a partial write or a
