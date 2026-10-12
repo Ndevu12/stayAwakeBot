@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""The contents saw's hook scanned clean at each path of a working tree, so a file checkout that
-writes one of them back scans nothing."""
+"""Record and read the contents saw's hook scanned clean at each path of a working tree."""
 from __future__ import annotations
 
 import hashlib
@@ -77,9 +76,8 @@ def unknown(root: Path, written: tuple[str, ...], largest: int, policy: str) -> 
 
 
 def remember(root: Path, checked: Checked, policy: str) -> bool:
-    """Record the contents a clean scan read, each one only when its file did not change while it was
-    scanned, and forget the paths no longer on disk. Takes the root, what was seen before the scan
-    and the policy digest. Returns True when the store was written."""
+    """Record the contents a clean scan read and forget the paths no longer on disk. Takes the root,
+    what was seen before the scan and the policy digest. Returns True when the store was written."""
     clean = {rel: c for rel, c in held(root, policy).items() if os.path.lexists(root / rel)}
     for rel, (before, content) in checked.files.items():
         if content is not None and before is not None and _status(root / rel) == before:

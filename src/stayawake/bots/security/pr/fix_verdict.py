@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from stayawake.bots.security.dependencies.remediation import plain_lines
 from stayawake.utils import textsafe
 
 
@@ -147,13 +148,14 @@ class FixVerdict:
     history: History = History()
     checkout_detail: CheckoutDetail = CheckoutDetail()
     arrivals: Arrivals = Arrivals()
+    kept_packages: tuple = ()
 
     @property
     def grade(self) -> Grade:
         """Grade the remaining work, anything not known to be settled needing review. Returns the
         grade."""
         if (self.checkout not in (Checkout.CLEAN, Checkout.CLEANED) or self.history.unread
-                or self.arrivals.undecided
+                or self.arrivals.undecided or self.kept_packages
                 or not isinstance(self.base_fix, BaseFix) or self.base_fix.state not in _SETTLED):
             return Grade.NEEDS_REVIEW
         if self.history.holds or self.arrivals.taken_out_held:
@@ -196,6 +198,7 @@ def checkout_of(result) -> tuple[Checkout, CheckoutDetail]:
 
 
 _INDENT = "    "
+_KEPT_PACKAGES_SHOWN = 10
 _HOLD_INDENT = "      "
 
 
@@ -343,4 +346,7 @@ def render_fix_verdict(verdict: FixVerdict, detail: bool = False) -> str:
                      "clean")
     lines += _taken_out_lines(verdict.arrivals, verdict.base_fix, detail)
     lines += [_INDENT + line for line in _arrival_lines(verdict.arrivals, detail)]
+    if verdict.kept_packages:
+        lines.append(_INDENT + "your project still declares known-malicious packages; to remove them:")
+        lines += [_INDENT + line for line in plain_lines(verdict.kept_packages, _KEPT_PACKAGES_SHOWN)]
     return "\n".join(lines)

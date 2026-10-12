@@ -13,13 +13,12 @@ from stayawake.utils import scratch
 from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
-from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC
 from stayawake.bots.security.remediation import delivery, live, manifest
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
-from stayawake.bots.security.pr import arrivals_for_fix, held
+from stayawake.bots.security.pr import arrivals_for_fix, dependency_questions, held
 from stayawake.bots.security.pr.constants import FIX_BRANCH, PARTIAL_LABEL
 from stayawake.bots.security.pr.branches import choose_fix_branch
 from stayawake.bots.security.pr.fix_verdict import (
@@ -60,12 +59,13 @@ def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, 
 
 @dataclass(frozen=True)
 class _CheckoutSeen:
-    """What the checkout pass came to, what the history still stores where it cleared, and what
-    was added beside it."""
+    """What the checkout pass came to, what the history still stores where it cleared, what was
+    added beside it, and the known-malicious packages the project still declares."""
     state: Checkout = Checkout.UNREAD
     detail: CheckoutDetail = CheckoutDetail()
     history: History = History()
     arrivals: Arrivals = Arrivals()
+    kept_packages: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -97,18 +97,18 @@ class _Stopped:
 
 
 def _malicious_names(findings) -> set:
-    """Takes the findings. Returns the names of the packages saw knows to be malicious."""
-    return {f.package_name for f in findings
-            if getattr(f, "dependency_state", None) == MALICIOUS and f.package_name}
+    """Name the known-malicious packages a manifest declares. Takes the findings. Returns their
+    names."""
+    return set(manifest.declared_malicious(findings))
 
 
-def _manifest_changes(wt: Path, findings) -> list:
-    """Drop every known-malicious dependency from the manifests that declare it.
+def _manifest_changes(wt: Path, findings, names: set[str]) -> list:
+    """Drop the known-malicious packages the operator chose from the manifests they were found in.
 
-    Takes the worktree and the findings. Returns the changes for the branch, empty when none
-    declares one.
+    Takes the worktree, the findings and the package names. Returns the changes for the branch,
+    empty when none was chosen or no manifest declares one.
     """
-    rewritten = manifest.drop_dependencies(wt, _malicious_names(findings))
+    rewritten = manifest.drop_dependencies(wt, names, manifest.dropping(findings, names))
     return [remediation.Change("update", rel, "removed a known-malicious dependency")
             for rel in rewritten]
 
@@ -304,13 +304,16 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         manual_reviews: dict = {}
         suggested: list = []
         merge_clean: dict = {}
+        choose_dependencies = dependency_questions.Chooser(resolver)
         checkout = live.clean_checkout(
             repo, opts, signatures, allowlist,
             scan=scan_target,
             keep=getattr(opts, "keep_dirs", ()) or (),
             lockfile_root=wt,
             base_confirmed=bool(_blocking(findings)),
-            remove_lockfiles=not installed.lockfile_stays())
+            remove_lockfiles=not installed.lockfile_stays(),
+            choose_dependencies=choose_dependencies)
+        chosen_dependencies = choose_dependencies(findings)
         if _blocking(findings) and not scan.error:
             removed = list(getattr(checkout.report, "removed_lockfiles", None) or ())
             if not installed.lockfile_stays():
@@ -322,12 +325,13 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             repo, checkout.cleared, baseref, signatures, allowlist, opts, fix_branch=branch),
             arrivals_for_fix.arrivals_beside(repo, checkout.cleared, findings, signatures,
                                              allowlist, opts, resolver=resolver, baseref=baseref,
-                                             fix_branch=branch))
+                                             fix_branch=branch),
+            choose_dependencies.kept())
 
         def stopped(text: str) -> tuple[_Stopped, Path]:
             return _Stopped(BaseState.ABORTED, text, base, seen), wt
         if not scan.error:
-            applied = (lockfile_changes + _manifest_changes(wt, findings)
+            applied = (lockfile_changes + _manifest_changes(wt, findings, chosen_dependencies)
                        + remediation.apply(wt, remediation.plan(findings), rollback))
             taken_out, not_taken = _take_out_arrivals(wt, seen.arrivals.take_out, rollback)
             applied += taken_out
@@ -481,7 +485,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
 
 def _verdict(repository: str, base_fix: BaseFix, checkout: _CheckoutSeen) -> FixVerdict:
     return FixVerdict(repository, base_fix, checkout.state, checkout.history, checkout.detail,
-                      checkout.arrivals)
+                      checkout.arrivals, checkout.kept_packages)
 
 
 def _stopped_verdict(label: str, stop: _Stopped) -> FixVerdict:
