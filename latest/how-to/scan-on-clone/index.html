@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Scan code the moment it lands — a clone, pull, branch switch or rebase — so you are warned before you install, build or open it.">
+        <meta name="description" content="Scan code the moment it lands — a clone, pull, branch switch, rebase or file checkout — so you are warned before you install, build or open it.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
@@ -77,13 +77,13 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
   <meta property="og:title" content="Scan on clone — saw documentation">
-  <meta property="og:description" content="Scan code the moment it lands — a clone, pull, branch switch or rebase — so you are warned before you install, build or open it.">
+  <meta property="og:description" content="Scan code the moment it lands — a clone, pull, branch switch, rebase or file checkout — so you are warned before you install, build or open it.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
   <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/how-to/scan-on-clone/">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Scan on clone — saw documentation">
-  <meta name="twitter:description" content="Scan code the moment it lands — a clone, pull, branch switch or rebase — so you are warned before you install, build or open it.">
+  <meta name="twitter:description" content="Scan code the moment it lands — a clone, pull, branch switch, rebase or file checkout — so you are warned before you install, build or open it.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -93,7 +93,7 @@
       "@context": "https://schema.org",
       "@type": "TechArticle",
       "headline": "Scan on clone",
-      "description": "Scan code the moment it lands — a clone, pull, branch switch or rebase — so you are warned before you install, build or open it.",
+      "description": "Scan code the moment it lands — a clone, pull, branch switch, rebase or file checkout — so you are warned before you install, build or open it.",
       "url": "https://saw-docs.ndevuspace.com/latest/how-to/scan-on-clone/",
       "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
@@ -1796,7 +1796,7 @@
 you clone. And a worm spreads when you push it on to a shared remote, where it reaches your
 collaborators and your CI.
 <code>saw hook</code> puts a scan in between on both sides: a fresh clone and its submodules, a pull, a branch
-switch or a rebase is scanned and you are warned <em>before</em> you run anything, and a <code>git push</code> is checked for every file
+switch, a rebase or a file checkout (<code>git checkout &lt;rev&gt; -- &lt;paths&gt;</code>, <code>git restore</code>) is scanned and you are warned <em>before</em> you run anything, and a <code>git push</code> is checked for every file
 version it would publish, and reported, <em>before</em> the code leaves your machine. Flags:
 <a href="../../reference/cli/hook/">CLI reference</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w">                       </span><span class="c1"># new clones and this repository are scanned automatically</span>
