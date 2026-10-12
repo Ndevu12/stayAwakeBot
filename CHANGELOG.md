@@ -85,6 +85,8 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
+- **A repository's git settings are graded by where they really point.** Re-run `saw scan` on
+  repositories you scanned before this release.
 - **saw's own git commands run no git hooks, including hooks defined in git settings.**
 - **saw writes the files it keeps for itself only where they were named, including under `sudo`.**
   When it cannot, it writes nothing there and says so.
@@ -126,6 +128,10 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 
+- **Scan-on-clone scans a repository's submodules when they are first checked out**, and a
+  repository that a branch checkout (`git checkout <branch>` or `git switch`) first fills after
+  `git clone --no-checkout`. Run `saw scan` on repositories with submodules you cloned before this
+  release.
 - **`saw guard check` grades the gate that actually guards the branch** when a repository runs the
   scanner in more than one place. Re-run `saw guard check` on repositories you gate this way.
 - **`saw hook install` and `saw harden` read git's hook and template settings as git does.** A
