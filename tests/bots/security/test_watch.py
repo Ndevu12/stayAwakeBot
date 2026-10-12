@@ -13,7 +13,7 @@ from unittest import mock
 from stayawake.bots.security import liveledger, schedule, watch, watchstate, watchstatus
 from stayawake.bots.security.watchevents import SENTENCE_FOR
 from stayawake.bots.security.harden.live import Ending
-from stayawake.bots.security.livecode import LiveCode, fingerprint
+from stayawake.bots.security.livecode import LiveCode, fingerprint, live_code_finder
 from stayawake.utils import elevate, exitcodes
 from stayawake.utils.procsnap import Process, Snapshot
 
@@ -145,8 +145,44 @@ class TestCodeRestartedInANewProcessCameBack(unittest.TestCase):
         self.assertEqual(watch.what_the_stop_did([_held(1, "x", True)], None), watch.StopOutcome())
         for unreadable in (Snapshot(processes=[]), Snapshot(supported=False)):
             with self.subTest(unreadable=unreadable):
-                self.assertIsNone(watch._look_again(None, lambda s=unreadable: s),
+                self.assertIsNone(watch._look_again(None, lambda s=unreadable: s, live_code_finder()),
                                   "an unreadable second look was read as nothing running")
+
+
+    def test_a_pass_grades_each_code_argument_once(self):
+        from unittest import mock
+        from stayawake.bots.security import livecode
+        table = Snapshot(processes=[Process(pid=7, argv=("node", "-e", "identified-code")),
+                                    Process(pid=8, argv=("node", "-e", "console.log(8)"))])
+        asked = []
+
+        def stop(*, find, elevated):
+            find(), find(), find()
+            return Ending(matched=1, ended=1, quiet=True)
+        with mock.patch.object(livecode, "snapshot", lambda: table), \
+                mock.patch.object(livecode, "_known_loader",
+                                  lambda code: asked.append(code) or code == "identified-code"):
+            watch.examine(find=None, stop=stop, look=lambda: table, load=liveledger.Ledger,
+                          save=lambda ledger: True)
+        self.assertEqual(sorted(asked), ["console.log(8)", "identified-code"])
+
+
+    def test_an_injected_finder_is_handed_to_the_ender_whatever_its_truth_value(self):
+        class Falsy:
+            def __bool__(self):
+                return False
+
+            def __call__(self):
+                return [_held(1, "x", True)]
+        from unittest import mock
+        from stayawake.bots.security import livecode
+        recorder = _Recorder()
+        elsewhere = Snapshot(processes=[Process(pid=999, argv=("node", "-e", "identified-code"))])
+        with mock.patch.object(livecode, "snapshot", lambda: elsewhere), \
+                mock.patch.object(livecode, "_known_loader", lambda code: True):
+            watch.examine(find=Falsy(), stop=recorder, look=lambda: _READABLE, load=liveledger.Ledger,
+                          save=lambda ledger: True)
+            self.assertEqual([item.process.pid for item in recorder.find()], [1])
 
 
 class TestTheLedgerNeverKeepsThePassFromEndingCode(unittest.TestCase):

@@ -361,3 +361,61 @@ class TestAPlatformItCannotReadIsNotClean(unittest.TestCase):
     def test_the_registry_still_covers_the_platform_it_knows(self):
         from stayawake.bots.security import hygiene
         self.assertIn("running processes", hygiene._POSIX_ONLY_PROBES)
+
+
+def _counted(graded: list):
+    """Count each code argument the obfuscation engine is asked about. Takes the list it appends to.
+    Returns the stand-in, which still answers as the engine does."""
+    real = livecode._obfuscation_verdict
+    return lambda code: graded.append(code) or real(code)
+
+
+class TestAPassGradesEachArgumentOnce(unittest.TestCase):
+    """Check that a finder kept for a pass asks about each code argument once and finds what a fresh
+    look finds."""
+
+    def _table(self):
+        return _snapshot(
+            Process(pid=1, argv=("node", "-e", _loader())),
+            Process(pid=2, argv=("node", "-e", "console.log(1)")),
+            Process(pid=3, argv=("node", "-e", "console.log(1)")),
+            Process(pid=4, argv=("node", "-e", "console.log(2)")),
+            Process(pid=5, argv=("some-daemon",)))
+
+    def test_each_code_argument_is_graded_once(self):
+        graded, identified = [], []
+        real_loader = livecode._known_loader
+        find = livecode.live_code_finder()
+        with mock.patch.object(livecode, "_obfuscation_verdict", _counted(graded)), \
+                mock.patch.object(livecode, "_known_loader",
+                                  lambda code: identified.append(code) or real_loader(code)):
+            for _ in range(3):
+                find(self._table())
+        self.assertEqual(sorted(identified), sorted({_loader(), "console.log(1)", "console.log(2)"}))
+        self.assertEqual(len(graded), len(set(graded)))
+
+    def test_a_pass_finds_what_a_fresh_look_finds(self):
+        def shape(found):
+            return [(item.process.pid, item.code, item.reason, item.confirmed) for item in found]
+        find = livecode.live_code_finder()
+        with mock.patch.object(livecode, "program_is_gone", lambda pid: pid in (4, 5)):
+            fresh = shape(livecode.live_code_processes(self._table()))
+            for _ in range(3):
+                self.assertEqual(shape(find(self._table())), fresh)
+        self.assertEqual([pid for pid, _c, _r, _k in fresh], [1, 4, 5])
+
+    def test_code_that_differs_by_one_character_is_graded_on_its_own(self):
+        find = livecode.live_code_finder()
+        table = _snapshot(Process(pid=9, argv=("node", "-e", "identified;")),
+                          Process(pid=10, argv=("node", "-e", "identified")))
+        with mock.patch.object(livecode, "_known_loader", lambda code: code == "identified"):
+            self.assertEqual([item.process.pid for item in find(table)], [10])
+
+    def test_a_program_that_leaves_the_disk_between_looks_is_seen(self):
+        find = livecode.live_code_finder()
+        table = _snapshot(Process(pid=6, argv=("node", "-e", "console.log(1)")))
+        with mock.patch.object(livecode, "program_is_gone", return_value=False):
+            self.assertEqual(find(table), [])
+        with mock.patch.object(livecode, "program_is_gone", return_value=True):
+            self.assertEqual([item.process.pid for item in find(table)], [6])
+

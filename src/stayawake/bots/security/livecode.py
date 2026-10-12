@@ -71,12 +71,30 @@ def program_is_gone(pid: int) -> bool:
     return ask(pid)
 
 
-def live_code_processes(snap=None) -> list[LiveCode]:
-    """Every running process executing code with no file behind it.
+def _graded(code: str, grades: dict) -> tuple[str, str, bool] | None:
+    """Grade one code argument. Takes the code and the grades already made, which it adds to.
+    Returns `(code, reason, confirmed)`, or None when the code is not live code."""
+    if code not in grades:
+        if _known_loader(code):
+            grades[code] = (code, "code this tool has identified", True)
+        else:
+            verdict = _obfuscation_verdict(code)
+            grades[code] = (code, verdict.reason, False) if verdict.obfuscated else None
+    return grades[code]
 
-    The single authority: the report and anything that acts on these ask this function.
-    """
+
+def live_code_finder():
+    """Make a finder that grades each code argument once however often it is called. Returns a
+    callable that takes an optional snapshot, as `live_code_processes` does."""
+    grades: dict = {}
+    return lambda snap=None: live_code_processes(snap, grades)
+
+
+def live_code_processes(snap=None, grades: dict | None = None) -> list[LiveCode]:
+    """List every running process executing code with no file behind it. Takes the process table,
+    read now when None, and the grades earlier calls made, which it adds to. Returns them."""
     snap = snap if snap is not None else snapshot()
+    grades = {} if grades is None else grades
     found: list[LiveCode] = []
     if not snap.supported or not snap.processes:
         return found
@@ -88,12 +106,8 @@ def live_code_processes(snap=None) -> list[LiveCode]:
         invocation = resolve_invocation(process.argv)
         graded = None
         for code in invocation.code_args:
-            if _known_loader(code):
-                graded = (code, "code this tool has identified", True)
-                break
-            verdict = _obfuscation_verdict(code)
-            if verdict.obfuscated:
-                graded = (code, verdict.reason, False)
+            graded = _graded(code, grades)
+            if graded is not None:
                 break              # one per process; the rest of its argv is the same code
         if graded is None:
             if invocation.reads_stdin:
