@@ -23,7 +23,7 @@ from stayawake.utils import textsafe
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.contexts import empty_hooks_dir
-from stayawake.bots.security import checkout_record, hookscript, outbound, push_record
+from stayawake.bots.security import checkout_writes, hookscript, outbound, push_record
 from stayawake.lib.git.run import stdout_bytes
 from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.bots.security.hook_policy import operator_policy
@@ -999,7 +999,7 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
     if event == "post-checkout":
         old, new, flag = (argv + ["", "", ""])[:3]
         if flag != "1":
-            return _file_checkout_scope(root, config_path)[:2]
+            return _file_checkout_scope(root, config_path)
         if old == _NULL_REV or (_first_checkout_after_a_clone(root)
                                 and not _scanned_clean(root, _clean_key(old, config_path))):
             return None, "clone"
@@ -1024,24 +1024,15 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
     return False, None
 
 
-def _is_a_file_checkout(event: str, argv: list[str]) -> bool:
-    """Tell whether a hook event is a file checkout rather than a branch checkout. Takes the event and
-    its arguments. Returns the answer."""
-    return event == "post-checkout" and (argv + ["", "", ""])[2] != "1"
-
-
 def _file_checkout_scope(root: Path, config_path: str | None):
     """Decide what a file checkout scans. Takes the root and the operator config. Returns
-    `(include_only, label, look, plan)`: the files on disk saw has not judged as they now are, the
-    whole tree with no look when the tree could not be looked at, or `(False, None, look, plan)`
-    when every file is as saw judged it."""
-    now = checkout_record.look(root, operator_policy(config_path).opts)
-    if now is None:
-        return None, _FILES_WRITTEN, None, None
-    laid_out = checkout_record.plan(root, now, checkout_record.load(root, _policy_digest(config_path)))
-    if not laid_out.to_scan:
-        return False, None, now, laid_out
-    return laid_out.to_scan, _FILES_WRITTEN, now, laid_out
+    `(include_only, label)`: the files the git command that ran the hook wrote, the whole tree when
+    saw cannot tell which, or `(False, None)` when it wrote none."""
+    since = checkout_writes.git_started_ns()
+    fresh = None if since is None else checkout_writes.written(root, operator_policy(config_path).opts, since)
+    if fresh is None:
+        return None, _FILES_WRITTEN
+    return (fresh, _FILES_WRITTEN) if fresh else (False, None)
 
 
 def _holds_its_commit(root: Path, head: str) -> bool:
@@ -1162,13 +1153,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         return 0
     if not from_settings:
         _bring_up_to_date()
-    if _is_a_file_checkout(event, argv):
-        include, label, now, laid_out = _file_checkout_scope(root, config_path)
-    else:
-        (include, label), now, laid_out = _scan_scope(event, argv, root, config_path), None, None
+    include, label = _scan_scope(event, argv, root, config_path)
     if label is None:
-        if laid_out is not None:
-            _record_judgements(root, now, laid_out, set(), config_path)
         return 0
 
     display = str(root).replace(os.path.expanduser("~"), "~")
@@ -1180,9 +1166,6 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     clean_key = _clean_key(head, config_path) if head and whole_tree else None
     if clean_key and _scanned_clean(root, clean_key):
         return 0
-    if whole_tree:
-        now = checkout_record.look(root, operator_policy(config_path).opts)
-        laid_out = checkout_record.whole_read(now) if now is not None else None
 
     err = sys.stderr
     with spin_status(f"{_BRAND}: scanning {shown} for supply-chain worms…",
@@ -1209,8 +1192,6 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
                 _remember(root, clean_key)
             if label == "clone":
                 print(_paint(f"✓ {_BRAND}: {shown} scanned clean.", "ok", err), file=err)
-    if laid_out is not None and not result.error:
-        _record_judgements(root, now, laid_out, {f.path for f in result.findings}, config_path)
     return found
 
 
@@ -1239,13 +1220,3 @@ def _tell(result, shown: str, rescan: str, quoted_root: str) -> int | None:
         print("   " + _paint("Review:", "dim", err) + " " + _cmd(rescan, err), file=err)
         return 0
     return None
-
-
-def _record_judgements(root: Path, now, laid_out, flagged: set[str], config_path: str | None) -> None:
-    """Record what a file checkout or a whole read judged in a working tree. Takes the root, the
-    look, the plan, the paths of the findings and the operator config. A record that cannot be
-    written is skipped."""
-    try:
-        checkout_record.remember(root, now, laid_out, flagged, _policy_digest(config_path))
-    except (OSError, ValueError):
-        pass

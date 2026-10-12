@@ -5,7 +5,7 @@ description: saw hook — install global git hooks that scan code as it lands an
 # `saw hook`
 
 **Scan on clone, and before you push.** saw's git hooks scan what lands in a repository (a clone
-and its submodules, a pull, a branch switch, a rebase) and warn you *before* a dependency install, a build or an editor
+and its submodules, a pull, a branch switch, a rebase, a file checkout) and warn you *before* a dependency install, a build or an editor
 task runs it. A `git push` is checked for everything it would publish *before* the code leaves your
 machine. The hooks warn and point at [`saw fix`](fix.md); they never change your code, never break a
 git command, and never stop a push. See [scan on clone](../../how-to/scan-on-clone.md).
@@ -35,7 +35,7 @@ saw hook status [--no-stream]
   you to examine. A hook that could not be put back is named.
 - **[`saw audit`](audit.md) reports** a hook saw did not install, or one of saw's that was changed;
   `saw hook repair` puts it back.
-- **Scans are quick and bounded.** A pull or switch scans only what changed. Each scan has a time
+- **Scans are quick and bounded.** A pull, a switch or a file checkout scans only what changed. Each scan has a time
   budget (`SAW_HOOK_TIMEOUT`: 60s, 20s for a push). What could not be checked in time reads as not
   verified, never clean.
 - **A push goes through.** A worm it would publish is named with the commit that carries it and

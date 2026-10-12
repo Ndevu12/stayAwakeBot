@@ -165,5 +165,23 @@ class TestTheProcessListComesFromTheSystemsOwnPs(unittest.TestCase):
             self.assertIsNone(procsnap.ps_signature(os.getpid()))
 
 
+@unittest.skipUnless(sys.platform == "darwin" or sys.platform.startswith("linux"),
+                     "no process start time on this platform")
+class TestAProcessStart(unittest.TestCase):
+    def test_it_is_when_the_process_started_with_its_name_and_parent(self):
+        before = time.time_ns()
+        with _fixture(["sleep", "5"]) as pid:
+            start = procsnap.started(pid)
+        self.assertEqual(start.name, "sleep")
+        self.assertEqual(start.ppid, os.getpid())
+        self.assertLessEqual(before - 2_000_000_000, start.at_ns)
+        self.assertLessEqual(start.at_ns, time.time_ns())
+
+    def test_a_process_that_is_gone_has_none(self):
+        with _fixture(["sleep", "5"]) as pid:
+            pass
+        self.assertIsNone(procsnap.started(pid))
+
+
 if __name__ == "__main__":
     unittest.main()

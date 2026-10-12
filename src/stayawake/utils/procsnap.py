@@ -21,7 +21,6 @@ _PS_ENV = {"LC_ALL": "C", "PATH": "/usr/bin:/bin"}
 
 _PROC_PIDTBSDINFO = 3
 _PROC_PIDPATHINFO_MAXSIZE = 4096
-_ESRCH = 3
 _EPERM = 1
 
 RUNNING, GONE, NOT_OURS, UNSUPPORTED = "running", "gone", "not-ours", "unsupported"
@@ -156,8 +155,9 @@ def _argmax() -> int:
     return _ARGMAX_FALLBACK
 
 
-def _identity_darwin(pid: int) -> tuple["Identity | None", str]:
-    """One process's identity through libproc, as `(Identity | None, state)`."""
+def _bsd_info(pid: int) -> tuple["_BsdInfo | None", str]:
+    """Read one process's `proc_bsdinfo` through libproc. Takes the pid. Returns it and RUNNING, or
+    None and GONE, NOT_OURS or UNSUPPORTED."""
     try:
         libc = ctypes.CDLL("libproc.dylib", use_errno=True)
     except OSError:
@@ -168,15 +168,18 @@ def _identity_darwin(pid: int) -> tuple["Identity | None", str]:
                              ctypes.c_uint64(0), ctypes.byref(info),
                              ctypes.c_int(ctypes.sizeof(info)))
     if read == ctypes.sizeof(info):
-        return Identity(pid=pid, ppid=int(info.pbi_ppid), uid=int(info.pbi_uid),
-                        start_time=int(info.pbi_start_tvsec),
-                        zombie=int(info.pbi_status) == _SZOMB), RUNNING
-    err = ctypes.get_errno()
-    if err == _EPERM:
-        return None, NOT_OURS
-    if err == _ESRCH:
-        return None, GONE
-    return None, GONE
+        return info, RUNNING
+    return None, NOT_OURS if ctypes.get_errno() == _EPERM else GONE
+
+
+def _identity_darwin(pid: int) -> tuple["Identity | None", str]:
+    """One process's identity through libproc, as `(Identity | None, state)`."""
+    info, state = _bsd_info(pid)
+    if info is None:
+        return None, state
+    return Identity(pid=pid, ppid=int(info.pbi_ppid), uid=int(info.pbi_uid),
+                    start_time=int(info.pbi_start_tvsec),
+                    zombie=int(info.pbi_status) == _SZOMB), RUNNING
 
 
 def _identity_linux(pid: int) -> tuple["Identity | None", str]:
@@ -205,6 +208,49 @@ def _identity_linux(pid: int) -> tuple["Identity | None", str]:
             break
     return Identity(pid=pid, ppid=ppid, uid=uid, start_time=start,
                     zombie=state == "Z"), RUNNING
+
+
+@dataclass(frozen=True)
+class Start:
+    """When a process started, as wall-clock nanoseconds, the short name of what it runs, and its
+    parent."""
+    at_ns: int
+    name: str
+    ppid: int
+
+
+def _started_darwin(pid: int) -> "Start | None":
+    info, _ = _bsd_info(pid)
+    if info is None:
+        return None
+    at_ns = int(info.pbi_start_tvsec) * 1_000_000_000 + int(info.pbi_start_tvusec) * 1_000
+    return Start(at_ns, info.pbi_comm.decode("utf-8", "replace"), int(info.pbi_ppid))
+
+
+def _started_linux(pid: int) -> "Start | None":
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text()
+        booted = Path("/proc/stat").read_text()
+        ticks = os.sysconf("SC_CLK_TCK")
+        name = raw[raw.index("(") + 1:raw.rindex(")")]
+        fields = raw[raw.rindex(")") + 2:].split()
+        ppid, since_boot = int(fields[1]), int(fields[19])
+        boot = next(int(line.split()[1]) for line in booted.splitlines() if line.startswith("btime "))
+    except (OSError, ValueError, IndexError, StopIteration):
+        return None
+    if ticks <= 0:
+        return None
+    return Start(boot * 1_000_000_000 + since_boot * 1_000_000_000 // ticks, name, ppid)
+
+
+def started(pid: int) -> "Start | None":
+    """Read when a process started. Takes the pid. Returns its start, never later than the real one,
+    with its program's short name and its parent, or None when it cannot be read."""
+    if sys.platform == "darwin":
+        return _started_darwin(pid)
+    if sys.platform.startswith("linux"):
+        return _started_linux(pid)
+    return None
 
 
 def identify(pid: int) -> tuple["Identity | None", str]:
