@@ -51,8 +51,11 @@ read-back; never a project's tree) · `db` (offline advisory corpus) · `guard`
 
 Scan scope is **local by default** (given paths / configured globs / current repo); `--remote`
 (or `--user`/`--org`) switches to GitHub repos. One scope per run. The scan CLI is repo-oriented
-(0 repos → fail closed). Large scans show a bounded dashboard plus a written full-report file; the
-pager is opt-in (`--pager`), never default.
+(0 repos → fail closed). A scan of more than 25 targets, or with more than 200 findings and advisories,
+shows the summary table and writes the full report, printing its path; a smaller one prints every
+finding. The commands that remove a compromised dependency are given once per run: last on the
+terminal, at the top of the written report, and in a fix PR's body. The pager is opt-in (`--pager`),
+never default.
 
 Related: `engineering-standard`, `working-with-this-codebase`, `shipping-changes`.
 

@@ -342,8 +342,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         FileSink(tmp).emit(report)
         report_path = tmp / "latest.md"
     if report_path is not None:
-        reason = (f"{len(results)} repositories scanned" if len(results) > LARGE_FLEET
-                  else "the report is larger than a terminal can show")
+        reason = f"{len(results)} repositories" if len(results) > LARGE_FLEET else ""
         _print_report_pointer(report_path, spilled=spill, reason=reason)
     _print_dependency_actions(results)
 

@@ -35,16 +35,15 @@ def _print_report_pointer(report_path: Path, *, spilled: bool, reason: str = "")
     wording: a spilled sweep shows only the dashboard on-screen (the detail is in the file);
     otherwise the file is a full copy for the record (e.g. `-d`)."""
     on = supports_color(sys.stderr)
-    head = (f"Full report with per-finding detail saved ({reason}) — the terminal shows a summary only:"
-            if spilled else "Report written — a full copy saved for the record:")
-    tip = "  (click a coloured path to open it)" if on else ""
+    head = (f"The full report, with everything this scan found{f' in {reason}' if reason else ''}:"
+            if spilled else "A copy of this report is saved:")
+    tip = "  (click a path to open it)" if on else ""
     bar = rule(72)
     print("\n".join([
         bar,
         head + tip,
         f"  \u2192 {path_link(report_path, on=on)}",
-        f"    machine-readable: {path_link(report_path.with_name('latest.json'), on=on)}",
-        f"    folder: {path_link(report_path.parent, on=on)}",
+        f"    for tools: {path_link(report_path.with_name('latest.json'), on=on)}",
         bar,
     ]), file=sys.stderr)
 

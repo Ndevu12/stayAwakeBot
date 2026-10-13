@@ -138,8 +138,8 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                if (r["infected"] or r.get("suspicious") or r.get("residue")) and r["findings"]]
     if flagged and not detail:
         n = len(flagged)
-        out += ["", f"Per-finding detail for {n} flagged "
-                    f"repositor{'y' if n == 1 else 'ies'} is in the full report (path below)."]
+        out += ["", f"What was found in the {n} flagged "
+                    f"repositor{'y' if n == 1 else 'ies'} is in the full report named below."]
     elif flagged:
         out += ["", "Findings"]
         for r in flagged:
@@ -191,12 +191,12 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                     if a.get("reference"):
                         out.append(f"        {MARKER['detail']} details: {textsafe.plain(a['reference'])}")
     if s.get("suspicious"):
-        out += ["", "suspicious = heuristic match(es) to review; not asserted as malware."]
+        out += ["", "SUSPECT: something to review by hand; saw does not report it as malware."]
     if s.get("residue"):
-        out += ["", "residue = nothing here executes, but this is not what the project would carry."]
+        out += ["", "residue: nothing here runs, but these files are not what the project would carry."]
     notes = _coverage_notes(payload)
     if notes:
-        out += ["", "Coverage notes (not gating):"] + [
+        out += ["", "Notes:"] + [
             f"  {MARKER['info']} {textsafe.plain(n, limit=_NOTE_LIMIT)}" for n in notes]
     out += ["", _host_note(payload, textsafe.plain)]
     return "\n".join(out) + "\n"
@@ -250,19 +250,19 @@ def _coverage_notes(payload: dict[str, Any]) -> list[str]:
     common = set(per_target[0][1])
     for _, notes in per_target[1:]:
         common &= set(notes)
-    out: list[str] = []
-    seen: set[str] = set()
+    owners: dict[str, list[str]] = {}
     for target, notes in per_target:
         for note in notes:
-            if note in common:
-                if note not in seen:
-                    seen.add(note)
-                    out.append(note)
-            elif len(results) > 1:
-                out.append(f"{target} — {note}")
-            else:
-                out.append(note)
-    return out
+            owners.setdefault(note, []).append(target)
+    return [note if note in common or len(results) == 1 else f"{_named(owners[note])} — {note}"
+            for note in owners]
+
+
+def _named(targets: list[str]) -> str:
+    """Name the targets a note is about. Takes them in order. Returns the first three, and how many
+    more."""
+    more = len(targets) - 3
+    return ", ".join(targets[:3]) + (f" and {more} more" if more > 0 else "")
 
 
 _LOC_LIMIT = 300          # textsafe's own default; named here because `_loc` budgets against it
@@ -387,7 +387,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
             out.append("")
     notes = _coverage_notes(payload)
     if notes:
-        out += ["## Coverage notes", "", "_Not gating — what this scan did not look at._", ""]
+        out += ["## Notes", ""]
         out += [f"- {textsafe.code(n)}" for n in notes] + [""]
     if out and out[-1] != "":
         out.append("")

@@ -430,9 +430,9 @@ class TestDeepSweep(unittest.TestCase):
         from stayawake.utils.timeutil import now_iso
         payload = ScanReport(now_iso(), [self._scan(self._repo("none"), deep=False)]).to_payload()
         term, md = render_terminal(payload, detail=True), render_markdown(payload)
-        self.assertIn("Coverage notes", term)
+        self.assertIn("Notes:", term)
         self.assertIn("--deep", term)
-        self.assertIn("Coverage notes", md)
+        self.assertIn("## Notes", md)
 
     def test_source_files_skips_nested_node_modules_and_symlinks(self):
         from stayawake.bots.security.dependencies.installed import NpmInstalledTree, InstalledPackage

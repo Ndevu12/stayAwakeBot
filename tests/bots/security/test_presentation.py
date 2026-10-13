@@ -134,7 +134,7 @@ class TestLargeFleetPointer(unittest.TestCase):
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
             rc = service.scan(None, no_stream=True, jobs=1)          # local, no -d / --json
         self.assertEqual(rc, 0)
-        self.assertIn("Full report", err.getvalue())         # pointer printed for a big sweep
+        self.assertIn("The full report, with everything", err.getvalue())         # pointer printed for a big sweep
 
     def test_large_fleet_moves_detail_off_terminal(self):
         repos = [Path(f"/x/r{i}") for i in range(service.run.LARGE_FLEET + 5)]
@@ -146,7 +146,7 @@ class TestLargeFleetPointer(unittest.TestCase):
             rc = service.scan(None, no_stream=True, jobs=1)
         self.assertEqual(rc, 1)                                       # infected → exit 1
         self.assertNotIn("hidden code that loads and runs a payload", out.getvalue())          # detail off the terminal
-        self.assertIn("per-finding detail", err.getvalue().lower())  # …pointed to the file
+        self.assertIn("with everything this scan found in", err.getvalue())  # …pointed to the file
 
     def test_small_fleet_writes_no_pointer(self):
         repos = [Path("/x/r0")]
@@ -156,7 +156,7 @@ class TestLargeFleetPointer(unittest.TestCase):
                                return_value=WorkerScan(ScanResult("r", "local"))), \
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
             service.scan(None, no_stream=True, jobs=1)
-        self.assertNotIn("Full report", err.getvalue())
+        self.assertNotIn("The full report, with everything", err.getvalue())
 
 
 def _remote_scan(results, **kw):
@@ -191,37 +191,37 @@ class TestManyFindingsSpills(unittest.TestCase):
         self.assertIn("o/huge", out)                            # board still names the target
         self.assertNotIn("sig-0", out)                          # per-finding detail OFF the terminal
         self.assertIn("full report", out.lower())               # dashboard points at the file
-        self.assertIn("Full report", err)                       # highlighted path on stderr
-        self.assertIn("larger than a terminal", err)
+        self.assertIn("The full report, with everything", err)                       # highlighted path on stderr
+        self.assertIn("with everything this scan found:", err)
         self.assertIn("latest.md", err)
-        self.assertIn("folder:", err)                           # folder line for easy navigation
+        self.assertIn("for tools:", err)                        # the machine-readable copy
 
     def test_remote_wall_of_findings_shows_board_and_spills(self):
         rc, out, err = _remote_scan([_infected_many("o/huge", service.run.MANY_FINDINGS + 10)])
         self.assertEqual(rc, 1)
         self.assertIn("o/huge", out)                            # same board as local
         self.assertNotIn("sig-0", out)
-        self.assertIn("Full report", err)
+        self.assertIn("The full report, with everything", err)
         self.assertIn("latest.md", err)
 
     def test_small_local_keeps_detail_inline_no_pointer(self):
         rc, out, err = _local_scan(_infected("o/bad"))
         self.assertIn("hidden code that loads and runs a payload", out)                   # detail stays inline
-        self.assertNotIn("Full report", err)
-        self.assertNotIn("Report written", err)
+        self.assertNotIn("The full report, with everything", err)
+        self.assertNotIn("A copy of this report is saved", err)
 
     def test_small_remote_keeps_detail_inline_no_pointer(self):
         # Small remote is still terminal-first — no auto-persist unless spilled or -d.
         rc, out, err = _remote_scan([_infected("o/bad")])
         self.assertIn("hidden code that loads and runs a payload", out)
-        self.assertNotIn("Full report", err)
-        self.assertNotIn("Report written", err)
+        self.assertNotIn("The full report, with everything", err)
+        self.assertNotIn("A copy of this report is saved", err)
 
     def test_local_with_reports_dir_highlights_path(self):
         d = tempfile.mkdtemp()
         rc, out, err = _local_scan(_infected("o/bad"), reports_dir=d)
         self.assertIn("hidden code that loads and runs a payload", out)                   # small → detail still inline
-        self.assertIn("Report written", err)                    # -d → highlighted path
+        self.assertIn("A copy of this report is saved", err)                    # -d → highlighted path
         self.assertIn(os.path.basename(d), err)
 
 
