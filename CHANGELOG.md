@@ -132,6 +132,11 @@ reader, not the mechanism or the weakness it closed.
 
 - **Shell projects such as oh-my-zsh no longer scan infected.** A project that removes a folder of
   its own was reported as deleting your home folder.
+- **`saw scan`, `saw fix` and `saw guard` say what they did.** `saw scan --history` no longer says
+  that only the working tree was scanned. `saw fix`, `saw fix amend` and `saw guard` name the folder
+  they looked in when it holds no repository, before asking for any credential, and add no note about
+  this machine when they examined nothing. The note about this machine after a scan or a fix says
+  plainly what not to do and to run `saw audit` before changing a password or token.
 - **`saw harden` no longer stops ordinary programs, and `saw audit` no longer reports them.** On
   Linux it could take programs you rely on, your desktop among them, for code with no file behind it
   and stop them, freezing the machine. When stopping code needs root, your system asks for

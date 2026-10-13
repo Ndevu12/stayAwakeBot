@@ -659,7 +659,7 @@ class TestScanHostNote(unittest.TestCase):
 
     def test_infected_scan_points_at_saw_audit_without_calling_the_repo_clean(self):
         out = " ".join(sink_render.render_terminal(self._payload(infected=1)).split())
-        self.assertIn("Before rotating any credential, run `saw audit`", out)
+        self.assertIn("Before you change any password or token, run `saw audit`", out)
         self.assertNotIn("clean repo scan", out)
 
     def test_the_saved_report_carries_the_host_note(self):
@@ -696,7 +696,7 @@ class TestScanHostNote(unittest.TestCase):
         saved = sink_render.render_markdown(self._payload(infected=0))
         self.assertIn("\n\nHost note:", saved, "the note runs into the line before it")
         clean = " ".join(sink_render.render_terminal(self._payload(infected=0)).split())
-        self.assertIn("a clean repo scan is NOT a host all-clear", clean)
+        self.assertIn("a clean result covers these repositories, not this machine", clean)
 
     def test_a_loader_path_reaches_the_terminal_escaped(self):
         payload = self._payload(infected=1)
@@ -704,7 +704,7 @@ class TestScanHostNote(unittest.TestCase):
                                               "path": "a\x1b[2Jb.js", "signature_id": "x",
                                               "severity": "critical", "description": "d"}]
         out = sink_render._host_note(payload, sink_render.textsafe.plain)
-        self.assertIn("ON THIS MACHINE", out)
+        self.assertIn("malicious code is in a folder on this machine", out)
         self.assertNotIn("\x1b", out)
 
 

@@ -174,7 +174,9 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
     else:
         repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
         if not repos:
-            prog.line("No local git repositories found.")
+            prog.line(resolution.no_repository_in(_local_patterns(cfg, paths),
+                                                  so_nothing_was="checked",
+                                                  name_one="saw guard check"))
             return 0
         token, _ = auth.resolve_token()
         latest = latest_strix(token)
@@ -256,7 +258,9 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
     else:
         repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
         if not repos:
-            prog.line("No local git repositories found.")
+            prog.line(resolution.no_repository_in(_local_patterns(cfg, paths),
+                                                  so_nothing_was="checked",
+                                                  name_one="saw guard drift"))
             return 0
         token, source = auth.resolve_token()
         latest = latest_strix(token)
@@ -359,6 +363,12 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                                    dry_run=dry_run, pr=True,
                                    branch=branch, spin=spin)
     else:
+        repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
+        if not repos:
+            prog.line(resolution.no_repository_in(_local_patterns(cfg, paths),
+                                                  so_nothing_was="changed",
+                                                  name_one="saw guard setup"))
+            return 0
         token, source = auth.resolve_token() if (pr or not ref) else (None, None)
         pin = resolve_pin(token, ref)
         if pin is None:
@@ -369,10 +379,6 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
             prog.line("couldn't resolve the scanner release to pin — the gate would install "
                       "whatever is newest at run time")
             return 2
-        repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
-        if not repos:
-            prog.line("No local git repositories found.")
-            return 0
         prog.line(f"Setting up {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
         items, labels = repos, [_disp(r) for r in repos]
 

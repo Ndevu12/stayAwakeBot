@@ -118,9 +118,9 @@ Keeping `gh`'s short-lived token is a good end state.
 
 ## If the host may be compromised
 
-This page covers routine hygiene. If `saw audit` reports persistence, follow the incident order
-instead: run `saw harden`, remove the persistence, rebuild, and rotate credentials last. Rotating
-while persistence is running can trigger a home-directory wiper.
+This page covers routine hygiene. When `saw audit` prints an order to respond in, follow it
+instead: run `saw harden`, remove what `saw audit` names, rebuild, and change passwords and tokens
+last. Changing them earlier can set off code that deletes your files.
 
 ## Checklist
 
