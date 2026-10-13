@@ -1801,9 +1801,12 @@ write is unknown, never success. The result does not claim that one control prot
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo saw harden
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw harden --take-back [--no-stream]
 </code></pre></div>
-<p>It also asks this machine to keep checking itself, by putting <a href="../watch/"><code>saw watch</code></a> in place — the
-same arrangement that command makes, made here as part of hardening. <code>--take-back</code> removes it with
-the rest.</p>
+<p>It also puts <a href="../watch/"><code>saw watch</code></a> in place, which ends code saw has identified from then on and
+after every login — the same arrangement that command makes. <code>--take-back</code> removes it with the
+rest.</p>
+<p>The first line of the result says where this machine stands: code that is still running, controls
+that are not in place, or every control in place. Each line after it names the command that acts on
+what it reports.</p>
 <p>It corrects the editor settings that let a folder run code when it is opened, in <strong>every</strong> editor of
 the VS Code family on this machine — Cursor, Windsurf, VSCodium and the rest, not only VS Code
 itself.</p>
@@ -1819,6 +1822,8 @@ approval step is off is made to ask again. What you allowed that is not risky st
 named in the result, and left exactly as it stood.</p>
 <p>Run it again with <code>sudo</code> to act on the rest and to strengthen what is already in place. The result
 distinguishes a control root holds from one you hold, and tells you which you have.</p>
+<p>When stopping code needs root, your system asks you for permission with its own prompt; saw never
+asks for or sees your password. This happens only when your account administers this machine.</p>
 <p>If a running process still holds code that is not on disk, it refuses: capture that process first.
 If it could not examine what is running on this machine, it refuses as well. Neither depends on
 whether you gave it root.</p>
