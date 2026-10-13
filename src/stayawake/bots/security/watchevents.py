@@ -12,7 +12,7 @@ _LEFT = "Something running here could not be stopped. Run `saw harden`."
 _UNNAMED = "Suspicious code is running here. Run `saw audit` to see it."
 _QUIET = "Nothing on this machine is running code it should not."
 _NOT_READ = "Running processes could not be read on this pass. Run `saw watch status`."
-_PASS_FAILED = "`saw watch` could not read what was running. Run `saw watch status`."
+_PASS_FAILED = "`saw watch` could not finish a pass. Run `saw watch status`."
 _NOT_REMEMBERED = ("`saw watch` could not keep its record of what it stopped, so code that comes "
                    "back may not be recognised. Run `saw audit`.")
 

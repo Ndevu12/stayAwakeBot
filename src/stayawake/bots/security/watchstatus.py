@@ -9,11 +9,10 @@ from stayawake.bots.security import schedule, watchack, watchrecord, watchstate
 from stayawake.utils import exitcodes
 
 _CHECKING = "`saw watch` is in place."
-_FROM_LOGIN = "`saw watch` is in place from your next login. Run `saw watch` to start it now."
+_FROM_LOGIN = "`saw watch` will be in place from your next login. Run `saw watch` to start it now."
 _NOT_CHECKING = "`saw watch` is not in place. Run `saw watch`."
 _WAS_CHANGED = "`saw watch` had been changed on this machine. Run `saw watch` to put it back."
-_CANNOT_TELL = ("Whether `saw watch` is in place could not be established. Run `saw watch` to put "
-                "it in place.")
+_CANNOT_TELL = "Whether `saw watch` is in place could not be established."
 _STALLED = ("`saw watch` is in place but has not run recently. Run `saw watch stop`, then "
             "`saw watch`.")
 

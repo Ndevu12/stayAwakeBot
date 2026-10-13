@@ -20,7 +20,7 @@ LINE_FOR = {
     NOT_SHOWN: "Notifications could not be shown on this machine; saw tells you here instead.",
 }
 URGENT = frozenset({CAME_BACK, NOT_STOPPED, NOT_CHECKING})
-QUIET_DAY = "Nothing was running that should not be."
+QUIET_DAY = "`saw watch` found nothing running that should not be."
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,7 @@ def what_happened(since: dict) -> list[str]:
         said.append(f"Suspicious code ran here {_times(since[UNNAMED])}.")
     unchecked = since.get(NOT_READ, 0) + since.get(PASS_FAILED, 0)
     if unchecked:
-        said.append(f"`saw watch` could not read what was running {_times(unchecked)}.")
+        said.append(f"`saw watch` could not finish a pass {_times(unchecked)}.")
     if since.get(NOT_REMEMBERED):
         said.append(f"Its record could not be kept {_times(since[NOT_REMEMBERED])}.")
     return said
