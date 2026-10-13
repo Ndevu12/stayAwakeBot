@@ -22,6 +22,11 @@ _HOME = (r"(?:\bos\.homedir\s*\(\)|(?<![\w.])homedir\s*\(\)"
          r"|\$\{?HOME\}?|%USERPROFILE%|%HOMEPATH%"          # POSIX / Windows batch env home
          r"|(?<![\w.~/])~(?=[/\s'\"]|$))")     # ~/  and a bare `~` path (rm -rf ~) — not `~x` bitwise-not
 _HOME_ROOT = re.compile(_HOME, re.IGNORECASE)
+_NAMED_INSIDE_HOME = re.compile(
+    r"(?:[\"'}]?[/\\]|[ \t]{0,4}/[ \t]{0,4}[\"'`]|[ \t]{0,4}\+[ \t]{0,4}[\"'`][/\\]"
+    r"|[ \t]{0,4},[ \t]{0,4}[\"'`])(\.?[A-Za-z0-9_@-][^\s'\"`,;()]{0,200})")
+_TRAVERSAL = re.compile(r"(?:^|[/\\])\.\.(?:[/\\]|$)")
+_COMMENT_LINE = re.compile(r"^[ \t]*#(?:[ \t#][^\n]{0,4000}|$)", re.MULTILINE)
 
 _ROOT_WIPE = re.compile(
     r"\brm\s+-[a-z]*(?:rf|fr)[a-z]*\s+/(?:\s|$|['\"])"          # rm -rf /
@@ -70,6 +75,26 @@ _DISABLED_FLAG = re.compile(
 
 
 
+def _reaches_home_itself(text: str, after: int) -> bool:
+    """Tell whether a home reference names home itself rather than a folder inside it. Takes the
+    text and the offset just after the reference. Returns True for home itself, its contents, or a
+    path that climbs back out of a folder, and False for a named folder inside home."""
+    named = _NAMED_INSIDE_HOME.match(text, after)
+    return named is None or bool(_TRAVERSAL.search(named.group(1)))
+
+
+def _targets_home(text: str, hit: re.Match) -> bool:
+    """Tell whether a match reaches home itself. Takes the text and the match. Returns True when a
+    home reference inside it does."""
+    return any(_reaches_home_itself(text, token.end())
+               for token in _HOME_ROOT.finditer(text, hit.start(), hit.end()))
+
+
+def _without_comment_lines(text: str) -> str:
+    """Blank every whole-line comment. Takes the text. Returns it with those lines as spaces."""
+    return _COMMENT_LINE.sub(lambda line: " " * len(line.group(0)), text)
+
+
 def _recursive_delete_of_home_name(text: str) -> bool:
     """A recursive delete whose target is a name that STILL holds the home directory there.
 
@@ -102,7 +127,8 @@ def _last_home_binding_before(text: str, name: str, pos: int) -> int | None:
                          + r"\s*=(?!=)\s*" + _W + _HOME, re.IGNORECASE)
     last = None
     for m in binding.finditer(text, 0, pos):
-        last = m.end()
+        if _targets_home(text, m):
+            last = m.end()
     return last
 
 
@@ -180,7 +206,7 @@ def _walk_result_reaches_a_deleter(text: str) -> bool:
     """A function that walks home whose RESULT is handed to a function that deletes."""
     walkers, deleters = [], []
     for name, body in _callable_bodies(text):
-        if _WALK_HOME.search(body):
+        if any(_targets_home(body, walk) for walk in _WALK_HOME.finditer(body)):
             walkers.append(name)
         elif _DELETE.search(body):
             deleters.append(name)
@@ -203,6 +229,8 @@ def _walks_home_and_deletes(text: str) -> bool:
     """A home-rooted walk with a delete still in its scope — checked at EVERY walk, since an early
     unrelated one must not decide the file."""
     for walk in _WALK_HOME.finditer(text):
+        if not _targets_home(text, walk):
+            continue
         for delete in _DELETE.finditer(text, walk.end()):
             gap = text[walk.end():delete.start()]
             if len(gap) > _MAX_WALK_TO_DELETE:
@@ -241,11 +269,13 @@ def detect_destructive(text: str) -> DestructiveVerdict | None:
     reason but are never required. FP-safe by the home-root ∧ recursive ∧ delete corroboration."""
     if not text:
         return None
-    root_wipe = bool(_ROOT_WIPE.search(text))
-    home_recursive_delete = (bool(_RECURSIVE_DELETE_HOME.search(text))
-                             or bool(_RMSYNC_RECURSIVE_HOME.search(text))
-                             or _recursive_delete_of_home_name(text))
-    home_walk_delete = _walks_home_and_deletes(text) or _walk_result_reaches_a_deleter(text)
+    code = _without_comment_lines(text)
+    root_wipe = bool(_ROOT_WIPE.search(code))
+    home_recursive_delete = (
+        any(_targets_home(code, hit) for hit in _RECURSIVE_DELETE_HOME.finditer(code))
+        or any(_targets_home(code, hit) for hit in _RMSYNC_RECURSIVE_HOME.finditer(code))
+        or _recursive_delete_of_home_name(code))
+    home_walk_delete = _walks_home_and_deletes(code) or _walk_result_reaches_a_deleter(code)
     if not (home_recursive_delete or home_walk_delete or root_wipe):
         return None
     home = home_recursive_delete or home_walk_delete
