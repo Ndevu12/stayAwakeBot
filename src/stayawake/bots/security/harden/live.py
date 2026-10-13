@@ -8,12 +8,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from stayawake.utils import elevate, env, procstop
-from stayawake.utils.procsnap import parent_map, ps_signature
+from stayawake.utils import elevate, env, operator, procstop
+from stayawake.utils.procsnap import maps_the_hosts_root, parent_map, ps_signature
 from stayawake.bots.security.livecode import live_code_processes
 
 _MAX_ROUNDS = 12
 _CAPTURE_KEEP = 20_000
+_PROGRAM_KEEP = 300
 _ANCESTOR_LIMIT = 64
 
 
@@ -27,6 +28,8 @@ class Ending:
     refused: list[int] = field(default_factory=list)
     asked_for: list[int] = field(default_factory=list)
     asking: str = ""
+    left_unidentified: list[int] = field(default_factory=list)
+    cannot_reach_the_machines_root: bool = False
     frozen_left: list[int] = field(default_factory=list)
     quiet: bool = False
     still_holding: int = 0
@@ -36,7 +39,8 @@ class Ending:
     def finished(self) -> bool:
         """True when nothing that held live code is executing and nothing is left unreachable."""
         return (self.quiet and not self.survived and not self.refused
-                and not self.frozen_left and self.still_holding == 0)
+                and not self.left_unidentified and not self.frozen_left
+                and self.still_holding == 0)
 
 
 def capture_path() -> Path:
@@ -67,11 +71,12 @@ def _capture(held: dict[int, tuple], where: Path, now=None) -> str | None:
         return None
     stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
     pids = sorted(held)
-    identity, code = held[pids[0]]
+    code = held[pids[0]][1]
     record = {
         "captured_at": stamp,
         "processes": [{"pid": pid, "ppid": held[pid][0].ppid, "uid": held[pid][0].uid,
-                       "start_time": held[pid][0].start_time} for pid in pids],
+                       "start_time": held[pid][0].start_time,
+                       "program": held[pid][2] if len(held[pid]) > 2 else ""} for pid in pids],
         "representative_pid": pids[0],
         "code": code[:_CAPTURE_KEEP],
         "code_bytes": len(code),
@@ -83,6 +88,32 @@ def _capture(held: dict[int, tuple], where: Path, now=None) -> str | None:
     except OSError:
         return None
     return str(target)
+
+
+def _person_running_it() -> int | None:
+    """Name the account saw acts for. Returns its uid, or None when that is root or cannot be
+    told."""
+    if not maps_the_hosts_root():
+        return None
+    if os.geteuid() != 0:
+        return os.getuid()
+    who = operator.resolve()
+    if who is None or who.uid <= 0:
+        return None
+    return who.uid
+
+
+def _only_of(identity, own: int | None) -> bool:
+    """Tell whether a process holds no account but `own`. Takes its identity and the account.
+    Returns True when every account it holds is that one."""
+    return own is not None and all(uid == own for uid in (identity.held_uids or (identity.uid,)))
+
+
+def _program_of(process) -> str:
+    """Name the program a process runs. Takes the process. Returns its first argument, cut short,
+    or "" when it has none."""
+    argv = getattr(process, "argv", ()) or ()
+    return str(argv[0])[:_PROGRAM_KEEP] if argv else ""
 
 
 def _deepest_first(held: dict[int, tuple]) -> list[int]:
@@ -102,29 +133,46 @@ def _deepest_first(held: dict[int, tuple]) -> list[int]:
 def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procstop.end,
                   ended=procstop.has_ended, capture=_capture, where=None,
                   protected=_protected, elevated=procstop.end_as_root,
-                  rounds: int = _MAX_ROUNDS) -> Ending:
-    """Freeze everything holding live code until a pass finds nothing new, then end it."""
+                  person=_person_running_it, rounds: int = _MAX_ROUNDS) -> Ending:
+    """Freeze everything holding live code until a pass finds nothing new, then end it; another
+    account's or a system process only when saw identified its code. Takes the finder, the
+    collaborators that freeze, end, capture, elevate and name the account saw acts for, and the
+    number of rounds. Returns what it did, as an Ending."""
     keep_out = protected()
+    own = person()
+    reaches_root = maps_the_hosts_root()
     held: dict[int, tuple] = {}
     held_done: set[int] = set()
     needs_root: dict[int, str | None] = {}
     refused: list[int] = []
-    out = Ending()
+    out = Ending(cannot_reach_the_machines_root=not reaches_root)
 
     try:
         for _round in range(rounds):
-            fresh = [(p, code) for p, code, _reason in find()
-                     if p.identity is not None and p.pid not in held and p.pid not in keep_out]
+            fresh = []
+            for item in find():
+                process, code, _reason = item
+                if (process.identity is not None and process.pid not in held
+                        and process.pid not in keep_out):
+                    fresh.append((item, process, code))
             if not fresh:
                 out.quiet = True
                 break
-            for process, code in fresh:
+            for item, process, code in fresh:
+                identified = getattr(item, "confirmed", False)
+                if not identified and not _only_of(process.identity, own):
+                    out.left_unidentified.append(process.pid)
+                    keep_out.add(process.pid)
+                    continue
                 verdict = freeze(process.identity)
                 if verdict == procstop.SIGNALLED:
-                    held[process.pid] = (process.identity, code)
-                elif verdict == procstop.NEEDS_PRIVILEGE:
+                    held[process.pid] = (process.identity, code, _program_of(process))
+                elif verdict == procstop.NEEDS_PRIVILEGE and identified:
                     needs_root[process.pid] = ps_signature(process.pid)
                     keep_out.add(process.pid)      # asking again every round answers the same way
+                elif verdict == procstop.NEEDS_PRIVILEGE:
+                    out.left_unidentified.append(process.pid)
+                    keep_out.add(process.pid)
                 elif verdict == procstop.REFUSED:
                     refused.append(process.pid)
                     keep_out.add(process.pid)
@@ -134,23 +182,24 @@ def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procs
         # Counted before anything moves between the fields below.
         out.matched = len(held) + len(needs_root) + len(refused)
         out.frozen = len(held)
-
-        if needs_root:
-            out.asked_for = sorted(needs_root)
-            out.asking, ended_as_root = elevated(out.asked_for, signatures=needs_root)
-            out.ended += len(ended_as_root)
-            refused.extend(pid for pid in out.asked_for if pid not in set(ended_as_root))
-        out.refused = sorted(set(refused))
         out.captured = capture(held, where or capture_path())
 
         for pid in _deepest_first(held):
-            identity, _code = held[pid]
+            identity = held[pid][0]
             end(identity)
             if ended(identity):
                 out.ended += 1
                 held_done.add(pid)
             else:
                 out.survived.append(pid)
+
+        if needs_root:
+            out.asked_for = sorted(needs_root)
+            out.asking, ended_as_root = (elevated(out.asked_for, signatures=needs_root)
+                                         if reaches_root else ("", []))
+            out.ended += len(ended_as_root)
+            refused.extend(pid for pid in out.asked_for if pid not in set(ended_as_root))
+        out.refused = sorted(set(refused))
     finally:
         out.frozen_left = sorted(pid for pid in held if pid not in held_done)
 

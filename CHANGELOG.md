@@ -13,6 +13,20 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-10-13
+
+### Fixed
+- **`saw harden` no longer stops ordinary programs, and `saw audit` no longer reports them.** On
+  Linux it could take programs you rely on, your desktop among them, for code with no file behind it
+  and stop them, freezing the machine. When stopping code needs root, your system asks for
+  permission with its own prompt, and only from an account that administers the machine; saw never
+  asks for a password.
+
+### Changed
+- **`saw harden`'s result says where this machine stands and what to run.** Its first line says
+  whether code is still running, which controls are not in place, or that every control is in
+  place; each line after it names the command that acts on it.
+
 ## [0.11.4] - 2026-09-16
 
 ### Changed
@@ -1121,7 +1135,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.4...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.5...HEAD
+[0.11.5]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.4...v0.11.5
 [0.11.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.1...v0.11.2
