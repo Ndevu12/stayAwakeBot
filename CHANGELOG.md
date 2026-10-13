@@ -130,6 +130,8 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 
+- **Shell projects such as oh-my-zsh no longer scan infected.** A project that removes a folder of
+  its own was reported as deleting your home folder.
 - **`saw harden` no longer stops ordinary programs, and `saw audit` no longer reports them.** On
   Linux it could take programs you rely on, your desktop among them, for code with no file behind it
   and stop them, freezing the machine. When stopping code needs root, your system asks for
