@@ -2135,9 +2135,9 @@ confirms you can still authenticate over SSH.</p>
 </table>
 <p>Keeping <code>gh</code>'s short-lived token is a good end state.</p>
 <h2 id="if-the-host-may-be-compromised">If the host may be compromised<a class="headerlink" href="#if-the-host-may-be-compromised" title="Permanent link">&para;</a></h2>
-<p>This page covers routine hygiene. If <code>saw audit</code> reports persistence, follow the incident order
-instead: run <code>saw harden</code>, remove the persistence, rebuild, and rotate credentials last. Rotating
-while persistence is running can trigger a home-directory wiper.</p>
+<p>This page covers routine hygiene. When <code>saw audit</code> prints an order to respond in, follow it
+instead: run <code>saw harden</code>, remove what <code>saw audit</code> names, rebuild, and change passwords and tokens
+last. Changing them earlier can set off code that deletes your files.</p>
 <h2 id="checklist">Checklist<a class="headerlink" href="#checklist" title="Permanent link">&para;</a></h2>
 <ul>
 <li>[ ] I know how this machine authenticates to GitHub: SSH, <code>gh</code> as git's helper, or an HTTPS token.</li>
