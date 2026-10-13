@@ -203,7 +203,7 @@ class TestAPassThatCouldNotLookIsNeverQuiet(unittest.TestCase):
                                           save=lambda ledger: True, look=lambda s=snap: s)
             self.assertEqual(code, exitcodes.INCOMPLETE)
             self.assertNotIn(SENTENCE_FOR[watch.QUIET], text)
-            self.assertIn("could not be examined", text)
+            self.assertIn("could not be read on this pass", text)
 
     def test_a_pass_that_failed_is_reported(self):
         said = []
@@ -241,7 +241,7 @@ class TestItEndsOnlyWhatWasIdentified(unittest.TestCase):
         code, text, _led, _ = _run([_held(2, "shape-only", False)], ender)
         self.assertIsNone(ender.find, "the ender must not run when nothing was identified")
         self.assertEqual(code, exitcodes.CLEAN)
-        self.assertIn("cannot identify", text)
+        self.assertIn("Suspicious code is running here", text)
 
 
 class TestItRemembersWhatItSaw(unittest.TestCase):

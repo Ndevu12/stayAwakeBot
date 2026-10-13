@@ -274,6 +274,9 @@ reader, not the mechanism or the weakness it closed.
 - **`saw harden`'s result says where this machine stands and what to run.** Its first line says
   whether code is still running, which controls are not in place, or that every control is in
   place; each line after it names the command that acts on it.
+- **`saw watch` says what is in place and what to run.** `saw watch`, `saw watch status`, the line
+  other commands print, its notifications and `saw audit`'s findings say whether `saw watch` is in
+  place or what it found, and name the command that acts on it.
 - **`saw harden` and the watcher finish sooner.** Every running program is still checked on every
   pass.
 - **The intro screen names the verdict rather than an exit code, and `saw hook install` no longer

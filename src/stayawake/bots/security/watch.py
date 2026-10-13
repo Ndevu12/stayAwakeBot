@@ -20,14 +20,15 @@ from stayawake.utils.procsnap import snapshot
 
 BETWEEN_PASSES = 30
 
-_NOT_TOLD = "What this machine found could not be recorded or announced. Run `saw watch status`."
-_SCHEDULED = "This machine will keep checking itself from now on."
-_AT_LOGIN = "This machine will keep checking itself from your next login."
-_ALREADY = "This machine was already checking itself."
-_PUT_BACK = "The check this machine runs by itself had been changed. It has been put back."
-_NOT_SCHEDULED = "This machine could not be asked to keep checking itself."
-_UNSCHEDULED = "This machine will no longer check itself."
-_WAS_NOT = "This machine was not checking itself."
+_NOT_TOLD = "What `saw watch` found could not be recorded or shown. Run `saw watch status`."
+_SCHEDULED = ("`saw watch` is now in place: it ends code saw has identified, from now on and after "
+              "every login.")
+_AT_LOGIN = "`saw watch` will be in place from your next login."
+_ALREADY = "`saw watch` was already in place."
+_PUT_BACK = "`saw watch` had been changed on this machine. It has been put back."
+_NOT_SCHEDULED = "`saw watch` could not be put in place."
+_UNSCHEDULED = "`saw watch` has been taken back."
+_WAS_NOT = "`saw watch` was not in place."
 _NOT_OURS = "Something else is there under that name. It has been left alone."
 
 

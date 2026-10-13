@@ -16,11 +16,11 @@ DEAL_WITH_IT = "Run `saw harden`, then `saw audit` to find what brings it back."
 LINE_FOR = {
     CAME_BACK: "Code stopped here before came back and has not been dealt with. " + DEAL_WITH_IT,
     NOT_STOPPED: "Code was running here that could not be stopped. Run `saw harden`.",
-    NOT_CHECKING: "This machine has not checked itself recently. Run `saw watch status`.",
+    NOT_CHECKING: "`saw watch` has not run recently. Run `saw watch status`.",
     NOT_SHOWN: "Notifications could not be shown on this machine; saw tells you here instead.",
 }
 URGENT = frozenset({CAME_BACK, NOT_STOPPED, NOT_CHECKING})
-QUIET_DAY = "Nothing was running that should not be."
+QUIET_DAY = "`saw watch` found nothing running that should not be."
 
 
 @dataclass(frozen=True)
@@ -73,11 +73,10 @@ def what_happened(since: dict) -> list[str]:
     if since.get(ENDED):
         said.append(f"Code running here was stopped {_times(since[ENDED])}.")
     if since.get(UNNAMED):
-        said.append("Something ran here that this machine could not identify "
-                    f"{_times(since[UNNAMED])}.")
+        said.append(f"Suspicious code ran here {_times(since[UNNAMED])}.")
     unchecked = since.get(NOT_READ, 0) + since.get(PASS_FAILED, 0)
     if unchecked:
-        said.append(f"This machine could not check itself {_times(unchecked)}.")
+        said.append(f"`saw watch` could not finish a pass {_times(unchecked)}.")
     if since.get(NOT_REMEMBERED):
         said.append(f"Its record could not be kept {_times(since[NOT_REMEMBERED])}.")
     return said
