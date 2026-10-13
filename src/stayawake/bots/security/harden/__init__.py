@@ -87,8 +87,30 @@ _AGENTS_STUCK = "An AI agent here still runs commands without asking. Run `saw a
 
 
 _TOOK_BACK = "Every control saw harden placed has been taken back."
-_NOT_ALL_BACK = ("Not every control was taken back. This command deletes nothing, and every "
-                 "location below says what was done to it.")
+_NOTHING_PLACED = "No control saw harden places was found, so nothing was changed."
+_NOT_ALL_BACK = "Not all of saw harden's controls could be taken back."
+_EDITORS_NOT_BACK = ("An editor setting saw changed could not be put back. Run `saw harden "
+                     "--take-back` again.")
+_AGENTS_NOT_BACK = ("An AI agent setting saw changed could not be put back. Run `saw harden "
+                    "--take-back` again.")
+_TAKEN_BACK_OR_ABSENT = frozenset({REMOVED, NOTHING_TO_REMOVE, OCCUPIED})
+_SOMETHING_ELSE_THERE = ("A location saw guards holds something saw did not put there. "
+                         "`saw audit` checks what is in it.")
+_EDITORS_NOT_LOOKED_UP = ("The editor settings saw changed could not be looked up, so they were "
+                          "left as they are. Run `saw audit`.")
+_AGENTS_NOT_LOOKED_UP = ("The AI agent settings saw changed could not be looked up, so they were "
+                         "left as they are. Run `saw audit`.")
+_WHAT_TO_DO_WITH_WHAT_IS_LEFT = {
+    NEEDS_ROOT: "Some of it needs an administrator. Run `sudo saw harden --take-back` to take it "
+                "back.",
+    HELD_BY_ANOTHER: ("Another account placed some of it, so it was left as it is. That account can "
+                      "take it back with `saw harden --take-back`."),
+    LOCKED_OVER_CONTENT: "A location saw guards holds files saw did not put there, so it was left "
+                         "locked. Run `saw audit` before anything else.",
+    NOT_WHERE_IT_WAS_NAMED: "A location saw guards now leads somewhere else, so it was left as it "
+                            "is. Run `saw audit`.",
+}
+_COULD_NOT_TAKE_BACK = "Some of it could not be taken back. Run `saw harden --take-back` again."
 
 
 def take_back(*, folders=_global_folders, remove=remove_one,
@@ -107,9 +129,10 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     if not supported():
         return 2, _NOT_HERE
     try:
-        left_running = unschedule() not in (schedule.REMOVED, schedule.NOTHING_TO_REMOVE)
+        unscheduled = unschedule()
     except Exception:
-        left_running = True
+        unscheduled = None
+    left_running = unscheduled not in (schedule.REMOVED, schedule.NOTHING_TO_REMOVE)
     try:
         editors_back = restore_editors()
     except Exception:
@@ -119,23 +142,36 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     except Exception:
         agents_back = None
     outcomes = [remove(p) for p in folders()]
-    settled = {REMOVED, NOTHING_TO_REMOVE}
-    done = bool(outcomes) and all(o.state in settled for o in outcomes)
+    done = bool(outcomes) and all(o.state in _TAKEN_BACK_OR_ABSENT for o in outcomes)
     done = done and not left_running and editors_back is not None and editors_back.done
     done = done and agents_back is not None and agents_back.done
-    lines = [_TOOK_BACK if done else _NOT_ALL_BACK, ""]
+    placed_nothing = (done and unscheduled == schedule.NOTHING_TO_REMOVE
+                      and all(o.state in (NOTHING_TO_REMOVE, OCCUPIED) for o in outcomes)
+                      and not editors_back.restored and not editors_back.kept
+                      and not agents_back.restored)
+    lines = [(_NOTHING_PLACED if placed_nothing else _TOOK_BACK) if done else _NOT_ALL_BACK, ""]
     if left_running:
         lines.extend([_WATCH_LEFT, ""])
-    if editors_back is None or not editors_back.done:
-        lines.extend([_EDITORS_STUCK, ""])
-    if agents_back is None or not agents_back.done:
-        lines.extend([_AGENTS_STUCK, ""])
+    if editors_back is None or editors_back.unreadable_record:
+        lines.extend([_EDITORS_NOT_LOOKED_UP, ""])
+    elif editors_back.failed:
+        lines.extend([_EDITORS_NOT_BACK, ""])
     elif editors_back.kept:
         lines.extend([_EDITORS_KEPT, ""])
+    if agents_back is None or agents_back.unreadable_record:
+        lines.extend([_AGENTS_NOT_LOOKED_UP, ""])
+    elif agents_back.failed:
+        lines.extend([_AGENTS_NOT_BACK, ""])
+    if any(o.state == OCCUPIED for o in outcomes):
+        lines.extend([_SOMETHING_ELSE_THERE, ""])
     if any(o.state == LEFT_OPEN_OVER_CONTENT for o in outcomes):
         lines.extend([_LEFT_OPEN_NOTE, ""])
-    for o in outcomes:
-        lines.append(f"  {o.state}: {o.path} — {o.detail}")
+    left = {o.state for o in outcomes} - _TAKEN_BACK_OR_ABSENT - {LEFT_OPEN_OVER_CONTENT}
+    for state, line in _WHAT_TO_DO_WITH_WHAT_IS_LEFT.items():
+        if state in left:
+            lines.extend([line, ""])
+    if left - set(_WHAT_TO_DO_WITH_WHAT_IS_LEFT):
+        lines.extend([_COULD_NOT_TAKE_BACK, ""])
     return (0, "\n".join(lines).rstrip()) if done else (3, "\n".join(lines).rstrip())
 
 

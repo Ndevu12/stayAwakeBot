@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.utils import hostdenial
-from stayawake.utils.pathsafe import reached_where_it_was_named, trusted_ancestor
+from stayawake.utils.pathsafe import trusted_ancestor
 
 
 ENFORCING = "enforcing"
@@ -299,6 +299,34 @@ def apply_one(path: Path) -> PathOutcome:
     return _hand_back(path, owner_before, "could not be verified")
 
 
+_NOT_THERE, _UNREADABLE, _LEADS_ELSEWHERE, _CLEAR = "not-there", "unreadable", "elsewhere", "clear"
+
+
+def _on_the_way_to(path: Path) -> str:
+    """Judge every folder on the way to a location without following links. Takes the location.
+    Returns whether one is not there, cannot be read, leads somewhere else, or all are clear."""
+    for folder in reversed(path.parents):
+        try:
+            found = os.lstat(folder)
+        except (FileNotFoundError, NotADirectoryError):
+            return _NOT_THERE
+        except OSError:
+            return _UNREADABLE
+        if not stat.S_ISLNK(found.st_mode) and not stat.S_ISDIR(found.st_mode):
+            return _NOT_THERE
+        if not trusted_ancestor(folder):
+            return _LEADS_ELSEWHERE
+    return _CLEAR
+
+
+def _unreadable(path: Path) -> PathOutcome:
+    """Say that a location could not be read. Takes the location. Returns its outcome: one an
+    administrator can take back, or one that could not be taken back when this run is root."""
+    if hostdenial.privileged():
+        return _unknown(path, "could not be read")
+    return PathOutcome(path, NEEDS_ROOT, "could not be read")
+
+
 def remove_one(path: Path) -> PathOutcome:
     """Take back a denial this tool placed, and nothing else.
 
@@ -308,31 +336,42 @@ def remove_one(path: Path) -> PathOutcome:
     does not target, is not this command's to open. The removal is read back; a directory still
     there afterwards is never reported as gone.
     """
-    if not reached_where_it_was_named(path):
+    on_the_way = _on_the_way_to(path)
+    if on_the_way == _NOT_THERE:
+        return PathOutcome(path, NOTHING_TO_REMOVE, "not on this machine")
+    if on_the_way == _UNREADABLE:
+        return _unreadable(path)
+    if on_the_way == _LEADS_ELSEWHERE:
         return PathOutcome(path, NOT_WHERE_IT_WAS_NAMED,
-                           "something on the way to this location redirects it elsewhere, so it "
-                           "was not opened")
+                           "a link on the way to it points somewhere else, so it was left as it is")
+    try:
+        found = os.lstat(path)
+    except FileNotFoundError:
+        return PathOutcome(path, NOTHING_TO_REMOVE, "nothing of saw's here")
+    except OSError:
+        return _unreadable(path)
     held = hostdenial.held_by(path)
     if held is None:
         if hostdenial.immutable(path):
             return PathOutcome(path, LOCKED_OVER_CONTENT,
-                               "locked, and holding something — this command did not put that "
-                               "there and will not open it; look at it before anything else")
-        return PathOutcome(path, NOTHING_TO_REMOVE, "no control of this tool's here")
+                               "it is locked and holds files saw did not put there, so it was left "
+                               "locked. Run `saw audit` before anything else")
+        if not stat.S_ISDIR(found.st_mode) or not hostdenial.empty_dir(path):
+            return PathOutcome(path, OCCUPIED, "something saw did not put there is here")
+        return PathOutcome(path, NOTHING_TO_REMOVE, "nothing of saw's here")
     if held == hostdenial.OTHER_HELD:
-        # Without this the removal below would unlock and delete another account's lock.
         return PathOutcome(path, HELD_BY_ANOTHER,
-                           "this lock is another account's; this command takes back only what it "
-                           "placed, so it was left as it stood")
+                           "another account placed this one, so it was left as it is")
     if held == hostdenial.ROOT_HELD and not hostdenial.privileged():
         return PathOutcome(path, NEEDS_ROOT,
-                           "root holds this one — run again with sudo to take it back")
+                           "an administrator placed this one. Run `sudo saw harden --take-back` "
+                           "to take it back")
     if not hostdenial.clear_immutable(path):
         return _unknown(path, "the lock could not be taken off")
     if not hostdenial.empty_dir(path):
         return PathOutcome(path, LEFT_OPEN_OVER_CONTENT,
-                           "something arrived while the lock was off; it has been left unlocked "
-                           "so you can read and remove what is in it")
+                           "files arrived while it was unlocked, so it was left unlocked for you "
+                           "to read them. Run `saw audit`")
     try:
         os.rmdir(path)
     except OSError:
