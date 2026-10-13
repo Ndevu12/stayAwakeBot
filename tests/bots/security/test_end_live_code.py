@@ -25,7 +25,7 @@ def _held(pid, ppid=1, start=1000):
 
     A raw tuple here would let the ender's compatibility with the detector's result go untested."""
     return LiveCode(Process(pid=pid, argv=("node", "-e", "payload"),
-                            identity=Identity(pid=pid, ppid=ppid, uid=501, start_time=start)),
+                            identity=Identity(pid=pid, ppid=ppid, uid=os.getuid(), start_time=start)),
                     "payload", "dynamic-exec sink", False)
 
 
