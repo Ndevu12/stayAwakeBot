@@ -119,6 +119,16 @@ def _from_escalation(env) -> Operator | None:
                     home=Path(record.pw_dir), via="raised")
 
 
+def homes_acted_for(env=None, *, own_home=Path.home) -> list[Path]:
+    """Name the home folders a command acts for. Takes the environment, read now when None, and
+    the reader of this process's own home. Returns this process's own home, and when privilege was
+    raised for someone it can establish, that person's home too."""
+    env = os.environ if env is None else env
+    own = own_home()
+    who = _from_escalation(env) if _raised(env) else None
+    return [own] if who is None or who.home == own else [own, who.home]
+
+
 def acting_uid(env=None) -> int:
     """The uid a denial belongs to when it is not root's.
 

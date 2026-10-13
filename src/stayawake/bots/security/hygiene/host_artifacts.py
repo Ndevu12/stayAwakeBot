@@ -12,7 +12,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from stayawake.utils import hostdenial
+from stayawake.utils import hostdenial, operator
 from stayawake.utils.pathsafe import canonical_id, grade
 
 from .models import (HOST_ARTIFACT_SCAN_BLOCKED_ID, HygieneIssue, _WIPER_NOTE,
@@ -256,7 +256,7 @@ def _global_folders() -> list[Path]:
     POSIX-only list would leave the equivalent Windows locations uncovered — the same partial
     coverage this probe exists to remove. `/usr/local` and `%APPDATA%` are user-writable on ordinary
     installs, so the prefix entry is reachable without administrator rights."""
-    home = Path.home()
+    homes = operator.homes_acted_for(own_home=Path.home)
     # The two home entries are targeted whether or not they exist — absent is the state a payload
     # creates them from. A PREFIX entry is different: if the prefix root is not on this machine,
     # nothing is installed there, so it is not a path the runtime resolves through and there is
@@ -264,7 +264,7 @@ def _global_folders() -> list[Path]:
     # package manager the host does not have.
     # Present or not: this answers where the runtime looks, and what a control may CREATE is that
     # control's decision. Filtering here starved the probe of locations it enumerates for coverage.
-    folders = [home / ".node_modules", home / ".node_libraries"]
+    folders = [home / name for home in homes for name in (".node_modules", ".node_libraries")]
     folders += [root / "lib" / "node" for root in _npm_prefix_roots()]
     return _distinct_dirs(folders)
 

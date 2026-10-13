@@ -40,8 +40,9 @@ approval step is off is made to ask again. What you allowed that is not risky st
 Root is not required. Run it as yourself and it acts where it can; anything it did not take is
 named in the result, and left exactly as it stood.
 
-Run it again with `sudo` to act on the rest and to strengthen what is already in place. The result
-distinguishes a control root holds from one you hold, and tells you which you have.
+Run it again with `sudo` to act on the rest and to strengthen what is already in place. Under
+`sudo` it covers your own folders as well as root's. The result distinguishes a
+control root holds from one you hold, and tells you which you have.
 
 When stopping code needs root, your system asks you for permission with its own prompt; saw never
 asks for or sees your password. This happens only when your account administers this machine.

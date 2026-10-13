@@ -16,6 +16,8 @@ from stayawake.utils import hostdenial
 from stayawake.bots.security.dependencies.installed import NpmInstalledTree
 
 from .models import HygieneIssue, _WIPER_NOTE
+from stayawake.utils import operator
+
 from .host_artifacts import _npm_prefix_roots, _usable_prefix
 
 GLOBAL_INSTALL_FINDING_ID = "global-install-tree"
@@ -48,7 +50,8 @@ def _declared_prefixes() -> list[Path]:
     if named is not None:
         out.append(named)
     user = os.environ.get("NPM_CONFIG_USERCONFIG")
-    for rc in (Path(user) if user else Path.home() / ".npmrc",):
+    homes = operator.homes_acted_for(own_home=Path.home)
+    for rc in ([Path(user)] if user else [home / ".npmrc" for home in homes]):
         from_file = _prefix_from_npmrc(rc)
         if from_file is not None:
             out.append(from_file)
@@ -62,10 +65,10 @@ def _managed_prefixes() -> list[Path]:
     Both the location the environment names and the default one are read: pointing the variable
     elsewhere does not remove what is already installed at the default.
     """
-    home = Path.home()
+    homes = operator.homes_acted_for(own_home=Path.home)
     out: list[Path] = []
     for var, parts in _MANAGED_PREFIXES:
-        bases = [home / parts[0]]
+        bases = [home / parts[0] for home in homes]
         named = os.environ.get(var)
         if named:
             bases.append(Path(named))

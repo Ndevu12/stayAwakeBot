@@ -133,6 +133,8 @@ reader, not the mechanism or the weakness it closed.
 - **A scan that finds, in a folder on this machine, an install script that drops a known payload or
   runs an AI assistant without asking, or a known-malicious package says it may already have run and
   to run `saw audit` now**, as it already did for a code loader.
+- **Under `sudo`, `saw harden` and `saw audit` also cover your own folders**, as well as those of the
+  account they run as.
 - **Shell projects such as oh-my-zsh no longer scan infected.** A project that removes a folder of
   its own was reported as deleting your home folder.
 - **`saw scan`, `saw fix` and `saw guard` say what they did.** `saw scan --history` no longer says
