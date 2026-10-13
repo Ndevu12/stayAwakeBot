@@ -14,9 +14,13 @@ sudo saw harden
 saw harden --take-back [--no-stream]
 ```
 
-It also asks this machine to keep checking itself, by putting [`saw watch`](watch.md) in place — the
-same arrangement that command makes, made here as part of hardening. `--take-back` removes it with
-the rest.
+It also puts [`saw watch`](watch.md) in place, which ends code saw has identified from then on and
+after every login — the same arrangement that command makes. `--take-back` removes it with the
+rest.
+
+The first line of the result says where this machine stands: code that is still running, controls
+that are not in place, or every control in place. Each line after it names the command that acts on
+what it reports.
 
 It corrects the editor settings that let a folder run code when it is opened, in **every** editor of
 the VS Code family on this machine — Cursor, Windsurf, VSCodium and the rest, not only VS Code
@@ -38,6 +42,9 @@ named in the result, and left exactly as it stood.
 
 Run it again with `sudo` to act on the rest and to strengthen what is already in place. The result
 distinguishes a control root holds from one you hold, and tells you which you have.
+
+When stopping code needs root, your system asks you for permission with its own prompt; saw never
+asks for or sees your password. This happens only when your account administers this machine.
 
 If a running process still holds code that is not on disk, it refuses: capture that process first.
 If it could not examine what is running on this machine, it refuses as well. Neither depends on

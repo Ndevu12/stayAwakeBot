@@ -86,6 +86,32 @@ class Streamer:
         self.write(text + "\n")
 
 
+_HOLDS = [0]
+_HOLDS_LOCK = threading.Lock()
+_SETTLE_SECONDS = 0.2
+
+
+def _spinners_held() -> bool:
+    """Tell whether a spinner must stay off the terminal. Returns True while something holds it."""
+    with _HOLDS_LOCK:
+        return _HOLDS[0] > 0
+
+
+@contextmanager
+def spinners_held(*, settle: float = _SETTLE_SECONDS, sleep=time.sleep) -> Iterator[None]:
+    """Keep every running spinner off the terminal, its line cleared, while something else talks
+    to the person at it. Takes how long to wait for a spinner to step aside, and the sleeper.
+    Yields once they have."""
+    with _HOLDS_LOCK:
+        _HOLDS[0] += 1
+    try:
+        sleep(settle)
+        yield
+    finally:
+        with _HOLDS_LOCK:
+            _HOLDS[0] -= 1
+
+
 @contextmanager
 def status(label: str, *, out: TextIO | None = None,
            enabled: bool | None = None, interval: float = 0.08) -> Iterator[None]:
@@ -104,9 +130,18 @@ def status(label: str, *, out: TextIO | None = None,
     stop = threading.Event()
 
     def spin() -> None:
+        cleared = False
         for f in itertools.cycle(frames):
             if stop.is_set():
                 break
+            if _spinners_held():
+                if not cleared:
+                    out.write("\r\033[K")
+                    out.flush()
+                    cleared = True
+                time.sleep(interval)
+                continue
+            cleared = False
             out.write(f"\r\033[K{f} {label}")
             out.flush()
             time.sleep(interval)

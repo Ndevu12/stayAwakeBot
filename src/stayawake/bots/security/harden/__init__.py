@@ -12,7 +12,7 @@ from stayawake.bots.security.hygiene.process import check_live_processes
 from .live import end_live_code
 from . import settings as editorsettings
 from . import approvals as agentapprovals
-from stayawake.utils import hostdenial, textsafe
+from stayawake.utils import elevate, hostdenial, textsafe
 from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
                      NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
                      NOT_WHERE_IT_WAS_NAMED, OCCUPIED, REMOVED, SELF_ENFORCING, UNKNOWN,
@@ -35,8 +35,16 @@ TAKE_BACK_TOUCHES = frozenset({"folders", "unschedule", "restore_editors",
 _LIVE = "live-obfuscated-process"
 
 _ENDED_LIVE = "Code was running here with no file behind it. It has been stopped."
-_STILL_LIVE = "Code is running here with no file behind it, and not all of it could be stopped."
-_NOT_OURS_LIVE = "Run again with sudo."
+_STILL_LIVE = "Code with no file behind it is still running on this machine."
+_GONE_LIVE = "Code was running here with no file behind it. It is no longer running."
+_RUN_AGAIN = "Run `saw harden` again to stop it."
+_NOT_OURS_LIVE = "Run `sudo saw harden` to stop it."
+_NOT_OURS_BY_ASKING = {
+    elevate.NOT_AN_ADMINISTRATOR: "An administrator can stop it with `sudo saw harden`.",
+    elevate.NOT_AVAILABLE: "An administrator can stop it by running `saw harden` as root.",
+}
+_UNIDENTIFIED_LEFT = "Suspicious code was left running. Run `saw audit` to see it."
+_FROM_OUTSIDE = "Run `saw harden` outside this container to stop it."
 _STILL_SPAWNING = "It is starting again by itself. Run `saw audit` to find what starts it."
 _REFUSED_UNREAD = (
     "Running processes could not be examined, so this control was not applied."
@@ -46,27 +54,31 @@ _REFUSED_BLOCKED = (
     "The check stopped on: {reason}"
 )
 _CAPTURE_EXCERPT = 300
-_NOT_HERE = "This control is not implemented on this platform."
-_CLAIM = "This machine is protected."
-_CLAIM_AS_YOU = ("This machine is protected, but you can undo it yourself. "
-                 "Run again with sudo to make it stick.")
-_NEEDS_ROOT_NOTE = "Run again with sudo."
-_NOT_EVERYWHERE = "This machine is not fully protected."
-_STUCK_ONE = "This is as far as this machine allows."
-_STUCK_MANY = "This is as far as this machine allows."
+_NOT_HERE = "saw harden's controls are not available on this system."
+_CLAIM = "saw harden's controls are in place on this machine."
+_CLAIM_AS_YOU = ("saw harden's controls are in place on this machine, but your account can undo "
+                 "them. Run `sudo saw harden` so only an administrator can.")
+_NEEDS_ROOT_NOTE = "Run `sudo saw harden` to place the rest."
+_NOT_EVERYWHERE = "Some of saw harden's controls are not in place on this machine."
+_STUCK_ONE = ("A control could not be placed because something else is already there. "
+              "Run `saw audit` to see what.")
+_STUCK_MANY = ("{count} controls could not be placed because something else is already there. "
+               "Run `saw audit` to see what.")
 _LEFT_OPEN_NOTE = "Something is here that should not be. Run `saw audit`."
 _DEAD_SAW_NOTE = (
-    "The saw that saw's git hooks call is gone or cannot run, so clones are not scanned. "
-    "`saw hook repair` points the hooks at this saw."
+    "saw's git hooks call a saw that is gone or cannot run, so clones are not scanned. "
+    "Run `saw hook repair`."
 )
-_ALTERED_HOOKS_NOTE = "Run `saw hook repair`."
+_ALTERED_HOOKS_NOTE = ("Something where saw's git hooks run is not what saw installed. "
+                       "Run `saw hook repair`.")
 _HOOKS_ON = "New clones and pulls on this machine will be scanned."
 _HOOKS_REPAIRED = "A hook on this machine had been changed. It has been put back."
-_HOOKS_OFF = "Run `saw hook install`."
-_WATCH_ON = "This machine will also keep checking itself for code running with no file behind it."
-_WATCH_REPAIRED = "The check this machine runs by itself had been changed. It has been put back."
-_WATCH_OFF = "This machine will not keep checking itself. Run `saw watch`."
-_WATCH_LEFT = "This machine is still checking itself, and that was not taken back."
+_HOOKS_OFF = "New clones are not scanned on this machine. Run `saw hook install`."
+_WATCH_ON = ("`saw watch` is now in place: it ends code saw has identified, from now on and after "
+             "every login.")
+_WATCH_REPAIRED = "`saw watch` had been changed on this machine. It has been put back."
+_WATCH_OFF = "`saw watch` could not be put in place. Run `saw watch`."
+_WATCH_LEFT = "`saw watch` is still in place; it was not taken back. Run `saw watch stop`."
 _EDITORS_FIXED = ("An editor here could run code without asking you. That is now off.")
 _EDITORS_STUCK = "An editor on this machine still opens folders that can run code. Run `saw audit`."
 _EDITORS_KEPT = "An editor setting was left as it is. Run `saw audit`."
@@ -74,7 +86,7 @@ _AGENTS_FIXED = "An AI agent here could run commands without asking. That is now
 _AGENTS_STUCK = "An AI agent here still runs commands without asking. Run `saw audit`."
 
 
-_TOOK_BACK = "Every control this tool placed here has been taken back."
+_TOOK_BACK = "Every control saw harden placed has been taken back."
 _NOT_ALL_BACK = ("Not every control was taken back. This command deletes nothing, and every "
                  "location below says what was done to it.")
 
@@ -139,8 +151,12 @@ def _every_reachable_one(outcomes) -> bool:
 
 
 def _headline(outcomes, unresolved: bool, hooks_ok: bool, editors_ok: bool = True) -> str:
-    """The one line that says where this machine stands."""
-    if unresolved or not hooks_ok or not editors_ok or not _every_reachable_one(outcomes):
+    """Say where this machine stands, in one line. Takes the outcomes of each location, whether
+    code is still running, and whether the hooks and editor settings are settled. Returns the
+    line."""
+    if unresolved:
+        return _STILL_LIVE
+    if not hooks_ok or not editors_ok or not _every_reachable_one(outcomes):
         return _NOT_EVERYWHERE
     if any(o.state == SELF_ENFORCING for o in outcomes):
         return _CLAIM_AS_YOU
@@ -234,11 +250,18 @@ def run(*, live=check_live_processes, folders=_global_folders,
     agents_ok = agents_settled is not None and agents_settled.settled
     lines = [_headline(outcomes, unresolved, hooks_ok, editors_ok and agents_ok), ""]
     if ending_failed is not None:
-        lines.extend([_STILL_LIVE, ""])
+        lines.extend([_RUN_AGAIN, ""])
     elif ending is not None:
-        lines.append(_STILL_LIVE if unresolved else _ENDED_LIVE)
-        if ending.refused:
-            lines.append(_NOT_OURS_LIVE)
+        if not unresolved:
+            lines.append(_ENDED_LIVE if ending.matched else _GONE_LIVE)
+        if ending.survived or ending.frozen_left:
+            lines.append(_RUN_AGAIN)
+        if ending.refused and not ending.cannot_reach_the_machines_root:
+            lines.append(_NOT_OURS_BY_ASKING.get(ending.asking, _NOT_OURS_LIVE))
+        if ending.left_unidentified:
+            lines.append(_UNIDENTIFIED_LEFT)
+        if ending.cannot_reach_the_machines_root and (ending.refused or ending.left_unidentified):
+            lines.append(_FROM_OUTSIDE)
         if not ending.quiet:
             lines.append(_STILL_SPAWNING)
         lines.append("")

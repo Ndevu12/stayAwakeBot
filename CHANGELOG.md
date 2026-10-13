@@ -130,6 +130,11 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 
+- **`saw harden` no longer stops ordinary programs, and `saw audit` no longer reports them.** On
+  Linux it could take programs you rely on, your desktop among them, for code with no file behind it
+  and stop them, freezing the machine. When stopping code needs root, your system asks for
+  permission with its own prompt, and only from an account that administers the machine; saw never
+  asks for a password.
 - **Scan-on-clone scans a repository's submodules when they are first checked out**, and a
   repository that a branch checkout (`git checkout <branch>` or `git switch`) first fills after
   `git clone --no-checkout`. Run `saw scan` on repositories with submodules you cloned before this
@@ -266,6 +271,9 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **`saw harden`'s result says where this machine stands and what to run.** Its first line says
+  whether code is still running, which controls are not in place, or that every control is in
+  place; each line after it names the command that acts on it.
 - **`saw harden` and the watcher finish sooner.** Every running program is still checked on every
   pass.
 - **The intro screen names the verdict rather than an exit code, and `saw hook install` no longer

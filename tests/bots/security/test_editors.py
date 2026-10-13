@@ -410,7 +410,7 @@ class TestTheVerdictLineKnowsAboutEditors(unittest.TestCase):
             settle_hooks=_hooks_in_place, schedule_pass=lambda: None,
             altered=lambda: False, saw_runs=lambda: True,
             editor_pass=lambda: stuck)
-        self.assertNotIn("This machine is protected.", body.splitlines()[0])
+        self.assertNotIn("saw harden's controls are in place on this machine.", body.splitlines()[0])
         self.assertEqual(code, 3)
 
 
@@ -452,7 +452,7 @@ class TestTakingBackNeverClaimsMoreThanHappened(unittest.TestCase):
             remove=lambda p: harden.PathOutcome(p, harden.REMOVED, "gone"),
             unschedule=lambda: harden.schedule.NOTHING_TO_REMOVE,
             restore_editors=lambda: kept)
-        self.assertNotIn("Every control this tool placed here has been taken back",
+        self.assertNotIn("Every control saw harden placed has been taken back",
                          body.splitlines()[0])
         self.assertEqual(code, 3)
 
