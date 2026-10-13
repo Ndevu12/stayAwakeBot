@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="saw watch — keep this machine checking itself, ending running code the tool has identified.">
+        <meta name="description" content="saw watch — end code saw has identified, from now on and after every login.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
@@ -77,13 +77,13 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
   <meta property="og:title" content="saw watch — saw documentation">
-  <meta property="og:description" content="saw watch — keep this machine checking itself, ending running code the tool has identified.">
+  <meta property="og:description" content="saw watch — end code saw has identified, from now on and after every login.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
   <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/reference/cli/watch/">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="saw watch — saw documentation">
-  <meta name="twitter:description" content="saw watch — keep this machine checking itself, ending running code the tool has identified.">
+  <meta name="twitter:description" content="saw watch — end code saw has identified, from now on and after every login.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -93,7 +93,7 @@
       "@context": "https://schema.org",
       "@type": "TechArticle",
       "headline": "saw watch",
-      "description": "saw watch — keep this machine checking itself, ending running code the tool has identified.",
+      "description": "saw watch — end code saw has identified, from now on and after every login.",
       "url": "https://saw-docs.ndevuspace.com/latest/reference/cli/watch/",
       "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
@@ -1971,10 +1971,10 @@
 
 
 <h1 id="saw-watch"><code>saw watch</code><a class="headerlink" href="#saw-watch" title="Permanent link">&para;</a></h1>
-<p>Ask this machine to keep checking itself. From then on, and from every login, it makes a pass over
-what is running and ends code the tool has <strong>identified</strong>. It never asks for a password, and it
-writes what it saw to its own record so a later pass can tell something that has come back from
-something new. It keeps checking until you stop it.</p>
+<p>Put <code>saw watch</code> in place. From then on, and after every login, it looks at what is running and
+ends code saw has <strong>identified</strong>. It never asks for a password, and it writes what it saw to its own
+record so a later pass can tell something that has come back from something new. It stays in place
+until you take it back with <code>saw watch stop</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw watch [--no-stream]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw watch status [--no-stream]
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw watch stop [--no-stream]
@@ -2028,8 +2028,8 @@ every hour until they are dealt with: run <a href="../harden/"><code>saw harden<
 Once a day it sends a short report, on quiet days too, so a day without one is worth a
 <code>saw watch status</code>.</p>
 <p>While something is not dealt with, every other <code>saw</code> command prints one line saying so, whether or
-not a notification was shown: code that came back, code that could not be stopped, or a watcher
-that has stopped checking. <code>saw watch status</code> lists the same, with what happened since the last
+not a notification was shown: code that came back, code that could not be stopped, or
+<code>saw watch</code> no longer running. <code>saw watch status</code> lists the same, with what happened since the last
 report and any notifications that could not be sent, and <code>saw audit</code> reports code that came back
 or could not be stopped.</p>
 <p><code>saw watch</code> sends one notification when you set it up, to show where they will appear. On macOS
@@ -2039,8 +2039,8 @@ shown is tried again later.</p>
 <h2 id="when-it-runs-by-itself">When it runs by itself<a class="headerlink" href="#when-it-runs-by-itself" title="Permanent link">&para;</a></h2>
 <p><a href="../harden/"><code>saw harden</code></a> puts this in place as part of hardening a machine, and <code>saw watch</code> is how
 you ask for it on its own, check it, or change your mind about it.</p>
-<p><code>saw watch</code> asks this machine to keep making the pass — starting with your session, and started
-again if it ever stops, so the machine is not left unwatched. It says whether that is in force now
+<p><code>saw watch</code> puts the pass in place — starting with your session, and started again if it ever
+stops. It says whether that is in force now
 or from your next login; where the system will not start it immediately, the arrangement is still
 made and takes effect then. It keeps doing that until <code>saw watch stop</code>.
 Asking twice changes nothing and says so.</p>
@@ -2048,7 +2048,7 @@ Asking twice changes nothing and says so.</p>
 else to point somewhere else; if it is not exactly what <code>saw</code> wrote, running <code>saw watch</code> again puts it
 back and tells you it had been changed. Anything else found under that name is left alone —
 stopping removes saw's own work and nothing else.</p>
-<p>A quiet pass sends nothing; the daily report says the machine was checked.</p>
+<p>A quiet pass sends nothing; the daily report says nothing was running that should not be.</p>
 <h2 id="the-record">The record<a class="headerlink" href="#the-record" title="Permanent link">&para;</a></h2>
 <p>The pass keeps a small record under your state directory of the code it has seen: when each was
 first and last seen, how often, and whether it was ended. That is what lets it say <em>again</em> rather
@@ -2066,9 +2066,9 @@ your session and is started again if it stops, and <code>saw watch stop</code> r
 <li><a href="../harden/"><code>saw harden</code></a> — the same job with you present, and able to ask for privilege</li>
 <li><a href="../audit/"><code>saw audit</code></a> — what else this machine looks like</li>
 </ul>
-<p><code>saw watch status</code> says whether this machine is checking itself. Whether it is running is asked
-of the system, not read from the file: one command stops the check without changing a byte. If it
-says the machine has not checked itself recently, run <code>saw watch stop</code>, then <code>saw watch</code>; do the
+<p><code>saw watch status</code> says whether <code>saw watch</code> is in place. Whether it is running is asked of the
+system, not read from the file: one command stops the check without changing a byte. If it says
+<code>saw watch</code> has not run recently, run <code>saw watch stop</code>, then <code>saw watch</code>; do the
 same once after upgrading saw.</p>
 <p>It is set up from the copy of saw you run it with, so run it from an installed one. A copy inside a temporary directory is refused: the check would work until that directory is cleaned up. If the check ever stops, <code>saw audit</code> says so.</p>
 
