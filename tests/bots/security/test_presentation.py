@@ -116,12 +116,12 @@ class TestDetailSuppression(unittest.TestCase):
     def test_detail_false_omits_findings_and_points_at_file(self):
         out = render_terminal(_payload([_infected("o/bad")]), detail=False)
         self.assertIn("o/bad", out)                # table still names the infected repo
-        self.assertNotIn("loader-seed-var", out)   # per-finding detail is gone from the terminal
+        self.assertNotIn("hidden code that loads and runs a payload", out)   # per-finding detail is gone from the terminal
         self.assertIn("full report", out)          # …and we point at where it lives
 
     def test_detail_true_keeps_findings(self):
         out = render_terminal(_payload([_infected("o/bad")]), detail=True)
-        self.assertIn("loader-seed-var", out)      # small fleet → full detail inline
+        self.assertIn("hidden code that loads and runs a payload", out)      # small fleet → full detail inline
 
 
 class TestLargeFleetPointer(unittest.TestCase):
@@ -145,7 +145,7 @@ class TestLargeFleetPointer(unittest.TestCase):
              redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
             rc = service.scan(None, no_stream=True, jobs=1)
         self.assertEqual(rc, 1)                                       # infected → exit 1
-        self.assertNotIn("loader-seed-var", out.getvalue())          # detail off the terminal
+        self.assertNotIn("hidden code that loads and runs a payload", out.getvalue())          # detail off the terminal
         self.assertIn("per-finding detail", err.getvalue().lower())  # …pointed to the file
 
     def test_small_fleet_writes_no_pointer(self):
@@ -206,21 +206,21 @@ class TestManyFindingsSpills(unittest.TestCase):
 
     def test_small_local_keeps_detail_inline_no_pointer(self):
         rc, out, err = _local_scan(_infected("o/bad"))
-        self.assertIn("loader-seed-var", out)                   # detail stays inline
+        self.assertIn("hidden code that loads and runs a payload", out)                   # detail stays inline
         self.assertNotIn("Full report", err)
         self.assertNotIn("Report written", err)
 
     def test_small_remote_keeps_detail_inline_no_pointer(self):
         # Small remote is still terminal-first — no auto-persist unless spilled or -d.
         rc, out, err = _remote_scan([_infected("o/bad")])
-        self.assertIn("loader-seed-var", out)
+        self.assertIn("hidden code that loads and runs a payload", out)
         self.assertNotIn("Full report", err)
         self.assertNotIn("Report written", err)
 
     def test_local_with_reports_dir_highlights_path(self):
         d = tempfile.mkdtemp()
         rc, out, err = _local_scan(_infected("o/bad"), reports_dir=d)
-        self.assertIn("loader-seed-var", out)                   # small → detail still inline
+        self.assertIn("hidden code that loads and runs a payload", out)                   # small → detail still inline
         self.assertIn("Report written", err)                    # -d → highlighted path
         self.assertIn(os.path.basename(d), err)
 

@@ -4,13 +4,14 @@ description: Where a saw report can go — terminal, JSON, SARIF, alerts, a repo
 
 # Report sinks
 
-A report is a message, not a file. Full evidence exists only on the live terminal or via `--json`;
-any artifact written to disk stores a `{sha256, preview, len}` fingerprint in place of the raw match,
-so a report on disk can never re-distribute a live payload.
+A report is a message, not a file. Only `--json` carries the full evidence. The terminal shows a
+short preview of each finding it lists, and any artifact written to disk stores a
+`{sha256, preview, len}` fingerprint in place of the raw match, so a report on disk can never
+re-distribute a live payload.
 
 | Sink | Flag | Evidence | Destination |
 | --- | --- | --- | --- |
-| Terminal | (default) | full | stdout, ephemeral |
+| Terminal | (default) | a short preview | stdout, ephemeral |
 | JSON | `--json` | full | stdout — pipe it; no file |
 | SARIF | `--sarif FILE` | redacted | `FILE`, for GitHub code scanning |
 | Alert | `--alert` | evidence-free | GitHub issue + Slack |

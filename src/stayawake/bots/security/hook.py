@@ -27,6 +27,8 @@ from stayawake.lib.git.contexts import empty_hooks_dir
 from stayawake.bots.security import checkout_writes, clean_contents, hookscript, outbound, push_record
 from stayawake.lib.git.run import stdout_bytes
 from stayawake.lib.git.write.working_tree import uncommitted_paths
+from stayawake.bots.security.found import what_it_is, where_it_is
+from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.hook_report import BRAND as _BRAND, command as _cmd, paint_at as _paint
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
@@ -40,7 +42,8 @@ _NULL_REV = "0" * 40
 _HEAD_MOVED_BY_A_CLONE = "clone: "
 _FILES_WRITTEN = "files"
 _AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `pnpm`), open it in "
-          "your editor/IDE (auto-run tasks & extensions fire on open), or build or run it")
+          "your editor/IDE (auto-run tasks & extensions fire on open), start an AI coding assistant in "
+          "it, or build or run it")
 
 
 
@@ -1121,9 +1124,9 @@ def _warn_infected(display: str, quoted_root: str, result) -> None:
     err = sys.stderr
     print("\n" + _paint(f"⚠  {_BRAND}: WORM DETECTED in freshly-landed code — {display}",
                         "warn", err), file=err)
-    for f in result.findings[:5]:
-        loc = textsafe.plain(f"{f.path}:{f.line}" if f.line else f.path)
-        print("     " + _paint("•", "warn", err) + f" {f.signature_id}  —  {loc}", file=err)
+    for f in sorted(result.findings, key=lambda f: f.confidence != CONFIRMED)[:5]:
+        loc = textsafe.plain(where_it_is(f.path, f.line, f.commit_sha))
+        print("     " + _paint("•", "warn", err) + f" {what_it_is(f.signature_id, f.category)}  —  {loc}", file=err)
     extra = len(result.findings) - 5
     if extra > 0:
         print(_paint(f"     • …and {extra} more", "dim", err), file=err)

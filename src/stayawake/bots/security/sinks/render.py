@@ -17,6 +17,7 @@ from typing import Any
 
 from stayawake.bots.security.dependencies.remediation import (
     dependency_actions, markdown_lines)
+from stayawake.bots.security.found import is_a_commit, what_it_is
 from stayawake.bots.security.host_note import scan_host_note
 from stayawake.bots.security.redaction import redact, render_redacted
 from stayawake.bots.security.signatures import runs_on_this_machine
@@ -50,8 +51,20 @@ def _fmt_evidence(ev: Any, encode, *, composed: bool = False) -> str:
     return encode(ev)
 
 
+def _shown_evidence(ev: Any, encode, *, composed: bool = False) -> str:
+    """Show evidence on the terminal. Takes the evidence, the terminal's escaping and whether saw
+    wrote it. Returns what saw wrote, or a bounded, quoted preview of the file's bytes."""
+    if composed and not isinstance(ev, dict):
+        return encode(ev)
+    window = ev if isinstance(ev, dict) else redact(ev)
+    cut = "…" if window["len"] > len(window["preview"]) else ""
+    return encode(window["preview"] + cut)
+
+
 def _loc(item: dict, encode) -> str:
     """`path:line`, with the PATH encoded — whoever writes the repository names the file."""
+    if is_a_commit(item.get("path"), item.get("commit_sha")):
+        return encode(f"commit {item['path']}", _LOC_LIMIT)
     line = f":{item['line']}" if item.get("line") else ""
     # Truncate the PATH, never the line number: encoding the joined string put `:42` inside the
     # 300-char limit, so a 300+ char path (routine in nested node_modules) silently lost its line.
@@ -145,11 +158,12 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                 loc = _loc(f, textsafe.plain)
                 colored = paint(tag.ljust(tw), _SEV_COLOR.get(f["severity"]), on=color)
                 # A visible bullet per finding; evidence sits under it, deeper-indented.
-                out.append(f"    {MARKER['info']} {colored}  {f['signature_id']}  —  {loc}")
+                what = what_it_is(f.get("signature_id", ""), f.get("category", ""))
+                out.append(f"    {MARKER['info']} {colored}  {what}  —  {loc}")
                 if f.get("evidence"):
-                    ev = _fmt_evidence(f["evidence"], textsafe.quoted,
-                                       composed=f.get("composed_evidence", False))
-                    out.append(f"        evidence: {ev}")
+                    ev = _shown_evidence(f["evidence"], textsafe.quoted,
+                                         composed=f.get("composed_evidence", False))
+                    out.append(f"        found: {ev}")
                 if f.get("fix_advice"):                          # actionable remediation
                     out.append(f"        {MARKER['detail']} fix: {textsafe.plain(f['fix_advice'])}")
                 if f.get("reference"):
@@ -166,10 +180,11 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                             f"{'y' if len(r['advisories']) == 1 else 'ies'}"]
                 for a in r["advisories"]:
                     loc = _loc(a, textsafe.plain)
-                    out.append(f"    {MARKER['info']} [{a['severity']}]  {a['signature_id']}  —  {loc}")
+                    out.append(f"    {MARKER['info']} [{a['severity']}]  "
+                               f"{what_it_is(a.get('signature_id', ''), a.get('category', ''))}  —  {loc}")
                     if a.get("evidence"):
-                        adv_ev = _fmt_evidence(a["evidence"], textsafe.quoted,
-                                               composed=a.get("composed_evidence", False))
+                        adv_ev = _shown_evidence(a["evidence"], textsafe.quoted,
+                                                 composed=a.get("composed_evidence", False))
                         out.append(f"        {adv_ev}")
                     if a.get("fix_advice"):                      # how to actually fix it
                         out.append(f"        {MARKER['detail']} fix: {textsafe.plain(a['fix_advice'])}")

@@ -36,9 +36,9 @@ log. `saw audit` reports on credentials without ever reading a live secret's byt
 
 ## Evidence stays where you put it
 
-Full match evidence exists on your terminal and in `--json`. Anything written to disk carries a
-fingerprint instead, so a report can never re-distribute a live payload, and an alert body carries no
-evidence at all.
+Only `--json` carries the full evidence. The terminal shows a short preview of each finding it
+lists, and anything written to disk carries a fingerprint instead, so a report can never
+re-distribute a live payload; an alert body carries no evidence at all.
 
 ## What is not published
 
