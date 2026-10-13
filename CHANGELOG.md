@@ -140,6 +140,9 @@ reader, not the mechanism or the weakness it closed.
   keeps itself in sight, such as a background watch task in its own terminal, is reported for you to
   check. A task that hides itself is still reported as infected. A task file with a setting of an
   unexpected kind no longer stops the scan.
+- **A routine cleanup of your home folder is not a home wipe.** A command that tidies up stray files,
+  such as `.DS_Store`, is no longer reported as code that destroys your files. Code that wipes your
+  home folder is still reported as infected.
 - **saw's hooks never hang when started without input.** The push hook and the hook that
   runs after an amend or a rebase no longer hang when started without any input; they still check what
   they are given and run your own hook. Hooks an earlier saw installed are brought up to date without a
