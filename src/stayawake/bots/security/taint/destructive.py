@@ -77,8 +77,7 @@ _DISABLED_FLAG = re.compile(
 
 def _reaches_home_itself(text: str, after: int) -> bool:
     """Tell whether a home reference names home itself rather than a folder inside it. Takes the
-    text and the offset just after the reference. Returns True for home itself, its contents, or a
-    path that climbs back out of a folder, and False for a named folder inside home."""
+    text and the offset just after the reference. Returns True when it names home itself."""
     named = _NAMED_INSIDE_HOME.match(text, after)
     return named is None or bool(_TRAVERSAL.search(named.group(1)))
 
