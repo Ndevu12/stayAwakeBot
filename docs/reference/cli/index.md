@@ -23,7 +23,7 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | [`fix amend`](amend.md) | Amend the infected commits and force-update the branches they sat on. **Force-updates the remote** | the branches that carried those commits, on the remote |
 | [`discard`](discard.md) | Undo `saw fix` | git / GitHub API |
 | [`audit`](audit.md) | Machine hygiene, start-up surface, branch protection | read-only |
-| [`harden`](harden.md) | Create host denials; in place only after a read-back | this machine |
+| [`harden`](harden.md) | Put saw's controls in place on this machine | this machine |
 | [`watch`](watch.md) | One unattended pass: end identified code, remember the rest | this machine |
 | [`guard`](guard.md) | Install and verify the Strix CI gate | `check`/`drift` read-only; `setup` writes a workflow or a PR |
 | [`hook`](hook.md) | Scan what a clone or pull just brought in | your global git config |
@@ -31,7 +31,7 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | [`db`](db.md) | Manage the offline advisory database | its cache only |
 | [`search`](search.md) | Find the command you want | — |
 | [`intro`](intro.md) | Tour (also the bare-`saw` welcome) | — |
-| [`doctor`](doctor.md) | Self-check: install, credential, capabilities | — |
+| [`doctor`](doctor.md) | Check the install and the GitHub credential | — |
 | [`completion`](completion.md) | Print a shell-completion script | — |
 
 Three sections apply across commands: [remote targeting](remote.md), [report sinks](sinks.md) and
