@@ -66,24 +66,29 @@ class TestAnUnfixedRepoFailsClosed(RemoteFixExitCase):
         self.assertIn("saw fix cleans repositories, not this machine", tail)
         self.assertIn("run `saw audit`", tail)
 
-    def test_an_amend_run_and_an_empty_fix_run_end_by_pointing_at_saw_audit(self):
+    def _tail(self, inner, outcomes, call):
         import contextlib
         import io
-        outcome = mock.Mock(needs_review=False)
-        runs = (("amend", "_amend_local", [outcome], lambda: remediator.amend(no_stream=True)),
-                ("empty amend", "_amend_local", [], lambda: remediator.amend(no_stream=True)),
-                ("empty fix", "_fix_local", [], lambda: remediator.fix(no_stream=True)))
-        for name, inner, outcomes, call in runs:
+        err = io.StringIO()
+        with mock.patch.object(remediator, "_resolve_config", return_value=self.CONFIG), \
+             mock.patch.object(remediator, "load_signatures", return_value={}), \
+             mock.patch.object(remediator, inner, return_value=outcomes), \
+             contextlib.redirect_stderr(err):
+            call()
+        return " ".join(err.getvalue().split())
+
+    def test_an_amend_run_ends_by_pointing_at_saw_audit(self):
+        tail = self._tail("_amend_local", [mock.Mock(needs_review=False)],
+                          lambda: remediator.amend(no_stream=True))
+        self.assertIn("saw fix cleans repositories, not this machine", tail)
+        self.assertIn("run `saw audit`", tail)
+
+    def test_a_run_that_examined_nothing_says_nothing_about_this_machine(self):
+        runs = (("empty amend", "_amend_local", lambda: remediator.amend(no_stream=True)),
+                ("empty fix", "_fix_local", lambda: remediator.fix(no_stream=True)))
+        for name, inner, call in runs:
             with self.subTest(run=name):
-                err = io.StringIO()
-                with mock.patch.object(remediator, "_resolve_config", return_value=self.CONFIG), \
-                     mock.patch.object(remediator, "load_signatures", return_value={}), \
-                     mock.patch.object(remediator, inner, return_value=outcomes), \
-                     contextlib.redirect_stderr(err):
-                    call()
-                tail = " ".join(err.getvalue().split())
-                self.assertIn("saw fix cleans repositories, not this machine", tail)
-                self.assertIn("run `saw audit`", tail)
+                self.assertNotIn("Host note", self._tail(inner, [], call))
 
     def test_a_real_fix_still_exits_zero(self):
         # The gate must not become "always fail" — that would be a different kind of useless.

@@ -3,8 +3,8 @@
 verdict on the host, and `saw audit` comes before any credential is rotated."""
 from __future__ import annotations
 
-_ROTATE_AFTER_AUDIT = ("Before rotating any credential, run `saw audit` (rotating while a "
-                       "persistence daemon is live can arm a home-directory wiper).")
+_AUDIT_FIRST = ("Before you change any password or token, run `saw audit`: changing them first "
+                "can set off code that deletes your files.")
 
 
 def scan_host_note(*, infected: bool, local_loaders: list[str] | tuple[str, ...] = (),
@@ -13,18 +13,16 @@ def scan_host_note(*, infected: bool, local_loaders: list[str] | tuple[str, ...]
     paths of code loaders confirmed in working trees on this machine, and whether every target was
     scanned and found clean (taken as `not infected` when not given). Returns the note."""
     if local_loaders:
-        return ("Host note: a code loader was found in a working tree ON THIS MACHINE "
-                f"({', '.join(local_loaders[:3])}). It may already have run — the ways it arrives "
-                "execute when the folder is opened or the project is built. Treat this host as "
-                "compromised until `saw audit` says otherwise, and do NOT rotate credentials first "
-                "(rotating while a persistence daemon is live can arm a home-directory wiper).")
+        return ("Host note: malicious code is in a folder on this machine "
+                f"({', '.join(local_loaders[:3])}), and it may already have run. Run `saw audit` "
+                "now: changing a password or token before it has checked this machine can set off "
+                "code that deletes your files. Do not open, install or build that folder until it "
+                "is cleaned.")
     if infected or clean is False:
-        return ("Host note: this scan checked repositories, not this machine. "
-                + _ROTATE_AFTER_AUDIT)
-    return ("Host note: a clean repo scan is NOT a host all-clear — it does not check host "
-            "persistence. " + _ROTATE_AFTER_AUDIT)
+        return f"Host note: this scan checked repositories, not this machine. {_AUDIT_FIRST}"
+    return f"Host note: a clean result covers these repositories, not this machine. {_AUDIT_FIRST}"
 
 
 def fix_host_note() -> str:
     """Say what a fix run covers on this machine. Returns the note."""
-    return "Host note: saw fix cleans repositories, not this machine. " + _ROTATE_AFTER_AUDIT
+    return f"Host note: saw fix cleans repositories, not this machine. {_AUDIT_FIRST}"

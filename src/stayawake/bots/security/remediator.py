@@ -20,7 +20,7 @@ from stayawake.bots.security import resolution
 from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.service.config import _options
 from stayawake.bots.security.resolution import (
-    discover_local_repos, invalid_slugs, REMOTE_EMPTY_HINT, DEFAULT_CONFIG,
+    discover_local_repos, invalid_slugs, no_repository_in, REMOTE_EMPTY_HINT, DEFAULT_CONFIG,
     enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
     resolve_remote as _resolve_remote)
 from stayawake.bots.security.targets import ScanOptions
@@ -120,10 +120,15 @@ def named_but_absent(paths) -> list[str]:
                   and not Path(p).expanduser().exists())
 
 
-def _local_repos(cfg: dict, opts: ScanOptions, paths) -> list[Path]:
+def _local_patterns(cfg: dict, paths) -> list[str]:
+    """Name the folders a local fix looks in. Takes the configuration and the folders named on the
+    command line. Returns those folders, the configured ones, or the repository standing here."""
     cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
-    patterns = list(paths) if paths else (list(cfg_local) or [str(_enclosing_repo_root())])
-    return discover_local_repos(patterns, opts)
+    return list(paths) if paths else (list(cfg_local) or [str(_enclosing_repo_root())])
+
+
+def _local_repos(cfg: dict, opts: ScanOptions, paths) -> list[Path]:
+    return discover_local_repos(_local_patterns(cfg, paths), opts)
 
 
 def _disp(repo: Path) -> str:
@@ -214,6 +219,11 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
     if missing:
         prog.line(f"error: no such path: {', '.join(missing)}")
         return []
+    repos = _local_repos(cfg, opts, paths)
+    if not repos:
+        prog.line(no_repository_in(_local_patterns(cfg, paths), so_nothing_was="changed",
+                                   name_one="saw fix"))
+        return []
     token = source = None
     if publish:
         token, source = auth.resolve_token()
@@ -221,9 +231,6 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
         if err:
             prog.line(err)
             return []
-    repos = _local_repos(cfg, opts, paths)
-    if not repos:
-        return []
     items: list[tuple] = []
     refused: list[FixOutcome] = []
     for repo in repos:
@@ -326,11 +333,6 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
         outcomes = _amend_local(cfg, opts, sigs, allowlist, paths, prog, jobs=jobs,
                                 resolver=resolver)
     if not outcomes:
-        # Nothing was examined. The four paths that reach here — a denied preflight, a malformed
-        # slug, an empty resolution, a named path that matched no repository — all printed an
-        # error and did no work; reporting success would let a CI gate read "no credential" as
-        # "no payload".
-        prog.line(fix_host_note())
         return 2
     needs_review = sum(1 for o in outcomes if o.needs_review)
     n = len(outcomes)
@@ -351,14 +353,15 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
     if missing:
         prog.line(f"error: no such path: {', '.join(missing)}")
         return []
+    repos = _local_repos(cfg, opts, paths)
+    if not repos:
+        prog.line(no_repository_in(_local_patterns(cfg, paths), so_nothing_was="changed",
+                                   name_one="saw fix amend"))
+        return []
     token, source = auth.resolve_token()
     err = _preflight(token, intent=Intent.AMEND_REFS)
     if err:
         prog.line(err)
-        return []
-    repos = _local_repos(cfg, opts, paths)
-    if not repos:
-        prog.line("No repositories to amend.")
         return []
     prog.line(f"Amending {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'}…")
 
@@ -452,8 +455,6 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
                 else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr, jobs=jobs,
                                 branches=branches, resolver=resolver))
     if not outcomes:
-        prog.line("No repositories to fix.")
-        prog.line(fix_host_note())
         return 0
     prog.line(fix_tally(outcomes))
     prog.line(fix_host_note())

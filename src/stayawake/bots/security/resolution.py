@@ -60,6 +60,16 @@ def enclosing_repo_root(start: Path | None = None) -> Path:
     return start
 
 
+def no_repository_in(places: list[str], *, so_nothing_was: str, name_one: str) -> str:
+    """Say that no git repository was found where a command looked. Takes the folders or patterns
+    it looked in, what therefore did not happen, and the command that names a repository. Returns
+    the line."""
+    home = os.path.expanduser("~")
+    shown = ", ".join(str(place).replace(home, "~") for place in places) or "the current folder"
+    return (f"No git repository in {shown}, so nothing was {so_nothing_was}. "
+            f"Run it inside a repository, or name one: `{name_one} <folder>`.")
+
+
 def discover_local_repos(patterns: list[str], opts: ScanOptions,
                         *, unreadable: list[Path] | None = None) -> list[Path]:
     """Every git repository under the given path/glob `patterns` (deduped, deterministic order).

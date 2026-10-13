@@ -187,6 +187,7 @@ def attach_history_note(result, root, opts, signatures, allowlist) -> None:
     """
     if not getattr(opts, "history", False):
         return
+    result.notes = [n for n in result.notes if not n.startswith(_WORKING_TREE_ONLY)]
     note = history_residue_note(root, opts, signatures, allowlist)
     if note:
         result.notes.append(note)
@@ -289,6 +290,9 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
             f"them.{cut}")
 
 
+_WORKING_TREE_ONLY = "Only the working tree was scanned;"
+
+
 def _history_scope_note(root) -> str | None:
     """What a scan of the working tree did NOT look at.
 
@@ -313,7 +317,7 @@ def _history_scope_note(root) -> str | None:
         parts.append(f"{tags} {'tag' if tags == 1 else 'tags'}")
     if not parts:
         return None
-    return (f"Only the working tree was scanned; {', '.join(parts)} not examined. Any of them can "
+    return (f"{_WORKING_TREE_ONLY} {', '.join(parts)} not examined. Any of them can "
             "be put on disk by one command (`git checkout <rev>`, `git clone --branch <tag>`), so a "
             "file cleaned here may still be served from there.")
 
