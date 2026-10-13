@@ -160,7 +160,7 @@ class TestRunContract(unittest.TestCase):
     def test_not_implemented_is_not_success(self):
         code, text = harden.run(editor_pass=_EDITORS_OK, agent_pass=_AGENTS_OK, supported=lambda: False, live=lambda: [], settle_hooks=_hooks_already_there, stop=lambda: None, apply=lambda p: harden.PathOutcome(harden.NOT_HERE_YET, p, ''), schedule_pass=lambda: None)
         self.assertEqual(code, 2)
-        self.assertIn("not implemented", text.lower())
+        self.assertIn("not available on this system", text.lower())
 
     def test_an_altered_saw_hook_is_named_and_left_to_the_repair_verb(self):
         mine = Path("/mine")
@@ -197,7 +197,7 @@ class TestRunContract(unittest.TestCase):
             if p == mine else denial.PathOutcome(p, denial.NEEDS_ROOT, "not yours to write to"), settle_hooks=_hooks_already_there, stop=lambda: None, schedule_pass=lambda: None)
         # Both facts point at the same action, so the run states the action once rather than
         # explaining each location — which is what made the report unreadable.
-        self.assertIn("Run again with sudo", text)
+        self.assertIn("Run `sudo saw harden`", text)
         self.assertIn("sudo", text)
         self.assertNotEqual(code, 0, "a location it could not take is not a complete result")
 
@@ -212,7 +212,7 @@ class TestRunContract(unittest.TestCase):
                                 stop=lambda: ended, settle_hooks=_hooks_already_there, schedule_pass=lambda: None)
         self.assertEqual(code, 0)
         self.assertIn("It has been stopped", text)
-        self.assertIn("This machine is protected", text)
+        self.assertIn("controls are in place on this machine", text)
 
     def test_what_it_could_not_end_does_not_cost_the_controls_it_could_place(self):
         # Withholding here was the same inversion as refusing to act at all: the worse the machine,
@@ -225,8 +225,8 @@ class TestRunContract(unittest.TestCase):
                                 stop=lambda: alive, settle_hooks=_hooks_already_there, schedule_pass=lambda: None)
         apply.assert_called_once()
         self.assertEqual(code, 1, "an unresolved process must still fail the run")
-        self.assertIn("not all of it could be stopped", text)
-        self.assertIn("not all of it could be stopped", text)
+        self.assertIn("still running on this machine", text)
+        self.assertIn("still running on this machine", text)
 
     def test_a_source_it_cannot_see_is_named_rather_than_implied(self):
         spawning = live.Ending(matched=9, frozen=9, ended=9, quiet=False, still_holding=2)
@@ -247,9 +247,9 @@ class TestRunContract(unittest.TestCase):
                                 live=lambda: [_issue("live-obfuscated-process")],
                                 stop=lambda: theirs, settle_hooks=_hooks_already_there, schedule_pass=lambda: None)
         self.assertEqual(code, 1)
-        self.assertIn("Run again with sudo", text)
-        self.assertIn("Run again with sudo", text)
-        self.assertIn("Run again with sudo", text)
+        self.assertIn("Run `sudo saw harden`", text)
+        self.assertIn("Run `sudo saw harden`", text)
+        self.assertIn("Run `sudo saw harden`", text)
 
     def test_privilege_nobody_can_grant_costs_only_what_needed_it(self):
         # The whole point: a part that needs a password nobody can answer must not cost the
@@ -263,7 +263,7 @@ class TestRunContract(unittest.TestCase):
             live=lambda: [_issue("live-obfuscated-process")], stop=lambda: theirs, settle_hooks=_hooks_already_there, schedule_pass=lambda: None)
         self.assertEqual(placed, [Path("/one"), Path("/two")], "it skipped the controls it could place")
         self.assertEqual(code, 1, "the part it could not do must still fail the run")
-        self.assertIn("not all of it could be stopped", text)
+        self.assertIn("still running on this machine", text)
 
     def test_privilege_that_was_granted_ends_it_and_the_control_goes_on(self):
         granted = live.Ending(matched=2, frozen=1, ended=2, asked_for=[404], asking="granted",
@@ -348,9 +348,9 @@ class TestRunContract(unittest.TestCase):
                                                   "already had something in it, so it was not changed"), settle_hooks=_hooks_already_there, stop=lambda: None, schedule_pass=lambda: None)
         self.assertEqual(code, 3)
         self.assertNotIn("is denied", text)
-        self.assertIn("not fully protected", text)
+        self.assertIn("controls are not in place", text)
         self.assertNotEqual(code, 0)
-        self.assertIn("not fully protected", text)
+        self.assertIn("controls are not in place", text)
 
     def test_one_denied_among_untouched_does_not_claim_the_host(self):
         a, b = Path("/a"), Path("/b")
@@ -364,7 +364,7 @@ class TestRunContract(unittest.TestCase):
             folders=lambda: [a, b], apply=apply, settle_hooks=_hooks_already_there, stop=lambda: None, schedule_pass=lambda: None)
         self.assertEqual(code, 3)
         self.assertNotIn("is denied", text)
-        self.assertIn("not fully protected", text)
+        self.assertIn("controls are not in place", text)
 
     def test_enforcing_only_when_every_target_reads_back(self):
         p = Path("/denial")
@@ -373,8 +373,8 @@ class TestRunContract(unittest.TestCase):
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"), settle_hooks=_hooks_already_there, stop=lambda: None, schedule_pass=lambda: None)
         self.assertEqual(code, 0)
-        self.assertIn("This machine is protected", text)
-        self.assertIn("This machine is protected", text)
+        self.assertIn("controls are in place on this machine", text)
+        self.assertIn("controls are in place on this machine", text)
         self.assertNotIn("prevent", text.lower())
 
     def test_a_write_that_is_not_read_back_is_unknown_never_success(self):
@@ -384,7 +384,7 @@ class TestRunContract(unittest.TestCase):
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.UNKNOWN, "could not be verified"), settle_hooks=_hooks_already_there, stop=lambda: None, schedule_pass=lambda: None)
         self.assertEqual(code, 3)
-        self.assertIn("not fully protected", text)
+        self.assertIn("controls are not in place", text)
         self.assertNotIn("enforcing", text.split("\n")[0])
 
     def test_occupied_is_not_success_and_names_that_it_was_not_changed(self):
@@ -395,7 +395,7 @@ class TestRunContract(unittest.TestCase):
             apply=lambda path: denial.PathOutcome(path, denial.OCCUPIED,
                                                   "already had something in it, so it was not changed"), settle_hooks=_hooks_already_there, stop=lambda: None, schedule_pass=lambda: None)
         self.assertEqual(code, 3)
-        self.assertIn("not fully protected", text)
+        self.assertIn("controls are not in place", text)
 
     def test_one_occupied_among_enforcing_is_not_success(self):
         a, b = Path("/a"), Path("/b")
@@ -479,7 +479,7 @@ class TestRunContract(unittest.TestCase):
             supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
             folders=lambda: [Path("/denial")], apply=apply, stop=boom, settle_hooks=_hooks_already_there, schedule_pass=lambda: None)
         self.assertEqual(code, 1)
-        self.assertIn("not all of it could be stopped", text)
+        self.assertIn("still running on this machine", text)
         apply.assert_called_once()
 
     def test_an_implant_that_had_already_gone_does_not_withhold_the_control(self):
@@ -491,15 +491,15 @@ class TestRunContract(unittest.TestCase):
             apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "in place"),
             stop=lambda: live.Ending(matched=0, quiet=True, still_holding=0), settle_hooks=_hooks_already_there, schedule_pass=lambda: None)
         self.assertEqual(code, 0)
-        self.assertIn("This machine is protected", text)
+        self.assertIn("controls are in place on this machine", text)
 
     def test_a_self_held_result_is_never_reported_as_root_held(self):
         code, text = harden.run(editor_pass=_EDITORS_OK, agent_pass=_AGENTS_OK, 
             supported=lambda: True, live=lambda: [],
             folders=lambda: [Path("/mine")],
             apply=lambda p: denial.PathOutcome(p, denial.SELF_ENFORCING, "in place"), settle_hooks=_hooks_already_there, stop=lambda: None, schedule_pass=lambda: None)
-        self.assertIn("you can undo it yourself", text)
-        self.assertIn("you can undo it yourself", text)
+        self.assertIn("your account can undo them", text)
+        self.assertIn("your account can undo them", text)
         self.assertNotIn("only root can remove it", text)
         self.assertEqual(code, 0, "it took every location it was given")
 
@@ -1022,7 +1022,7 @@ class TestNothingIsSealedInDuringTheUpgrade(unittest.TestCase):
                              folders=lambda: [Path("/open"), Path("/theirs")],
                              apply=lambda p: left_open if p == Path("/open") else needs_root, settle_hooks=_hooks_already_there, stop=lambda: None, schedule_pass=lambda: None)
         self.assertIn("should not be", text)
-        self.assertIn("Run again with sudo", text)
+        self.assertIn("Run `sudo saw harden`", text)
 
 
 class TestTakingAControlBack(unittest.TestCase):
@@ -1339,7 +1339,7 @@ class TestALockUnderAThirdAccount(unittest.TestCase):
         code, text = harden.run(editor_pass=_EDITORS_OK, agent_pass=_AGENTS_OK, supported=lambda: True, live=lambda: [],
                                 folders=lambda: [Path("/x")], apply=lambda p: out, settle_hooks=_hooks_already_there, stop=lambda: None, schedule_pass=lambda: None)
         self.assertEqual(code, 3)
-        self.assertIn("not fully protected", text)
+        self.assertIn("controls are not in place", text)
 
     def test_taking_back_refuses_it(self):
         with self._under_another_account():
@@ -1522,7 +1522,7 @@ class TestTheReportIsReadable(unittest.TestCase):
         # There is nothing to protect at a path that is not there.
         code, text = self._run([denial.ENFORCING, denial.NOT_HERE_YET, denial.NOT_HERE_YET])
         self.assertEqual(code, 0)
-        self.assertIn("This machine is protected", text)
+        self.assertIn("controls are in place on this machine", text)
 
     def test_a_live_install_left_alone_is_not_a_failure_either(self):
         code, _text = self._run([denial.ENFORCING, denial.IN_A_LIVE_INSTALL])
@@ -1531,7 +1531,7 @@ class TestTheReportIsReadable(unittest.TestCase):
     def test_nothing_reachable_means_it_cannot_claim_success(self):
         code, text = self._run([denial.NOT_HERE_YET, denial.IN_A_LIVE_INSTALL])
         self.assertNotEqual(code, 0, "it claimed success having protected nothing")
-        self.assertIn("not fully protected", text)
+        self.assertIn("controls are not in place", text)
 
     def test_no_path_is_ever_printed(self):
         for states in ([denial.ENFORCING, denial.NEEDS_ROOT],
@@ -1591,7 +1591,7 @@ class TestItPutsTheHooksInPlaceToo(unittest.TestCase):
     def test_hooks_that_could_not_be_put_in_place_are_not_a_silent_pass(self):
         code, text = self._run(hook.Settling(problem="git refused", code=2))
         self.assertEqual(code, 3)
-        self.assertIn("not fully protected", text)
+        self.assertIn("controls are not in place", text)
         self.assertIn("saw hook install", text)
 
     def test_the_reason_it_failed_is_not_shown_to_the_operator(self):
@@ -1706,12 +1706,12 @@ class TestHardeningAlsoAsksTheMachineToKeepChecking(unittest.TestCase):
         from stayawake.bots.security import schedule
         calls, text = self._run(schedule.Scheduling(state=schedule.PLACED, active=True))
         self.assertEqual(len(calls), 1, "hardening did not set the watcher up")
-        self.assertIn("keep checking itself", text)
+        self.assertIn("`saw watch` is now in place", text)
 
     def test_one_already_there_is_not_announced_again(self):
         from stayawake.bots.security import schedule
         _calls, text = self._run(schedule.Scheduling(state=schedule.IN_PLACE, active=True))
-        self.assertNotIn("keep checking itself", text)
+        self.assertNotIn("`saw watch` is now in place", text)
 
     def test_one_altered_underneath_you_reads_differently_from_a_first_setup(self):
         from stayawake.bots.security import schedule
@@ -1723,7 +1723,7 @@ class TestHardeningAlsoAsksTheMachineToKeepChecking(unittest.TestCase):
         if not schedule.supported():
             self.skipTest("the line is only owed where the control exists")
         _calls, text = self._run(schedule.Scheduling(problem="no"))
-        self.assertIn("will not keep checking itself", text)
+        self.assertIn("`saw watch` could not be put in place", text)
 
     def test_a_watcher_it_could_not_take_back_is_said_not_swallowed(self):
         # take_back returns a STATE and does not raise. Ignoring it reported "every control has
@@ -1734,7 +1734,7 @@ class TestHardeningAlsoAsksTheMachineToKeepChecking(unittest.TestCase):
             remove=lambda p: harden.PathOutcome(Path(p), harden.REMOVED, "gone"),
             supported=lambda: True, unschedule=lambda: schedule.ALTERED)
         self.assertNotEqual(code, 0)
-        self.assertIn("still checking itself", text)
+        self.assertIn("`saw watch` is still in place", text)
 
     def test_and_one_it_did_take_back_reports_cleanly(self):
         from stayawake.bots.security import schedule
@@ -1743,7 +1743,7 @@ class TestHardeningAlsoAsksTheMachineToKeepChecking(unittest.TestCase):
             remove=lambda p: harden.PathOutcome(Path(p), harden.REMOVED, "gone"),
             supported=lambda: True, unschedule=lambda: schedule.REMOVED)
         self.assertEqual(code, 0)
-        self.assertNotIn("still checking itself", text)
+        self.assertNotIn("`saw watch` is still in place", text)
 
     def test_taking_the_controls_back_takes_that_back_too(self):
         removed = []

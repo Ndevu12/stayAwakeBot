@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -36,6 +37,7 @@ class Identity:
     uid: int
     start_time: int
     zombie: bool = False
+    held_uids: tuple[int, ...] = field(default=(), compare=False)
 
     def is_same(self, other: "Identity | None") -> bool:
         return other is not None and (self.pid, self.start_time) == (other.pid, other.start_time)
@@ -179,7 +181,8 @@ def _identity_darwin(pid: int) -> tuple["Identity | None", str]:
         return None, state
     return Identity(pid=pid, ppid=int(info.pbi_ppid), uid=int(info.pbi_uid),
                     start_time=int(info.pbi_start_tvsec),
-                    zombie=int(info.pbi_status) == _SZOMB), RUNNING
+                    zombie=int(info.pbi_status) == _SZOMB,
+                    held_uids=(int(info.pbi_ruid), int(info.pbi_uid), int(info.pbi_svuid))), RUNNING
 
 
 def _identity_linux(pid: int) -> tuple["Identity | None", str]:
@@ -198,16 +201,17 @@ def _identity_linux(pid: int) -> tuple["Identity | None", str]:
         state, ppid, start = fields[0], int(fields[1]), int(fields[19])
     except (ValueError, IndexError):
         return None, GONE
-    uid = -1
+    uid, held = -1, ()
     for line in status.splitlines():
         if line.startswith("Uid:"):
             try:
-                uid = int(line.split()[1])
+                held = tuple(int(value) for value in line.split()[1:])
+                uid = held[0]
             except (ValueError, IndexError):
-                uid = -1
+                uid, held = -1, ()
             break
     return Identity(pid=pid, ppid=ppid, uid=uid, start_time=start,
-                    zombie=state == "Z"), RUNNING
+                    zombie=state == "Z", held_uids=held), RUNNING
 
 
 @dataclass(frozen=True)
@@ -305,17 +309,175 @@ def program_path(pid: int) -> str | None:
     return buf.value.decode("utf-8", "replace") or None
 
 
-def program_is_gone(pid: int) -> bool:
-    """Whether `pid` is executing something that is no longer a file on this disk."""
-    where = program_path(pid)
+_DELETED = " (deleted)"
+_WRITABLE_BY_OTHERS = 0o022
+_MEMORY_FILESYSTEM_KINDS = frozenset({0x01021994, 0x858458F6})
+_STATFS_BYTES = 256
+
+
+def _running_file(pid: int) -> os.stat_result:
+    """Read the status of the file `pid` executes. Takes the pid. Returns its status; raises
+    OSError when it cannot be read."""
+    return os.stat(f"/proc/{pid}/exe")
+
+
+def _filesystem_of(pid: int) -> int:
+    """Read the kind of filesystem the file `pid` executes lives on. Takes the pid. Returns the
+    kernel's number for it; raises OSError when it cannot be read."""
+    if not sys.platform.startswith("linux"):
+        raise OSError(0, "only Linux describes a running file's filesystem")
+    libc = ctypes.CDLL(None, use_errno=True)
+    status = ctypes.create_string_buffer(_STATFS_BYTES)
+    if libc.statfs(f"/proc/{pid}/exe".encode(), status) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    return ctypes.c_ulong.from_buffer(status).value & 0xFFFFFFFF
+
+
+def _account_of(pid: int) -> int | None:
+    """Read the account `pid` runs as. Takes the pid. Returns its uid, or None when it cannot be
+    read."""
+    identity, _state = identify(pid)
+    return identity.uid if identity is not None else None
+
+
+def _runs_as_root() -> bool:
+    """Tell whether this run is root's. Returns True when it is."""
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid is not None and geteuid() == 0
+
+
+def program_is_gone(pid: int, *, path=program_path, running=_running_file,
+                    filesystem=_filesystem_of, account=_account_of,
+                    as_root=_runs_as_root) -> bool:
+    """Tell whether `pid` is executing something that is no longer a file on this disk. Takes the
+    pid, the readers of the path it executes, of that file's status, of the filesystem it lives on
+    and of the account it runs as, and whether this run is root's. Returns True when it is, and
+    False when it is not or cannot be read."""
+    where = path(pid)
     if where is None:
         return False
-    if where.startswith("/memfd:") or where.endswith(" (deleted)"):
+    if where.startswith("/memfd:"):
+        return True
+    deleted = where.endswith(_DELETED)
+    try:
+        info = running(pid)
+    except PermissionError:
+        return False if as_root() else deleted or not _exists(where)
+    except (OSError, ValueError):
+        return deleted or not _exists(where)
+    if deleted:
+        view, runs_as = _view_of(pid), account(pid)
+        return not _an_administrators_program(where[:-len(_DELETED)], info, view, runs_as)
+    try:
+        here = os.stat(where)
+    except (FileNotFoundError, NotADirectoryError):
+        return _on_memory(pid, filesystem)
+    except PermissionError:
+        return _on_memory(pid, filesystem) if as_root() else True
+    except (OSError, ValueError):
+        return True
+    if (here.st_dev, here.st_ino) == (info.st_dev, info.st_ino):
+        return False
+    return _on_memory(pid, filesystem)
+
+
+def _exists(where: str) -> bool:
+    """Tell whether `where` names a file this run can see. Takes the path. Returns True when it
+    does, and False when it does not or cannot be read."""
+    try:
+        return os.path.exists(where)
+    except (OSError, ValueError):
+        return False
+
+
+def _an_administrators_program(gone_from: str, info: os.stat_result, view: str,
+                               runs_as: int | None) -> bool:
+    """Tell whether a removed running program was an administrator's. Takes the path it ran from,
+    the status of the file it runs, the view the path is read through and the account it runs as.
+    Returns True when it was, and False when not or when it cannot be told."""
+    if not (_installed_by_root(info) and _only_root_changes(os.path.dirname(gone_from), view)):
+        return False
+    if runs_as is not None and runs_as > 0:
         return True
     try:
-        return not os.path.exists(where)
-    except OSError:
+        now = os.stat(view + gone_from)
+    except (OSError, ValueError):
         return False
+    return _installed_by_root(now) and (now.st_dev, now.st_ino) != (info.st_dev, info.st_ino)
+
+
+def _installed_by_root(info: os.stat_result) -> bool:
+    """Tell whether a file is an administrator's. Takes its status. Returns True when it is."""
+    return (stat.S_ISREG(info.st_mode) and info.st_uid == 0
+            and not info.st_mode & _WRITABLE_BY_OTHERS)
+
+
+def _on_memory(pid: int, filesystem) -> bool:
+    """Tell whether the file `pid` executes lives only in memory. Takes the pid and the reader of
+    the filesystem it lives on. Returns True when it does or when that cannot be read."""
+    try:
+        kind = filesystem(pid)
+    except (OSError, ValueError):
+        return True
+    return kind in _MEMORY_FILESYSTEM_KINDS
+
+
+def _own_uid_map() -> str:
+    """Read how this run's accounts map onto the machine's. Returns the map, the identity map off
+    Linux; raises OSError when it cannot be read."""
+    if not sys.platform.startswith("linux"):
+        return "0 0 4294967295"
+    with open("/proc/self/uid_map", encoding="ascii", errors="replace") as table:
+        return table.read()
+
+
+def maps_the_hosts_root(*, read=_own_uid_map) -> bool:
+    """Tell whether this run sees the machine's administrator as root. Takes the reader of this
+    run's account map. Returns True when it does or the machine maps no accounts, and False when
+    not or when the map cannot be read."""
+    try:
+        table = read()
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return any(line.split()[:2] == ["0", "0"] for line in table.splitlines())
+
+
+def _view_of(pid: int) -> str:
+    """Name the root of the filesystem `pid` sees when it is not this run's. Takes the pid.
+    Returns the prefix that turns a path the process sees into one this run can open, or "" when
+    it shares this run's mounts or that cannot be read."""
+    if not sys.platform.startswith("linux"):
+        return ""
+    try:
+        if os.readlink(f"/proc/{pid}/ns/mnt") == os.readlink("/proc/self/ns/mnt"):
+            return ""
+        os.stat(f"/proc/{pid}/root/")
+    except OSError:
+        return ""
+    return f"/proc/{pid}/root"
+
+
+def _only_root_changes(folder: str, view: str = "") -> bool:
+    """Tell whether only an administrator can change what `folder` holds. Takes the folder and the
+    view it is read through. Returns True when only one can, and False when not or when it cannot
+    be read."""
+    path = os.path.normpath(folder) if folder else ""
+    if not path.startswith("/"):
+        return False
+    while True:
+        try:
+            info = os.lstat(view + path)
+        except OSError:
+            return False
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+                or info.st_mode & _WRITABLE_BY_OTHERS):
+            return False
+        if path == "/":
+            return True
+        path = os.path.dirname(path)
 
 
 def ps_signature(pid: int) -> str | None:

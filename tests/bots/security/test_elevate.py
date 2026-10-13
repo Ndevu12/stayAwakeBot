@@ -63,7 +63,7 @@ class TestItAsksOnlyWhenThereIsSomebodyToAsk(unittest.TestCase):
 
         outcome, detail = elevate.run_as_root(["/bin/kill", "-KILL", "9"],
                                               sudo=lambda: "/usr/bin/sudo",
-                                              ask=lambda: False, run=run)
+                                              ask=lambda: False, admin=lambda: True, run=run)
         self.assertEqual(outcome, elevate.CANNOT_ASK)
         self.assertEqual(len(calls), 1, "it prompted with no terminal to prompt on")
         self.assertIn("-n", calls[0])
