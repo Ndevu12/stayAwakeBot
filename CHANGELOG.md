@@ -137,6 +137,9 @@ reader, not the mechanism or the weakness it closed.
   they looked in when it holds no repository, before asking for any credential, and add no note about
   this machine when they examined nothing. The note about this machine after a scan or a fix says
   plainly what not to do and to run `saw audit` before changing a password or token.
+- **`saw harden --take-back` says what it did.** A location that is not on this machine no longer
+  reads as redirected or leaves the run unfinished; when it finds none of its controls it says so;
+  and it says what is left, each kind with what to do about it.
 - **`saw harden` no longer stops ordinary programs, and `saw audit` no longer reports them.** On
   Linux it could take programs you rely on, your desktop among them, for code with no file behind it
   and stop them, freezing the machine. When stopping code needs root, your system asks for

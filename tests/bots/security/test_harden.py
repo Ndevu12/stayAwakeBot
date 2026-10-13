@@ -1059,7 +1059,10 @@ class TestTakingAControlBack(unittest.TestCase):
         with locked(target):
             code, text = harden.take_back(restore_editors=_EDITORS_BACK, restore_agents=_AGENTS_BACK, supported=lambda: True, folders=lambda: [target], unschedule=lambda: 'nothing-to-remove')
         self.assertNotEqual(code, 0)
-        self.assertIn("locked-over-content", text)
+        self.assertIn("holds files saw did not put there", text)
+        self.assertIn("Run `saw audit` before anything else", text)
+        self.assertNotIn(str(target), text)
+        self.assertNotIn("locked-over-content", text)
 
     def test_content_arriving_while_the_lock_is_off_is_left_reachable(self):
         target = self._dir("racy")
@@ -1482,7 +1485,7 @@ class TestALockUnderAThirdAccountAtRoot(unittest.TestCase):
         with self._third_account(privileged=True):
             out = denial.remove_one(self.target)
         self.assertEqual(out.state, denial.HELD_BY_ANOTHER)
-        self.assertIn("only what it placed", out.detail)
+        self.assertIn("another account placed this one", out.detail)
         self.assertNotIn("cannot", out.detail.lower())
 
 class TestTheReportIsReadable(unittest.TestCase):

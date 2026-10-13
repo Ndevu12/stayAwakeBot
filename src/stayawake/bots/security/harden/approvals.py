@@ -55,6 +55,7 @@ class TakingBack:
     restored: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
     unreadable_record: bool = False
+    record_not_updated: bool = False
 
     @property
     def done(self) -> bool:
@@ -264,5 +265,5 @@ def take_back(record: Path | None = None, write=None) -> TakingBack:
             continue
         out.restored.append(path)
     if not atomicwrite.replace(where, json.dumps({"version": 1, "entries": left})):
-        out.unreadable_record = True
+        out.record_not_updated = True
     return out
