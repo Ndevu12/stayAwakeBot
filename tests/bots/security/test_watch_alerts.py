@@ -186,7 +186,7 @@ class TestOneReportADay(unittest.TestCase):
     def test_a_day_with_only_unidentified_code_is_not_called_quiet(self):
         alert = A.daily_report({"since": {UNNAMED: 4}})
         self.assertNotIn(watchstate.QUIET_DAY, alert.body)
-        self.assertIn("could not identify 4 times", alert.body)
+        self.assertIn("Suspicious code ran here 4 times", alert.body)
 
     def test_nothing_from_the_machine_reaches_a_notification(self):
         _, sent = _run([(ENDED, RETURNED, LEFT, NOT_READ)] * 20 + [(QUIET,)] * 2900, start=0)

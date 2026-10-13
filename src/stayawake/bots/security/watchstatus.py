@@ -8,13 +8,14 @@ import time
 from stayawake.bots.security import schedule, watchack, watchrecord, watchstate
 from stayawake.utils import exitcodes
 
-_CHECKING = "This machine is checking itself."
-_FROM_LOGIN = "This machine will check itself from your next login. Run `saw watch` to start it now."
-_NOT_CHECKING = "This machine is not checking itself. Run `saw watch`."
-_WAS_CHANGED = "What checks this machine was changed. Run `saw watch` to put it back."
-_CANNOT_TELL = "Whether this machine checks itself could not be established."
-_STALLED = ("This machine is set to check itself but has not done so recently. Run `saw watch stop`, "
-            "then `saw watch`.")
+_CHECKING = "`saw watch` is in place."
+_FROM_LOGIN = "`saw watch` is in place from your next login. Run `saw watch` to start it now."
+_NOT_CHECKING = "`saw watch` is not in place. Run `saw watch`."
+_WAS_CHANGED = "`saw watch` had been changed on this machine. Run `saw watch` to put it back."
+_CANNOT_TELL = ("Whether `saw watch` is in place could not be established. Run `saw watch` to put "
+                "it in place.")
+_STALLED = ("`saw watch` is in place but has not run recently. Run `saw watch stop`, then "
+            "`saw watch`.")
 
 
 def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
@@ -22,7 +23,7 @@ def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
               placed_since=schedule.placed_since, acknowledged=None) -> tuple[int, str]:
     """Say where the watcher stands. Takes the collaborators that read the schedule, the watcher's
     record and `saw harden`'s acknowledgement. Returns the exit code and the lines an operator
-    reads: whether the machine checks itself, everything still open, and what happened since the
+    reads: whether `saw watch` is in place, everything still open, and what happened since the
     last report."""
     code, line = _schedule_status(supported, verdict, running)
     kept = _settled_record(record, acknowledged)

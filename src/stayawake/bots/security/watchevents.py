@@ -9,11 +9,11 @@ _ENDED = "Code running on this machine was stopped."
 _RETURNED = ("It has been stopped here before and is running again. Run `saw harden`, then "
              "`saw audit` to find what brings it back.")
 _LEFT = "Something running here could not be stopped. Run `saw harden`."
-_UNNAMED = "Something is running that this machine cannot identify."
+_UNNAMED = "Suspicious code is running here. Run `saw audit` to see it."
 _QUIET = "Nothing on this machine is running code it should not."
-_NOT_READ = "Running processes could not be examined, so nothing here covers one."
-_PASS_FAILED = "This machine could not check itself. Run `saw watch status`."
-_NOT_REMEMBERED = ("This machine could not keep its record of what it stopped, so code that comes "
+_NOT_READ = "Running processes could not be read on this pass. Run `saw watch status`."
+_PASS_FAILED = "`saw watch` could not read what was running. Run `saw watch status`."
+_NOT_REMEMBERED = ("`saw watch` could not keep its record of what it stopped, so code that comes "
                    "back may not be recognised. Run `saw audit`.")
 
 SENTENCE_FOR = {ENDED: _ENDED, RETURNED: _RETURNED, LEFT: _LEFT, UNNAMED: _UNNAMED, QUIET: _QUIET,

@@ -149,7 +149,7 @@ def daily_report(record: dict) -> Alert:
     elif said:
         lead = "Daily report: run `saw watch status`."
     else:
-        return Alert("Daily report: this machine checked itself. " + watchstate.QUIET_DAY,
+        return Alert("Daily report: " + watchstate.QUIET_DAY,
                      False, DAILY)
     body = lead
     for sentence in said:

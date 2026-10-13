@@ -1,13 +1,13 @@
 ---
-description: saw watch — keep this machine checking itself, ending running code the tool has identified.
+description: saw watch — end code saw has identified, from now on and after every login.
 ---
 
 # `saw watch`
 
-Ask this machine to keep checking itself. From then on, and from every login, it makes a pass over
-what is running and ends code the tool has **identified**. It never asks for a password, and it
-writes what it saw to its own record so a later pass can tell something that has come back from
-something new. It keeps checking until you stop it.
+Put `saw watch` in place. From then on, and after every login, it looks at what is running and
+ends code saw has **identified**. It never asks for a password, and it writes what it saw to its own
+record so a later pass can tell something that has come back from something new. It stays in place
+until you take it back with `saw watch stop`.
 
 ```text
 saw watch [--no-stream]
@@ -54,8 +54,8 @@ Once a day it sends a short report, on quiet days too, so a day without one is w
 `saw watch status`.
 
 While something is not dealt with, every other `saw` command prints one line saying so, whether or
-not a notification was shown: code that came back, code that could not be stopped, or a watcher
-that has stopped checking. `saw watch status` lists the same, with what happened since the last
+not a notification was shown: code that came back, code that could not be stopped, or
+`saw watch` no longer running. `saw watch status` lists the same, with what happened since the last
 report and any notifications that could not be sent, and `saw audit` reports code that came back
 or could not be stopped.
 
@@ -69,8 +69,8 @@ shown is tried again later.
 [`saw harden`](harden.md) puts this in place as part of hardening a machine, and `saw watch` is how
 you ask for it on its own, check it, or change your mind about it.
 
-`saw watch` asks this machine to keep making the pass — starting with your session, and started
-again if it ever stops, so the machine is not left unwatched. It says whether that is in force now
+`saw watch` puts the pass in place — starting with your session, and started again if it ever
+stops. It says whether that is in force now
 or from your next login; where the system will not start it immediately, the arrangement is still
 made and takes effect then. It keeps doing that until `saw watch stop`.
 Asking twice changes nothing and says so.
@@ -80,7 +80,7 @@ else to point somewhere else; if it is not exactly what `saw` wrote, running `sa
 back and tells you it had been changed. Anything else found under that name is left alone —
 stopping removes saw's own work and nothing else.
 
-A quiet pass sends nothing; the daily report says the machine was checked.
+A quiet pass sends nothing; the daily report says nothing was running that should not be.
 
 ## The record
 
@@ -105,9 +105,9 @@ Elsewhere the command says it could not arrange it, rather than reporting a mach
 - [`saw harden`](harden.md) — the same job with you present, and able to ask for privilege
 - [`saw audit`](audit.md) — what else this machine looks like
 
-`saw watch status` says whether this machine is checking itself. Whether it is running is asked
-of the system, not read from the file: one command stops the check without changing a byte. If it
-says the machine has not checked itself recently, run `saw watch stop`, then `saw watch`; do the
+`saw watch status` says whether `saw watch` is in place. Whether it is running is asked of the
+system, not read from the file: one command stops the check without changing a byte. If it says
+`saw watch` has not run recently, run `saw watch stop`, then `saw watch`; do the
 same once after upgrading saw.
 
 It is set up from the copy of saw you run it with, so run it from an installed one. A copy inside a temporary directory is refused: the check would work until that directory is cleaned up. If the check ever stops, `saw audit` says so.
