@@ -36,7 +36,7 @@ class TestANamedFolderInsideHomeIsNotAWipe(unittest.TestCase):
     def test_a_function_that_walks_a_folder_of_its_own_is_not_a_wipe(self):
         text = ("function listCache() { return readdirSync(path.join(os.homedir(), '.cache', 'tool')) }\n"
                 "function clean(files) { files.forEach(f => unlinkSync(f)) }\n"
-                "clean(listCache())")
+                "const files = listCache(); clean(files)")
         self.assertIsNone(detect_destructive(text))
 
 
@@ -44,7 +44,7 @@ class TestHomeItselfIsStillAWipe(unittest.TestCase):
     def test_a_function_that_walks_home_is_still_a_wipe(self):
         text = ("function listAll() { return readdirSync(os.homedir()) }\n"
                 "function clean(files) { files.forEach(f => unlinkSync(f)) }\n"
-                "clean(listAll())")
+                "const files = listAll(); clean(files)")
         self.assertIsNotNone(detect_destructive(text))
 
     def test_deleting_home_or_everything_in_it_is_found(self):
