@@ -13,10 +13,11 @@ import shlex
 import shutil
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from stayawake.utils import atomicwrite, env
+from stayawake.utils import atomicwrite, env, procsnap
 
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.utils import textsafe
@@ -1133,6 +1134,75 @@ def _warn_infected(display: str, quoted_root: str, result) -> None:
           + "\n", file=err)
 
 
+_GIT_PROGRAMS = frozenset({"git", "git.exe"})
+_ANCESTORS_TO_GIT = 8
+_SAME_OPERATION_WITHIN_SECONDS = 120
+
+
+def _operation_key(head: str, config_path: str | None, event: str, argv: list[str], *,
+                   started=procsnap.started, me=os.getpid) -> str | None:
+    """Name the git process a hook runs under, for one repository commit, policy, hook event and
+    its arguments. Takes the commit, the operator config, the event, its arguments, and the readers
+    of when a process started and of this process. Returns the key, or None when no git process is
+    found above this one."""
+    called = hashlib.sha256("\0".join([event, *argv]).encode("utf-8", "replace")).hexdigest()[:16]
+    pid = me()
+    for _ in range(_ANCESTORS_TO_GIT):
+        start = started(pid)
+        if start is None:
+            return None
+        if start.name in _GIT_PROGRAMS:
+            return f"{_clean_key(head, config_path)}:{called}:{pid}:{start.at_ns}"
+        if start.ppid <= 1:
+            return None
+        pid = start.ppid
+    return None
+
+
+def _warnings_shown() -> dict:
+    """Read the infected warnings already shown. Returns them by repository, or none when the record
+    cannot be read."""
+    try:
+        shown = json.loads(hookscript.warnings_shown_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return shown if isinstance(shown, dict) else {}
+
+
+def _shown_moments_ago(last, operation: str, at: float) -> bool:
+    """Tell whether a warning for this operation was shown moments ago. Takes the repository's
+    record, the operation's key and the time now. Returns False for any record it cannot read."""
+    if not isinstance(last, dict) or last.get("operation") != operation:
+        return False
+    shown = last.get("at")
+    if isinstance(shown, bool) or not isinstance(shown, (int, float)):
+        return False
+    try:
+        return 0 <= at - shown < _SAME_OPERATION_WITHIN_SECONDS
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
+def _warn_once(root: Path | None, operation: str | None, warn, *, now=time.time) -> None:
+    """Show an infected warning once per git operation. Takes the repository, the operation's key
+    (None when it cannot be told), what shows the warning and the clock."""
+    where = os.path.realpath(root) if root is not None else None
+    if where is not None and operation is not None and _shown_moments_ago(
+            _warnings_shown().get(where), operation, now()):
+        return
+    warn()
+    if where is None or operation is None:
+        return
+    try:
+        held = {r: k for r, k in _warnings_shown().items() if os.path.isdir(r)}
+        held[where] = {"operation": operation, "at": now()}
+        atomicwrite.replace(hookscript.warnings_shown_path(), json.dumps(held),
+                            mode=atomicwrite.AS_A_PLAIN_WRITE,
+                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    except OSError:
+        pass
+
+
 def run_event(event: str, argv: list[str], config_path: str | None = None,
               *, no_stream: bool = False, from_settings: bool = False) -> int:
     """Run the check for one git hook event. Takes the event, its arguments, the operator config and
@@ -1193,7 +1263,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     result = scanned
     if clean_key and not from_settings:
         _remember(root, "")
-    found = _tell(result, shown, rescan, quoted_root)
+    operation = _operation_key(head, config_path, event, argv) if head else None
+    found = _tell(result, shown, rescan, quoted_root, root=root, operation=operation)
     if found is None:
         found = 0
         if clean_key and _holds_its_commit(root, head):
@@ -1217,13 +1288,15 @@ def _remember_clean_contents(root: Path, checked, config_path: str | None) -> No
         pass
 
 
-def _tell(result, shown: str, rescan: str, quoted_root: str) -> int | None:
+def _tell(result, shown: str, rescan: str, quoted_root: str, *, root: Path | None = None,
+          operation: str | None = None) -> int | None:
     """Print what a hook scan found. Takes the result, the repository as shown, the command that
-    rescans it and the repository quoted for a shell. Returns 1 infected, 2 not verified, 0 for a
-    finding to review, or None when it found nothing."""
+    rescans it, the repository quoted for a shell, and the repository and git operation an infected
+    warning is shown once for. Returns 1 infected, 2 not verified, 0 for a finding to review, or
+    None when it found nothing."""
     err = sys.stderr
     if result.infected:
-        _warn_infected(shown, quoted_root, result)
+        _warn_once(root, operation, lambda: _warn_infected(shown, quoted_root, result))
         return 1
     if result.error:
         print(_paint(f"⚠  {_BRAND}: {shown} could not be scanned — NOT verified "

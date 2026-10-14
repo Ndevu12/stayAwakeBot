@@ -39,6 +39,11 @@ def settings_scan_path() -> Path:
     return Path(env.xdg_cache_home()) / "saw" / "hook-settings-scans.json"
 
 
+def warnings_shown_path() -> Path:
+    """Return the file of the infected warnings saw's hooks showed, by repository and git operation."""
+    return Path(env.xdg_cache_home()) / "saw" / "hook-warnings-shown.json"
+
+
 def cache_path() -> Path:
     """Return the per-repository last-scanned-SHA cache file."""
     return Path(env.xdg_cache_home()) / "saw" / "hook-scan-cache.json"

@@ -140,6 +140,10 @@ reader, not the mechanism or the weakness it closed.
 - **`saw harden --take-back` says what it did.** A location that is not on this machine no longer
   reads as redirected or leaves the run unfinished; when it finds none of its controls it says so;
   and it says what is left, each kind with what to do about it.
+- **A clone saw finds infected shows its warning once.** With git 2.54 or later the warning was
+  printed twice for the same clone.
+- **`saw scan` names each path it could not scan and why** — a path that does not exist, a pattern
+  that matched nothing, or a folder this account cannot open — and says nothing was scanned.
 - **`saw harden` no longer stops ordinary programs, and `saw audit` no longer reports them.** On
   Linux it could take programs you rely on, your desktop among them, for code with no file behind it
   and stop them, freezing the machine. When stopping code needs root, your system asks for
