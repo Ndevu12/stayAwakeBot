@@ -74,7 +74,7 @@ def render_welcome(level: ColorLevel, version: str) -> str:
     cmds = [
             ("saw scan .", "hunt this repo for supply-chain worms (read-only)"),
             ("saw audit", "credential · editor · CI hygiene"),
-            ("saw harden", "host denials, read back before they count"),
+            ("saw harden", "put saw's controls in place on this machine"),
             ("saw intro", "a 60-second tour"),
             ("saw <command> -h", "help for any command"),
     ]
@@ -110,7 +110,7 @@ def render_intro(level: ColorLevel, version: str) -> str:
         "  " + C("saw fix   ", _CYAN, bold=True) + C("  recover from git onto a clean branch; ", _DIM)
         + C("--pr", _MINT) + C(" opens a PR", _DIM),
         "  " + C("saw audit ", _CYAN, bold=True) + C("  credential · editor · CI hygiene", _DIM),
-        "  " + C("saw harden", _CYAN, bold=True) + C("  host denials; in place only after a read-back", _DIM),
+        "  " + C("saw harden", _CYAN, bold=True) + C("  put saw's controls in place on this machine", _DIM),
         "", C("Why it's safe", _WHITE, bold=True),
         "  " + C("· runs ", _DIM) + C("zero code at install", _GREEN)
         + C(" (that's the very vector it hunts)", _DIM),

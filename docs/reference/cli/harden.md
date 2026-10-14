@@ -1,5 +1,5 @@
 ---
-description: saw harden — create host-level denials on this machine, and report them as in place only after a read-back.
+description: saw harden — put saw's controls in place on this machine, and take them back.
 ---
 
 # `saw harden`

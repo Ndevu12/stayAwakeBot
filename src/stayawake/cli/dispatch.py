@@ -33,8 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--version", action="version",
-        version=(f"saw (stayawakebot) {__version__}\n"
-                 "capabilities: security: local + CI; health: CI-only (stayawake-health-*)"),
+        version=f"saw (stayawakebot) {__version__}",
     )
     sub = p.add_subparsers(dest="command", metavar="<command>")
     for module in commands.REGISTRARS:

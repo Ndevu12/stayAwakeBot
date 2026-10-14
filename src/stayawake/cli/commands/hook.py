@@ -37,7 +37,7 @@ def register(sub) -> None:
                     "to the ones you already have: those you name, your configured local targets, "
                     "or the repository you run it in. The hooks scan what lands (a clone, pull, "
                     "branch switch or rebase) and warn before you run it, and check a push before it "
-                    "leaves. Your own hooks keep running. Read-only and offline.",
+                    "leaves. Your own hooks keep running. It works offline.",
         examples=[
             ("saw hook install", "scan every future clone and pull"),
             ("saw hook install -c ~/security.yml", "scan them against your allowlist"),

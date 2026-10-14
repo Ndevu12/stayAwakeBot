@@ -201,6 +201,20 @@ def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: 
     return result
 
 
+def _why_nothing_at(pattern: str) -> str:
+    """Say why a requested path gave nothing to scan. Takes the path or pattern as given. Returns
+    the reason, naming the path."""
+    shown = textsafe.plain(pattern, limit=4096)
+    if any(mark in pattern for mark in "*?["):
+        return f"{shown} matched nothing"
+    folder = Path(os.path.expanduser(pattern)).parent
+    while not os.path.lexists(folder) and folder != folder.parent:
+        folder = folder.parent
+    if os.path.lexists(folder) and not os.access(folder, os.X_OK):
+        return f"{shown} is inside {textsafe.plain(str(folder), limit=4096)}, which this account cannot open"
+    return f"{shown} does not exist"
+
+
 def scan(config_path: str | None = None, *, remote: bool = False,
          paths: list[str] | None = None, users: list[str] | None = None,
          orgs: list[str] | None = None, slugs: list[str] | None = None,
@@ -276,9 +290,9 @@ def scan(config_path: str | None = None, *, remote: bool = False,
             found = resolve_local_targets(local_patterns, opts, unsearched=unsearched)
         repos = [t.root for t in found]
         if (paths or cfg_local) and not repos:
-            print("error: the requested target(s) named nothing this user can see on disk — a "
-                  "path that is not there, or one under a directory this user cannot read. "
-                  "Nothing was scanned; failing closed (not reporting 'clean').", file=sys.stderr)
+            for pattern in local_patterns:
+                print(f"error: {_why_nothing_at(pattern)}.", file=sys.stderr)
+            print("Nothing was scanned.", file=sys.stderr)
             return 2
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")

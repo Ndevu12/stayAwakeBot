@@ -8,7 +8,7 @@ let delivery classify push failures — never invent a silent "no write access".
 from __future__ import annotations
 
 from stayawake.core.identity.capabilities import Capability
-from stayawake.core.identity.intents import Intent, requirements
+from stayawake.core.identity.intents import Intent, requirements, what_it_does
 from stayawake.core.identity.outcomes import Decision, UpgradePath, upgrades_for_missing
 from stayawake.core.identity.session import Session, resolve_session
 from stayawake.lib import auth
@@ -28,7 +28,7 @@ def require(intent: Intent, *, session: Session | None = None,
     if not sess.token:
         return Decision(
             allowed=False, intent=intent, missing=needed,
-            reason=auth.no_credential_hint(f"{intent.value.replace('_', ' ')}"),
+            reason=auth.no_credential_hint(what_it_does(intent)),
             upgrades=upgrades_for_missing(needed, source=None),
             session_source=None, session_actor=None,
         )
@@ -162,5 +162,4 @@ def _deny_reason(intent: Intent, missing: frozenset[Capability], sess: Session) 
             f"(classic) or Workflows: Read and write (fine-grained / GitHub App) to create or "
             f"update `.github/workflows/*`. This is NOT missing repo write access."
         )
-    names = ", ".join(sorted(c.value for c in missing))
-    return f"{who} is not authorized for {intent.value} (missing {names})."
+    return f"{who} cannot be used for {what_it_does(intent)}."
