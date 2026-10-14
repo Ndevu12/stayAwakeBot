@@ -37,9 +37,29 @@ def evidence(text: str, start: int, end: int, width: int = 80) -> str:
     Every other matcher puts a sentence it wrote itself in `Finding.evidence`. This is the one that
     returns file content. The report fingerprints evidence by DEFAULT, so a caller needs no flag;
     `composed_evidence=True` is the opt-out and must never be set on a window built here."""
-    s = max(0, start - 12)
+    s = _lead_in_start(text, start)
     snippet = text[s:end + width].replace("\n", " ")
     return (snippet[:width] + "…") if len(snippet) > width else snippet
+
+
+_LEAD_IN = 12
+
+
+def _lead_in_start(text: str, start: int) -> int:
+    """Find where a window opens before a match. Takes the text and where the match starts.
+    Returns the first word start within the lead-in, or the match's own start."""
+    s = max(0, start - _LEAD_IN)
+    if s == 0 or not (_word_char(text[s - 1]) and _word_char(text[s])):
+        return s
+    for i in range(s, start):
+        if not _word_char(text[i]):
+            return i + 1
+    return start
+
+
+def _word_char(char: str) -> bool:
+    """Tell whether a character is part of a word. Takes the character. Returns True when it is."""
+    return char.isalnum() or char == "_"
 
 
 def globs_ok(relpath: str, sig: dict[str, Any]) -> bool:

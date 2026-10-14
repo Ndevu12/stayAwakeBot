@@ -130,6 +130,10 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 
+- **The text a scan quotes from a file for a finding starts at a whole word**, where it could start
+  partway through one, as in a `.gitignore` finding that showed `ode_modules`. An allowlist entry that
+  names such a finding's `evidence` needs the new text; until it is updated, the finding is reported
+  again.
 - **A scan that finds, in a folder on this machine, an install script that drops a known payload or
   runs an AI assistant without asking, or a known-malicious package says it may already have run and
   to run `saw audit` now**, as it already did for a code loader.
