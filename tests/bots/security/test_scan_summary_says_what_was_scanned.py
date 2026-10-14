@@ -5,25 +5,21 @@ from __future__ import annotations
 
 import contextlib
 import io
-import re
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from stayawake.bots.security.models import Finding, ScanReport, ScanResult, Severity
-from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.service.report import _print_report_pointer
-from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.sinks.render import render_markdown, render_terminal
-from stayawake.bots.security.targets.base import ScanOptions, Target
 from stayawake.utils import scratch
 
-_DEEP = "To also scan every file of the packages installed in node_modules, run `saw scan --deep`."
+_SHARED_NOTE = "Run `saw scan --history` to also scan earlier commits."
 
 
 def _report(n_with_note: int, n_without: int = 1) -> dict:
-    results = [ScanResult(target=f"repo{i}", source="local", findings=[], notes=[_DEEP])
+    results = [ScanResult(target=f"repo{i}", source="local", findings=[], notes=[_SHARED_NOTE])
                for i in range(n_with_note)]
     results += [ScanResult(target=f"plain{i}", source="local", findings=[])
                 for i in range(n_without)]
@@ -33,12 +29,12 @@ def _report(n_with_note: int, n_without: int = 1) -> dict:
 class TestEachNoteIsShownOnce(unittest.TestCase):
     def test_a_note_many_repositories_share_is_one_line_naming_them(self):
         out = render_terminal(_report(18), detail=True)
-        self.assertEqual(out.count(_DEEP), 1)
-        self.assertIn(f"repo0, repo1, repo2 and 15 more — {_DEEP}", out)
+        self.assertEqual(out.count(_SHARED_NOTE), 1)
+        self.assertIn(f"repo0, repo1, repo2 and 15 more — {_SHARED_NOTE}", out)
 
     def test_a_note_every_repository_shares_names_none(self):
         out = render_terminal(_report(4, n_without=0), detail=True)
-        self.assertIn(f"  • {_DEEP}", out.replace("ℹ", "•"))
+        self.assertIn(f"  • {_SHARED_NOTE}", out.replace("ℹ", "•"))
         self.assertNotIn("repo0", out.split("Notes:")[1].split("Host note:")[0])
 
     def test_the_notes_say_what_to_run_without_a_heading_about_gating(self):
@@ -48,16 +44,6 @@ class TestEachNoteIsShownOnce(unittest.TestCase):
         markdown = render_markdown(_report(2))
         self.assertIn("## Notes", markdown)
         self.assertNotIn("did not look at", markdown)
-
-
-class TestInstalledPackagesNameTheCommandThatScansThem(unittest.TestCase):
-    def test_a_project_with_installed_packages_names_saw_scan_deep(self):
-        project = Path(tempfile.mkdtemp(prefix="installed-"))
-        self.addCleanup(shutil.rmtree, project, True)
-        (project / "node_modules" / "leftpad").mkdir(parents=True)
-        (project / "node_modules" / "leftpad" / "index.js").write_text("module.exports = 1;\n")
-        result = scan_target(Target(project, str(project), ScanOptions()), load_signatures(), [])
-        self.assertIn(_DEEP, result.notes)
 
 
 class TestTheSummaryUsesPlainWords(unittest.TestCase):
@@ -82,7 +68,7 @@ class TestTheReportIsPointedAtInAFewLines(unittest.TestCase):
             _print_report_pointer(self.folder / "latest.md", **kwargs)
         return err.getvalue()
 
-    def test_a_spilled_report_names_the_report_and_its_copy_for_tools(self):
+    def test_a_large_scan_names_its_report_and_the_copy_for_tools(self):
         text = self._pointer(spilled=True, reason="72 repositories")
         self.assertIn("The full report, with everything this scan found in 72 repositories:", text)
         self.assertIn("latest.md", text)

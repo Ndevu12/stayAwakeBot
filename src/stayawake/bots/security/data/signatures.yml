@@ -124,7 +124,7 @@ signatures:
     matcher: content
     pattern: 'Blockchain Explorer|BlockchainFont|TechMono'
     file_globs: ["**/fonts/README.md", "**/fonts/*.md"]
-    description: "Fake 'Blockchain Explorer' fonts README used as camouflage (GlassWorm-family)"
+    description: "Fake 'Blockchain Explorer' fonts README used as camouflage"
     shown_as: "a decoy file a worm leaves beside its payload"
     remediation: remove-file
     confidence: confirmed
@@ -330,7 +330,7 @@ signatures:
     matcher: content
     pattern: 'Sha1-Hulud:\s*The Second Coming|A Mini Shai-Hulud has Appeared'
     prefilter: "hulud"   # cheap required-literal reject before the regex
-    description: "Shai-Hulud exfil branding — attacker repo/commit vanity label (Second Coming / Mini variant)"
+    description: "A known worm's exfiltration branding: the label it puts on the repository or commit it publishes"
     shown_as: "a mark a known worm leaves where it has run"
     remediation: manual
     confidence: confirmed
@@ -342,7 +342,7 @@ signatures:
     pattern: '\bSHA1HULUD\b'
     prefilter: "sha1hulud"   # cheap required-literal reject before the regex
     file_globs: [".github/**", "**/.github/**", ".runner", "**/.runner", "**/actions-runner/**", "*.service"]
-    description: "Shai-Hulud persistence — self-hosted runner named SHA1HULUD in runner/workflow config"
+    description: "A known worm's persistence: a self-hosted runner it registers, named in runner or workflow config"
     shown_as: "a CI runner a known worm sets up to keep control"
     remediation: manual
     confidence: confirmed
@@ -354,7 +354,7 @@ signatures:
     confidence: heuristic
     pattern: 'Sha[i1]-Hulud'
     prefilter: "-hulud"   # cheap required-literal reject before the regex
-    description: "Shai-Hulud vanity token (bare mention — heuristic; benign in security write-ups)"
+    description: "A known worm's name mentioned in a file (also common in security write-ups)"
     shown_as: "a mention of a known worm"
     remediation: manual
 
@@ -397,7 +397,7 @@ signatures:
     severity: critical
     matcher: npm-manifest
     pattern: '\bsetup_bun\b'
-    description: "npm lifecycle hook runs the setup_bun.js dropper (Shai-Hulud install-time exec)"
+    description: "npm lifecycle hook runs a known worm's dropper at install time"
     shown_as: "an install script that drops a known worm's payload"
     remediation: manual
     confidence: confirmed

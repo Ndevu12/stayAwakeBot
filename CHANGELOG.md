@@ -288,6 +288,7 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **The written report and the SARIF log describe each finding without naming a worm.**
 - **`saw --version`, `saw doctor`, the intro and each command's help say what saw does in plain
   words.** `saw doctor` names the one command to run when a GitHub credential is missing or cannot
   open pull requests.
@@ -299,9 +300,8 @@ reader, not the mechanism or the weakness it closed.
   not to start an AI coding assistant in the clone. `saw scan --json` gives each finding's `signature`
   and full evidence for an allowlist entry.
 - **The end of `saw scan` is shorter.** A note several repositories share is shown once with the
-  repositories it is about, SUSPECT and residue are said in plain words, the note on installed
-  packages names `saw scan --deep`, and the full report is pointed at in a few lines, in a folder
-  named by when it was written.
+  repositories it is about, SUSPECT and residue are said in plain words, and the full report is
+  pointed at in a few lines, in a folder named by when it was written.
 - **`saw harden`'s result says where this machine stands and what to run.** Its first line says
   whether code is still running, which controls are not in place, or that every control is in
   place; each line after it names the command that acts on it.
