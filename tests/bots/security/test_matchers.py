@@ -2,6 +2,8 @@
 """Matcher/scanner tests against inert fixtures (clean vs infected)."""
 from __future__ import annotations
 
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -29,7 +31,10 @@ EXPECTED_IN_INFECTED = {
 
 class TestScanner(unittest.TestCase):
     def _scan(self, name, allow=None):
-        t = LocalRepoTarget(FIX / name, name, ScanOptions())
+        copy = Path(tempfile.mkdtemp(prefix="fixture-")) / name
+        self.addCleanup(shutil.rmtree, copy.parent, True)
+        shutil.copytree(FIX / name, copy)
+        t = LocalRepoTarget(copy, name, ScanOptions())
         return scan_target(t, SIGS, allow or [])
 
     def test_infected_fixture_triggers_all_vectors(self):
