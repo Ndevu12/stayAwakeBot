@@ -17,7 +17,7 @@ from typing import Any
 
 from stayawake.bots.security.dependencies.remediation import (
     dependency_actions, markdown_lines)
-from stayawake.bots.security.found import is_a_commit, what_it_is
+from stayawake.bots.security.found import described, is_a_commit, what_it_is
 from stayawake.bots.security.host_note import scan_host_note
 from stayawake.bots.security.redaction import redact, render_redacted
 from stayawake.bots.security.signatures import runs_on_this_machine
@@ -341,7 +341,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
             loc = _loc(f, textsafe.code)
             out.append(f"- **[{f['severity']} {MARKER['meta']} {f.get('confidence', 'confirmed')}]** "
                        f"`{f['signature_id']}` — {loc}")
-            out.append(f"  - {f['description']}")
+            out.append(f"  - {described(f['signature_id'], f.get('category', ''), f.get('description'))}")
             if f.get("evidence"):
                 ev = _fmt_evidence(f["evidence"], textsafe.code,
                                    composed=f.get("composed_evidence", False))
@@ -375,7 +375,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
             for a in r["advisories"]:
                 loc = _loc(a, textsafe.code)
                 out.append(f"- **[{a['severity']}]** `{a['signature_id']}` — {loc}")
-                out.append(f"  - {a['description']}")
+                out.append(f"  - {described(a['signature_id'], a.get('category', ''), a.get('description'))}")
                 if a.get("evidence"):
                     adv_ev = _fmt_evidence(a["evidence"], textsafe.code,
                                            composed=a.get("composed_evidence", False))

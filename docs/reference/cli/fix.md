@@ -43,8 +43,8 @@ itself.
 repository loses the link, and what it points at is left alone. Directories you listed under
 `keep_dirs` are never removed, and neither is anything inside them. Write each one relative to the
 repository root — `data`, or `dist/assets` for one directory of a generated tree. A name alone
-keeps that directory at the root, not every directory sharing the name. `exclude_dirs` says what is
-not scanned and does not decide this.
+keeps that directory at the root, not every directory sharing the name. A generated tree is cleared
+whatever it holds.
 
 **Your uncommitted work is kept.** Once the cleanup is done, what your working tree holds and has
 not committed is recorded on a local branch named `saw/uncommitted-…`, as it then stands. It is

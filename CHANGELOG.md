@@ -292,6 +292,8 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **The SARIF log, `saw scan --json` and the written report describe each finding in the same plain
+  words as the terminal.**
 - **The written report and the SARIF log describe each finding without naming a worm.**
 - **`saw --version`, `saw doctor`, the intro and each command's help say what saw does in plain
   words.** `saw doctor` names the one command to run when a GitHub credential is missing or cannot

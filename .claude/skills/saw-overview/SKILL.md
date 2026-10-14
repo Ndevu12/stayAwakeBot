@@ -45,8 +45,8 @@ commits the payload has already propagated into and force-updates those branches
 commit keeps its original message; it is not a merge-specific command, it does not open a
 pull request, and it does not take `--branch`; if a remote branch cannot be read, nothing is
 force-updated) · `discard` · `audit` (+ `--verify` content-scans a non-repo
-suspect dir; + credential/dependency hygiene) · `harden` (host denials; in place only after a
-read-back; never a project's tree) · `db` (offline advisory corpus) · `guard`
+suspect dir; + credential/dependency hygiene) · `harden` (puts saw's controls in place on this
+machine; never a project's tree) · `db` (offline advisory corpus) · `guard`
 (install/verify the CI gate) · `search` · `intro` · `doctor` · `completion`.
 
 Scan scope is **local by default** (given paths / configured globs / current repo); `--remote`
@@ -63,7 +63,7 @@ Related: `engineering-standard`, `working-with-this-codebase`, `shipping-changes
 `saw` is being standardised from a tool that **reports** into one that **acts**. The complaint it
 answers is that it flags things for a human to review and solves nothing. Judge every proposal by
 whether it moves off that: **prefer doing the thing over instructing the user to do it, and one line
-of output over a runbook.** Good antivirus quarantines and says one sentence.
+of output over a runbook.** Good antivirus acts and says one sentence.
 
 The direction does not loosen anything below — it is why those rules exist. A tool that only reports
 can afford a loose verdict; one that acts turns every false positive into damage.
