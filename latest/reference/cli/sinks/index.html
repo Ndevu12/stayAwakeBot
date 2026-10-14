@@ -1861,9 +1861,10 @@
 
 
 <h1 id="report-sinks">Report sinks<a class="headerlink" href="#report-sinks" title="Permanent link">&para;</a></h1>
-<p>A report is a message, not a file. Full evidence exists only on the live terminal or via <code>--json</code>;
-any artifact written to disk stores a <code>{sha256, preview, len}</code> fingerprint in place of the raw match,
-so a report on disk can never re-distribute a live payload.</p>
+<p>A report is a message, not a file. Only <code>--json</code> carries the full evidence. The terminal shows a
+short preview of each finding it lists, and any artifact written to disk stores a
+<code>{sha256, preview, len}</code> fingerprint in place of the raw match, so a report on disk can never
+re-distribute a live payload.</p>
 <table>
 <thead>
 <tr>
@@ -1877,7 +1878,7 @@ so a report on disk can never re-distribute a live payload.</p>
 <tr>
 <td>Terminal</td>
 <td>(default)</td>
-<td>full</td>
+<td>a short preview</td>
 <td>stdout, ephemeral</td>
 </tr>
 <tr>

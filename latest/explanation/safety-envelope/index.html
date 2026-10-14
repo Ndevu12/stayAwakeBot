@@ -2056,8 +2056,9 @@ evidence and rarely removes the cause, and deleting a credential you actually us
 than a fix. So the audit tells you what it found and what to do in which order, and leaves the
 machine alone. See <a href="../../how-to/audit-a-machine/">audit a machine</a>.</p>
 <h2 id="reports-do-not-carry-payloads">Reports do not carry payloads<a class="headerlink" href="#reports-do-not-carry-payloads" title="Permanent link">&para;</a></h2>
-<p>Full evidence stays on your terminal or in <code>--json</code>. Anything persisted stores a fingerprint instead,
-and alert bodies carry no evidence at all — a security report can never re-distribute live malware.
+<p>Only <code>--json</code> carries the full evidence. The terminal shows a short preview of each finding it
+lists, anything persisted stores a fingerprint instead, and alert bodies carry no evidence at all — a
+security report can never re-distribute live malware.
 See <a href="../../reference/cli/sinks/">report sinks</a>.</p>
 
 

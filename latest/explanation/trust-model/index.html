@@ -2043,9 +2043,9 @@ never through a URL or process arguments, so it cannot leak through <code>ps</co
 log. <code>saw audit</code> reports on credentials without ever reading a live secret's bytes. See
 <a href="../../reference/cli/credentials/">credentials</a>.</p>
 <h2 id="evidence-stays-where-you-put-it">Evidence stays where you put it<a class="headerlink" href="#evidence-stays-where-you-put-it" title="Permanent link">&para;</a></h2>
-<p>Full match evidence exists on your terminal and in <code>--json</code>. Anything written to disk carries a
-fingerprint instead, so a report can never re-distribute a live payload, and an alert body carries no
-evidence at all.</p>
+<p>Only <code>--json</code> carries the full evidence. The terminal shows a short preview of each finding it
+lists, and anything written to disk carries a fingerprint instead, so a report can never
+re-distribute a live payload; an alert body carries no evidence at all.</p>
 <h2 id="what-is-not-published">What is not published<a class="headerlink" href="#what-is-not-published" title="Permanent link">&para;</a></h2>
 <p>How detection decides — the signals, the thresholds, the corroboration — is deliberately not
 documented publicly. Published detection mechanics are an evasion aid. If you are evaluating <code>saw</code>,

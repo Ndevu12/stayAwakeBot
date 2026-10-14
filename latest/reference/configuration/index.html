@@ -1983,14 +1983,15 @@ signature database ships inside the package.</p>
 <tr>
 <td><code>signatures_path</code></td>
 <td>packaged</td>
-<td>Path to a custom signature database. Every signature in it states its <code>confidence</code>.</td>
+<td>Path to a custom signature database. Every signature in it states its <code>confidence</code>, and may give <code>shown_as</code>, the words saw shows for what it finds.</td>
 </tr>
 </tbody>
 </table>
 <p>Booleans are parsed strictly, so <code>external_audit: "false"</code> reads as false rather than being coerced
 true — a security-sensitive setting can never be switched on by quoting.</p>
-<p>Each <code>allowlist</code> entry <strong>must name a <code>signature</code></strong>, optionally narrowed by <code>path_glob</code>. A bare
-<code>path_glob</code> is ignored, so it cannot blanket-suppress whatever lands on that path next:</p>
+<p>Each <code>allowlist</code> entry <strong>must name a <code>signature</code></strong>, optionally narrowed by <code>path_glob</code>; <code>saw scan
+--json</code> gives each finding's <code>signature</code> and <code>evidence</code>. A bare <code>path_glob</code> is ignored, so it cannot
+blanket-suppress whatever lands on that path next:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">allowlist</span><span class="p">:</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">signature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fake-font-fa-solid-400</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">path_glob</span><span class="p">:</span><span class="w"> </span><span class="s">"tests/**"</span>
