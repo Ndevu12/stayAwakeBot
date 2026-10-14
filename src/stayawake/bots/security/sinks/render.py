@@ -19,6 +19,7 @@ from stayawake.bots.security.dependencies.remediation import (
     dependency_actions, markdown_lines)
 from stayawake.bots.security.host_note import scan_host_note
 from stayawake.bots.security.redaction import redact, render_redacted
+from stayawake.bots.security.signatures import runs_on_this_machine
 from stayawake.utils.render import MARKER, SEVERITY, STATUS, paint, rule
 from stayawake.utils import textsafe
 
@@ -190,8 +191,9 @@ def _host_note(payload: dict[str, Any], escape) -> str:
     """Build the run's note on what its verdict covers on this machine. Takes the report payload
     and the escaping the sink applies to a path. Returns the note."""
     infected = bool(payload["summary"].get("infected"))
-    loaders = [escape(p) for p in _local_loader_paths(payload)] if infected else []
-    return scan_host_note(infected=infected, local_loaders=loaders, clean=_fully_clean(payload))
+    may_have_run = ([escape(p) for p in _paths_of_code_that_runs_here(payload)]
+                    if infected else [])
+    return scan_host_note(infected=infected, local_loaders=may_have_run, clean=_fully_clean(payload))
 
 
 def _fully_clean(payload: dict[str, Any]) -> bool:
@@ -202,15 +204,18 @@ def _fully_clean(payload: dict[str, Any]) -> bool:
                                      or r.get("residue") for r in results)
 
 
-def _local_loader_paths(payload: dict[str, Any]) -> list[str]:
-    """Paths of confirmed code-loader findings on LOCAL targets — the ones that put this host at
-    risk. A remote scan reads someone else's repository and says nothing about this machine."""
+def _paths_of_code_that_runs_here(payload: dict[str, Any]) -> list[str]:
+    """Name the confirmed findings, in folders on this machine, of a code loader or of other code that
+    runs when the folder is opened, installed or built. Takes the report payload. Returns their
+    paths."""
     paths: dict[str, None] = {}
+    marked = runs_on_this_machine()
     for r in payload.get("results", []):
         if r.get("source") != "local":
             continue
         for f in r.get("findings", []):
-            if f.get("category") == "code-loader" and f.get("confidence") == "confirmed":
+            runs_here = f.get("category") == "code-loader" or f.get("signature_id") in marked
+            if runs_here and f.get("confidence") == "confirmed":
                 paths.setdefault(f.get("path") or "an unnamed file", None)
     return list(paths)
 

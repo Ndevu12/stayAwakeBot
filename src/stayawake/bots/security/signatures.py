@@ -9,6 +9,7 @@ self-contained; a caller may pass a path to override it. No detection logic here
 from __future__ import annotations
 
 from collections import defaultdict
+from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -68,3 +69,11 @@ def load_signatures(path: str | Path | None = None) -> dict[str, list[dict[str, 
                 f"Signature {s['id']}: invalid confidence '{conf}' (use one of {CONFIDENCE_LEVELS})")
         grouped[s["matcher"]].append(s)
     return dict(grouped)
+
+
+@lru_cache(maxsize=1)
+def runs_on_this_machine() -> frozenset[str]:
+    """Name the packaged signatures whose confirmed finding is code that runs on this machine when
+    its folder is opened, installed or built. Returns their ids."""
+    return frozenset(s["id"] for s in every_signature(load_signatures())
+                     if s.get("runs_on_this_machine") is True)

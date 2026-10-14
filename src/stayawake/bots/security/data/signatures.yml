@@ -12,6 +12,8 @@
 #               npm-manifest | workflow-yaml | dependency-audit | installed-package-audit | symlink |
 #               git-exec-surface
 #   description human-readable
+#   runs_on_this_machine  true when a confirmed finding is code that runs on this machine when
+#               the folder is opened, installed or built (OPTIONAL)
 #   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
 #               remove-file | remove-foreign-vscode | strip-gitignore-markers | manual
 #   confidence  verdict weight (OPTIONAL, default `confirmed`): confirmed | heuristic |
@@ -363,6 +365,7 @@ signatures:
     description: "npm lifecycle hook runs the setup_bun.js dropper (Shai-Hulud install-time exec)"
     remediation: manual
     confidence: confirmed
+    runs_on_this_machine: true
 
   - id: npm-lifecycle-remote-fetch
     category: npm-lifecycle
@@ -390,6 +393,7 @@ signatures:
     description: "npm install-time lifecycle hook runs a coding agent with its approval prompt switched off"
     remediation: manual
     confidence: confirmed
+    runs_on_this_machine: true
 
   - id: npm-lifecycle-agent-yolo
     category: npm-lifecycle
@@ -412,6 +416,7 @@ signatures:
       - "html-to-gutenberg@4.2.11"
       - "fetch-page-assets@1.2.9"
     confidence: confirmed
+    runs_on_this_machine: true
 
   # ── Installed-tree audit — what's ACTUALLY on disk, reconciled against the lockfile (#1144) ────
   - id: malicious-installed-package
@@ -422,6 +427,7 @@ signatures:
     remediation: manual
     corpus: true          # reuses the SAME offline malware corpus as malicious-dependency (memoized)
     confidence: confirmed
+    runs_on_this_machine: true
   - id: ghost-package
     category: supply-chain-dep
     severity: high
@@ -453,6 +459,7 @@ signatures:
     description: "An INSTALLED dependency's entry file (main/bin) carries a known code-loader fingerprint — a novel malicious package whose payload runs on require, invisible to the lockfile audit (T1195.001)"
     remediation: manual
     confidence: confirmed
+    runs_on_this_machine: true
 
   # ── Vulnerable (but not malicious) upstream dependency — the OPT-IN advisory tier ─────────────
   - id: vulnerable-dependency
