@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A home wipe deletes home itself, everything in it, or a walk of it; a named folder inside home
-and a whole-line comment are not one."""
+"""Shell projects and scripts that remove a folder of their own scan clean, and one that deletes
+your home folder or everything in it is still reported."""
 from __future__ import annotations
 
 import unittest
@@ -9,8 +9,8 @@ from stayawake.bots.security.taint import destructive
 from stayawake.bots.security.taint.destructive import detect_destructive
 
 
-class TestANamedFolderInsideHomeIsNotAWipe(unittest.TestCase):
-    def test_shell_projects_that_remove_their_own_folder_are_not_wipes(self):
+class TestProjectsThatRemoveTheirOwnFolderScanClean(unittest.TestCase):
+    def test_shell_projects_scan_clean(self):
         for text in (
             "rm -rf ~/.oh-my-zsh",
             "alias xcdd='rm -rf ~/Library/Developer/Xcode/DerivedData/*'",
@@ -22,7 +22,7 @@ class TestANamedFolderInsideHomeIsNotAWipe(unittest.TestCase):
         ):
             self.assertIsNone(detect_destructive(text), text)
 
-    def test_scripts_that_remove_a_folder_of_their_own_are_not_wipes(self):
+    def test_scripts_scan_clean(self):
         for text in (
             "rimraf(path.join(os.homedir(), '.cache', 'tool'))",
             "fs.rmSync(path.join(os.homedir(), '.tool'), { recursive: true })",
@@ -32,22 +32,21 @@ class TestANamedFolderInsideHomeIsNotAWipe(unittest.TestCase):
         ):
             self.assertIsNone(detect_destructive(text), text)
 
-
-    def test_a_function_that_walks_a_folder_of_its_own_is_not_a_wipe(self):
+    def test_a_cleanup_of_a_folder_of_their_own_scans_clean(self):
         text = ("function listCache() { return readdirSync(path.join(os.homedir(), '.cache', 'tool')) }\n"
                 "function clean(files) { files.forEach(f => unlinkSync(f)) }\n"
                 "const files = listCache(); clean(files)")
         self.assertIsNone(detect_destructive(text))
 
 
-class TestHomeItselfIsStillAWipe(unittest.TestCase):
-    def test_a_function_that_walks_home_is_still_a_wipe(self):
+class TestDeletingYourHomeFolderIsReported(unittest.TestCase):
+    def test_a_cleanup_of_your_home_folder_is_reported(self):
         text = ("function listAll() { return readdirSync(os.homedir()) }\n"
                 "function clean(files) { files.forEach(f => unlinkSync(f)) }\n"
                 "const files = listAll(); clean(files)")
         self.assertIsNotNone(detect_destructive(text))
 
-    def test_deleting_home_or_everything_in_it_is_found(self):
+    def test_deleting_your_home_folder_or_everything_in_it_is_reported(self):
         for text in (
             "rm -rf ~", "rm -rf ~/", "rm -rf ~/*", "rm -rf ~/.*", "rm -rf $HOME",
             'rm -rf "$HOME"', "rm -rf ${HOME}/*", 'rm -rf "$HOME/"*',
@@ -58,32 +57,32 @@ class TestHomeItselfIsStillAWipe(unittest.TestCase):
         ):
             self.assertIsNotNone(detect_destructive(text), text)
 
-    def test_home_followed_by_another_path_is_still_home(self):
+    def test_your_home_folder_among_other_paths_is_reported(self):
         self.assertIsNotNone(detect_destructive("rm -rf ~/ build"))
 
-    def test_a_path_that_climbs_back_out_of_a_folder_is_home(self):
+    def test_every_path_that_names_your_home_folder_is_reported(self):
         for text in ("rm -rf ~/..", "rm -rf ~/x/..", "rm -rf $HOME/a/../", "rm -rf ~/./"):
             self.assertIsNotNone(detect_destructive(text), text)
 
-    def test_a_folder_named_only_by_a_variable_is_home(self):
+    def test_a_folder_chosen_when_the_script_runs_is_reported(self):
         for text in ("rm -rf $HOME/$TARGET", 'rm -rf "$HOME/${DIR}"'):
             self.assertIsNotNone(detect_destructive(text), text)
 
 
-class TestOnlyAWholeLineCommentIsNotCode(unittest.TestCase):
-    def test_a_comment_line_that_mentions_a_wipe_is_not_one(self):
+class TestAScriptIsJudgedByItsCode(unittest.TestCase):
+    def test_a_project_that_mentions_a_wipe_in_a_comment_scans_clean(self):
         for text in ("\t# shell to execute 'sudo rm -rf /' when the prompt is drawn.",
                      "# never run rm -rf ~ here", "#\n## rm -rf ~"):
             self.assertIsNone(detect_destructive(text), repr(text))
 
-    def test_a_wipe_on_the_line_after_a_comment_is_found(self):
+    def test_a_wipe_after_a_comment_is_reported(self):
         self.assertIsNotNone(detect_destructive("# clean up\nrm -rf ~"))
 
-    def test_a_wipe_after_an_inline_comment_marker_is_still_read(self):
+    def test_a_wipe_sharing_a_line_with_a_comment_is_reported(self):
         for text in ("echo done # rm -rf ~", "// ; rm -rf ~", "rem ; rm -rf ~", ":: ; rm -rf ~"):
             self.assertIsNotNone(detect_destructive(text), text)
 
-    def test_only_comment_lines_are_blanked(self):
+    def test_code_lines_reach_the_scan_as_written(self):
         kept = ("#!/bin/sh", '#define WIPE system("x")', "x # y", "  code()")
         blanked = ("# a note", "#", "\t## heading")
         for line in kept:
