@@ -112,17 +112,6 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
         shown = ", ".join(unique[:5]) + (" …" if len(unique) > 5 else "")
         result.error = f"{len(unique)} path(s) unreadable: {shown}"
     result.notes.extend(coverage_notes or [])
-    # points — so a payload in a non-entry node_modules file reads clean. Say so, so `clean` isn't
-    # silently hollow, and point at the opt-in that does look. Coverage note, never gating.
-    if opts is not None and root is not None and not getattr(opts, "deep", False):
-        try:
-            nm = Path(root) / "node_modules"
-            if nm.is_dir() and any(nm.iterdir()):        # present AND non-empty (nothing to note if bare)
-                result.notes.append(
-                    "To also scan every file of the packages installed in node_modules, run "
-                    "`saw scan --deep`.")
-        except OSError:
-            pass
     if root is not None:
         finding = _cleanup_residue(Path(root))
         if finding is not None:

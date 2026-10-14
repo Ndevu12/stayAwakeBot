@@ -356,10 +356,10 @@ class TestDeepSweep(unittest.TestCase):
         o = ScanOptions(); o.deep = deep
         return scan_target(Target(d, str(d), o), _REAL_SIGS, [])
 
-    def test_default_misses_non_entry_but_says_so(self):
+    def test_a_scan_without_deep_reports_the_project_clean_and_adds_no_note(self):
         r = self._scan(self._repo("nonentry"), deep=False)
-        self.assertEqual(r.verdict, "clean")                       # non-entry payload invisible by default
-        self.assertTrue(any("node_modules" in n and "--deep" in n for n in r.notes))  # …but honestly noted
+        self.assertEqual(r.verdict, "clean")
+        self.assertEqual(r.notes, [])
 
     def test_deep_catches_non_entry_payload(self):
         r = self._scan(self._repo("nonentry"), deep=True)
@@ -423,16 +423,6 @@ class TestDeepSweep(unittest.TestCase):
             r = self._scan(d, deep=True)
         self.assertTrue(any("budget" in n and "partial" in n.lower() for n in r.notes),
                         f"expected a truncation coverage note, got {r.notes}")
-
-    def test_coverage_note_renders_in_terminal_and_markdown(self):
-        from stayawake.bots.security.models import ScanReport
-        from stayawake.bots.security.sinks.render import render_markdown, render_terminal
-        from stayawake.utils.timeutil import now_iso
-        payload = ScanReport(now_iso(), [self._scan(self._repo("none"), deep=False)]).to_payload()
-        term, md = render_terminal(payload, detail=True), render_markdown(payload)
-        self.assertIn("Notes:", term)
-        self.assertIn("--deep", term)
-        self.assertIn("## Notes", md)
 
     def test_source_files_skips_nested_node_modules_and_symlinks(self):
         from stayawake.bots.security.dependencies.installed import NpmInstalledTree, InstalledPackage

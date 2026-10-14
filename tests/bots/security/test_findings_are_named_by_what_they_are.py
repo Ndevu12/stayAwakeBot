@@ -45,7 +45,7 @@ class TestEveryFindingHasItsOwnWords(unittest.TestCase):
             self.assertEqual(found.what_it_is(signature["id"], "not-a-category"),
                              signature["shown_as"])
 
-    def test_every_category_has_words_for_a_signature_without_its_own(self):
+    def test_a_finding_without_words_of_its_own_still_reads_in_plain_words(self):
         categories = {s["category"] for s in yaml.safe_load(_SIGNATURES.read_text())["signatures"]}
         for category in categories | {"remediation-residue"}:
             self.assertNotEqual(found.what_it_is("not-a-signature", category),

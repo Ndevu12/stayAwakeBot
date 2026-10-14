@@ -19,8 +19,8 @@ re-distribute a live payload.
 
 ## The report a long scan writes for you
 
-A scan of more than 25 targets, or with more than 200 findings and advisories between them, stops
-printing per-finding detail and shows the summary table only. The full report is written to a file
+A large scan — many targets, or many findings and advisories between them — stops printing
+per-finding detail and shows the summary table only. The full report is written to a file
 instead, so nothing is lost to scrollback, and the path is printed on stderr in a ruled block
 (clickable when your terminal supports it). A smaller scan prints every finding on the terminal.
 
