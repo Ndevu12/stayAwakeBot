@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from stayawake.core.identity.capabilities import Capability
-from stayawake.core.identity.intents import Intent
+from stayawake.core.identity.capabilities import Capability, what_it_allows
+from stayawake.core.identity.intents import Intent, what_it_does
 
 
 @dataclass(frozen=True)
@@ -33,16 +33,22 @@ class Decision:
         """Human-facing multi-line summary for CLI stderr / progress lines."""
         if self.allowed:
             who = self.session_actor or self.session_source or "credential"
-            return f"authz ok for {self.intent.value} (as {who})"
-        lines = [self.reason or f"not authorized for {self.intent.value}"]
+            return f"{who} can be used for {what_it_does(self.intent)}"
+        lines = [self.reason or f"This credential cannot be used for {what_it_does(self.intent)}."]
         if self.missing:
-            lines.append("missing: " + ", ".join(sorted(c.value for c in self.missing)))
+            lines.append(f"It needs a credential that can {_in_a_list(self.missing)}.")
         for u in self.upgrades:
             if u.command:
                 lines.append(f"  → {u.detail}: `{u.command}`" if u.detail else f"  → `{u.command}`")
             elif u.detail:
                 lines.append(f"  → {u.detail}")
         return "\n".join(lines)
+
+
+def _in_a_list(capabilities: frozenset[Capability]) -> str:
+    """Join what capabilities allow into one phrase. Takes the capabilities. Returns the phrase."""
+    words = [what_it_allows(c) for c in sorted(capabilities, key=lambda c: c.value)]
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
 
 
 def upgrades_for_missing(missing: frozenset[Capability], *, source: str | None) -> tuple[UpgradePath, ...]:
@@ -54,9 +60,9 @@ def upgrades_for_missing(missing: frozenset[Capability], *, source: str | None) 
     })
     if source in (None,):
         paths.append(UpgradePath(
-            kind="login",
-            detail="authenticate first",
-            command="gh auth login   # or: saw auth app register",
+            kind="register_app",
+            detail="or use a saw GitHub App",
+            command="saw auth app register",
         ))
         return tuple(paths)
     if need_workflow:

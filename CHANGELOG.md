@@ -285,6 +285,11 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **`saw --version`, `saw doctor`, the intro and each command's help say what saw does in plain
+  words.** `saw doctor` names the one command to run when a GitHub credential is missing or cannot
+  open pull requests.
+- **A command refused for its GitHub credential says what it was doing, what the credential must
+  be able to do, and the command to run**, as when `saw fix amend` runs without a credential.
 - **`saw harden`'s result says where this machine stands and what to run.** Its first line says
   whether code is still running, which controls are not in place, or that every control is in
   place; each line after it names the command that acts on it.

@@ -34,5 +34,20 @@ _REQUIREMENTS: dict[Intent, frozenset[Capability]] = {
 }
 
 
+_WHAT_IT_DOES: dict[Intent, str] = {
+    Intent.READ_REMOTE: "reading repositories on GitHub",
+    Intent.OPEN_FIX_PR: "opening fix pull requests",
+    Intent.AMEND_REFS: "replacing infected commits on GitHub",
+    Intent.OPEN_GUARD_PR: "opening guard pull requests",
+    Intent.WRITE_ISSUES: "filing issues",
+    Intent.READ_ADMIN: "reading branch protection",
+}
+
+
 def requirements(intent: Intent) -> frozenset[Capability]:
     return _REQUIREMENTS[intent]
+
+
+def what_it_does(intent: Intent) -> str:
+    """Name what an intent does, in plain words. Takes the intent. Returns the phrase."""
+    return _WHAT_IT_DOES[intent]

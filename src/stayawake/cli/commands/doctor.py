@@ -20,10 +20,10 @@ def register(sub) -> None:
         sub, "doctor", aliases=["d", "doc"],
         help="self-check install + credentials",
         description=(
-            "Self-check the installation: confirm `saw` resolves to this install, report the "
-            "active GitHub credential and whether it can open fix and guard PRs, note whether a "
-            "StayAwakeBot App is configured, and confirm the health entry points are present. "
-            "`saw auth status` carries the full intent/capability matrix."),
+            "Check this install: that `saw` runs this copy, which GitHub credential it uses and "
+            "whether that credential can open fix and guard pull requests, whether a saw GitHub "
+            "App is set up, and that saw's CI health tools are installed. `saw auth status` shows "
+            "everything the credential can do."),
         examples=[
             ("saw doctor", "the full self-check"),
             ("saw doctor -q", "print only the problems"),
@@ -66,27 +66,30 @@ def run(a: argparse.Namespace) -> int:
         f"{mark(bool(saw_path))} saw resolves to: {saw_path or 'NOT FOUND on PATH'}",
     ]
     if not sess.token:
-        lines.append("• no GitHub credential (public scans + local audit still work; needed "
-                     "for private repos and remote fix/guard PRs)")
-        lines.append("  → `gh auth login`  or  `saw auth app register`")
+        lines.append("• No GitHub credential. Scans of public repositories and `saw audit` work "
+                     "without one; private repositories and fix or guard pull requests need one.")
+        lines.append("  Run `gh auth login`, or `saw auth app register` to use a saw GitHub App.")
     else:
         who = sess.actor or "?"
         lines.append(f"{mark(sess.live)} GitHub credential: {sess.source} as {who}")
         if sess.scopes is not None:
             lines.append(f"  scopes: {', '.join(sorted(sess.scopes)) or '(none)'}")
-        lines.append(f"{mark(fix.allowed)} can open fix PRs (Contents + Pull requests)")
-        lines.append(f"{mark(guard.allowed)} can open guard/workflow PRs (+ Workflows / `workflow` scope)")
+        lines.append(f"{mark(fix.allowed)} can open fix pull requests")
+        if not fix.allowed:
+            lines.append("  It needs write access to repository contents and pull requests.")
+        lines.append(f"{mark(guard.allowed)} can open guard pull requests")
         if not guard.allowed:
+            lines.append("  It also needs permission to change workflow files.")
             for u in guard.upgrades:
                 if u.command:
                     lines.append(f"  → {u.command}")
         if github_app.is_configured():
-            lines.append(f"✓ Saw App config present ({github_app.config_path()})")
+            lines.append(f"✓ a saw GitHub App is set up ({github_app.config_path()})")
     lines += [
-        f"{mark(bool(health))} health entry points installed (remote-only, not saw "
-        f"subcommands): {'yes' if health else 'no'}",
+        f"{mark(bool(health))} saw's CI health tools are installed" if health
+        else f"{mark(False)} saw's CI health tools are not installed. Reinstall saw.",
         f"• version: {__version__}",
-        "• `saw auth status` for the full intent/capability matrix",
+        "• `saw auth status` shows everything the credential can do",
     ]
     if a.quiet:
         problems = [ln for ln in lines if ln.startswith("✗")]
