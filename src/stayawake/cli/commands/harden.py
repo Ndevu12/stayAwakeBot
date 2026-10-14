@@ -13,7 +13,7 @@ from stayawake.cli.argtypes import no_stream_requested
 def register(sub) -> None:
     p = add_command(
         sub, "harden",
-        help="create host denials; reports in place only after a read-back",
+        help="put saw's controls in place on this machine",
         description=(
             "Create host-level controls on this machine. It never touches a project's "
             "dependency tree. A write is reported as in place only after it is read back; "
@@ -36,7 +36,7 @@ def run(a: argparse.Namespace) -> int:
     """Put the host controls in place, or take them back. Takes the parsed arguments. Returns the
     exit code; a run that ended the live code it found also marks what the watcher had found
     before it started as dealt with."""
-    label = "removing host denials…" if a.take_back else "creating host denials…"
+    label = "taking saw's controls back…" if a.take_back else "putting saw's controls in place…"
     no_stream = no_stream_requested(a)
     counted = _watcher_counted()
     with busy(label, no_stream=no_stream):

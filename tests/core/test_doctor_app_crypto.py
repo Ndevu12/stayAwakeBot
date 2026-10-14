@@ -51,7 +51,7 @@ class TestDoctorAppCrypto(unittest.TestCase):
     def test_human_app_present_no_crypto_caveat(self, *_mocks):
         rc, out = self._run()
         self.assertEqual(rc, 0)
-        self.assertIn("✓ Saw App config present", out)
+        self.assertIn("✓ a saw GitHub App is set up", out)
         self.assertNotIn("not usable yet", out)
         self.assertNotIn("[app]", out)
 

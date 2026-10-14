@@ -19,6 +19,22 @@ class Capability(str, Enum):
     ADMIN_READ = "admin_read"
 
 
+_WHAT_IT_ALLOWS: dict[Capability, str] = {
+    Capability.REPO_READ: "read the repository",
+    Capability.CONTENTS_WRITE: "push to the repository",
+    Capability.PULL_REQUESTS_WRITE: "open pull requests",
+    Capability.WORKFLOWS_WRITE: "change workflow files",
+    Capability.ISSUES_WRITE: "file issues",
+    Capability.FORK: "fork the repository",
+    Capability.ADMIN_READ: "read branch protection",
+}
+
+
+def what_it_allows(capability: Capability) -> str:
+    """Name what a capability lets a credential do. Takes the capability. Returns the phrase."""
+    return _WHAT_IT_ALLOWS[capability]
+
+
 _SCOPE_GRANTS: dict[str, frozenset[Capability]] = {
     "repo": frozenset({
         Capability.REPO_READ, Capability.CONTENTS_WRITE, Capability.PULL_REQUESTS_WRITE,

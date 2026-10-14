@@ -44,7 +44,7 @@ saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]
 ## `saw guard setup`
 
 Install the gate, or surgically bump an existing pin, across the resolved repositories. It resolves
-the latest Strix release to a commit SHA and the latest scanner release to a version, then writes the
+the latest worm-guard release to a commit SHA and the latest scanner release to a version, then writes the
 workflow described below. When a gate already exists it rewrites only that `uses:` reference and
 leaves the rest of the file untouched — unless the gate is configured so it cannot report what it
 finds, which is repaired. It is idempotent, fails closed if either release cannot be resolved, and
@@ -83,7 +83,7 @@ saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O
 | --- | --- |
 | `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `-j` / `--no-stream` | As for [`saw scan`](scan.md). |
 | `--pr`, `--open-pr` | Open/update a rolling `security/guard-setup` PR per repository instead of writing into the working tree. `--remote` always opens a PR. Needs a token with the `workflow` permission. |
-| `--ref SHA\|TAG` | Pin this Strix ref explicitly instead of resolving the latest release — offline and deterministic. A tag is resolved to its immutable SHA. |
+| `--ref SHA\|TAG` | Pin this worm-guard ref explicitly instead of resolving the latest release — offline and deterministic. A tag is resolved to its immutable SHA. |
 | `-b`, `--branch` | Default branch to target (default: auto-detect). |
 | `--dry-run` | Print what would be written; write nothing. |
 

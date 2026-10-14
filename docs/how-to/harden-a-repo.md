@@ -33,7 +33,7 @@ Scan what arrives before you run it:
 ```bash
 saw hook install        # see docs/how-to/scan-on-clone.md
 saw audit               # the machine's own posture
-sudo saw harden         # host denials; in place only after a read-back
+sudo saw harden         # put saw's controls in place on this machine
 ```
 
 ## 4. Keep dependencies audited
