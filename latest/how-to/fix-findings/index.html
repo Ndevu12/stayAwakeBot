@@ -1995,7 +1995,7 @@ files on the branch; it does not claim the tree is already clean.</p>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>git<span class="w"> </span>show<span class="w"> </span>HEAD~1:postcss.config.mjs<span class="w">   </span><span class="c1"># still returns the old contents</span>
 </code></pre></div>
 <p>That is residue, not execution — nothing runs it on clone or build. <code>saw scan</code> says so in its
-coverage notes rather than letting <code>clean</code> imply the repository has no trace of it.</p>
+notes rather than letting <code>clean</code> imply the repository has no trace of it.</p>
 <p><code>saw fix amend</code> is the history act. It replaces past commits the payload has already propagated
 into and force-updates each branch they sat on. That force-update is the fix. The replaced
 commit keeps its original message. It does not open a pull request, it does not take

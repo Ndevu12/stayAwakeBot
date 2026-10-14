@@ -1451,6 +1451,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#the-dependencies-to-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The dependencies to remove
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1835,6 +1846,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#the-dependencies-to-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The dependencies to remove
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1908,10 +1930,10 @@ re-distribute a live payload.</p>
 </tbody>
 </table>
 <h2 id="the-report-a-long-scan-writes-for-you">The report a long scan writes for you<a class="headerlink" href="#the-report-a-long-scan-writes-for-you" title="Permanent link">&para;</a></h2>
-<p>A scan whose result is too large for a terminal — many repositories, or a lot of findings and
-advisories between them — stops printing per-finding detail and shows the summary table only. The
-full report is written to a file instead, so nothing is lost to scrollback, and the path is printed
-on stderr in a ruled block (clickable when your terminal supports it).</p>
+<p>A scan of more than 25 targets, or with more than 200 findings and advisories between them, stops
+printing per-finding detail and shows the summary table only. The full report is written to a file
+instead, so nothing is lost to scrollback, and the path is printed on stderr in a ruled block
+(clickable when your terminal supports it). A smaller scan prints every finding on the terminal.</p>
 <p>Where it lands:</p>
 <table>
 <thead>
@@ -1927,16 +1949,21 @@ on stderr in a ruled block (clickable when your terminal supports it).</p>
 </tr>
 <tr>
 <td>nothing</td>
-<td>a fresh temporary directory named <code>sab-report-…</code>, printed with the report</td>
+<td>a folder <code>saw</code> keeps for you in the system's temporary directory, named by when it was written</td>
 </tr>
 </tbody>
 </table>
-<p>Two things worth knowing about the temporary copy. Its evidence is <strong>redacted</strong>, like any artifact
-on disk — the full evidence stayed on your terminal. And <code>saw</code> never deletes it; your operating
-system clears its temporary directory on its own schedule, which may be at reboot or not at all. If
-you want the report kept somewhere you chose, pass <code>-d DIR</code> and it goes there instead.</p>
+<p>Two things worth knowing about the copy <code>saw</code> keeps. Its evidence is <strong>redacted</strong>, like any artifact
+on disk; <code>saw scan --json</code> carries it in full. And <code>saw</code> never deletes it; your operating system
+clears its temporary directory on its own schedule, which may be at reboot or not at all. If you
+want the report kept somewhere you chose, pass <code>-d DIR</code> and it goes there instead.</p>
 <p><code>--json</code> turns the spill off: that payload already carries every finding in full, so there is
 nothing to rescue from scrollback. A <code>-d DIR</code> you asked for is still written.</p>
+<h2 id="the-dependencies-to-remove">The dependencies to remove<a class="headerlink" href="#the-dependencies-to-remove" title="Permanent link">&para;</a></h2>
+<p>When a scan flags a dependency, the commands that remove each known-malicious package, and the
+versions an advisory affects, are given once per run: last on the terminal, below the report's path
+when a large scan writes one; at the top of the written report; and in the body of a fix pull
+request. <code>saw</code> names the compromised versions and never a version to install.</p>
 
 
 
