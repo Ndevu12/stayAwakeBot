@@ -65,10 +65,11 @@ class TestTerminalSink(unittest.TestCase):
             TerminalSink(enabled=False).emit(_report())
         out = buf.getvalue()
         self.assertIn("Security scan", out)
-        # A payload window is now fingerprinted here, not printed: handing over clean pasteable
+        # A payload window is shown as a bounded preview, never whole: handing over clean pasteable
         # malware invites hand-editing it. Composed evidence still renders whole.
         self.assertNotIn(PAYLOAD, out)
-        self.assertIn("sha256:", out)
+        self.assertIn("found: `String.fromCharCode(127)", out)
+        self.assertNotIn("sha256:", out)
         self.assertNotIn("|---", out)                   # aligned table, not raw markdown pipes
 
     def test_table_lists_all_targets_and_details_findings(self):
@@ -88,8 +89,8 @@ class TestTerminalSink(unittest.TestCase):
         self.assertIn("clean", out)
         self.assertIn("INFECTED", out)
         # findings are enumerated for both infected and suspect repos.
-        self.assertIn("loader-fromcharcode", out)
-        self.assertIn("oversized-config-line", out)
+        self.assertIn("hidden code that loads and runs a payload", out)
+        self.assertIn("x.js:1", out)
 
     def test_color_only_when_requested(self):
         payload = _report().to_payload()

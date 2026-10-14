@@ -293,6 +293,11 @@ reader, not the mechanism or the weakness it closed.
   open pull requests.
 - **A command refused for its GitHub credential says what it was doing, what the credential must
   be able to do, and the command to run**, as when `saw fix amend` runs without a credential.
+- **`saw scan` and the warning from saw's git hooks name each finding by what it is** — such as an
+  install script that runs code straight from the internet — and where it is, a merge commit by its
+  commit, with a short preview of what was found. The warning lists confirmed findings first and says
+  not to start an AI coding assistant in the clone. `saw scan --json` gives each finding's `signature`
+  and full evidence for an allowlist entry.
 - **`saw harden`'s result says where this machine stands and what to run.** Its first line says
   whether code is still running, which controls are not in place, or that every control is in
   place; each line after it names the command that acts on it.

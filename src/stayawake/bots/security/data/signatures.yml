@@ -14,6 +14,8 @@
 #   description human-readable
 #   runs_on_this_machine  true when a confirmed finding is code that runs on this machine when
 #               the folder is opened, installed or built (OPTIONAL)
+#   shown_as    the words saw shows a person for a finding (OPTIONAL; the category's words
+#               otherwise)
 #   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
 #               remove-file | remove-foreign-vscode | strip-gitignore-markers | manual
 #   confidence  verdict weight (OPTIONAL, default `confirmed`): confirmed | heuristic |
@@ -34,6 +36,7 @@ signatures:
     prefilter: "fromcharcode"   # cheap required-literal reject before the regex
     corroborate: exec-sink
     description: "Obfuscated loader fingerprint — fromCharCode(127) shuffler feeding an exec sink"
+    shown_as: "hidden code that loads and runs a payload"
     remediation: recover
     confidence: confirmed
 
@@ -44,6 +47,7 @@ signatures:
     pattern: '(?:var|let|const)\s+_\$_[0-9a-f]{2,}\s*='
     prefilter: "_$_"   # cheap required-literal reject before the regex
     description: "Obfuscated loader seed variable (var/let/const _$_xxxx=)"
+    shown_as: "hidden code that loads and runs a payload"
     remediation: recover
     confidence: confirmed
 
@@ -55,6 +59,7 @@ signatures:
     prefilter: "sfl"   # cheap required-literal reject before the regex
     confidence: heuristic
     description: "Obfuscated loader decoder call — the sfL decoder function"
+    shown_as: "code that looks like a hidden payload loader"
     remediation: recover
 
   - id: loader-global-v-marker
@@ -64,6 +69,7 @@ signatures:
     pattern: "global\\[\\s*['\"]_V['\"]\\s*\\]\\s*="
     prefilter: "global['_v'"   # cheap required-literal reject before the regex
     description: "Loader bootstrap assigning the global['_V'] marker"
+    shown_as: "the start of a hidden payload loader"
     remediation: recover
     confidence: confirmed
 
@@ -75,6 +81,7 @@ signatures:
     prefilter: "failed to run clientcode"   # cheap required-literal reject before the regex
     confidence: heuristic
     description: "Obfuscated loader status string reported to its operator channel"
+    shown_as: "code that looks like it reports to whoever runs a payload"
     remediation: recover
 
   - id: loader-global-bang
@@ -84,6 +91,7 @@ signatures:
     pattern: "global\\['!'\\]\\s*="
     prefilter: "global['!']"   # cheap required-literal reject before the regex
     description: "Loader bootstrap assigning global['!']"
+    shown_as: "the start of a hidden payload loader"
     remediation: recover
     confidence: confirmed
 
@@ -94,6 +102,7 @@ signatures:
     pattern: 'global\[_\$_[0-9a-f]+\[0\]\]\s*=\s*require'
     prefilter: "_$_"   # cheap required-literal reject before the regex
     description: "Loader reassigning global.require to smuggle CommonJS into ESM"
+    shown_as: "code that slips a hidden payload into the program"
     remediation: recover
     confidence: confirmed
 
@@ -104,6 +113,7 @@ signatures:
     pattern: '(?<![\w$.])(?:global|globalThis)\s*(?:\[\s*(?!["''](?:require|module)["'']\s*\])[^;\n]{1,60}\]|\.(?!require\b|module\b)\w{1,24})\s*(?:\?\?=|\|\|=|=)\s*(?:require|module)\b(?![\s]*[.(\[])'
     prefilter: "global"
     description: "CommonJS require/module handed to global scope — an ESM module has no legitimate reason to"
+    shown_as: "code that slips a hidden payload into the program"
     remediation: recover
     confidence: confirmed
 
@@ -115,6 +125,7 @@ signatures:
     pattern: 'Blockchain Explorer|BlockchainFont|TechMono'
     file_globs: ["**/fonts/README.md", "**/fonts/*.md"]
     description: "Fake 'Blockchain Explorer' fonts README used as camouflage (GlassWorm-family)"
+    shown_as: "a decoy file a worm leaves beside its payload"
     remediation: remove-file
     confidence: confirmed
 
@@ -125,6 +136,7 @@ signatures:
     matcher: filename
     pattern: 'fa-solid-400.woff2'
     description: "Payload disguised as FontAwesome fa-solid-400.woff2 (not a real FA file)"
+    shown_as: "a font file that may be a disguised payload"
     remediation: manual
     confidence: heuristic
 
@@ -135,6 +147,7 @@ signatures:
     kind: magic-byte-masquerade
     file_globs: ["*.woff", "*.woff2", "*.ttf", "*.otf"]
     description: "Font file whose bytes are actually JavaScript/text (disguised payload)"
+    shown_as: "a payload disguised as a font file"
     remediation: remove-file
     confidence: confirmed
 
@@ -145,6 +158,7 @@ signatures:
     kind: magic-byte-masquerade
     file_globs: ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp", "*.ico", "*.wasm", "*.pdf"]
     description: "Image/wasm/pdf file whose bytes are actually JavaScript/text (disguised payload)"
+    shown_as: "a payload disguised as an image or other file"
     remediation: remove-file
     confidence: confirmed
 
@@ -158,6 +172,7 @@ signatures:
     threshold: 2000
     file_globs: ["*.mjs", "*.cjs", "*.js", "*.ts", "postcss.config.*"]
     description: "Config file with an abnormally long single line (likely appended payload)"
+    shown_as: "a config file that may hide a payload"
     remediation: recover
 
   # ── Whitespace / invisible-character concealment (T1027/T1564) ────────────────
@@ -170,6 +185,7 @@ signatures:
     file_globs: ["*.mjs", "*.cjs", "*.js", "*.jsx", "*.ts", "*.tsx", "*.vue", "*.svelte", "*.json",
                  "*.woff2", "*.woff", "*.ttf", "*.otf"]
     description: "Content concealed behind a long whitespace run or zero-width/bidi-control characters (off-screen hiding)"
+    shown_as: "content that may be hidden off-screen or behind invisible characters"
     remediation: manual
 
   # ── Whole-file obfuscation (line-agnostic, context-scoped) ───────────────────
@@ -180,6 +196,7 @@ signatures:
     confidence: heuristic
     kind: obfuscated-file
     description: "Hand-authored source/config file containing packed/obfuscated payload (line-agnostic)"
+    shown_as: "a source file with packed code that may hide a payload"
     remediation: recover
 
   - id: obfuscated-build-artifact
@@ -189,6 +206,7 @@ signatures:
     confidence: heuristic
     kind: obfuscated-build-artifact
     description: "Build/minified artifact carries a self-evident obfuscation construct (opt-in scan_build_outputs; review the source it was built from)"
+    shown_as: "a built file with packed code that may hide a payload"
     remediation: manual
 
   # ── Destructive intent — self-destruct / evidence removal (#1334) ────────────
@@ -198,6 +216,7 @@ signatures:
     matcher: destructive
     kind: destructive-home-wipe
     description: "Code recursively walks the user's home directory and DELETES files (home-dir wipe; recoverable — image the disk before further use)"
+    shown_as: "code that deletes the files in your home folder; if it has run, copy the disk before you use it again, so they can be recovered"
     remediation: manual
     confidence: confirmed
   - id: secure-home-wipe
@@ -206,6 +225,7 @@ signatures:
     matcher: destructive
     kind: secure-home-wipe
     description: "Code recursively walks the user's home directory and OVERWRITES-then-deletes files (secure wipe — the data is UNRECOVERABLE)"
+    shown_as: "code that overwrites and deletes the files in your home folder; if it has run, they cannot be recovered"
     remediation: manual
     confidence: confirmed
 
@@ -216,6 +236,7 @@ signatures:
     matcher: structural-json
     kind: vscode-task-autorun
     description: "VS Code task auto-running a command on folderOpen (executes on open)"
+    shown_as: "an editor task that hides itself and runs a command when the folder opens"
     remediation: remove-foreign-vscode
     confidence: confirmed
 
@@ -226,6 +247,7 @@ signatures:
     confidence: heuristic
     kind: vscode-task-autorun-visible
     description: "VS Code task set to run on folder open (ordinary configuration; review it if it is not yours)"
+    shown_as: "an editor task set to run when the folder opens; check it is yours"
     remediation: manual
 
   - id: vscode-task-runs-font
@@ -234,6 +256,7 @@ signatures:
     matcher: structural-json
     kind: vscode-task-runs-font
     description: "VS Code task whose command executes a font file via node"
+    shown_as: "an editor task that runs a disguised payload"
     remediation: remove-foreign-vscode
     confidence: confirmed
 
@@ -243,6 +266,7 @@ signatures:
     matcher: structural-json
     kind: vscode-allow-automatic-tasks
     description: "settings.json enables task.allowAutomaticTasks (required for folderOpen abuse)"
+    shown_as: "an editor setting that lets tasks run when the folder opens"
     remediation: remove-foreign-vscode
     confidence: confirmed
 
@@ -254,6 +278,7 @@ signatures:
     confidence: heuristic
     kind: claude-hook-autorun
     description: "Claude Code hook auto-runs a command on a lifecycle/open event (SessionStart etc.) — agent auto-execute foothold (review)"
+    shown_as: "a Claude Code hook that runs a command when Claude Code starts in this folder; check it is yours"
     remediation: manual
 
   - id: claude-hook-runs-payload
@@ -262,6 +287,7 @@ signatures:
     matcher: structural-json
     kind: claude-hook-runs-payload
     description: "Claude Code hook command executes a disguised payload (remote-fetch→interpreter, font/binary, or a known loader fingerprint)"
+    shown_as: "a Claude Code hook that runs a disguised payload when you use Claude Code in this folder"
     remediation: manual
     confidence: confirmed
 
@@ -273,6 +299,7 @@ signatures:
     pattern: 'temp_auto_push\.bat|temp_interactive_push\.bat|branch_structure\.json'
     file_globs: [".gitignore"]
     description: "Injected .gitignore markers for the worm's auto-push tooling"
+    shown_as: "entries a worm adds to .gitignore"
     remediation: strip-gitignore-markers
     confidence: confirmed
 
@@ -284,6 +311,7 @@ signatures:
     confidence: heuristic
     kind: evil-merge
     description: "Merge commit introducing content beyond a clean 3-way merge of its parents (review-evading)"
+    shown_as: "a merge commit that adds code of its own; check it"
     remediation: manual
   - id: evil-merge-loader
     category: evil-merge
@@ -292,6 +320,7 @@ signatures:
     confidence: confirmed
     kind: evil-merge
     description: "Merge commit smuggling a worm loader payload past review (introduced hunk matches a loader signature)"
+    shown_as: "a merge commit that slips in a hidden payload loader"
     remediation: manual
 
   # ── Shai-Hulud exfiltration / persistence branding (content) ─────────────────
@@ -302,6 +331,7 @@ signatures:
     pattern: 'Sha1-Hulud:\s*The Second Coming|A Mini Shai-Hulud has Appeared'
     prefilter: "hulud"   # cheap required-literal reject before the regex
     description: "Shai-Hulud exfil branding — attacker repo/commit vanity label (Second Coming / Mini variant)"
+    shown_as: "a mark a known worm leaves where it has run"
     remediation: manual
     confidence: confirmed
 
@@ -313,6 +343,7 @@ signatures:
     prefilter: "sha1hulud"   # cheap required-literal reject before the regex
     file_globs: [".github/**", "**/.github/**", ".runner", "**/.runner", "**/actions-runner/**", "*.service"]
     description: "Shai-Hulud persistence — self-hosted runner named SHA1HULUD in runner/workflow config"
+    shown_as: "a CI runner a known worm sets up to keep control"
     remediation: manual
     confidence: confirmed
 
@@ -324,6 +355,7 @@ signatures:
     pattern: 'Sha[i1]-Hulud'
     prefilter: "-hulud"   # cheap required-literal reject before the regex
     description: "Shai-Hulud vanity token (bare mention — heuristic; benign in security write-ups)"
+    shown_as: "a mention of a known worm"
     remediation: manual
 
   # ── Self-hosted runner persistence — committed install artifacts ─────────────────
@@ -334,6 +366,7 @@ signatures:
     confidence: heuristic
     pattern: '.runner'
     description: "Committed file named .runner — likely a self-hosted runner registration config (review)"
+    shown_as: "a file that looks like a self-hosted CI runner registration; check it is yours"
     remediation: remove-file
 
   - id: runner-registration-content
@@ -344,6 +377,7 @@ signatures:
     prefilter: "url"   # cheap required-literal reject before the regex
     file_globs: ['.runner', '**/.runner', '**/actions-runner/**']
     description: "Committed self-hosted runner registration (.runner with a live registration endpoint) — durable CI persistence foothold"
+    shown_as: "a self-hosted CI runner registration that keeps control of a machine"
     remediation: remove-file
     confidence: confirmed
 
@@ -354,6 +388,7 @@ signatures:
     confidence: heuristic
     pattern: '.credentials'
     description: "Committed .credentials file — pairs with a self-hosted runner install (review; benign alone)"
+    shown_as: "a committed file that looks like CI runner credentials; check it is yours"
     remediation: remove-file
 
   # ── npm install-time lifecycle-hook execution (package.json) ─────────────────
@@ -363,6 +398,7 @@ signatures:
     matcher: npm-manifest
     pattern: '\bsetup_bun\b'
     description: "npm lifecycle hook runs the setup_bun.js dropper (Shai-Hulud install-time exec)"
+    shown_as: "an install script that drops a known worm's payload"
     remediation: manual
     confidence: confirmed
     runs_on_this_machine: true
@@ -373,6 +409,7 @@ signatures:
     matcher: npm-manifest
     pattern: '\b(?:curl|wget)\b[^|]{0,2048}\|\s*(?:sh|bash|node|bun|bunx|deno)\b'
     description: "npm lifecycle hook pipes a remote fetch into an interpreter (curl|wget → sh/bun/node)"
+    shown_as: "an install script that runs code straight from the internet"
     remediation: manual
     confidence: confirmed
 
@@ -383,6 +420,7 @@ signatures:
     confidence: heuristic
     pattern: '\b(?:bun|bunx|deno|curl|wget)\b'
     description: "npm install-time lifecycle hook invokes Bun/Deno or a remote fetch (review)"
+    shown_as: "an install script that runs a download or another runtime; check it"
     remediation: manual
 
   - id: npm-lifecycle-agent-approval-disabled
@@ -391,6 +429,7 @@ signatures:
     matcher: npm-manifest
     pattern: '(?<![\w-])--(?:dangerously-skip-permissions|trust-all-tools)(?![\w-])'
     description: "npm install-time lifecycle hook runs a coding agent with its approval prompt switched off"
+    shown_as: "an install script that runs an AI assistant with its safety prompts switched off"
     remediation: manual
     confidence: confirmed
     runs_on_this_machine: true
@@ -402,6 +441,7 @@ signatures:
     confidence: heuristic
     pattern: '(?<![\w-])--yolo(?![\w-])'
     description: "npm install-time lifecycle hook passes an agent's unattended-run flag (review)"
+    shown_as: "an install script that may run an AI assistant unattended; check it"
     remediation: manual
 
   # ── Malicious upstream dependency (package.json + lockfiles, T1195.001) ───────────
@@ -410,6 +450,7 @@ signatures:
     severity: critical
     matcher: dependency-audit
     description: "Declared/locked dependency matches a known-malicious upstream package@version (T1195.001)"
+    shown_as: "a known-malicious package among the dependencies"
     remediation: manual
     corpus: true
     known_bad:
@@ -424,6 +465,7 @@ signatures:
     severity: critical
     matcher: installed-package-audit
     description: "A package INSTALLED on disk matches a known-malicious upstream package@version — caught even if the lockfile was not edited (T1195.001)"
+    shown_as: "a known-malicious package installed here"
     remediation: manual
     corpus: true          # reuses the SAME offline malware corpus as malicious-dependency (memoized)
     confidence: confirmed
@@ -434,6 +476,7 @@ signatures:
     matcher: installed-package-audit
     confidence: heuristic  # SUSPICIOUS — npm writes every install to the lockfile, so off-lockfile is
     description: "A package is present in the installed tree but absent from the lockfile — a postinstall may have dropped it off-lockfile"
+    shown_as: "an installed package the lockfile does not list; check it"
     remediation: manual
 
   - id: tampered-installed-package
@@ -442,6 +485,7 @@ signatures:
     matcher: installed-package-audit
     confidence: heuristic  # SUSPICIOUS — a byte mismatch vs the package's OWN RECORD sha256 is a strong
     description: "An installed file's bytes differ from its package's .dist-info/RECORD sha256 — modified after install (a payload injected into a dependency)"
+    shown_as: "an installed package whose files changed after it was installed; check it"
     remediation: manual
 
   - id: installed-lifecycle-hook
@@ -449,6 +493,7 @@ signatures:
     severity: critical
     matcher: installed-package-audit
     description: "An INSTALLED dependency's npm lifecycle hook runs a known install-time payload (setup_bun dropper or remote-fetch→interpreter) — invisible to the lockfile/root-manifest audit (T1195.001)"
+    shown_as: "an installed package whose install script runs a payload"
     remediation: manual
     confidence: confirmed
 
@@ -457,6 +502,7 @@ signatures:
     severity: critical
     matcher: installed-package-audit
     description: "An INSTALLED dependency's entry file (main/bin) carries a known code-loader fingerprint — a novel malicious package whose payload runs on require, invisible to the lockfile audit (T1195.001)"
+    shown_as: "an installed package that carries a hidden payload loader"
     remediation: manual
     confidence: confirmed
     runs_on_this_machine: true
@@ -467,6 +513,7 @@ signatures:
     severity: medium
     matcher: dependency-audit
     description: "Declared/locked dependency has a known security advisory (CVE/GHSA) — informational"
+    shown_as: "a dependency with a known vulnerability"
     remediation: manual
     advisory_corpus: true
     confidence: confirmed
@@ -479,6 +526,7 @@ signatures:
     confidence: heuristic
     kind: dangerous-trigger-run-injection
     description: "Workflow with an injection-prone trigger (pull_request_target/issue_comment/discussion/workflow_run) interpolates untrusted github.event.* into a run step (script injection / secret theft)"
+    shown_as: "a CI workflow that may run code from outsiders; check it"
     remediation: manual
 
   - id: workflow-dependabot-impersonation
@@ -488,6 +536,7 @@ signatures:
     confidence: heuristic
     kind: dependabot-impersonation
     description: "Workflow masquerading as Dependabot (name/filename) while using self-hosted runners, a remote-fetch-into-interpreter run step, or an untrusted-injection expression (T1036 camouflage)"
+    shown_as: "a CI workflow that may be posing as Dependabot"
     remediation: manual
 
   # ── Symlink escaping the repo root (traversal / scan-evasion anomaly) ─────────
@@ -497,6 +546,7 @@ signatures:
     matcher: symlink
     confidence: heuristic   # SUSPICIOUS — an anomaly, not a payload; legit escaping links exist
     description: "A symlink resolves OUTSIDE the repository root — hides code behind an un-followed link (followlinks=False) or escapes the repo (T1564 defense evasion). Contents behind the link stay unscanned."
+    shown_as: "a link that points outside the repository; check it"
     remediation: manual
 
   # ── Symlink redirecting a WRITE into a sensitive sink (GhostApproval / SymJacking, #1161) ──
@@ -506,6 +556,7 @@ signatures:
     matcher: symlink
     confidence: confirmed   # INFECTED — a committed symlink whose target is ~/.ssh, a shell startup
     description: "A committed symlink points at a sensitive write-target (SSH authorized_keys/keys, a shell/editor/REPL startup file, git/cloud/service credentials, a GPG keyring, a PATH executable dir, an OS-persistence directory such as LaunchAgents/systemd/cron, or what git itself runs). A tool or agent asked to write the link's path writes THROUGH it into that sink — the GhostApproval / SymJacking write-redirect (#1161)."
+    shown_as: "a link that points at a sensitive file outside the project"
     remediation: manual
 
   # ── What git itself runs for a repository ─────────────────────────────────────
@@ -514,6 +565,7 @@ signatures:
     severity: critical
     matcher: git-exec-surface
     description: "Something git runs for this repository carries or runs malicious code."
+    shown_as: "a command git runs for this repository that runs malicious code"
     remediation: remove-git-exec-payload
     confidence: confirmed
 
@@ -523,6 +575,7 @@ signatures:
     matcher: git-exec-surface
     confidence: heuristic   # SUSPICIOUS — review; not asserted as malware
     description: "Something git runs for this repository is configured the way malicious setups are. Review it."
+    shown_as: "a command git runs for this repository, set up the way malicious ones are; check it"
     remediation: manual
 
   - id: git-exec-runs
@@ -531,4 +584,5 @@ signatures:
     matcher: git-exec-surface
     confidence: informational   # reported on its own; never part of the verdict
     description: "A command git runs for this repository."
+    shown_as: "a command git runs for this repository"
     remediation: manual

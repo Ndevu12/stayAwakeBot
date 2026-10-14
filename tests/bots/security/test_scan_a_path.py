@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -49,10 +50,9 @@ def _signatures_reported(target: Path, about: str) -> set[str]:
     (cfgd / "c.yml").write_text("allowlist: []\n", encoding="utf-8")
     out = io.StringIO()
     with redirect_stdout(out), redirect_stderr(io.StringIO()):
-        service.scan(str(cfgd / "c.yml"), paths=[str(target)], no_stream=True)
-    return {line.split("]")[1].split()[0]
-            for line in out.getvalue().splitlines()
-            if "  • [" in line and about in line}
+        service.scan(str(cfgd / "c.yml"), paths=[str(target)], no_stream=True, json_out=True)
+    return {f["signature_id"] for r in json.loads(out.getvalue())["results"]
+            for f in r["findings"] if about in f["path"]}
 
 
 class TestWhatAPathResolvesTo(unittest.TestCase):
@@ -370,11 +370,11 @@ class TestTheKnownLossIsDisclosed(unittest.TestCase):
 
     def test_the_directory_scan_reports_it(self):
         # If this stops holding the fixture is dead and the test below proves nothing.
-        self.assertIn("ghost-package", self._report(self.d))
+        self.assertIn("an installed package the lockfile does not list", self._report(self.d))
 
     def test_naming_the_file_does_not_and_says_so(self):
         report = self._report(self.d / self.rel)
-        self.assertNotIn("ghost-package", report)
+        self.assertNotIn("an installed package the lockfile does not list", report)
         # Asserted against the note itself: "installed package" appears elsewhere in the report, so
         # searching the whole of it passed even with the note's wording gutted.
         note = self._one_file_note(report)
@@ -594,7 +594,7 @@ class TestATargetThatCarriesAVerdictIsNotAlsoRefused(unittest.TestCase):
         # stderr too: the terminal sink hides the error behind an INFECTED panel, so a
         # stdout-only assertion passed while the contradiction was still being emitted.
         everything = _report_of(pkg) + _stderr_of(pkg)
-        self.assertIn("symlink-escapes-repo", everything)
+        self.assertIn("a link that points outside the repository", everything)
         self.assertNotIn("carries no verdict", everything)
 
     def test_a_target_that_really_read_nothing_still_fails_closed(self):
