@@ -75,6 +75,9 @@ def declare(saw: str, config: str | None, hooks: Path | None = None,
     record = {"saw": saw, "config": config, "hooks": where}
     if folders:
         record["hooks_folders"] = folders
+    given = [str(f) for f in hooks_written()]
+    if given:
+        record["hooks_written"] = given
     try:
         if not atomicwrite.replace(path, json.dumps(record), mode=atomicwrite.AS_A_PLAIN_WRITE):
             return False
@@ -118,6 +121,33 @@ def installed_hooks_folders() -> list[Path]:
     data = _record()
     held = data.get("hooks_folders") if data else None
     return [Path(f) for f in held if isinstance(f, str) and os.path.isabs(f)] if isinstance(held, list) else []
+
+
+def hooks_written() -> list[Path]:
+    """Return every hooks directory of the person's, in a repository or a template folder, that
+    `saw hook install` wrote saw's hooks into."""
+    data = _record()
+    held = data.get("hooks_written") if data else None
+    return [Path(f) for f in held if isinstance(f, str) and os.path.isabs(f)] if isinstance(held, list) else []
+
+
+def remember_hooks_written(folders: list[Path]) -> bool:
+    """Add hooks directories saw's hooks were written into to the record of what was installed.
+    Takes them. Returns True when the record reads back with them."""
+    if not folders:
+        return True
+    data = _record()
+    if data is None:
+        return False
+    held = [str(f) for f in hooks_written()]
+    held += [str(f) for f in folders if str(f) not in held]
+    data["hooks_written"] = held
+    try:
+        if not atomicwrite.replace(declaration_path(), json.dumps(data), mode=atomicwrite.AS_A_PLAIN_WRITE):
+            return False
+    except OSError:
+        return False
+    return [str(f) for f in hooks_written()] == held
 
 
 def forget() -> None:
@@ -314,6 +344,16 @@ def repository_hooks_dir(repo: Path) -> Path | None:
         return None
     path = Path(os.path.expanduser(answer))
     return path if path.is_absolute() else Path(os.path.normpath(repo / path))
+
+
+def repository_own_hooks_dir(repo: Path) -> Path | None:
+    """Return the hooks directory inside `repo`'s own git directory, whatever `core.hooksPath` says, or
+    None when git cannot say."""
+    answer = _ask(repo, ["rev-parse", "--git-common-dir"]).strip()
+    if not answer:
+        return None
+    path = Path(os.path.expanduser(answer))
+    return (path if path.is_absolute() else Path(os.path.normpath(repo / path))) / "hooks"
 
 
 def _ask(repo: Path, args: list[str]) -> str:

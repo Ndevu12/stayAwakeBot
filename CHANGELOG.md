@@ -138,6 +138,12 @@ reader, not the mechanism or the weakness it closed.
   partway through one, as in a `.gitignore` finding that showed `ode_modules`. An allowlist entry that
   names such a finding's `evidence` needs the new text; until it is updated, the finding is reported
   again.
+- **`saw hook` says what it did.** `saw hook install`, `repair` and `uninstall` say what they did in a
+  line for each kind of change, with the command to run for what is left. `saw hook install` says when
+  a folder you named does not exist or holds no repository. `saw hook uninstall` also takes saw's hooks
+  out of the repositories you gave them to or they have run in, and puts back the hooks of yours they
+  ran before. When a check by saw's hooks could not finish, the warning says the repository or push is
+  not known to be clean.
 - **A scan that finds, in a folder on this machine, an install script that drops a known payload or
   runs an AI assistant without asking, or a known-malicious package says it may already have run and
   to run `saw audit` now**, as it already did for a code loader.

@@ -233,7 +233,7 @@ class TestTheOperatorsHookIsSetAsideAsItWas(_Sandbox):
         self.assertEqual(0o600, (self.elsewhere / "secret").stat().st_mode & 0o777)
         self.assertTrue((hooks / "post-checkout").exists())
         self.assertFalse((hooks / "post-checkout.local").exists())
-        self.assertIn("left as it is", " ".join(a.detail for a in actions))
+        self.assertIn((hook.UNVERIFIED, hook.NOT_PUT_IN_PLACE), [(a.state, a.kind) for a in actions])
 
 
 class TestARefusedReportPathKeepsTheScan(_Sandbox):
