@@ -119,8 +119,8 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
             nm = Path(root) / "node_modules"
             if nm.is_dir() and any(nm.iterdir()):        # present AND non-empty (nothing to note if bare)
                 result.notes.append(
-                    "node_modules was not content-scanned (only dependency entry points + identity). "
-                    "Run `saw scan --deep` to scan vendored code for loader payloads.")
+                    "To also scan every file of the packages installed in node_modules, run "
+                    "`saw scan --deep`.")
         except OSError:
             pass
     if root is not None:

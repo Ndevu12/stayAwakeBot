@@ -272,7 +272,7 @@ class TestTheReportCannotBeAimedByWhoeverCommitted(GitSandbox):
         note = "1 path(s) still STORE a confirmed payload: " + hostile
         payload = ScanReport("t", [ScanResult("acme/widget", "local", notes=[note])]).to_payload()
         out = render_terminal(payload, detail=True)
-        self.assertIn("Coverage notes", out, "the note really did render")
+        self.assertIn("Notes:", out, "the note really did render")
         self.assertNotIn("\x1b", out, "an escape sequence reached the terminal raw")
 
     def test_a_path_holding_a_vertical_tab_is_not_truncated(self):

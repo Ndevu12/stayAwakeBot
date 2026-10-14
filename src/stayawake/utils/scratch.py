@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -70,7 +71,7 @@ def kept_dir(purpose: str) -> Path:
     Returns the path."""
     base = root() / KEPT / _slug(purpose)
     base.mkdir(parents=True, exist_ok=True)
-    made = Path(tempfile.mkdtemp(dir=str(base)))
+    made = Path(tempfile.mkdtemp(dir=str(base), prefix=time.strftime("%Y-%m-%d-%H%M%S-")))
     _areas.append(Area(made, purpose, None, True))
     return made
 

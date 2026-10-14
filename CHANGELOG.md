@@ -298,6 +298,10 @@ reader, not the mechanism or the weakness it closed.
   commit, with a short preview of what was found. The warning lists confirmed findings first and says
   not to start an AI coding assistant in the clone. `saw scan --json` gives each finding's `signature`
   and full evidence for an allowlist entry.
+- **The end of `saw scan` is shorter.** A note several repositories share is shown once with the
+  repositories it is about, SUSPECT and residue are said in plain words, the note on installed
+  packages names `saw scan --deep`, and the full report is pointed at in a few lines, in a folder
+  named by when it was written.
 - **`saw harden`'s result says where this machine stands and what to run.** Its first line says
   whether code is still running, which controls are not in place, or that every control is in
   place; each line after it names the command that acts on it.

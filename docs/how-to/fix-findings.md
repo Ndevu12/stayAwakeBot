@@ -69,7 +69,7 @@ git show HEAD~1:postcss.config.mjs   # still returns the old contents
 ```
 
 That is residue, not execution — nothing runs it on clone or build. `saw scan` says so in its
-coverage notes rather than letting `clean` imply the repository has no trace of it.
+notes rather than letting `clean` imply the repository has no trace of it.
 
 `saw fix amend` is the history act. It replaces past commits the payload has already propagated
 into and force-updates each branch they sat on. That force-update is the fix. The replaced
