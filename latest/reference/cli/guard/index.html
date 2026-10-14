@@ -1990,7 +1990,7 @@ so a decorative gate cannot answer for a live one.</p>
 </table>
 <h2 id="saw-guard-setup"><code>saw guard setup</code><a class="headerlink" href="#saw-guard-setup" title="Permanent link">&para;</a></h2>
 <p>Install the gate, or surgically bump an existing pin, across the resolved repositories. It resolves
-the latest Strix release to a commit SHA and the latest scanner release to a version, then writes the
+the latest worm-guard release to a commit SHA and the latest scanner release to a version, then writes the
 workflow described below. When a gate already exists it rewrites only that <code>uses:</code> reference and
 leaves the rest of the file untouched — unless the gate is configured so it cannot report what it
 finds, which is repaired. It is idempotent, fails closed if either release cannot be resolved, and
@@ -2059,7 +2059,7 @@ lost.</p>
 </tr>
 <tr>
 <td><code>--ref SHA\|TAG</code></td>
-<td>Pin this Strix ref explicitly instead of resolving the latest release — offline and deterministic. A tag is resolved to its immutable SHA.</td>
+<td>Pin this worm-guard ref explicitly instead of resolving the latest release — offline and deterministic. A tag is resolved to its immutable SHA.</td>
 </tr>
 <tr>
 <td><code>-b</code>, <code>--branch</code></td>

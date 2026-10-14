@@ -1796,9 +1796,10 @@
 <h1 id="saw-doctor"><code>saw doctor</code><a class="headerlink" href="#saw-doctor" title="Permanent link">&para;</a></h1>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw doctor [--json] [-q] [--no-stream]
 </code></pre></div>
-<p>Confirms <code>saw</code> resolves to this installation, reports the active credential and whether it can open
-fix and guard PRs, and confirms the health entry points are installed. <code>saw auth status</code> carries the
-full capability matrix. <code>-q</code> prints only problems.</p>
+<p>Checks that <code>saw</code> runs this copy, which GitHub credential it uses and whether that credential can
+open fix and guard pull requests, whether a saw GitHub App is set up, and that saw's CI health tools
+are installed. When the credential is missing or cannot open pull requests, it names the command to
+run. <code>saw auth status</code> shows everything the credential can do. <code>-q</code> prints only problems.</p>
 
 
 
