@@ -146,7 +146,7 @@ signatures:
     severity: critical
     matcher: heuristic
     kind: magic-byte-masquerade
-    file_globs: ["*.woff", "*.woff2", "*.ttf", "*.otf"]
+    file_globs: ["*.woff", "*.woff2", "*.ttf", "*.otf", "*.eot"]
     description: "Font file whose bytes are actually JavaScript/text (disguised payload)"
     shown_as: "a payload disguised as a font file"
     remediation: remove-file
@@ -184,7 +184,7 @@ signatures:
     confidence: heuristic
     kind: whitespace-concealment
     file_globs: ["*.mjs", "*.cjs", "*.js", "*.jsx", "*.ts", "*.tsx", "*.vue", "*.svelte", "*.json",
-                 "*.woff2", "*.woff", "*.ttf", "*.otf"]
+                 "*.woff2", "*.woff", "*.ttf", "*.otf", "*.eot"]
     description: "Content concealed behind a long whitespace run or zero-width/bidi-control characters (off-screen hiding)"
     shown_as: "content that may be hidden off-screen or behind invisible characters"
     remediation: manual
