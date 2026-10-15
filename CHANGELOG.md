@@ -152,6 +152,9 @@ reader, not the mechanism or the weakness it closed.
   keeps itself in sight, such as a background watch task in its own terminal, is reported for you to
   check. A task that hides itself is still reported as infected. A task file with a setting of an
   unexpected kind no longer stops the scan.
+- **An editor setting that lets tasks run when the folder opens is for you to check.** In an ordinary
+  project it is reported as something to check by hand, not as infected, including beside a task that
+  stays in sight. The known implant's settings still read infected and `saw fix` still takes them out.
 - **A routine cleanup of your home folder is not a home wipe.** A command that tidies up stray files,
   such as `.DS_Store`, is no longer reported as code that destroys your files. Code that wipes your
   home folder is still reported as infected.
