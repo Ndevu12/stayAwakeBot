@@ -418,13 +418,15 @@ signatures:
 
   - id: npm-lifecycle-remote-fetch
     category: npm-lifecycle
-    severity: critical
+    severity: high
     matcher: npm-manifest
     pattern: '\b(?:curl|wget)\b[^|]{0,2048}\|\s*(?:sh|bash|node|bun|bunx|deno)\b'
-    description: "npm lifecycle hook pipes a remote fetch into an interpreter (curl|wget → sh/bun/node)"
-    shown_as: "an install script that runs code straight from the internet"
+    description: "npm lifecycle hook pipes a remote fetch into an interpreter (curl|wget → sh/bun/node) (review)"
+    shown_as: "an install script that runs code straight from the internet; check it"
     remediation: manual
-    confidence: confirmed
+    confidence: heuristic
+    confidence_when_installed: confirmed
+    severity_when_installed: critical
 
   - id: npm-lifecycle-exec
     category: npm-lifecycle

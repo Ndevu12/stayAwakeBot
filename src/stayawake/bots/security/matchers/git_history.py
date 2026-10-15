@@ -10,6 +10,7 @@ from stayawake.bots.security.models import Finding, Severity, CONFIRMED, HEURIST
 from stayawake.bots.security.matchers.base import Matcher, build_confirmed_loader_check, globs_ok
 from stayawake.bots.security.matchers.content import matching_signatures
 from stayawake.bots.security.matchers.npm_manifest import lifecycle_scripts
+from stayawake.bots.security.dependencies.installed import stated_at
 from stayawake.lib.git.merge import ReadBudget
 from stayawake.lib.git.merge.liveness import (introduced_liveness, describe,
                                               PRESENT, CHANGED, GONE, UNKNOWN)
@@ -49,7 +50,7 @@ def _merge_payload_check(signatures, left_out=frozenset()):
                if s.get("matcher") == "content" and s.get("pattern") and s.get("confidence") == CONFIRMED]
     scripts = [(s, re.compile(s["pattern"], re.IGNORECASE)) for s in signatures
                if s.get("matcher") == "npm-manifest" and s.get("pattern")
-               and s.get("confidence") == CONFIRMED]
+               and CONFIRMED in (s.get("confidence"), s.get("confidence_when_installed"))]
 
     def check(path, merged, earlier, held_by_a_parent):
         try:
@@ -66,8 +67,10 @@ def _merge_payload_check(signatures, left_out=frozenset()):
         carried = matching_signatures(merged, scoped)
         run = []
         if scripts and path.rsplit("/", 1)[-1] == "package.json":
+            graded = [(sig, rx) for sig, rx in scripts
+                      if stated_at(sig, "confidence", path) == CONFIRMED]
             for _key, cmd in lifecycle_scripts(merged):
-                run += [(cmd, sig, m) for sig, rx in scripts for m in [rx.search(cmd)] if m]
+                run += [(cmd, sig, m) for sig, rx in graded for m in [rx.search(cmd)] if m]
         if not carried and not run:
             return None
         before = earlier()

