@@ -409,7 +409,7 @@ class TestNamingADirectoryLosesNoDetection(unittest.TestCase):
         wf = d / ".github" / "workflows"
         wf.mkdir(parents=True)
         (wf / "ci.yml").write_text(
-            samples.joined('jobs:\n  b:\n    runs-on: [self-hosted, SHA1', 'HULUD]\n    steps: []\n'),
+            samples.joined('jobs:\n  b:\n    runs-on: [self-hosted, ', samples.RUNNER_NAME, ']\n    steps: []\n'),
             encoding="utf-8")
         return d
 
@@ -556,7 +556,7 @@ class TestWherePathsAreMeasuredFrom(unittest.TestCase):
         wf = d / ".github" / "workflows"
         wf.mkdir(parents=True)
         (wf / "ci.yml").write_text(
-            samples.joined('jobs:\n  b:\n    runs-on: [self-hosted, SHA1', 'HULUD]\n    steps: []\n'),
+            samples.joined('jobs:\n  b:\n    runs-on: [self-hosted, ', samples.RUNNER_NAME, ']\n    steps: []\n'),
             encoding="utf-8")
         return d
 
@@ -882,7 +882,7 @@ class TestAScopeThatCannotBeSureDoesNotSayClean(unittest.TestCase):
         wf = d / ".github" / "workflows"
         wf.mkdir(parents=True)
         (wf / "ci.yml").write_text(
-            samples.joined('jobs:\n  b:\n    runs-on: [self-hosted, SHA1', 'HULUD]\n    steps: []\n'),
+            samples.joined('jobs:\n  b:\n    runs-on: [self-hosted, ', samples.RUNNER_NAME, ']\n    steps: []\n'),
             encoding="utf-8")
         return d
 

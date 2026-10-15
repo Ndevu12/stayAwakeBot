@@ -18,10 +18,10 @@ _SEEN_IN_ORDINARY_PROJECTS = ("vscode-task-folderopen-exec", "vscode-allow-autom
                               "claude-hook-runs-payload", "git-exec-payload",
                               "npm-lifecycle-remote-fetch", "installed-lifecycle-hook",
                               "disguised-binary-file", "destructive-home-wipe")
-_NOT_RUN_BY_OPENING_IT = ("evil-merge-loader", "evil-merge-payload", "exfil-worm-runner",
+_NOT_RUN_BY_OPENING_IT = ("evil-merge-loader", "evil-merge-payload", "known-worm-runner",
                           "runner-registration-content",
                           "camouflage-blockchain-readme", "gitignore-autopush-markers",
-                          "exfil-worm-branding", "symlink-write-redirect")
+                          "known-worm-branding", "symlink-write-redirect")
 
 
 def _signature(signature_id):
