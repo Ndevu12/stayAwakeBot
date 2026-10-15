@@ -13,12 +13,50 @@ import re
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, load_jsonc, build_confirmed_loader_check, REMOTE_FETCH_INTO_INTERPRETER)
-from stayawake.bots.security.matchers.editor_task import command_lines, named
+from stayawake.bots.security.matchers.command_shape import not_plain
+from stayawake.bots.security.matchers.editor_task import command_lines, command_text, named
 
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
 
 _REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
-_FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf)\b", re.IGNORECASE)
+_FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf|eot)\b", re.IGNORECASE)
+_EDITOR_VARIABLE = re.compile(r"\$\{[^${}\s]{1,200}\}")
+_EXECUTABLE_SUFFIX = re.compile(r"\.(?:exe|cmd|bat)$", re.IGNORECASE)
+
+
+def _one_call_of_a_font_tool(line: str, font_tools: frozenset[str]) -> bool:
+    """Tell whether a command line is one plain call of a font tool named without a path. Takes the line
+    and the font tools' names. Returns the answer."""
+    plain = _EDITOR_VARIABLE.sub("variable", line)
+    words = plain.split()
+    if not words or not_plain(plain):
+        return False
+    return _EXECUTABLE_SUFFIX.sub("", words[0]).lower() in font_tools
+
+
+def _changes_what_a_name_runs(task: dict, task_file: dict) -> bool:
+    """Tell whether a task or its file sets the environment or the shell its commands run with, for any
+    platform. Takes the task and the task file it sits in. Returns the answer."""
+    for scope in (task, task_file):
+        for part in (scope, *(scope.get(platform) for platform in ("osx", "linux", "windows"))):
+            options = part.get("options") if isinstance(part, dict) else None
+            if isinstance(options, dict) and ("env" in options or "shell" in options):
+                return True
+    return False
+
+
+def _font_named_by(task: dict, task_file: dict, font_tools: frozenset[str]) -> str | None:
+    """Return the first command line of a task that names a font file and is not one plain call of a font
+    tool; the task's command as written counts as a line when the editor cannot read it. Takes the task,
+    the task file it sits in and the font tools' names. Returns the line, or None."""
+    lines = command_lines(task, task_file)
+    written = task.get("command")
+    if written is not None and command_text(written) is None:
+        lines.append(str(written))
+    if _changes_what_a_name_runs(task, task_file):
+        font_tools = frozenset()
+    return next((line for line in lines
+                 if _FONT_EXEC.search(line) and not _one_call_of_a_font_tool(line, font_tools)), None)
 
 
 def _conceals_itself(task: dict) -> bool:
@@ -71,6 +109,8 @@ class StructuralJsonMatcher(Matcher):
 
     def _inspect(self, rel, base, data, by_kind):
         out = []
+        runs_font_signature = by_kind.get("vscode-task-runs-font", {})
+        font_tools = frozenset(str(name).lower() for name in runs_font_signature.get("font_tools", ()))
         for task in self._tasks(data):
             run_options = task.get("runOptions")
             run_on = run_options.get("runOn") if isinstance(run_options, dict) else None
@@ -84,8 +124,7 @@ class StructuralJsonMatcher(Matcher):
                 if kind in by_kind:
                     out.append(self._emit(by_kind[kind], rel,
                                           f"task '{task.get('label','?')}' runOn=folderOpen"))
-            runs_font = next((line for line in (str(task.get("command", "")), *command_lines(task, data))
-                              if _FONT_EXEC.search(line)), None)
+            runs_font = _font_named_by(task, data, font_tools)
             if runs_font is not None and "vscode-task-runs-font" in by_kind:
                 out.append(self._emit(by_kind["vscode-task-runs-font"], rel, runs_font[:90]))
         if base == "settings.json" and "vscode-allow-automatic-tasks" in by_kind:
