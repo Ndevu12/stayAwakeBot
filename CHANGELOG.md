@@ -133,6 +133,8 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **A payload saved as an Embedded OpenType font is found.** A `.eot` file that holds code instead of a
+  font now reads as a disguised payload, as the other font formats do; a real `.eot` font reads clean.
 - **An editor task that runs a disguised payload is found however the task file sets the command it
   runs**, including the settings for one platform and the command a task file sets for all its tasks.
 - **An editor task that hands a font file to a font tool is not a disguised payload.** A task that

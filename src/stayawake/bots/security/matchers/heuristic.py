@@ -118,9 +118,9 @@ class HeuristicMatcher(Matcher):
         """
 
         ext = "." + rel.rsplit(".", 1)[-1].lower() if "." in rel else ""
-        magic = FONT_MAGIC.get(ext) or BINARY_MAGIC.get(ext)
+        offset, magic = FONT_MAGIC.get(ext) or BINARY_MAGIC.get(ext) or (0, b"")
         raw = target.read_bytes(rel, limit=512)
-        if not raw or not magic or raw.startswith(magic):
+        if not raw or not magic or raw[offset:offset + len(magic)] == magic:
             return None
         texty = sum(1 for b in raw[:256] if 9 <= b <= 126) > 200
         has_js = any(tok in raw for tok in (b"function", b"var ", b"=>", b"require", b"global"))

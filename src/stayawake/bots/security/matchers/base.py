@@ -17,14 +17,14 @@ from stayawake.bots.security.jsonc import load_jsonc  # noqa: F401  (re-export)
 from stayawake.bots.security.models import HEURISTIC
 
 FONT_MAGIC = {
-    ".woff2": b"wOF2", ".woff": b"wOFF",
-    ".ttf": b"\x00\x01\x00\x00", ".otf": b"OTTO",
+    ".woff2": (0, b"wOF2"), ".woff": (0, b"wOFF"),
+    ".ttf": (0, b"\x00\x01\x00\x00"), ".otf": (0, b"OTTO"), ".eot": (34, b"LP"),
 }
 
 BINARY_MAGIC = {
-    ".png": b"\x89PNG\r\n\x1a\n", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff",
-    ".gif": b"GIF8", ".webp": b"RIFF", ".bmp": b"BM", ".ico": b"\x00\x00\x01\x00",
-    ".wasm": b"\x00asm", ".pdf": b"%PDF-",
+    ".png": (0, b"\x89PNG\r\n\x1a\n"), ".jpg": (0, b"\xff\xd8\xff"), ".jpeg": (0, b"\xff\xd8\xff"),
+    ".gif": (0, b"GIF8"), ".webp": (0, b"RIFF"), ".bmp": (0, b"BM"), ".ico": (0, b"\x00\x00\x01\x00"),
+    ".wasm": (0, b"\x00asm"), ".pdf": (0, b"%PDF-"),
 }
 
 REMOTE_FETCH_INTO_INTERPRETER = re.compile(
