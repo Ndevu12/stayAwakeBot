@@ -67,7 +67,7 @@ signatures:
     severity: critical
     matcher: content
     pattern: "global\\[\\s*['\"]_V['\"]\\s*\\]\\s*="
-    prefilter: "global['_v'"   # cheap required-literal reject before the regex
+    prefilter: "global["   # cheap required-literal reject before the regex
     description: "Loader bootstrap assigning the global['_V'] marker"
     shown_as: "the start of a hidden payload loader"
     remediation: recover
