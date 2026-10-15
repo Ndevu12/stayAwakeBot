@@ -78,8 +78,8 @@ signatures:
     category: code-loader
     severity: high
     matcher: content
-    pattern: 'failed to run clientCode'
-    prefilter: "failed to run clientcode"   # cheap required-literal reject before the regex
+    pattern: 'failed to run clien[t]Code'
+    prefilter: "run clientcode"   # cheap required-literal reject before the regex
     confidence: heuristic
     description: "Obfuscated loader status string reported to its operator channel"
     shown_as: "code that looks like it reports to whoever runs a payload"
@@ -338,7 +338,7 @@ signatures:
     category: exfil
     severity: critical
     matcher: content
-    pattern: 'Sha1-Hulud:\s*The Second Coming|A Mini Shai-Hulud has Appeared'
+    pattern: 'Sha1-Hul[u]d:\s*The Second Coming|A Mini Shai-Hul[u]d has Appeared'
     prefilter: "hulud"   # cheap required-literal reject before the regex
     description: "A known worm's exfiltration branding: the label it puts on the repository or commit it publishes"
     shown_as: "a mark a known worm leaves where it has run"

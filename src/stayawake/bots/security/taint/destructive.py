@@ -29,8 +29,8 @@ _TRAVERSAL = re.compile(r"(?:^|[/\\])\.\.(?:[/\\]|$)")
 _COMMENT_LINE = re.compile(r"^[ \t]*#(?:[ \t#][^\n]{0,4000}|$)", re.MULTILINE)
 
 _ROOT_WIPE = re.compile(
-    r"\brm\s+-[a-z]*(?:rf|fr)[a-z]*\s+/(?:\s|$|['\"])"          # rm -rf /
-    r"|\brimraf\s*\(\s*['\"]/['\"]"                            # rimraf("/")
+    r"\brm\s+-[a-z]*(?:rf|fr)[a-z]*\s+/(?:\s|$|['\"])"          # a recursive delete of the root, in a shell
+    r"|\brimraf\s*\(\s*['\"]/['\"]"                            # the same through rimraf
     r"|\brmSync\s*\(\s*['\"]/['\"]", re.IGNORECASE)
 
 # ── The corroborated core: a destructive op ROOTED AT HOME. The home token must appear INSIDE the

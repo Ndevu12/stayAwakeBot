@@ -25,6 +25,7 @@ from stayawake.bots.security import livecode
 from stayawake.bots.security.livecode import LiveCode
 from stayawake.utils import elevate, operator, procsnap, procstop, streaming
 from stayawake.utils.procsnap import Identity, Process, Snapshot
+from tests.support import samples
 
 _NEEDS_POSIX_NONROOT = (os.name == "posix"
                         and not (hasattr(os, "geteuid") and os.geteuid() == 0))
@@ -499,7 +500,7 @@ class TestASpinnerStaysOffTheTerminalWhileHeld(unittest.TestCase):
 def _the_known_implant():
     """Code the signature corpus identifies, assembled from split tokens so this file holds no
     contiguous indicator."""
-    return "glo" + "bal['_V']='0';var t=1;"
+    return samples.joined("glo", "bal['_V']='0';var t=1;")
 
 
 class TestTheKnownImplantIsAlwaysStopped(unittest.TestCase):

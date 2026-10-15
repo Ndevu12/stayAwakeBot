@@ -237,7 +237,7 @@ class TestItAsksTheCorpusItAlreadyShips(unittest.TestCase):
     def _identified() -> str:
         """Code carrying a confirmed marker, assembled from split tokens so this file holds no
         contiguous indicator."""
-        return "glo" + "bal['_V']='0';var t=1;"
+        return samples.joined("glo", "bal['_V']='0';var t=1;")
 
     def test_the_shape_engine_alone_does_not_see_it(self):
         # The control. Without it, the arm below could be passing on the shape engine's answer and
@@ -282,7 +282,7 @@ class TestItAsksTheCorpusItAlreadyShips(unittest.TestCase):
         self.assertTrue(livecode._known_loader(code))
 
     def test_a_newline_does_not_defeat_it(self):
-        code = "glo" + "bal['_V']='0';var t=1;"
+        code = samples.joined("glo", "bal['_V']='0';var t=1;")
         self.assertTrue(livecode._known_loader(code[:3] + "\n" + code[3:]))
 
     def test_a_corroborator_is_judged_on_the_flattened_text_too(self):
@@ -299,7 +299,7 @@ class TestItAsksTheCorpusItAlreadyShips(unittest.TestCase):
         # The tier restriction is the whole difference between "the corpus identified this" and
         # "something is shaped like it". The acting path is this builder's only consumer, so
         # nothing else in the suite can pin it.
-        heuristic = "console.error('failed to run client" + "Code: ' + err)"
+        heuristic = samples.joined("console.error('failed to run client", "Code: ' + err)")
         self.assertFalse(livecode._known_loader(heuristic))
 
     def test_a_command_line_that_merely_mentions_an_indicator_is_not_identified(self):
