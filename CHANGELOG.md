@@ -136,6 +136,7 @@ reader, not the mechanism or the weakness it closed.
 - **What deno or bun runs is what saw checks.** A running program or an entry that starts at login and
   runs a script with `deno run`, `deno serve` or `bun run`, code with `deno eval` or `bun --print`, or a
   program read from standard input is checked for that script, code or program.
+- **The first-scan guide says that a scan sends nothing anywhere and needs no token.**
 - **A payload saved as an Embedded OpenType font is found.** A `.eot` file that holds code instead of a
   font now reads as a disguised payload, as the other font formats do; a real `.eot` font reads clean.
 - **An editor task that runs a disguised payload is found however the task file sets the command it
