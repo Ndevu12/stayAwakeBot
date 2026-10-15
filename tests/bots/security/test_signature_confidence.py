@@ -12,7 +12,7 @@ from stayawake.bots.security.signatures import load_signatures
 GRADED_BELOW_CONFIRMED = {
     "claude-hook-autorun": "heuristic",
     "evil-merge": "heuristic",
-    "exfil-shai-hulud-token": "heuristic",
+    "exfil-worm-token": "heuristic",
     "fake-font-fa-solid-400": "heuristic",
     "ghost-package": "heuristic",
     "git-exec-runs": "informational",

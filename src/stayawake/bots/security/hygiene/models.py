@@ -38,7 +38,7 @@ class HygieneIssue:
 # --- incident-response sequencing (SAFETY: rotate credentials LAST) ---------
 #
 # Rotating a token while worm persistence is still live on a host can arm a reported
-# destructive tripwire: the Mini Shai-Hulud variant is reported to install a service
+# destructive tripwire: one known worm is reported to install a service
 # (gh-token-monitor.service) that WIPES the home directory when it detects credential
 # rotation (MITRE T1485). So the reflexive "rotate everything now" reaction is exactly
 # what turns containment into data loss — harden and neutralize persistence FIRST.

@@ -11,8 +11,8 @@ from stayawake.utils.pathsafe import grade
 from .models import HygieneIssue, _WIPER_NOTE, could_not_read
 
 #
-# Shai-Hulud 2.0 / Mini registers the compromised host as a self-hosted GitHub Actions
-# runner (reported name SHA1HULUD) so attacker workflows keep executing on the host —
+# A known worm registers the compromised host as a self-hosted GitHub Actions runner so
+# attacker workflows keep executing on the host —
 # surviving credential rotation and CI re-provisioning (T1543/T1546). Detection: an installed
 # runner dir with a `.runner` config, and/or a registered `actions.runner.*` service. (The
 # rotation-wiper OS service, gh-token-monitor, is a SEPARATE persistence artifact owned by

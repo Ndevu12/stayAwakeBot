@@ -323,8 +323,8 @@ signatures:
     shown_as: "a merge commit that slips in a hidden payload loader"
     remediation: manual
 
-  # ── Shai-Hulud exfiltration / persistence branding (content) ─────────────────
-  - id: exfil-shai-hulud-branding
+  # ── A known worm's exfiltration / persistence branding (content) ─────────────
+  - id: exfil-worm-branding
     category: exfil
     severity: critical
     matcher: content
@@ -335,7 +335,7 @@ signatures:
     remediation: manual
     confidence: confirmed
 
-  - id: exfil-sha1hulud-runner
+  - id: exfil-worm-runner
     category: exfil
     severity: critical
     matcher: content
@@ -347,7 +347,7 @@ signatures:
     remediation: manual
     confidence: confirmed
 
-  - id: exfil-shai-hulud-token
+  - id: exfil-worm-token
     category: exfil
     severity: high
     matcher: content
