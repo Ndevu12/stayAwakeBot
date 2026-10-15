@@ -24,7 +24,7 @@ def register(sub) -> None:
             "config, and can never break a git command."),
         examples=[
             ("saw hook install", "future clones/pulls are scanned"),
-            ("saw hook status", "is it active? where is its state?"),
+            ("saw hook status", "are the hooks in place?"),
             ("saw hook uninstall", "stop scanning future clones"),
         ])
     p.set_defaults(func=lambda a: (p.print_help() or 0))
@@ -54,8 +54,9 @@ def register(sub) -> None:
     un = add_command(
         hsub, "uninstall",
         help="remove the scan-on-clone git hooks",
-        description="Reverse `saw hook install`: remove saw's hooks and restore any hook of yours "
-                    "they ran before. Repositories already cloned keep the hooks they have.",
+        description="Reverse `saw hook install`: remove saw's hooks, from new clones and from the "
+                    "repositories you gave them to or they have run in, and restore any hook of yours "
+                    "they ran before.",
         examples=[
             ("saw hook uninstall", "stop scanning future clones"),
         ])
@@ -78,7 +79,7 @@ def register(sub) -> None:
         description="Report whether saw's hooks are in place and will run, and warn when something "
                     "would stop them.",
         examples=[
-            ("saw hook status", "is it active, and where is its state?"),
+            ("saw hook status", "are the hooks in place, and will they run?"),
         ])
     stt.set_defaults(func=run_status)
 

