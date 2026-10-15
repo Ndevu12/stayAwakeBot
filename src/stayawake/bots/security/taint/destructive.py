@@ -49,6 +49,21 @@ _WALK_HOME = re.compile(
     r"(?:\breaddir(?:Sync)?\s*\(|\bwalk(?:Sync)?\s*\(|\bglob(?:Sync)?\s*\(|\bklaw\s*\("
     r"|\blistdir\s*\(|\bscandir\s*\(|\biterdir\s*\(\s*\)|\bfind\s+)"
     + _W + _HOME, re.IGNORECASE)
+_CLEANUP_ROOT_CLOSE = re.compile(r"/?[\"']?")
+_CLEANUP_STEP = re.compile(
+    r"[ \t]{1,20}(?:(?P<name>-i?name[ \t]{1,20}(?:'[A-Za-z0-9._@+-]{1,200}'|\"[A-Za-z0-9._@+-]{1,200}\""
+    r"|[A-Za-z0-9._@+-]{1,200}))"
+    r"|(?P<files>-type[ \t]{1,20}f)"
+    r"|(?P<narrows>-(?:max|min)depth[ \t]{1,20}[0-9]{1,4}|-xdev|-mount|-depth|-print0?)"
+    r"|(?P<deletes>-delete)"
+    r"|(?P<removes>-exec[ \t]{1,20}rm(?:[ \t]{1,20}-[fiv]{1,3}){0,3}[ \t]{1,20}\{\}[ \t]{1,20}"
+    r"(?:\\{1,2};|';'|\";\"|\+))"
+    r"|(?P<hands_to_rm>\|[ \t]{0,20}xargs(?:[ \t]{1,20}(?:-0|-r|--null|--no-run-if-empty)){0,3}"
+    r"[ \t]{1,20}rm(?:[ \t]{1,20}-[fiv]{1,3}){0,3})"
+    r"|(?P<quiet>[0-9]?>[ \t]{0,20}(?:/dev/null|&[0-9])))")
+_CLEANUP_END = re.compile(r"[ \t]{0,20}(?:$|[\r\n;|&)`'\"#])")
+_CLEANUP_STEPS_MAX = 12
+_CLEANUP_REMOVALS = ("deletes", "removes", "hands_to_rm")
 _DELETE = re.compile(
     r"\bunlink(?:Sync)?\s*\(|\brmSync\s*\(|\brmdir(?:Sync)?\s*\(|\brimraf\b"
     r"|\bshutil\s*\.\s*rmtree\s*\(|\bremovedirs\s*\(|\bos\s*\.\s*remove\s*\("
@@ -87,6 +102,26 @@ def _targets_home(text: str, hit: re.Match) -> bool:
     home reference inside it does."""
     return any(_reaches_home_itself(text, token.end())
                for token in _HOME_ROOT.finditer(text, hit.start(), hit.end()))
+
+
+def _named_file_cleanup_end(text: str, walk: re.Match) -> int | None:
+    """Find where a walk of home ends when it is one `find` command that removes only the files of
+    one exact name. Takes the text and the walk. Returns the offset just after that command, or None
+    when the walk is not one."""
+    at = _CLEANUP_ROOT_CLOSE.match(text, walk.end()).end()
+    steps: list[str] = []
+    while len(steps) < _CLEANUP_STEPS_MAX:
+        step = _CLEANUP_STEP.match(text, at)
+        if step is None:
+            break
+        steps.append(step.lastgroup)
+        at = step.end()
+    removals = [i for i, kind in enumerate(steps) if kind in _CLEANUP_REMOVALS]
+    if steps.count("name") != 1 or len(removals) != 1 or not _CLEANUP_END.match(text, at):
+        return None
+    if steps[removals[0]] == "deletes" and "files" not in steps[:removals[0]]:
+        return None
+    return at
 
 
 def _without_comment_lines(text: str) -> str:
@@ -230,7 +265,8 @@ def _walks_home_and_deletes(text: str) -> bool:
     for walk in _WALK_HOME.finditer(text):
         if not _targets_home(text, walk):
             continue
-        for delete in _DELETE.finditer(text, walk.end()):
+        after_cleanup = _named_file_cleanup_end(text, walk) or walk.end()
+        for delete in _DELETE.finditer(text, after_cleanup):
             gap = text[walk.end():delete.start()]
             if len(gap) > _MAX_WALK_TO_DELETE:
                 break                       # deletes are found in order; the rest are further still
