@@ -17,7 +17,7 @@ from pathlib import Path
 from stayawake.bots.security.matchers.content import ContentMatcher
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets.base import ScanOptions, Target
-from tests.support import samples
+from tests.support import pattern_samples, samples
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -32,6 +32,16 @@ class TestContentPrefilter(unittest.TestCase):
         self.assertTrue(any(s.get("prefilter") for s in sigs),
                         "no content-signature prefilters present — nothing to guard")
         return sigs
+
+    def test_every_text_a_pattern_matches_holds_its_prefilter(self):
+        for s in self._content_sigs():
+            if not s.get("prefilter"):
+                continue
+            with self.subTest(signature=s["id"]):
+                matched = pattern_samples.matching_texts(s["pattern"], seed=1142)
+                self.assertTrue(matched, f"{s['id']}: no text was built that its pattern matches")
+                skipped = [t for t in matched if s["prefilter"] not in t.lower()]
+                self.assertEqual(skipped, [], f"{s['id']}: its prefilter skips text its pattern matches")
 
     def test_prefilters_are_lowercase(self):
         # The check is `prefilter not in text.lower()`, so a non-lowercase literal could never match

@@ -133,6 +133,8 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **saw reads a known loader's marker as an infection however it is quoted or spaced.** Written with
+  double quotes, or with spaces inside its brackets, it was read only as something to check.
 
 - **An issue or pull request that lists findings says how many more there are.** The issue saw opens
   for an infected repository, the issue it opens when it cannot open a fix, and the fix pull request's
