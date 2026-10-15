@@ -316,8 +316,10 @@ def judge(surface: ExecSurface, payload_check, max_bytes: int) -> list[Judgement
 
 def payload_check_for(signatures, *, holding_anywhere: bool = False) -> object:
     """Build the confirmed-payload check the grading uses. Takes every signature and
-    `holding_anywhere` (see `build_any_payload_check`). Returns it."""
-    return build_any_payload_check([s for s in signatures if s.get("matcher") == "content"],
+    `holding_anywhere` (see `build_any_payload_check`). Leaves out a signature that means something only
+    in its own files (`only_in_its_own_files`). Returns it."""
+    return build_any_payload_check([s for s in signatures if s.get("matcher") == "content"
+                                    and not s.get("only_in_its_own_files")],
                                    holding_anywhere=holding_anywhere)
 
 

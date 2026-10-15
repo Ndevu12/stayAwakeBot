@@ -133,6 +133,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **A git hook whose text only shares words with a decoy file is not a payload.** A hook that prints the
+  name of a project, for example, is no longer reported as infected. A hook that carries a known payload
+  still is.
 - **What deno or bun runs is what saw checks.** A running program or an entry that starts at login and
   runs a script with `deno run`, `deno serve` or `bun run`, code with `deno eval` or `bun --print`, or a
   program read from standard input is checked for that script, code or program.

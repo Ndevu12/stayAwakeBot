@@ -125,6 +125,7 @@ signatures:
     matcher: content
     pattern: 'Blockchain Explorer|BlockchainFont|TechMono'
     file_globs: ["**/fonts/README.md", "**/fonts/*.md"]
+    only_in_its_own_files: true
     description: "Fake 'Blockchain Explorer' fonts README used as camouflage"
     shown_as: "a decoy file a worm leaves beside its payload"
     remediation: remove-file
