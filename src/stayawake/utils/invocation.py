@@ -33,13 +33,26 @@ _CODE_FLAGS = {
     "python": frozenset({"-c"}), "python2": frozenset({"-c"}), "python3": frozenset({"-c"}),
     "node": frozenset({"-e", "--eval", "-p", "--print"}),
     "nodejs": frozenset({"-e", "--eval", "-p", "--print"}),
-    "deno": frozenset({"-e", "--eval"}), "bun": frozenset({"-e", "--eval"}),
+    "deno": frozenset({"-e", "--eval"}), "bun": frozenset({"-e", "--eval", "-p", "--print"}),
     "ruby": frozenset({"-e"}), "perl": frozenset({"-e", "-E"}), "php": frozenset({"-r"}),
     "osascript": frozenset({"-e"}),
 }
 
 _MODULE_FLAGS = {"python": frozenset({"-m"}), "python2": frozenset({"-m"}),
                  "python3": frozenset({"-m"})}
+
+_SUBCOMMANDS = {"deno": {"run": "script", "serve": "script", "eval": "code"}, "bun": {"run": "script"}}
+
+_VALUE_OPTIONS = {
+    "deno": frozenset({"--cert", "--conditions", "--config", "-c", "--ext", "--import-map", "--location",
+                       "--min-dep-age", "--node-modules-linker", "--seed", "--port", "--host"}),
+    "bun": frozenset({"--cwd", "--env-file", "--tsconfig-override", "--define", "-d",
+                      "--drop", "--loader", "-l", "--conditions", "--main-fields", "--extension-order",
+                      "--jsx-factory", "--jsx-fragment", "--jsx-import-source", "--jsx-runtime", "--port",
+                      "--fetch-preconnect", "--max-http-header-size", "--dns-result-order", "--user-agent",
+                      "--console-depth", "--unhandled-rejections", "--filter", "-F", "--elide-lines",
+                      "--shell", "--title", "--watch-kill-signal"}),
+}
 
 _SHELL_C_FLAG = re.compile(r"-[A-Za-z]{0,4}c")
 
@@ -149,8 +162,13 @@ def resolve_invocation(argv) -> Invocation:
     code_flags = _CODE_FLAGS.get(base, frozenset())
     module_flags = _MODULE_FLAGS.get(base, frozenset())
     stdin_flags = _STDIN_FLAGS.get(base, frozenset())
-    code, path, from_stdin = [], None, False
+    subcommands = _SUBCOMMANDS.get(base, {})
+    value_options = _VALUE_OPTIONS.get(base, frozenset())
+    code, path, from_stdin, operand, skip = [], None, False, "script", False
     for n, arg in enumerate(rest):
+        if skip:
+            skip = False
+            continue
         if arg in stdin_flags:
             from_stdin = True
         if arg in code_flags or (base in POSIX_SHELLS and _SHELL_C_FLAG.fullmatch(arg)):
@@ -159,8 +177,17 @@ def resolve_invocation(argv) -> Invocation:
             break              # what follows the code is an argument TO it ($0, $@) — never a path
         if arg in module_flags:
             break              # a module NAME, and what follows is the module's own argv
+        if arg in value_options:
+            skip = True
+            continue
         if not arg.startswith("-"):
-            path = arg
+            if arg in subcommands:
+                operand, subcommands = subcommands[arg], {}
+                continue
+            if operand == "code":
+                code.append(arg)
+            else:
+                path = arg
             break
     # No script argument means there is no file this runs: the code is inline, or it names a module.
     # Reporting the interpreter would send the reader 133 KB of `/bin/sh` to content-scan.
