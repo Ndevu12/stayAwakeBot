@@ -112,15 +112,11 @@ def notes_for(scope: LocalTarget, pruned: set[str]) -> list[str]:
 
 
 def pruning_note(pruned: set[str]) -> str | None:
-    """What a named directory's own walk skipped by name.
-
-    Inside a repository these are the standard exclusions and the scan says so elsewhere; when the
-    operator named the directory itself, a `dist` under a `dist` is dropped in silence otherwise.
-    """
+    """Say that a named folder's walk left folders out. Takes the names left out. Returns the
+    note, or None when none were."""
     if not pruned:
         return None
-    return (f"Directories named {', '.join(sorted(pruned))} under this one were not walked "
-            "(the standard exclusions), so nothing inside them was read.")
+    return "Folders the `exclude_dirs` setting leaves out were not scanned."
 
 
 

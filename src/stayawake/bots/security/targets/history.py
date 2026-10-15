@@ -191,7 +191,7 @@ class HistoryTarget(Target):
             return _ObjectStream(self.objects[sha])
         proc = open_stdout(Path(self.root), ["--no-replace-objects", "cat-file", "blob", sha])
         if proc is None:
-            raise OSError(f"git could not read stored blob {sha}")
+            raise OSError("git could not read a stored version of a file")
         return proc
 
     def _stream(self, rel: str, cap: int) -> tuple[bytes | None, bool]:

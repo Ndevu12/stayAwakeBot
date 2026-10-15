@@ -67,7 +67,7 @@ class TestWhatHistoryStillCarries(GitSandbox):
     def test_the_payload_is_still_stored_and_is_reported(self):
         repo = self._remediated()
         note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
-        self.assertIn("still STORE a confirmed payload", note)
+        self.assertIn("still stored with the payload", note)
         self.assertIn("loader.js", note)
 
     def test_reporting_it_does_not_move_the_verdict(self):
@@ -89,7 +89,7 @@ class TestWhatHistoryStillCarries(GitSandbox):
         self.commit(repo, "only commit")
         note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
         self.assertIn("History was read", note)
-        self.assertNotIn("still STORE", note)
+        self.assertNotIn("still stored with the payload", note)
 
     def test_a_history_it_could_not_finish_reading_is_not_reported_as_read(self):
         """A read that could not be established reports UNKNOWN, never no payload."""
@@ -138,13 +138,13 @@ class TestManyStoredVersionsOfOnePath(GitSandbox):
         note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
         self.assertIn("churn.js", note)
 
-    def test_what_the_bound_cut_is_counted(self):
-        """A bound that is not reported reads as coverage of what it cut."""
+    def test_a_history_with_versions_left_unread_says_it_read_in_part(self):
+        """A history with versions left unread never reads as read in full."""
         repo = self._churned(6)
         with mock.patch.object(scanner, "_HISTORY_ROUNDS", 2):
             note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
-        self.assertIn("were not read", note)
-        self.assertIn("path(s)", note)
+        self.assertTrue(note.startswith("History was read in part"), note)
+        self.assertNotIn("were not read", note)
 
     def test_a_heuristic_shape_in_history_is_not_called_confirmed(self):
         """Confirmed only. A shape benign code shares, in a five-year-old commit, is a line the
@@ -168,7 +168,7 @@ class TestManyStoredVersionsOfOnePath(GitSandbox):
                         "the fixture must actually produce a heuristic finding")
         self.assertFalse([f for f in found if f.confidence == CONFIRMED])
         note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
-        self.assertNotIn("still STORE a confirmed payload", note)
+        self.assertNotIn("still stored with the payload", note)
 
 
 class TestAnExcludedNameIsNotABlindSpot(GitSandbox):
@@ -190,7 +190,7 @@ class TestAnExcludedNameIsNotABlindSpot(GitSandbox):
         (repo / "node_modules" / "x" / "index.js").unlink()
         self.commit(repo, "removed from the tree")
         note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
-        self.assertIn("still STORE a confirmed payload", note)
+        self.assertIn("still stored with the payload", note)
 
 
 class TestAnOversizedStoredVersionIsBoundedButStillScanned(GitSandbox):
@@ -254,14 +254,14 @@ class TestTheReportCannotBeAimedByWhoeverCommitted(GitSandbox):
         rule = [{"signature": "loader-fromcharcode-127", "path_glob": "tests/**"}]
         note = scanner.history_residue_note(self._same_bytes_under_two_names("tests/fixture.js"),
                                             ScanOptions(history=True), self._sigs(), rule)
-        self.assertIn("still STORE a confirmed payload", note)
+        self.assertIn("still stored with the payload", note)
 
     def test_a_signature_wide_rule_is_still_honoured(self):
         """It carries the same operator intent and there is no name to aim, so it stays."""
         rule = [{"signature": "loader-fromcharcode-127"}]
         note = scanner.history_residue_note(self._same_bytes_under_two_names("tests/fixture.js"),
                                             ScanOptions(history=True), self._sigs(), rule)
-        self.assertNotIn("still STORE a confirmed payload", note)
+        self.assertNotIn("still stored with the payload", note)
 
     def test_a_path_cannot_repaint_the_terminal(self):
         """A path is committer-chosen text and reaches the notes block, which was the only value on
@@ -269,7 +269,7 @@ class TestTheReportCannotBeAimedByWhoeverCommitted(GitSandbox):
         left a forged all-clear in its place."""
         from stayawake.bots.security.sinks.render import render_terminal
         hostile = "a\x1b[2Jb\x1b[32mall targets clean\x1b[0m.js"
-        note = "1 path(s) still STORE a confirmed payload: " + hostile
+        note = "1 path(s) still stored with the payload: " + hostile
         payload = ScanReport("t", [ScanResult("acme/widget", "local", notes=[note])]).to_payload()
         out = render_terminal(payload, detail=True)
         self.assertIn("Notes:", out, "the note really did render")
@@ -309,7 +309,7 @@ class TestAnOversizedVersionIsReadTheWayTheTreeSideReadsOne(GitSandbox):
         tail = closer + b"\n" * (half - len(closer))        # starts exactly AT the tail boundary
         repo = self._stored(head + b"z" * half + tail)
         note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
-        self.assertNotIn("still STORE a confirmed payload", note)
+        self.assertNotIn("still stored with the payload", note)
 
     def test_the_tail_really_is_the_end_of_the_version(self):
         """A payload is usually APPENDED. Stopping the stream at a ceiling made the tail a middle
@@ -448,7 +448,7 @@ class TestEveryLocalTargetGetsIt(GitSandbox):
         self.commit(repo, "removal commit")
         job = workers.LocalScanJob(LocalTarget(repo, None, REPOSITORY), str(repo),
                                    ScanOptions(history=True), load_signatures(), [])
-        self.assertTrue(any("still STORE a confirmed payload" in n
+        self.assertTrue(any("still stored with the payload" in n
                             for n in workers.scan_local(job).result.notes))
 
     def test_without_the_flag_it_stays_silent(self):
@@ -771,7 +771,7 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         with mock.patch.object(history_target, "reachable_blobs", return_value=([], True)):
             note = scanner.history_residue_note(self.d, opts, sigs, [])
         self.assertIn("hook", note)
-        self.assertIn("still STORE", note)
+        self.assertIn("still stored with the payload", note)
 
     def _note(self):
         return scanner.history_residue_note(self.d, ScanOptions(history=True),
@@ -803,7 +803,7 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         sha = self.git(self.d, "commit-tree", tree, "-p", head, "-m", "a talkative name").strip()
         self.git(self.d, "update-ref", "HEAD", sha)
         note = self._note()
-        self.assertIn("still STORE", note)
+        self.assertIn("still stored with the payload", note)
         self.assertEqual(1, len(note.splitlines()), "a path broke the report onto its own line")
 
     def test_a_repository_that_would_fetch_is_refused_rather_than_fetched_from(self):

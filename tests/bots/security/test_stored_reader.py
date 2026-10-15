@@ -227,7 +227,7 @@ class TestGitLfsContentIsRead(_Store):
         note = scanner.history_residue_note(self.repo, ScanOptions(history=True),
                                             load_signatures(), [])
         self.assertIn("kept.js", note)
-        self.assertIn("1 stored version(s) are kept in Git LFS", note)
+        self.assertIn("1 stored version(s) are in Git LFS and were not checked", note)
 
     def test_a_history_scan_that_fails_is_never_reported_read(self):
         from unittest import mock

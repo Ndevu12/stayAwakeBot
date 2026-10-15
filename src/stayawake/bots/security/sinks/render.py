@@ -316,10 +316,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
            f"**{s['targets']} targets** · {s['infected']} infected · "
            f"{s.get('suspicious', 0)} suspicious · {s.get('residue', 0)} residue · "
            f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)", "",
-           "_Verdict: **infected** = a confirmed (high-confidence) signature matched; "
-           "**suspicious** = only heuristic match(es) that benign code can also produce — "
-           "review, not asserted as malware; **residue** = nothing here executes, but this is "
-           "not what the project would carry._", "",
+           "_Verdict: **infected**: malicious code is in this target. **suspicious**: something "
+           "to review by hand; saw does not report it as malware. **residue**: nothing here "
+           "runs, but this is not what the project would carry._", "",
            "| Target | Source | Status | Findings | Top severity |",
            "|--------|--------|--------|----------|--------------|"]
     for r in sorted(payload["results"], key=report_order):

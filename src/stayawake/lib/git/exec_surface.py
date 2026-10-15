@@ -97,7 +97,7 @@ def list_config_file(path: Path) -> tuple[list[tuple[str, str | None]], str | No
     if res is None:
         return [], "git could not be run"
     if res.returncode != 0:
-        return [], "git would not read it"
+        return [], "git could not read it"
     pairs: list[tuple[str, str | None]] = []
     for chunk in res.stdout.split("\0"):
         if not chunk:
@@ -602,8 +602,8 @@ def _read_repository(surface: ExecSurface, tree: Path | None, git_dir: Path, ask
                            as_this_view if git_can_run else None, collected)
     main_worktree = _main_worktree(common_dir, entries)
     if main_worktree is None and os.path.realpath(git_dir) != os.path.realpath(common_dir):
-        surface.unexamined.append(f"{common_dir}: the repository does not record where its main "
-                                  "working tree is, so what git runs there was not read")
+        surface.unexamined.append(f"{common_dir}: git could not tell where this repository's main "
+                                  "working tree is, so what git runs there is not known")
     views = [(view_git_dir, view_tree if _belongs(view_tree, view_git_dir) else view_git_dir)
              for view_git_dir, view_tree in [(git_dir, tree), (common_dir, main_worktree or common_dir),
                                              *_linked_worktrees(common_dir, surface)]]
@@ -661,8 +661,8 @@ def read_exec_surface(work_tree: Path, ask=repository_settings) -> ExecSurface |
         with_git = _read_with_git(root, ask, files_read)
     except Exception as exc:  # the reading with git only adds; its failure must not lose the first
         surface = surface or ExecSurface(root, root, root)
-        surface.unexamined.append(f"{work_tree}: reading the settings with git stopped "
-                                  f"({type(exc).__name__}), so what it adds was not read")
+        surface.unexamined.append(f"{work_tree}: git could not read this repository's settings, "
+                                  "so what they make git run is not known")
         return surface
     if surface is None:
         return with_git

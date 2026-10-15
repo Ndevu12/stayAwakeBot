@@ -67,7 +67,7 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
     # Search the raw body AND the newline-flattened form so an exec sink wrapped
     # across line breaks (`sfL['constructor']\n(decoded)`) is still seen.
     if _has_exec_sink_beyond_decoding(code) or _has_exec_sink_beyond_decoding(flat):
-        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/constructor/vm-runner)")
+        return ObfuscationVerdict(True, "code that builds and runs other code")
     # Decode→exec dropper — the ONE decode→exec-flow detector (see taint/): a baked encoded payload
     # variable-indirected form, leading arg) OR through a shell `-c` argument (`spawn('sh',['-c',d])`
     # the decode→exec FLOW is the dropper. Run on both the raw and newline-flattened views so a
@@ -133,7 +133,7 @@ def analyze_delta(introduced: str, baseline: str = "") -> ObfuscationVerdict:
     if _is_charcode_shuffler(text):
         return ObfuscationVerdict(True, "charcode/byte numeric-array literal (string shuffler)")
     if _has_exec_sink_beyond_decoding(text):
-        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/constructor/vm-runner)")
+        return ObfuscationVerdict(True, "code that builds and runs other code")
     # Decode→exec dropper introduced by the hunk — same ONE detector as analyze_file (leading-arg
     # decode→exec FLOW is. See taint/.
     from stayawake.bots.security.taint.analyzer import detect_dropper

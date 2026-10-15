@@ -200,7 +200,7 @@ class TestFailuresAreReturnedNotRaised(_CaptureCase):
             result = self.capture()
         self.assertFalse(result.verified)
         self.assertFalse(result.ok)
-        self.assertIn("did not read back", result.reason)
+        self.assertIn("could not be confirmed", result.reason)
         self.assertEqual(result.path, self.destination, "keep the file for the operator to look at")
 
     def test_git_that_cannot_run_is_reported(self):

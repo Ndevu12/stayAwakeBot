@@ -54,11 +54,11 @@ class InstalledPackageAuditMatcher(Matcher):
             if tamper_sig is not None:                # RECORD sha256 integrity (Python provides it)
                 for t in tree.tampered(target):
                     findings.append(_tampered(tamper_sig, t))
-        if deep and truncated:                        # HONEST: a coverage feature must not truncate silently
+        if deep and truncated:
             notes = getattr(target, "coverage_notes", None)
             if notes is not None:
-                notes.append("`--deep` sweep hit a size bound (byte budget or per-package file cap) — some "
-                             "vendored source files were NOT content-scanned. Coverage is partial, not clean.")
+                notes.append("Some installed packages could not be checked in full, so they are not "
+                             "known to be clean.")
         return [f for f in findings if f is not None]
 
     def _locked_names(self, ecosystem: str, target) -> set[str]:

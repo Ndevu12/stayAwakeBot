@@ -292,6 +292,12 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **What `saw scan` says about what it could not check names the command to run.** The note on a
+  repository's history names `saw fix amend` for files still stored with a payload, and a scan of the
+  checked-out files names `saw scan --history`. The written report and the SARIF log quote each
+  finding's evidence as the terminal does. An allowlist entry that names the `evidence` of a finding
+  for hidden or decoded code, for code that wipes files, or for a merge that added files needs the
+  new text; until it is updated, the finding is reported again.
 - **The SARIF log, `saw scan --json` and the written report describe each finding in the same plain
   words as the terminal.**
 - **The written report and the SARIF log describe each finding without naming a worm.**

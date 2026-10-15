@@ -297,8 +297,8 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
         if progress_on and unsearched:
-            prog.line(f"{len(unsearched)} director{'y' if len(unsearched) == 1 else 'ies'} could "
-                      "not be read and were not searched.")
+            prog.line(f"{len(unsearched)} folder{'' if len(unsearched) == 1 else 's'} could not be "
+                      "read, so the scan is not complete. Check their permissions and scan again.")
         if len(repos) == 1:
             home = os.path.expanduser("~")
             display = str(found[0].label).replace(home, "~")
@@ -350,8 +350,8 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         return 1
     if report.any_error:
         errored = [r for r in results if r.error]
-        print(f"error: {len(errored)} target(s) could not be scanned — failing closed (not "
-              f"reporting 'clean'):", file=sys.stderr)
+        print(f"error: {len(errored)} target(s) could not be scanned, so they are not clean:",
+              file=sys.stderr)
         for r in errored:
             print(f"  {textsafe.plain(r.target)} — {textsafe.plain(r.error)}", file=sys.stderr)
         return 2

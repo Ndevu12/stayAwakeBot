@@ -50,12 +50,12 @@ def register(sub) -> None:
     p.add_argument("--no-advisories", action="store_true", dest="no_advisories",
                    help="suppress the dependency CVE-advisory section. A scan reports malware AND "
                         "known CVEs (from the offline DB) by default; advisories never change the "
-                        "verdict/exit code, so this only quiets the output.")
+                        "verdict, so this only quiets the output.")
     p.add_argument("-x", "--external", action="store_true", dest="external_audit",
                    help="also run INSTALLED external auditors (osv-scanner, …) and fold their vulns "
                         "into the advisory tier. OPT-IN — this leaves the offline sandbox: it spawns "
                         "subprocesses and a tool may send your dependency list to its own servers. "
-                        "Absent tools are skipped; never changes the verdict/exit code.")
+                        "Absent tools are skipped; never changes the verdict.")
     p.add_argument("--deep", action="store_true", dest="deep",
                    help="also content-scan the CODE of installed npm dependency packages (node_modules), "
                         "not just their entry points, for known loader fingerprints. Catches a payload "

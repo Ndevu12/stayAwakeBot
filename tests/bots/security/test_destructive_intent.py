@@ -91,10 +91,10 @@ class TestAmplifiers(unittest.TestCase):
         v = detect_destructive("if(!process.env.GITHUB_TOKEN){ rimraf(os.homedir()); }")
         self.assertIn("dead-man's-switch", v.reason)
 
-    def test_named_ioc_enriches_reason(self):
-        # a file that mentions the named dropper alongside the wipe
+    def test_a_known_dropper_enriches_reason(self):
         v = detect_destructive("// setup_bun.js\nrimraf(os.homedir());")
-        self.assertIn("setup_bun", v.reason)
+        self.assertIn("carries a known dropper", v.reason)
+        self.assertNotIn("setup_bun", v.reason)
 
     def test_amplifier_never_gates(self):
         # a wipe with NO amplifier is still a confirmed finding (amplifiers enrich, never require)

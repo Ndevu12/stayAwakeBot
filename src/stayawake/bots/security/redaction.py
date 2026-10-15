@@ -31,8 +31,9 @@ def redact(evidence: Any) -> dict[str, Any] | None:
 
 
 def render_redacted(r: dict[str, Any]) -> str:
-    """One-line human form of a redact() dict, for SARIF messages / markdown."""
-    return f"sha256:{r['sha256'][:12]}… preview={r['preview']!r} len={r['len']}"
+    """Show a redact() dict as one line for SARIF messages and markdown. Takes the dict. Returns
+    its preview, quoted, ending in … when the evidence is longer."""
+    return f"{r['preview']!r}{'…' if r['len'] > len(r['preview']) else ''}"
 
 
 def redact_payload(payload: dict[str, Any]) -> dict[str, Any]:

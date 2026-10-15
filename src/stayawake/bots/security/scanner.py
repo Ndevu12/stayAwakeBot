@@ -176,7 +176,7 @@ def attach_history_note(result, root, opts, signatures, allowlist) -> None:
     """
     if not getattr(opts, "history", False):
         return
-    result.notes = [n for n in result.notes if not n.startswith(_WORKING_TREE_ONLY)]
+    result.notes = [n for n in result.notes if not n.startswith(_CHECKED_OUT_ONLY)]
     note = history_residue_note(root, opts, signatures, allowlist)
     if note:
         result.notes.append(note)
@@ -244,8 +244,7 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
             unread |= set(target.iter_files()) - {f.path for f in result.findings}
         elsewhere |= target.kept_elsewhere
     beyond = sum(max(len(v) - _HISTORY_ROUNDS, 0) for v in versions.values())
-    cut = (f" {beyond} further version(s) of {sum(1 for v in versions.values() if len(v) > _HISTORY_ROUNDS)}"
-           f" path(s) were not read." if beyond else "")
+    cut = ""
     if not complete or not every_link:
         cut += " Not all of what it stores could be enumerated."
     cut += finish
@@ -256,10 +255,10 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
         cut += f" {len(unread)} stored version(s) could not be read at all."
     if elsewhere:
         scanned -= len(elsewhere)
-        cut += (f" {len(elsewhere)} stored version(s) are kept in Git LFS and not in this "
-                f"repository, so were not read.")
+        cut += (f" {len(elsewhere)} stored version(s) are in Git LFS and were not checked. Run "
+                "`git lfs fetch --all`, then scan again.")
     if not hits:
-        if complete and every_link and not unread and not elsewhere:
+        if complete and every_link and not unread and not elsewhere and not beyond:
             return (f"History was read: no confirmed payload in {scanned} stored version(s) across "
                     f"{len(versions)} path(s).{cut}")
         return (f"History was read in part: no confirmed payload in {scanned} stored version(s) "
@@ -272,23 +271,17 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     named += (payloads[3:] + redirects[2:])[:max(0, 5 - len(named))]
     shown = [textsafe.plain(path, limit=200) for path in named]
     more = len(paths) - len(named)
-    return (f"{len(paths)} path(s) still STORE a confirmed payload reachable from a ref: "
-            f"{'; '.join(shown)}"
-            f"{f'; and {more} more' if more > 0 else ''}. Removing these needs a history rewrite "
-            f"and the hosting provider's collection — a fix that cleans the tree does not reach "
-            f"them.{cut}")
+    return (f"{len(paths)} file(s) are still stored with the payload in this repository's "
+            f"history: {'; '.join(shown)}"
+            f"{f'; and {more} more' if more > 0 else ''}. Run `saw fix amend` to take them out.{cut}")
 
 
-_WORKING_TREE_ONLY = "Only the working tree was scanned;"
+_CHECKED_OUT_ONLY = "This covers the files checked out now,"
 
 
 def _history_scope_note(root) -> str | None:
-    """What a scan of the working tree did NOT look at.
-
-    A removal-commit remediation leaves the payload reachable from an earlier commit, and one
-    command puts it back on disk: `git checkout <rev>`, a bisect, or a clone of a tag that predates
-    the fix. Stating the axis costs a commit count; scanning it is a separate job.
-    """
+    """Say what a scan of the files checked out now leaves to `saw scan --history`. Takes the
+    repository root. Returns the note, or None when nothing else is stored or it cannot be counted."""
     try:
         n = gitutil.commit_count(root)
         branches, tags = gitutil.ref_counts(root)
@@ -306,9 +299,8 @@ def _history_scope_note(root) -> str | None:
         parts.append(f"{tags} {'tag' if tags == 1 else 'tags'}")
     if not parts:
         return None
-    return (f"{_WORKING_TREE_ONLY} {', '.join(parts)} not examined. Any of them can "
-            "be put on disk by one command (`git checkout <rev>`, `git clone --branch <tag>`), so a "
-            "file cleaned here may still be served from there.")
+    return (f"{_CHECKED_OUT_ONLY} not the {', '.join(parts)}. Run `saw scan --history` to check "
+            "those too.")
 
 
 def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],

@@ -612,8 +612,7 @@ class TestWhatTheWalkSkippedByName(unittest.TestCase):
         (d / "dist" / "keep.js").write_text("export const ok = 1;\n", encoding="utf-8")
         (d / "dist" / "node_modules" / "x.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
         report = _report_of(d / "dist")
-        self.assertIn("node_modules", report)
-        self.assertIn("were not walked", report)
+        self.assertIn("Folders the `exclude_dirs` setting leaves out were not scanned", report)
 
     def test_a_repository_scan_does_not_carry_that_note(self):
         import subprocess
@@ -621,7 +620,7 @@ class TestWhatTheWalkSkippedByName(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(d)], check=True)
         (d / "node_modules").mkdir()
         (d / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
-        self.assertNotIn("were not walked", _report_of(d))
+        self.assertNotIn("`exclude_dirs` setting leaves out", _report_of(d))
 
 
 class TestAWriteSinkIsNeverReadThrough(unittest.TestCase):
@@ -654,7 +653,7 @@ class TestAWriteSinkIsNeverReadThrough(unittest.TestCase):
         self.assertIn("symlink-write-redirect", _signatures_reported(self.proj, "keys.js"))
 
     def test_the_skipped_read_is_disclosed(self):
-        self.assertIn("its destination was not read", _report_of(self.proj))
+        self.assertIn("its content was not read into this report", _report_of(self.proj))
 
     def test_an_oversized_destination_is_not_read_either(self):
         # `read_text` sends a large SOURCE file straight to the head+tail reader, which never
@@ -733,7 +732,7 @@ class TestATargetThatReadNothingSaysWhy(unittest.TestCase):
         (d / "dist" / "bundle.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
         report = _report_of(d) + _stderr_of(d)
         self.assertIn("carries no verdict", report)
-        self.assertIn("were not walked", report)
+        self.assertIn("Folders the `exclude_dirs` setting leaves out were not scanned", report)
 
     def test_a_directory_of_only_pipes_does_not_read_clean(self):
         # A FIFO `exists()`, so the emptiness test counted it as content and nothing was opened.
@@ -779,7 +778,7 @@ class TestEachTargetOwnsItsCoverageNotes(unittest.TestCase):
         targets = self._two_repos_and_a_folder()
         notes = self._notes(targets)
         for repo in targets[:2]:
-            self.assertTrue(any(str(repo) in n and "link into SSH" in n for n in notes),
+            self.assertTrue(any(str(repo) in n and "points at a sensitive file" in n for n in notes),
                             f"{repo.name} does not own its note: {notes}")
 
     def test_a_note_about_one_target_names_that_target(self):
@@ -824,7 +823,7 @@ class TestAFolderThatCouldNotBeReadIsNotClean(unittest.TestCase):
         # "clean" — that word appears in the host note and in the refusal itself.
         report = _report_of(self.d)
         self.assertIn("ERROR", report)
-        self.assertIn("failing closed", _stderr_of(self.d))
+        self.assertIn("could not be scanned, so they are not clean", _stderr_of(self.d))
 
     def test_it_names_the_folder_it_could_not_read(self):
         self.assertIn("src/", _report_of(self.d) + _stderr_of(self.d))

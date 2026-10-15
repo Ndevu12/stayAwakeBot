@@ -15,8 +15,8 @@ from stayawake.bots.security.taint import flow, model
 _DECODE_ANCHORS = frozenset(name.split(".", 1)[0].lower() for name in model.DECODE_CALLS)
 _DECODE_ANCHOR_RE = re.compile("|".join(re.escape(a) for a in sorted(_DECODE_ANCHORS)), re.IGNORECASE)
 
-_R_DIRECT = "base64/hex decoded and run via a command/module sink (child_process/import/Worker)"
-_R_VAR = "base64 payload decoded via a variable and run (command/module/worker sink)"
+_R_DIRECT = "encoded code that is decoded and run"
+_R_VAR = "encoded code that is decoded and run"
 _R_SHELL = "base64/hex decoded and run as a shell command (sh/bash/cmd/powershell -c)"
 
 # ── Shell code-position building blocks (from the model, longest-first so `cmd.exe` beats `cmd`) ──

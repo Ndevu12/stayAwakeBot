@@ -252,7 +252,7 @@ def _amplifiers(text: str) -> list[str]:
     if _DEADMAN.search(text):
         extra.append("armed on a GitHub-auth / token-revocation condition (dead-man's-switch)")
     if _NAMED_IOC.search(text):
-        extra.append("carries a named Shai-Hulud dropper (setup_bun/bun_environment)")
+        extra.append("carries a known dropper")
     try:                                            # co-present decode→exec dropper (lazy: avoid cycle)
         from .analyzer import detect_dropper
         if detect_dropper(text):

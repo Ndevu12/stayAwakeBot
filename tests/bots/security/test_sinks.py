@@ -117,7 +117,9 @@ class TestFileSink(unittest.TestCase):
         text = (d / "latest.json").read_text(encoding="utf-8")
         self.assertNotIn(PAYLOAD, text)                 # never persist the raw payload
         self.assertIn("sha256", text)
-        self.assertIn("sha256:", (d / "latest.md").read_text(encoding="utf-8"))
+        markdown = (d / "latest.md").read_text(encoding="utf-8")
+        self.assertIn(repr(PAYLOAD[:48]) + "…", markdown)    # a bounded, quoted preview
+        self.assertNotIn("_TAIL", markdown)
 
 
 class TestExitCodeVerdict(unittest.TestCase):

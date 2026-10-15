@@ -38,13 +38,11 @@ class HistoryScopeNote(unittest.TestCase):
     def test_a_repository_with_earlier_commits_says_they_were_not_examined(self):
         note = _history_scope_note(self._repo(3))
         self.assertIsNotNone(note)
-        self.assertIn("2 earlier commits", note)
-        # The reader must learn it can come BACK, not merely be read: one command puts it on disk.
-        self.assertIn("on disk", note)
-        self.assertIn("one command", note.lower())
+        self.assertIn("not the 2 earlier commits", note)
+        self.assertIn("Run `saw scan --history` to check those too.", note)
 
     def test_one_earlier_commit_reads_as_singular(self):
-        self.assertIn("1 earlier commit not examined", _history_scope_note(self._repo(2)))
+        self.assertIn("not the 1 earlier commit.", _history_scope_note(self._repo(2)))
 
     def test_a_single_commit_repository_with_no_other_refs_gets_no_note(self):
         self.assertIsNone(_history_scope_note(self._repo(1)))
