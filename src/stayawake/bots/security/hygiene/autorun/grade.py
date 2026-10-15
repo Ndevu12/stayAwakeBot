@@ -420,8 +420,8 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     persistence entry is non-interactive (no TTY, launchd/systemd-spawned) BY CONSTRUCTION. So we fuse,
     never blocklist a destination:
       * decisive `hit` — a fetch/decode-to-shell command, a decode→execute dropper, OR the dead-man
-        self-destruct shape in the daemon's own code. The Mini
-        Shai-Hulud wiper is plain code (poll → on token-revoke, delete `$HOME`), NOT a decode→exec
+        self-destruct shape in the daemon's own code. A known worm's
+        wiper is plain code (poll → on token-revoke, delete `$HOME`), NOT a decode→exec
         dropper, so fusing `detect_destructive` here is what actually catches it.
       * corroborating reason — a short poll interval (the timer the dead-man loop runs on). Never
         decisive alone: benign software polls on a timer too (the FP guard is that escalation needs a
