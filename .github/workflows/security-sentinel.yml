@@ -76,7 +76,7 @@ jobs:
       # always(): the scan exits non-zero when infected, but the SARIF is written before that verdict.
       - name: Upload SARIF to code-scanning
         if: ${{ always() && vars.ENABLE_CODE_SCANNING == 'true' && steps.scan.outputs.sarif == 'true' }}
-        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d   # v3.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d   # v4.38.3
         with:
           sarif_file: ${{ runner.temp }}/latest.sarif
           category: saw-security-sentinel
@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload SARIF as build artifact
         if: ${{ always() && steps.scan.outputs.sarif == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
           name: security-sarif
           path: ${{ runner.temp }}/latest.sarif
