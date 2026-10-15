@@ -18,6 +18,7 @@ from stayawake.bots.security.service.workers import WorkerScan
 from stayawake.bots.security.service.report import _print_dependency_actions
 from stayawake.bots.security.sinks.render import render_markdown
 from stayawake.bots.security import service
+from stayawake.utils import docs_site
 
 BAD = "evil-pkg@1.2.3"
 AFFECTED = "lodash@4.17.20"
@@ -204,6 +205,34 @@ class TestEverySurfaceCarriesTheCommand(unittest.TestCase):
         self.assertEqual("", _terminal())
 
 
+class TestEachBlockSaysWhereToReadWhatTheCommandsChange(unittest.TestCase):
+    LINK = docs_site.REMOVE_A_COMPROMISED_DEPENDENCY
+
+    def test_the_pull_request_body_links_it_once_below_the_commands(self):
+        body = _pr_body("acme/app", [], findings=[_dep(BAD, command="npm uninstall evil-pkg")])
+        self.assertEqual(body.count(self.LINK), 1)
+        self.assertLess(body.index("npm uninstall evil-pkg"), body.index(self.LINK))
+
+    def test_the_report_file_links_it_once_below_the_commands(self):
+        md = render_markdown(_payload(findings=[_dep(BAD, command="npm uninstall evil-pkg")]))
+        self.assertEqual(md.count(self.LINK), 1)
+        self.assertLess(md.index("npm uninstall evil-pkg"), md.index(self.LINK))
+        self.assertLess(md.index(self.LINK), md.index("| Target |"))
+
+    def test_the_terminal_links_it_once_below_the_commands(self):
+        out = _terminal(findings=[_dep(BAD, command="npm uninstall evil-pkg")])
+        self.assertEqual(out.count(self.LINK), 1)
+        self.assertLess(out.index("npm uninstall evil-pkg"), out.index(self.LINK))
+
+    def test_an_advisory_alone_links_it_too(self):
+        self.assertIn(self.LINK, _terminal(advisories=[_dep(AFFECTED, state=VULNERABLE)]))
+
+    def test_nothing_to_remove_links_nothing(self):
+        self.assertNotIn(self.LINK, _pr_body("acme/app", []))
+        self.assertNotIn(self.LINK, render_markdown(_payload()))
+        self.assertEqual("", _terminal())
+
+
 class TestTheRunActuallyPrintsIt(unittest.TestCase):
     """The footer is wired into a real `saw scan`, not only into its renderer."""
 
@@ -218,7 +247,9 @@ class TestTheRunActuallyPrintsIt(unittest.TestCase):
     def test_a_scan_that_flags_a_dependency_prints_the_command(self):
         result = ScanResult(target="acme/app", source="local")
         result.advisories.append(_dep(AFFECTED, state=VULNERABLE))
-        self.assertIn(AFFECTED, self._scan(result))
+        out = self._scan(result)
+        self.assertIn(AFFECTED, out)
+        self.assertIn(docs_site.REMOVE_A_COMPROMISED_DEPENDENCY, out)
 
     def test_a_scan_that_flags_nothing_prints_no_block(self):
         self.assertNotIn("Compromised dependencies", self._scan(ScanResult(target="acme/app", source="local")))

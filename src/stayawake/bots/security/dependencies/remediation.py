@@ -13,7 +13,7 @@ import shlex
 from dataclasses import dataclass
 
 from stayawake.bots.security.dependencies.ecosystems import canonical_ecosystem
-from stayawake.utils import textsafe
+from stayawake.utils import docs_site, textsafe
 
 MALICIOUS = "malicious"
 VULNERABLE = "vulnerable"
@@ -22,6 +22,11 @@ _ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9._-]{1,80}\Z")
 
 _NAME_RE = re.compile(r"@?[A-Za-z0-9][A-Za-z0-9._-]{0,99}(/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?\Z")
 _VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}\Z")
+
+WHAT_THEY_CHANGE_MARKDOWN = ("Before you run these, read [what they change]"
+                             f"({docs_site.REMOVE_A_COMPROMISED_DEPENDENCY}).")
+WHAT_THEY_CHANGE_PLAIN = ("Before you run these, read what they change: "
+                          f"{docs_site.REMOVE_A_COMPROMISED_DEPENDENCY}")
 
 
 _REMOVE = {

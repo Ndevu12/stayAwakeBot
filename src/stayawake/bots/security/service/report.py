@@ -8,7 +8,8 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from stayawake.bots.security.dependencies.remediation import dependency_actions, plain_lines
+from stayawake.bots.security.dependencies.remediation import (
+    WHAT_THEY_CHANGE_PLAIN, dependency_actions, plain_lines)
 from stayawake.utils.render import path_link, rule
 from stayawake.utils.terminal import supports_color
 
@@ -61,4 +62,5 @@ def _print_dependency_actions(results) -> None:
                          ("affected by an advisory — move off these", actions.vulnerable)):
         if group:
             out += ["", f"  # {title}"] + plain_lines(group, _ACTION_LIMIT)
+    out += ["", WHAT_THEY_CHANGE_PLAIN]
     print("\n".join(out + [bar]), file=sys.stderr)

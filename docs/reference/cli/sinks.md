@@ -44,4 +44,6 @@ you asked for is still written.
 When a scan flags a dependency, the commands that remove each known-malicious package, and the
 versions an advisory affects, are given once per run: last on the terminal, below the report's path
 when a large scan writes one; at the top of the written report; and in the body of a fix pull
-request. `saw` names the compromised versions and never a version to install.
+request. `saw` names the compromised versions and never a version to install. Each ends with a link
+to [what these commands change](../../how-to/remove-a-compromised-dependency.md); read it before
+you run them.

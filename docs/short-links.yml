@@ -9,3 +9,4 @@ audit-a-machine: how-to/audit-a-machine/
 clean-audit: how-to/audit-a-machine/#what-a-clean-audit-does-and-does-not-mean
 credential-hygiene: explanation/credential-hygiene/
 fix-findings: how-to/fix-findings/
+compromised-dependency: how-to/remove-a-compromised-dependency/
