@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from stayawake.bots.security.models import Finding, Severity
+from stayawake.bots.security.models import CONFIRMED, Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, load_jsonc, build_confirmed_loader_check, REMOTE_FETCH_INTO_INTERPRETER)
 from stayawake.bots.security.matchers.command_shape import not_plain
@@ -59,6 +59,11 @@ def _font_named_by(task: dict, task_file: dict, font_tools: frozenset[str]) -> s
                  if _FONT_EXEC.search(line) and not _one_call_of_a_font_tool(line, font_tools)), None)
 
 
+_PANELS_HIDDEN = {"terminal.integrated.hideOnStartup": ("always", "whenempty"),
+                  "debug.openDebug": ("neveropen",)}
+_TASK_LIST = "tasks"
+
+
 def _conceals_itself(task: dict) -> bool:
     """Tell whether a task keeps itself out of sight. Takes the task. Returns True when it is hidden
     from the task list, does not bring its terminal forward when it starts, or does not show the
@@ -69,6 +74,14 @@ def _conceals_itself(task: dict) -> bool:
     if not isinstance(presentation, dict):
         return False
     return named(presentation.get("reveal")) in ("never", "silent") or presentation.get("echo") is False
+
+
+def _hides_panels_or_holds_tasks(settings: dict) -> bool:
+    """Tell whether an editor settings file hides the terminal or debug panel when the folder opens, or
+    holds a list of tasks. Takes the settings. Returns the answer."""
+    if _TASK_LIST in settings:
+        return True
+    return any(named(settings.get(key)) in values for key, values in _PANELS_HIDDEN.items())
 
 
 class StructuralJsonMatcher(Matcher):
@@ -85,7 +98,7 @@ class StructuralJsonMatcher(Matcher):
             if "/.vscode/" in slashed and base in ("tasks.json", "settings.json"):
                 data = load_jsonc(target.read_text(rel) or "")
                 if isinstance(data, dict):
-                    findings.extend(self._inspect(rel, base, data, by_kind))
+                    findings.extend(self._inspect(target, rel, base, data, by_kind))
             elif "/.claude/" in slashed and base in ("settings.json", "settings.local.json"):
                 data = load_jsonc(target.read_text(rel) or "")
                 if isinstance(data, dict):
@@ -107,7 +120,27 @@ class StructuralJsonMatcher(Matcher):
             return [x for x in t if isinstance(x, dict)]
         return [t] if isinstance(t, dict) else []
 
-    def _inspect(self, rel, base, data, by_kind):
+    def _inspect(self, target, rel, base, data, by_kind):
+        out = self._task_findings(rel, data, by_kind)
+        if base == "settings.json":
+            value = data.get("task.allowAutomaticTasks")
+            if value is True or (isinstance(value, str) and value != "off"):
+                armed = _hides_panels_or_holds_tasks(data) or self._launcher_beside(target, rel, by_kind)
+                kind = "vscode-allow-automatic-tasks" if armed else "vscode-allow-automatic-tasks-alone"
+                if kind in by_kind:
+                    out.append(self._emit(by_kind[kind], rel, f"task.allowAutomaticTasks: {value!r}"))
+        return out
+
+    def _launcher_beside(self, target, rel, by_kind) -> bool:
+        """Tell whether the tasks.json beside a settings file holds a task this matcher confirms. Takes
+        the target, the settings file's path and the signatures by kind. Returns the answer."""
+        confirmed = {s["id"] for s in by_kind.values() if s.get("confidence") == CONFIRMED}
+        tasks_path = rel[:-len("settings.json")] + "tasks.json"
+        tasks = load_jsonc(target.read_text(tasks_path) or "")
+        beside = self._task_findings(tasks_path, tasks, by_kind) if isinstance(tasks, dict) else []
+        return any(f.signature_id in confirmed for f in beside)
+
+    def _task_findings(self, rel, data, by_kind):
         out = []
         runs_font_signature = by_kind.get("vscode-task-runs-font", {})
         font_tools = frozenset(str(name).lower() for name in runs_font_signature.get("font_tools", ()))
@@ -127,11 +160,6 @@ class StructuralJsonMatcher(Matcher):
             runs_font = _font_named_by(task, data, font_tools)
             if runs_font is not None and "vscode-task-runs-font" in by_kind:
                 out.append(self._emit(by_kind["vscode-task-runs-font"], rel, runs_font[:90]))
-        if base == "settings.json" and "vscode-allow-automatic-tasks" in by_kind:
-            value = data.get("task.allowAutomaticTasks")
-            if value is True or (isinstance(value, str) and value != "off"):
-                out.append(self._emit(by_kind["vscode-allow-automatic-tasks"], rel,
-                                      f"task.allowAutomaticTasks: {value!r}"))
         return out
 
     # ── Claude Code hooks ──────────────────────────────────────────────────────────

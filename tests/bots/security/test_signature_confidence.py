@@ -29,6 +29,7 @@ GRADED_BELOW_CONFIRMED = {
     "runner-registration-config": "heuristic",
     "symlink-escapes-repo": "heuristic",
     "tampered-installed-package": "heuristic",
+    "vscode-allow-automatic-tasks-alone": "heuristic",
     "vscode-task-autorun-visible": "heuristic",
     "whitespace-concealment": "heuristic",
     "workflow-dependabot-impersonation": "heuristic",
