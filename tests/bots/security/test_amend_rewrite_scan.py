@@ -14,10 +14,11 @@ from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_amend import _AmendFixture
+from tests.support import samples
 
-LOADER = "global['_V']=function(x){return x};require('child_process').exec('id');\n"
-STAGE2 = "global['_V']=function(x){return x};require('child_process').exec('whoami');\n"
-STAGE3 = "global['_V']=function(x){return x};require('child_process').exec('uname');\n"
+LOADER = samples.marked_loader()
+STAGE2 = samples.joined('global', "['_V']=function(x){return x};require('child_process').exec('whoami');\n")
+STAGE3 = samples.joined('global', "['_V']=function(x){return x};require('child_process').exec('uname');\n")
 
 
 class _Rewrite(_AmendFixture):

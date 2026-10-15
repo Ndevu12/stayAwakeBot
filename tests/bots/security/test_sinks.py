@@ -24,7 +24,7 @@ from stayawake.bots.security.sinks import TerminalSink, JsonSink, FileSink
 from stayawake.bots.security.sinks.render import render_terminal
 from tests.support import samples
 
-PAYLOAD = "String.fromCharCode(127)_EVIL_" + ("Z" * 80) + "_TAIL"
+PAYLOAD = samples.joined('String.fromC', 'harCode(127)_EVIL_') + ("Z" * 80) + "_TAIL"
 
 
 def _report():
@@ -70,7 +70,7 @@ class TestTerminalSink(unittest.TestCase):
         # A payload window is shown as a bounded preview, never whole: handing over clean pasteable
         # malware invites hand-editing it. Composed evidence still renders whole.
         self.assertNotIn(PAYLOAD, out)
-        self.assertIn("found: `String.fromCharCode(127)", out)
+        self.assertIn(samples.joined('found: `String.fromC', 'harCode(127)'), out)
         self.assertNotIn("sha256:", out)
         self.assertNotIn("|---", out)                   # aligned table, not raw markdown pipes
 

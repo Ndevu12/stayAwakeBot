@@ -59,6 +59,24 @@ class TestTheInfectedProject(unittest.TestCase):
         self.assertTrue(_scan(folder / "infected").infected)
 
 
+class TestEachPieceReadsAsWhatItIsNamedFor(unittest.TestCase):
+    def test_each_piece_reads_as_its_signature(self):
+        pieces = {
+            "loader-decoder-fn": f"x = {samples.DECODER}(0);\n",
+            "loader-seed-var": f"var {samples.seed()} = 1;\n",
+            "loader-global-bang": f"{samples.GLOBAL}['!'] = 1;\n",
+            "loader-global-v-marker": samples.marked_loader(),
+            "loader-fromcharcode-127": f"const s=String.{samples.FROM_CHAR_CODE}(127);eval(s);\n",
+            "loader-clientcode-error": f"console.log('{samples.CLIENT_CODE_ERROR}: boom');\n",
+        }
+        for signature_id, text in pieces.items():
+            with self.subTest(signature=signature_id):
+                root = Path(tempfile.mkdtemp(prefix="piece-"))
+                self.addCleanup(shutil.rmtree, root, True)
+                (root / "index.js").write_text(text, encoding="utf-8")
+                self.assertIn(signature_id, {f.signature_id for f in _scan(root).findings})
+
+
 class TestTheFilesThatBuildThemHoldNone(unittest.TestCase):
     def test_no_signature_matches_them_or_what_python_compiles_from_them(self):
         root = Path(tempfile.mkdtemp(prefix="samples-source-"))

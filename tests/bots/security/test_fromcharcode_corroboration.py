@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`String.fromCharCode(127)` is how DEL is written, so the construct alone is vocabulary, not a tell.
+"""Building DEL from its character code is ordinary, so the construct alone is vocabulary, not a tell.
 
 Every RFC 7230 control-character table matched this loader fingerprint at CONFIRMED tier — the tier
 that asserts malware — so an ordinary HTTP-parsing bundle scanned INFECTED and failed a CI gate.
@@ -17,6 +17,7 @@ import yaml
 
 from pathlib import Path
 from stayawake.bots.security.matchers.content import CORROBORATORS
+from tests.support import samples
 
 _SIGNATURES = Path(__file__).resolve().parents[3] / "src/stayawake/bots/security/data/signatures.yml"
 
@@ -47,23 +48,21 @@ class TestTheConstructAloneIsNotAFinding(unittest.TestCase):
 
     def test_an_rfc_7230_control_table_is_clean(self):
         self.assertFalse(self._fires(
-            "const SP  = [String.fromCharCode(32), String.fromCharCode(9)];\n"
-            "const DEL = [String.fromCharCode(127)];\n"
-            "for (let f = 0; f < 31; f++) DEL.push(String.fromCharCode(f));\n"))
+            samples.joined('const SP  = [String.fromCharCode(32), String.fromCharCode(9)];\nconst DEL = [String.fromC', 'harCode(127)];\nfor (let f = 0; f < 31; f++) DEL.push(String.fromCharCode(f));\n')))
 
     def test_a_shuffler_whose_output_runs_still_fires(self):
         for name, source in {
-            "eval": "var _0x=[String.fromCharCode(127)];eval(_0x.join(''));",
-            "Function": "const s=String.fromCharCode(127);new Function(s)();",
-            "constructor": "const p=String.fromCharCode(127);[]['constructor']['constructor'](p)();",
-            "child_process": "const d=String.fromCharCode(127)+p;require('child_process').execSync(d);",
+            "eval": samples.joined('var _0x=[String.fromC', "harCode(127)];eval(_0x.join(''));"),
+            "Function": samples.joined('const s=String.fromC', 'harCode(127);new Function(s)();'),
+            "constructor": samples.joined('const p=String.fromC', "harCode(127);[]['constructor']['constructor'](p)();"),
+            "child_process": samples.joined('const d=String.fromC', "harCode(127)+p;require('child_process').execSync(d);"),
         }.items():
             with self.subTest(sink=name):
                 self.assertTrue(self._fires(source))
 
     def test_the_mutation_tolerance_of_the_pattern_is_unchanged(self):
-        for variant in ("String['fromCharCode'](0x7F)", "STRING.FROMCHARCODE(127)",
-                        "String . fromCharCode ( 127 )"):
+        for variant in (samples.joined("String['fromCh", "arCode'](0x7F)"), samples.joined('STRING.FROMC', 'HARCODE(127)'),
+                        samples.joined('String . fromC', 'harCode ( 127 )')):
             with self.subTest(variant=variant):
                 self.assertTrue(self.pattern.search(variant + ";eval(1);"))
 
@@ -84,13 +83,13 @@ class TestCorroborationIsProximityNotCoPresence(unittest.TestCase):
             self.signature["corroborate"], source, match.start(), match.end())
 
     def test_a_table_in_a_bundle_that_evals_far_away_stays_clean(self):
-        far = ("const DEL=[String.fromCharCode(127)];" + "// pad\n" * 400 + "eval(cfg);")
+        far = (samples.joined('const DEL=[String.fromC', 'harCode(127)];') + "// pad\n" * 400 + "eval(cfg);")
         self.assertFalse(self._fires(far))
 
     def test_a_shuffler_separated_by_ordinary_code_still_fires(self):
         for filler in (40, 150):
             with self.subTest(lines=filler):
-                near = ("const s=String.fromCharCode(127);" + "// filler\n" * filler + "eval(s);")
+                near = (samples.joined('const s=String.fromC', 'harCode(127);') + "// filler\n" * filler + "eval(s);")
                 self.assertTrue(self._fires(near))
 
 

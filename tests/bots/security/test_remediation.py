@@ -105,7 +105,7 @@ class TestStripAndResidual(unittest.TestCase):
 
     def test_remove_residual_removes_and_backs_up(self):
         repo = Path(tempfile.mkdtemp())
-        (repo / "evil.cjs").write_text("module.exports = sfL(0)\n", encoding="utf-8")
+        (repo / "evil.cjs").write_text(f"module.exports = {samples.DECODER}(0)\n", encoding="utf-8")
         q = remediation.rollback_path(repo)
         finding = type("F", (), {"path": "evil.cjs"})()
         done = remediation.remove_residual(repo, [finding], q)
@@ -353,7 +353,7 @@ class TestActionScopeMatchesEvidence(unittest.TestCase):
         self.assertEqual(res.verdict, "suspicious")
 
         res2 = scan_one("fa-solid-400.woff2",
-                        "global['_V']=function(x){return x};require('child_process').exec('x');\n" + "// " * 40)
+                        samples.marked_loader("x") + "// " * 40)
         self.assertTrue(res2.infected)
         self.assertTrue(any(f.confidence == CONFIRMED for f in res2.findings))
 

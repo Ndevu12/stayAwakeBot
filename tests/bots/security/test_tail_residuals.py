@@ -17,6 +17,7 @@ from stayawake.bots.security.models import CLEAN, INFECTED, SUSPICIOUS
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
+from tests.support import samples
 
 SIGS = load_signatures()
 
@@ -39,21 +40,21 @@ class TestNonSourceBodyScan(unittest.TestCase):
     # (a) — the confirmed content tier now head-scans NON-source files (#6/#7), FP-safe.
     def test_payload_under_benign_ext_is_caught(self):
         self.assertIn("loader-fromcharcode-127",
-                      _ids({"payload.bin": b"junk\nString.fromCharCode(127);eval(1)\nmore"}))
+                      _ids({"payload.bin": f"junk\nString.{samples.FROM_CHAR_CODE}(127);eval(1)\nmore".encode()}))
 
     def test_nul_laden_non_source_is_caught(self):
         # A NUL in the head used to make read_text skip a non-source file wholesale (#7).
-        self.assertIn("loader-seed-var", _ids({"x.dat": b"\x00\x00 var _$_1e42 = sfL(0);"}))
+        self.assertIn("loader-seed-var", _ids({"x.dat": f"\x00\x00 var {samples.seed()} = {samples.DECODER}(0);".encode()}))
 
     def test_oversized_non_source_head_is_scanned(self):
         # >2 MB non-source: payload in the head, then padding — used to be skipped wholesale (#6).
         self.assertIn("loader-fromcharcode-127",
-                      _ids({"big.log": b"String.fromCharCode(127);eval(1)\n" + b"x" * 2_500_000}))
+                      _ids({"big.log": samples.joined('String.fromC', 'harCode(127);eval(1)\n').encode("latin-1") + b"x" * 2_500_000}))
 
     def test_oversized_non_source_tail_is_scanned(self):
         # Head+tail (not head-only): a payload APPENDED past the cap is still seen.
         self.assertIn("loader-fromcharcode-127",
-                      _ids({"big.log": b"x" * 2_500_000 + b"\nString.fromCharCode(127);eval(1)\n"},
+                      _ids({"big.log": b"x" * 2_500_000 + samples.joined('\nString.fromC', 'harCode(127);eval(1)\n').encode("latin-1")},
                            ScanOptions()))
 
     def test_genuine_binary_is_clean(self):
@@ -103,7 +104,7 @@ class TestSymlinkEscape(unittest.TestCase):
 
     def test_escaping_dir_symlink_reported(self):
         outside = Path(tempfile.mkdtemp())
-        (outside / "evil.js").write_text("String.fromCharCode(127)")
+        (outside / "evil.js").write_text(samples.joined('String.fromC', 'harCode(127)'))
         (self.d / "escape").symlink_to(outside, target_is_directory=True)
         r = self._scan_dir()
         self.assertIn("symlink-escapes-repo", {f.signature_id for f in r.findings})

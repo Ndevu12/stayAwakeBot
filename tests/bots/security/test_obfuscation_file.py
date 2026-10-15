@@ -20,6 +20,7 @@ from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.bots.security.obfuscation import analyze_file, analyze_delta, is_generated_context
 from stayawake.bots.security.obfuscation.heuristics import _GENERATED_PATH
 from stayawake.bots.security.obfuscation.execsink import _has_exec_sink
+from tests.support import samples
 
 SIGS = load_signatures()
 OBF = "obfuscated-source-file"
@@ -44,7 +45,7 @@ class TestWholeFileObfuscation(unittest.TestCase):
 
     def test_wrapped_loader_in_jsx(self):
         packed = "\n".join("var p" + str(i) + "=" + ("z" * 110) + ";" for i in range(40))
-        body = "import React from 'react'\nvar _$_1e42='seed';\n" + packed
+        body = f"import React from 'react'\nvar {samples.seed()}='seed';\n" + packed
         self.assertIn(OBF, _scan({"C.jsx": body}))
 
     def test_vm_runinnewcontext_dropper_caught(self):
@@ -108,7 +109,7 @@ class TestWholeFileObfuscation(unittest.TestCase):
 
     def test_loader_line_just_under_long_line_threshold(self):
         # <2000 chars on every line, so the formatting-keyed rule never fires.
-        line = "export default {plugins:[" + "0," * 900 + "]};var _$_ab='x';function sfL(w){return w}"
+        line = "export default {plugins:[" + "0," * 900 + f"]}};var {samples.seed('ab')}='x';function {samples.DECODER}(w){{return w}}"
         self.assertLess(max(len(l) for l in line.splitlines()), 2000)
         self.assertIn(OBF, _scan({"postcss.config.mjs": line}))
 
@@ -764,7 +765,7 @@ class TestWholeFileObfuscation(unittest.TestCase):
             "runner-after-division.js": "var h = i++ / 2; atob(s); require('child_process').exec(cmd) / 1;\n",
             "suffixed-string.js": "var myString = String; myString.fromCharCode(...c);\n"
                                   "require('child_process').exec(cmd);\n",
-            "suffixed-global.js": "var myglobal = global; myglobal['!'] = 1;\n",
+            "suffixed-global.js": f"var myglobal = global; my{samples.GLOBAL}['!'] = 1;\n",
             "upper.js": "EVAL(payload);\n",
         }.items():
             self.assertIn(OBF, _scan({name: src}), name)
@@ -823,7 +824,7 @@ class TestWholeFileObfuscation(unittest.TestCase):
 
     def test_a_confirmed_signature_still_reports_where_it_is_the_only_tier(self):
         """A confirmed loader signature still reports in vendored and minified paths."""
-        worm = ("const parts = data.split(String.fromCharCode(127));\n"
+        worm = (f"const parts = data.split(String.{samples.FROM_CHAR_CODE}(127));\n"
                 "const stage2 = eval(parts[1]);\n")
         for rel in ("loader.js", "vendor/left-pad/index.js", "assets/app.min.js"):
             self.assertIn("loader-fromcharcode-127", _scan({rel: worm}), rel)
@@ -974,7 +975,7 @@ class TestWholeFileObfuscation(unittest.TestCase):
             self.assertFalse(analyze_file(code, ".ts"), code)
 
     def test_vendored_and_generated_paths_suppressed(self):
-        arr = "var a=[" + ",".join(["0x68"] * 40) + "];String.fromCharCode(127)"
+        arr = "var a=[" + ",".join(["0x68"] * 40) + samples.joined('];String.fromC', 'harCode(127)')
         for path in ("lib/app.min.js", ".pnp.cjs", ".yarn/releases/yarn.cjs",
                      "dist/main.js", "src/gql.generated.ts", "proto/__generated__/x.pb.js",
                      ".venv/lib/python3.11/site-packages/pkg/mod.py"):   # a Python venv (third-party code)
@@ -987,7 +988,7 @@ class TestWholeFileObfuscation(unittest.TestCase):
         # a real loader fingerprint IS.)
         sp = ".venv/lib/python3.11/site-packages/evilpkg/"
         self.assertNotIn(OBF, _scan({sp + "dense.py": self._OBF_ONLY}))            # density suppressed
-        self.assertIn("loader-seed-var", _scan({sp + "loader.py": "var _$_1e42 = sfL(0);\n"}))  # still caught
+        self.assertIn("loader-seed-var", _scan({sp + "loader.py": samples.joined('var _$', '_1e42 = sf', 'L(0);\n')}))  # still caught
 
     # ── Build-artifact blind spot (#1095): both suppression layers, documented ──
     # An obfuscation-ONLY payload: a numeric array fed to fromCharCode.apply — trips the density/

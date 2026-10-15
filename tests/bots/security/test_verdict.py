@@ -17,6 +17,7 @@ from stayawake.bots.security import remediation
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
+from tests.support import samples
 
 SIGS = load_signatures()
 
@@ -114,7 +115,7 @@ class TestVerdict(unittest.TestCase):
         self.assertFalse(any(f.signature_id == "obfuscated-source-file" for f in r.findings))
 
     def test_scanner_grades_real_loader_infected(self):
-        r = _scan({"x.mjs": "var _$_1e42 = sfL(0); String.fromCharCode(127);\n"})
+        r = _scan({"x.mjs": f"var {samples.seed()} = {samples.DECODER}(0); String.{samples.FROM_CHAR_CODE}(127);\n"})
         self.assertEqual(r.verdict, INFECTED)
         self.assertTrue(any(f.confidence == CONFIRMED for f in r.findings))
 

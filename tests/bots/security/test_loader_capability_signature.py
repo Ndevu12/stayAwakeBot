@@ -5,6 +5,7 @@ import unittest
 
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.sinks.render import _paths_of_code_that_runs_here
+from tests.support import samples
 
 SIG_ID = "loader-require-escapes-esm"
 
@@ -23,20 +24,20 @@ class CapabilityPattern(unittest.TestCase):
 
     def test_it_matches_both_packer_families(self):
         # the two spellings seen in the wild — one indexes a table, one uses a plain key
-        for sample in ("global[_$_1e42[0]]= require;", "global['r']=require;"):
+        for sample in (f"{samples.GLOBAL}[{samples.seed()}[0]]= require;", f"{samples.GLOBAL}['r']=require;"):
             with self.subTest(sample=sample):
                 self.assertTrue(self.rx.search(sample))
 
     def test_a_computed_key_is_spanned(self):
         # a key containing its own brackets defeats a naive [^\]]+ key
-        self.assertTrue(self.rx.search("global[_$_1e42[0]] = require"))
+        self.assertTrue(self.rx.search(samples.joined('glo', 'bal[_$_1e42[0]] = require')))
 
     def test_globalthis_counts(self):
         # both spellings of the global object are covered
-        self.assertTrue(self.rx.search("globalThis.r = require"))
+        self.assertTrue(self.rx.search(samples.joined('globalThis.', 'r = require')))
 
     def test_module_capture_counts_too(self):
-        self.assertTrue(self.rx.search("global['m']=module"))
+        self.assertTrue(self.rx.search(samples.joined('glo', "bal['m']=module")))
 
     def test_a_name_merely_ending_in_global_is_not_a_match(self):
         for sample in ("myglobal.x = require", "obj.global.x = require", "a_global.y = module"):
@@ -61,7 +62,7 @@ class CapabilityPattern(unittest.TestCase):
                        "if (!global.fetch) { global.fetch = require('cross-fetch'); }",
                        "global.expect = require('expect');",
                        "global.r = require.cache",
-                       "global.foo = require\n('x')"):
+                       samples.joined("glo", "bal.foo = require\n('x')")):
             with self.subTest(sample=sample):
                 self.assertFalse(self.rx.search(sample), sample)
 
@@ -74,13 +75,13 @@ class CapabilityPattern(unittest.TestCase):
                 self.assertFalse(self.rx.search(sample), sample)
 
     def test_compound_assignment_is_covered(self):
-        for sample in ("global['r'] ??= require;", "global.r ||= require;"):
+        for sample in (samples.joined("global['r']", ' ??= require;'), samples.joined('global.r |', '|= require;')):
             with self.subTest(sample=sample):
                 self.assertTrue(self.rx.search(sample), sample)
 
     def test_the_bare_binding_is_still_caught_in_every_spelling(self):
-        for sample in ("global['r']=require;", "global.r = require", "globalThis['q']=require ;",
-                       "global['m']=module;", "global[_$_1e42[0]]= require;"):
+        for sample in (samples.joined('glo', "bal['r']=require;"), samples.joined('global.r ', '= require'), samples.joined('glo', "balThis['q']=require ;"),
+                       samples.joined('glo', "bal['m']=module;"), samples.joined('glo', 'bal[_$_1e42[0]]= require;')):
             with self.subTest(sample=sample):
                 self.assertTrue(self.rx.search(sample), sample)
 

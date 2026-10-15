@@ -22,6 +22,7 @@ from stayawake.bots.security.targets import HistoryTarget, LocalRepoTarget, Push
 from stayawake.lib.git import objects, pushed
 from stayawake.utils import env
 from tests.bots.security._osv_fixtures import mal_record, osv_zip
+from tests.support import samples
 
 _PAYLOAD = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"
 _ZERO = "0" * 40
@@ -330,7 +331,7 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
         self.assertNotIn("too large to read in full", text)
 
     def test_a_large_file_of_any_kind_is_read_in_full(self):
-        loader = "global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        loader = samples.marked_loader()
         for name in ("big.js", "big.dat"):
             with self.subTest(name=name):
                 self.commit({name: "// padding\n" * 300 + loader + "// padding\n" * 300})
@@ -340,7 +341,7 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
 
     def test_a_payload_kept_in_git_lfs_here_is_caught(self):
         import hashlib
-        content = b"global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        content = samples.marked_loader().encode()
         oid = hashlib.sha256(content).hexdigest()
         store = self.work / ".git" / "lfs" / "objects" / oid[:2] / oid[2:4]
         store.mkdir(parents=True)

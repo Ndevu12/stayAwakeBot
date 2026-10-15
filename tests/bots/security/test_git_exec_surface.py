@@ -19,8 +19,9 @@ from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security.targets.local import LocalRepoTarget
 from stayawake.bots.security import hookscript
 from tests.support.gitrepo import GitSandbox
+from tests.support import samples
 
-LOADER = "global['_V'] = '8-st14';\n"
+LOADER = f"{samples.GLOBAL}['_V'] = '8-st14';\n"
 GIT_EXEC = {PAYLOAD_SIGNATURE, SUSPICIOUS_SIGNATURE, RUNS_SIGNATURE}
 
 
@@ -285,7 +286,7 @@ class TestPlantedCommandsAreCaught(ExecSurfaceSandbox):
 
     def test_a_command_carrying_a_payload_fingerprint(self):
         repo = self.repo()
-        self.append_config(repo, "[core]\n\teditor = node -e \\\"global['_V']='8-st14'\\\"\n")
+        self.append_config(repo, samples.joined('[core]\n\teditor = node -e \\"global', '[\'_V\']=\'8-st14\'\\"\n'))
         self.assert_tier(repo, CONFIRMED)
 
     def test_a_hook_that_fetches_and_runs(self):
@@ -755,11 +756,11 @@ class TestTheValueIsAKnownPayloadOnlyWhereTheFingerprintHolds(unittest.TestCase)
 
     def test_a_fingerprint_held_to_a_corroborator_holds_only_beside_it(self):
         self.assertEqual("loader-fromcharcode-127",
-                         self.carries_payload("node -e \"eval(String.fromCharCode(127)+x)\""))
-        self.assertIsNone(self.carries_payload("node -e \"const DEL = String.fromCharCode(127)\""))
+                         self.carries_payload(f"node -e \"eval(String.{samples.FROM_CHAR_CODE}(127)+x)\""))
+        self.assertIsNone(self.carries_payload(samples.joined('node -e "const DEL = String.fromC', 'harCode(127)"')))
 
     def test_a_fingerprint_that_holds_anywhere_holds(self):
-        self.assertEqual("loader-global-v-marker", self.carries_payload("node -e \"global['_V']='8-12';\""))
+        self.assertEqual("loader-global-v-marker", self.carries_payload(samples.joined('node -e "global', '[\'_V\']=\'8-12\';"')))
 
 
 if __name__ == "__main__":

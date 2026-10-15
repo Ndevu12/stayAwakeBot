@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 from stayawake.lib.git import lfs
+from tests.support import samples
 
 
 def pointer(content: bytes) -> bytes:
@@ -54,7 +55,7 @@ class TestOnlyAPointerIsAPointer(unittest.TestCase):
         self.assertEqual((hashlib.sha256(b"abc").hexdigest(), 3), lfs.named_object(data))
 
     def test_bytes_beyond_a_pointer_make_it_not_one(self):
-        code = b"global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        code = samples.marked_loader().encode()
         for extra in (code, b"x-note hello\n", b"oid sha256:" + b"2" * 64 + b"\n", b"size 3 \n",
                       b"\n" + code):
             data = pointer(b"abc") + extra
@@ -92,7 +93,7 @@ class TestEveryPointerGitLfsReadsNamesItsObject(unittest.TestCase):
                          lfs.checked_out_object(pointer(b"abc").replace(b"\n", b"\r\n")))
 
     def test_a_larger_file_names_an_object_only_when_its_start_is_a_pointer(self):
-        code = b"global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        code = samples.marked_loader().encode()
         oid = hashlib.sha256(b"abc").hexdigest()
         self.assertEqual((oid, 3), lfs.named_object(pointer(b"abc") + b"\n" * 1100 + code))
         self.assertIsNone(lfs.named_object(pointer(b"abc") + code + b"\n" * 1100))

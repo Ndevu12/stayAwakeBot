@@ -17,8 +17,9 @@ from pathlib import Path
 
 from stayawake.bots.security import service
 from stayawake.bots.security.service import run as run_mod
+from tests.support import samples
 
-_LOADER = "var _$_ab12 = 1;\n"          # confirmed `loader-seed-var`
+_LOADER = f"var {samples.seed('ab12')} = 1;\n"          # confirmed `loader-seed-var`
 
 
 def _big_repo(base: str, n_files: int, infected_every: int = 12) -> str:
