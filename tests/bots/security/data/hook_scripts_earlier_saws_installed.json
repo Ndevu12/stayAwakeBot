@@ -1,0 +1,14 @@
+{
+  "saw": "/usr/local/bin/saw",
+  "config": "/home/me/my config.yml",
+  "oldest_first": {
+    "post-rewrite": [
+      "#!/bin/sh\n# stayawake-scan-on-clone (post-rewrite) \u2014 installed by `saw hook install` (#1195). Must never fail git.\n/usr/local/bin/saw hook run --config '/home/me/my config.yml' post-rewrite \"$@\" </dev/null || true\n_local=\"$(dirname \"$0\")/post-rewrite.local\"\n[ -x \"$_local\" ] && \"$_local\" \"$@\" || true\nexit 0\n",
+      "#!/bin/sh\n# stayawake-scan-on-clone (post-rewrite) \u2014 installed by `saw hook install` (#1195). Must never fail git.\n_local=\"$(dirname \"$0\")/post-rewrite.local\"\n_feed() { [ -z \"$_pairs\" ] || printf '%s\\n' \"$_pairs\"; }\n_pairs=\"$(cat)\"\n_feed | /usr/local/bin/saw hook run --config '/home/me/my config.yml' post-rewrite \"$@\" || true\nif [ -x \"$_local\" ]; then _feed | \"$_local\" \"$@\"; fi\nexit 0\n"
+    ],
+    "pre-push": [
+      "#!/bin/sh\n# stayawake-scan-on-clone (pre-push) \u2014 installed by `saw hook install` (#1195). Must never fail git.\n_local=\"$(dirname \"$0\")/pre-push.local\"\n_feed() { [ -z \"$_refs\" ] || printf '%s\\n' \"$_refs\"; }\n_chain() {\nif [ -x \"$_local\" ]; then \"$_local\" \"$@\"; return $?; fi\ngit config --local --get lfs.repositoryformatversion >/dev/null 2>&1 || { cat >/dev/null; return 0; }\ncommand -v git-lfs >/dev/null 2>&1 || { echo \"This repository uses Git LFS, but git-lfs was not found on your path.\" >&2; return 2; }\ngit lfs pre-push \"$@\"\n}\n_refs=\"$(cat)\"\n_feed | /usr/local/bin/saw hook run --config '/home/me/my config.yml' pre-push \"$@\" || true\n_feed | _chain \"$@\"\nexit $?\n",
+      "#!/bin/sh\n# stayawake-scan-on-clone (pre-push) \u2014 installed by `saw hook install` (#1195). Must never fail git.\n_local=\"$(dirname \"$0\")/pre-push.local\"\n_feed() { [ -z \"$_refs\" ] || printf '%s\\n' \"$_refs\"; }\n_chain() {\nif [ -x \"$_local\" ]; then \"$_local\" \"$@\"; return $?; fi\ngit config --local --get lfs.repositoryformatversion >/dev/null 2>&1 || { cat >/dev/null; return 0; }\ncommand -v git-lfs >/dev/null 2>&1 || { echo \"This repository uses Git LFS, but git-lfs was not found on your path. Install Git LFS, then push again.\" >&2; return 2; }\ngit lfs pre-push \"$@\"\n}\n_refs=\"$(cat)\"\n_feed | /usr/local/bin/saw hook run --config '/home/me/my config.yml' pre-push \"$@\" || true\n_feed | _chain \"$@\"\nexit $?\n"
+    ]
+  }
+}

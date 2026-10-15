@@ -274,7 +274,7 @@ class TestAHookAnEarlierSawInstalledIsBroughtUpToDate(_Isolated):
         written = []
         for event in ("post-rewrite", "pre-push"):
             path = hook._hooks_dir() / event
-            path.write_text(hook.hookscript.render_previous(event, saw, None))
+            path.write_text(hook.hookscript.render_earlier(event, saw, None)[-1])
             os.chmod(path, 0o755)
             written.append(path)
         return written
@@ -302,7 +302,7 @@ class TestAHookAnEarlierSawInstalledIsBroughtUpToDate(_Isolated):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(hook.install(repositories=[str(repo)]), 0)
         rewrite = repo / ".git" / "hooks" / "post-rewrite"
-        rewrite.write_text(hook.hookscript.render_previous("post-rewrite", hook._saw_executable(), None))
+        rewrite.write_text(hook.hookscript.render_earlier("post-rewrite", hook._saw_executable(), None)[-1])
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(hook.repair(), 0)
         self.assertEqual(hook.hookscript.verdict(rewrite), hook.hookscript.PRISTINE)
@@ -313,7 +313,7 @@ class TestAHookAnEarlierSawInstalledIsBroughtUpToDate(_Isolated):
         folder = hook._hooks_dir()
         folder.mkdir(parents=True, exist_ok=True)
         for script in (hook.hookscript.render("post-checkout", saw, None),
-                       hook.hookscript.render_previous("post-rewrite", saw, None)):
+                       hook.hookscript.render_earlier("post-rewrite", saw, None)[-1]):
             path = folder / "pre-push"
             path.write_text(script)
             os.chmod(path, 0o755)
@@ -328,7 +328,7 @@ class TestAHookAnEarlierSawInstalledIsBroughtUpToDate(_Isolated):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(hook.install(repositories=[str(repo)]), 0)
         in_repo = repo / ".git" / "hooks" / "pre-push"
-        in_repo.write_text(hook.hookscript.render_previous("pre-push", hook._saw_executable(), None))
+        in_repo.write_text(hook.hookscript.render_earlier("pre-push", hook._saw_executable(), None)[-1])
         self._outdated()
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(hook.uninstall(), 0)
