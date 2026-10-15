@@ -39,9 +39,3 @@ log. `saw audit` reports on credentials without ever reading a live secret's byt
 Only `--json` carries the full evidence. The terminal shows a short preview of each finding it
 lists, and anything written to disk carries a fingerprint instead, so a report can never
 re-distribute a live payload; an alert body carries no evidence at all.
-
-## What is not published
-
-How detection decides — the signals, the thresholds, the corroboration — is deliberately not
-documented publicly. Published detection mechanics are an evasion aid. If you are evaluating `saw`,
-the promises on these pages are the contract; the internals are not part of it.

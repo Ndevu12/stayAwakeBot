@@ -51,6 +51,30 @@ def _packaged_words() -> dict[str, str]:
             if isinstance(s.get("shown_as"), str)}
 
 
+def described(signature_id: str, category: str, description: str | None) -> str:
+    """Say what a finding is, for a report. Takes its signature, category and description. Returns
+    the description saw wrote for this finding, or the finding's words when it carries only its
+    signature's own description."""
+    if description and description != _signature_descriptions().get(signature_id):
+        return description
+    return what_it_is(signature_id, category)
+
+
+def _signature_descriptions() -> dict[str, str]:
+    """Read the description of each packaged signature. Returns them by signature, or none when
+    the signatures cannot be read."""
+    try:
+        return _packaged_descriptions()
+    except (OSError, ValueError):
+        return {}
+
+
+@lru_cache(maxsize=1)
+def _packaged_descriptions() -> dict[str, str]:
+    """Read the description of each packaged signature once. Returns them by signature."""
+    return {s["id"]: s["description"] for group in load_signatures().values() for s in group}
+
+
 def is_a_commit(path: str | None, commit_sha: str | None) -> bool:
     """Tell whether a finding is a commit. Takes its path and commit. Returns the answer."""
     return bool(commit_sha and path and commit_sha.startswith(path))

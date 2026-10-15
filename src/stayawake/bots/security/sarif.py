@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from stayawake.bots.security.found import described
 from stayawake.bots.security import redaction
 from stayawake.utils import textsafe
 from stayawake.utils.io import write_json
@@ -62,24 +63,24 @@ def _fingerprint(signature_id: str, path: str, line: int | None) -> str:
 
 
 def _rule(finding: dict) -> dict[str, Any]:
-    """A reportingDescriptor (rule) for one signature, so triage shows real metadata
-    instead of a bare id. `help`/`fullDescription` are built from category + description."""
+    """Describe one signature as a SARIF rule. Takes a finding of it. Returns the rule."""
     sig = finding["signature_id"]
     category = finding.get("category", "")
-    description = finding.get("description", "")
+    words = described(sig, category, finding.get("description"))
     return {
         "id": sig,
         "name": _name(sig),
-        "shortDescription": {"text": f"{category}: {sig}" if category else sig},
-        "fullDescription": {"text": description or sig},
-        "help": {"text": f"Category: {category}\n\n{description}".strip()},
+        "shortDescription": {"text": words},
+        "fullDescription": {"text": words},
+        "help": {"text": f"{words}. Run `saw scan` in the repository for the full report, and "
+                         "`saw fix` to remove what saw can."},
         "defaultConfiguration": {"level": _level(finding.get("severity", ""))},
         "properties": {"category": category, "tags": [category] if category else []},
     }
 
 
 def _message(finding: dict) -> str:
-    text = finding.get("description") or finding["signature_id"]
+    text = described(finding["signature_id"], finding.get("category", ""), finding.get("description"))
     fp = redaction.redact(finding.get("evidence"))
     return f"{text}\n\nEvidence (redacted): {redaction.render_redacted(fp)}" if fp else text
 
@@ -153,8 +154,8 @@ NOT_SCANNED_RULE: dict[str, Any] = {
     "id": NOT_SCANNED_ID,
     "name": "TargetNotScanned",
     "shortDescription": {"text": "A target could not be scanned"},
-    "fullDescription": {"text": "A target saw could not scan is not clean. Scan it again."},
-    "help": {"text": "A target saw could not scan is not clean. Scan it again."},
+    "fullDescription": {"text": "A target that could not be scanned is not clean. Scan it again."},
+    "help": {"text": "A target that could not be scanned is not clean. Scan it again."},
     "defaultConfiguration": {"level": "error"},
     "properties": {"category": "scan", "tags": ["scan"]},
 }

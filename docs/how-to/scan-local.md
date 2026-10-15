@@ -26,7 +26,7 @@ saw scan -j 1                 # force sequential, e.g. on a low-memory box
 
 A persisted report is byte-identical either way.
 
-**Keep a copy.** A scan writes nothing by default. Pick a sink — see [report
+**Keep a copy.** A scan writes nothing by default. Pick an output — see [report
 sinks](../reference/cli/sinks.md):
 
 ```bash

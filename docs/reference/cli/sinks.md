@@ -9,7 +9,7 @@ short preview of each finding it lists, and any artifact written to disk stores 
 `{sha256, preview, len}` fingerprint in place of the raw match, so a report on disk can never
 re-distribute a live payload.
 
-| Sink | Flag | Evidence | Destination |
+| Output | Flag | Evidence | Where it goes |
 | --- | --- | --- | --- |
 | Terminal | (default) | a short preview | stdout, ephemeral |
 | JSON | `--json` | full | stdout — pipe it; no file |
@@ -36,8 +36,8 @@ on disk; `saw scan --json` carries it in full. And `saw` never deletes it; your 
 clears its temporary directory on its own schedule, which may be at reboot or not at all. If you
 want the report kept somewhere you chose, pass `-d DIR` and it goes there instead.
 
-`--json` turns the spill off: that payload already carries every finding in full, so there is
-nothing to rescue from scrollback. A `-d DIR` you asked for is still written.
+With `--json` no full report is written: the JSON already carries every finding in full. A `-d DIR`
+you asked for is still written.
 
 ## The dependencies to remove
 

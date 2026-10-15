@@ -113,5 +113,5 @@ a schedule and whenever that file changes.
 ## Reports
 
 Neither tool writes a report into your repository, and nothing is committed back. `saw scan` renders
-to the terminal and persists nothing by default; durable output is one opt-in sink per flag — see
+to the terminal and persists nothing by default; durable output is one opt-in output per flag — see
 [report sinks](cli/sinks.md).

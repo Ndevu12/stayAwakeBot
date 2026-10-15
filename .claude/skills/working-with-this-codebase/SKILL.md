@@ -43,7 +43,7 @@ tangent once, then let it go; don't keep dragging it back. Reproduce a bug with 
 When you spawn investigator subagents to find the best approach, give them an **open, upgrade-oriented
 mandate** — "find the strongest proper improvement, measure it" — not a biased checklist that primes
 them to hunt only downsides. Consider all sides, but the objective is the best upgrade, and let them
-honestly reject non-fitting ideas rather than force them.
+reject ideas that do not fit rather than force them.
 
 ## Brief from the root — bound the cost, never the thinking
 
