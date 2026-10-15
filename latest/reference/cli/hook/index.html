@@ -1947,7 +1947,8 @@ git command, and never stop a push. See <a href="../../../how-to/scan-on-clone/"
   you to examine. What could not be put back is said, with the command to run.</li>
 <li><strong><a href="../audit/"><code>saw audit</code></a> reports</strong> a hook saw did not install, or one of saw's that was changed;
   <code>saw hook repair</code> puts it back.</li>
-<li><strong>Scans are quick and bounded.</strong> A pull, a switch or a file checkout scans only what changed. Each scan has a time
+<li><strong>Scans are quick and bounded.</strong> A pull, a switch, a rebase, an amend or a file checkout scans only what changed.
+  Each scan has a time
   budget (<code>SAW_HOOK_TIMEOUT</code>: 60s, 20s for a push). What could not be checked in time reads as not
   verified, never clean.</li>
 <li><strong>A push goes through.</strong> A worm it would publish is named with the commit that carries it and
