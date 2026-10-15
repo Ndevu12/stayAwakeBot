@@ -276,6 +276,16 @@ signatures:
     remediation: remove-foreign-vscode
     confidence: confirmed
 
+  - id: vscode-task-runs-payload-script
+    category: vscode-autorun
+    severity: critical
+    matcher: task-package-script
+    kind: vscode-task-runs-payload-script
+    description: "VS Code task that runs, when its folder opens, a package script carrying a payload"
+    shown_as: "an editor task that runs a package script carrying a payload when the folder opens"
+    remediation: manual
+    confidence: confirmed
+
   - id: vscode-allow-automatic-tasks
     category: vscode-autorun
     severity: high

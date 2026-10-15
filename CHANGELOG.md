@@ -133,6 +133,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **A package script an editor task runs when the folder opens is checked.** When a task runs an npm,
+  pnpm, yarn or bun script as the folder opens, the script is read from the project and checked as the
+  task's own command is; a payload in it reads infected whether the task shows itself or not.
 - **A Claude Code hook that runs downloaded code is found however it runs it.** One that downloads or
   decodes code and runs it through `cmd`, PowerShell or a pipeline now reads infected, as such a git
   hook already does. A hook that only downloads a file is still not reported.
