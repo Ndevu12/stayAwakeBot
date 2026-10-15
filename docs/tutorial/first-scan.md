@@ -35,7 +35,8 @@ Stand in a repository and run:
 saw scan
 ```
 
-The scan runs on your machine and only reads. The last line of the report is the verdict.
+The scan runs on your machine and only reads: nothing is sent anywhere and no token is needed. The
+last line of the report is the verdict.
 
 ## 3. Read the verdict
 
