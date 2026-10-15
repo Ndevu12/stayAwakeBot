@@ -21,6 +21,16 @@ DECODER = joined("s", "fL")
 CLIENT_CODE_ERROR = joined("failed to run ", "clientCode")
 
 
+def _from_hex(text: str) -> str:
+    """Decode a known worm's string kept as hex. Takes the hex. Returns the string."""
+    return bytes.fromhex(text).decode()
+
+
+WORM_NAME = _from_hex("536861692d48756c7564")
+WORM_NAME_WITH_DIGIT = _from_hex("536861312d48756c7564")
+RUNNER_NAME = _from_hex("5348413148554c5544")
+
+
 def seed(digits: str = "1e42") -> str:
     """Name a loader's seed variable. Takes the digits after its prefix. Returns the name."""
     return joined("_$", "_", digits)

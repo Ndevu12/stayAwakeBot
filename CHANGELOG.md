@@ -331,8 +331,8 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
-- **Three signatures have new ids that name no worm:** `exfil-worm-branding`, `exfil-worm-runner` and
-  `exfil-worm-token`. An allowlist entry for one of them needs its new id, and code scanning shows
+- **Three signatures for a known worm have new ids that name no worm:** `known-worm-branding`,
+  `known-worm-runner` and `known-worm-name`. An allowlist entry for one of them needs its new id, and code scanning shows
   their findings under the new ids.
 - **`saw audit`, `saw harden` and `saw fix amend` say what they found and what to run in plain words.**
   The audit's scope line says what it covers; checks that could not run say so and name the command.

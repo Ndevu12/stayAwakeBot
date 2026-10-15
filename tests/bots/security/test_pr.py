@@ -160,7 +160,7 @@ class TestPartialFix(unittest.TestCase):
     _LOADER = Finding("x", "code-loader", Severity.CRITICAL, "postcss.config.mjs",
                       "loader", remediation="strip-appended-payload")
     _EXFIL = Finding("x", "exfil", Severity.CRITICAL, "telemetry.js",
-                     samples.joined('shai-', 'hulud'), remediation="manual")
+                     samples.WORM_NAME.lower(), remediation="manual")
     # A confirmed evil-merge (#1360 PR2): keyed to a merge SHA (path), with the introduced files in
     # `related_paths` — history guidance always names the commit; working-tree recovery is a
     # separate act keyed to those files when they still carry the payload.

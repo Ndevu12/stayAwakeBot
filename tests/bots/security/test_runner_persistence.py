@@ -32,7 +32,7 @@ def _scan(files, allow=None):
 
 
 # A realistic .runner registration config — carries the live registration endpoint.
-_RUNNER_CONFIG = (samples.joined('{"agentId":42,"agentName":"SHA1', 'HULUD","poolId":1,"serverUrl":"https://pipelines.actions.githubusercontent.com/abc","gitHubUrl":"https://github.com/acme/app","workFolder":"_work"}'))
+_RUNNER_CONFIG = (samples.joined('{"agentId":42,"agentName":"', samples.RUNNER_NAME, '","poolId":1,"serverUrl":"https://pipelines.actions.githubusercontent.com/abc","gitHubUrl":"https://github.com/acme/app","workFolder":"_work"}'))
 
 
 class TestRunnerPersistence(unittest.TestCase):

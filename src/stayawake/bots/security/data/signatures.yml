@@ -334,36 +334,36 @@ signatures:
     remediation: report
 
   # ── A known worm's exfiltration / persistence branding (content) ─────────────
-  - id: exfil-worm-branding
+  - id: known-worm-branding
     category: exfil
     severity: critical
     matcher: content
-    pattern: 'Sha1-Hul[u]d:\s*The Second Coming|A Mini Shai-Hul[u]d has Appeared'
-    prefilter: "hulud"   # cheap required-literal reject before the regex
+    pattern: '\x53\x68\x61\x31\x2d\x48\x75\x6c\x75\x64:\s*The Second Coming|A Mini \x53\x68\x61\x69\x2d\x48\x75\x6c\x75\x64 has Appeared'
+    prefilter: "\x68\x75\x6c\x75\x64"   # cheap required-literal reject before the regex
     description: "A known worm's exfiltration branding: the label it puts on the repository or commit it publishes"
     shown_as: "a mark a known worm leaves where it has run"
     remediation: manual
     confidence: confirmed
 
-  - id: exfil-worm-runner
+  - id: known-worm-runner
     category: exfil
     severity: critical
     matcher: content
-    pattern: '\bSHA1HULUD\b'
-    prefilter: "sha1hulud"   # cheap required-literal reject before the regex
+    pattern: '\b\x53\x48\x41\x31\x48\x55\x4c\x55\x44\b'
+    prefilter: "\x73\x68\x61\x31\x68\x75\x6c\x75\x64"   # cheap required-literal reject before the regex
     file_globs: [".github/**", "**/.github/**", ".runner", "**/.runner", "**/actions-runner/**", "*.service"]
     description: "A known worm's persistence: a self-hosted runner it registers, named in runner or workflow config"
     shown_as: "a CI runner a known worm sets up to keep control"
     remediation: manual
     confidence: confirmed
 
-  - id: exfil-worm-token
+  - id: known-worm-name
     category: exfil
     severity: high
     matcher: content
     confidence: heuristic
-    pattern: 'Sha[i1]-Hulud'
-    prefilter: "-hulud"   # cheap required-literal reject before the regex
+    pattern: '\x53\x68\x61[\x69\x31]\x2d\x48\x75\x6c\x75\x64'
+    prefilter: "\x2d\x68\x75\x6c\x75\x64"   # cheap required-literal reject before the regex
     description: "A known worm's name mentioned in a file (also common in security write-ups)"
     shown_as: "a mention of a known worm"
     remediation: manual
