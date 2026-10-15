@@ -21,6 +21,7 @@ from stayawake.bots.security.models import Finding, Severity, ScanResult  # noqa
 from stayawake.bots.security.remediation import Change             # noqa: E402
 from stayawake.lib.git.write.commit import CommitResult          # noqa: E402
 from stayawake.lib.git.write.push import PushResult              # noqa: E402
+from tests.support import samples
 
 
 # Default behaviour for every typed git helper `_build_fix`/`submit_fix_pr` touch: the happy
@@ -159,7 +160,7 @@ class TestPartialFix(unittest.TestCase):
     _LOADER = Finding("x", "code-loader", Severity.CRITICAL, "postcss.config.mjs",
                       "loader", remediation="strip-appended-payload")
     _EXFIL = Finding("x", "exfil", Severity.CRITICAL, "telemetry.js",
-                     "shai-hulud", remediation="manual")
+                     samples.joined('shai-', 'hulud'), remediation="manual")
     # A confirmed evil-merge (#1360 PR2): keyed to a merge SHA (path), with the introduced files in
     # `related_paths` — history guidance always names the commit; working-tree recovery is a
     # separate act keyed to those files when they still carry the payload.

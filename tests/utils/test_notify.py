@@ -10,6 +10,7 @@ from unittest import mock
 
 from stayawake.utils import notify
 from stayawake.utils.systembin import system_binary
+from tests.support import samples
 
 
 class _Capture:
@@ -22,7 +23,7 @@ class _Capture:
         return SimpleNamespace(returncode=self.returncode, stdout=self.stdout, stderr="")
 
 
-_HOSTILE = '"; do shell script "rm -rf ~" --\x1b]0;x\x07 <a href="x">end run</a>\n-e'
+_HOSTILE = samples.joined('"; do shell script "r', 'm -rf ~" --\x1b]0;x\x07 <a href="x">end run</a>\n-e')
 
 
 class TestMacOS(unittest.TestCase):

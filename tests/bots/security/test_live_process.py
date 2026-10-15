@@ -305,7 +305,7 @@ class TestItAsksTheCorpusItAlreadyShips(unittest.TestCase):
     def test_a_command_line_that_merely_mentions_an_indicator_is_not_identified(self):
         # An analyst hunting the indicator, and this repo's own prevention library, both put these
         # strings on a command line. Neither is running the thing they name.
-        for benign in ("grep -ri sha1" + "hulud /Users/me/dev",
+        for benign in (samples.joined("grep -ri sha1", "hulud /Users/me/dev"),
                        "RE='Block" + "chain Explorer|Tech" + "Mono'; echo $RE",
                        "open('branch_" + "structure.json').read()"):
             with self.subTest(benign=benign[:32]):

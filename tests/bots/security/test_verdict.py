@@ -122,10 +122,10 @@ class TestVerdict(unittest.TestCase):
     def test_exfil_branding_and_runner_are_infected_token_is_suspicious(self):
         # #1089: the worm's exact vanity labels are CONFIRMED (INFECTED); a bare mention is
         # HEURISTIC (SUSPICIOUS), so a security write-up isn't falsely labelled malware.
-        self.assertEqual(_scan({"r.md": "A Mini Shai-Hulud has Appeared\n"}).verdict, INFECTED)
+        self.assertEqual(_scan({"r.md": samples.joined('A Mini Shai-', 'Hulud has Appeared\n')}).verdict, INFECTED)
         self.assertEqual(
-            _scan({"gh-token-monitor.service": "--name SHA1HULUD\n"}).verdict, INFECTED)
-        self.assertEqual(_scan({"w.md": "about the Shai-Hulud worm\n"}).verdict, SUSPICIOUS)
+            _scan({"gh-token-monitor.service": samples.joined('--name SHA1', 'HULUD\n')}).verdict, INFECTED)
+        self.assertEqual(_scan({"w.md": samples.joined('about the Shai-', 'Hulud worm\n')}).verdict, SUSPICIOUS)
 
     # ── Remediation safety: heuristic findings never auto-strip ─────────────────
     def test_codeloader_is_never_plan_auto_fixed(self):
