@@ -258,7 +258,7 @@ signatures:
     matcher: structural-json
     kind: vscode-task-runs-font
     description: "VS Code task whose command runs a font file"
-    font_tools: [pyftsubset, pyftmerge, fonttools, ttx, woff2_compress, woff2_decompress, woff2_info,
+    font_tools: &font_tools [pyftsubset, pyftmerge, fonttools, ttx, woff2_compress, woff2_decompress, woff2_info,
                  sfnt2woff, sfnt2woff-zopfli, woff2sfnt, ttf2woff, ttf2woff2, ttf2eot, otf2ttf, ttfautohint,
                  lv_font_conv, glyphhanger]
     shown_as: "an editor task that runs a disguised payload"
@@ -302,6 +302,7 @@ signatures:
     matcher: structural-json
     kind: claude-hook-runs-payload
     description: "Claude Code hook command executes a disguised payload (remote-fetch→interpreter, font/binary, or a known loader fingerprint)"
+    font_tools: *font_tools
     shown_as: "a Claude Code hook that runs a disguised payload when you use Claude Code in this folder"
     remediation: manual
     confidence: confirmed
