@@ -11,7 +11,7 @@ def named(value) -> str | None:
     return value.lower() if isinstance(value, str) else None
 
 
-def _text(value) -> str | None:
+def command_text(value) -> str | None:
     """Return the text of a command or an argument, written as a string, a list of strings or a quoted
     value. Takes the value. Returns the text, or None when there is none."""
     if isinstance(value, dict):
@@ -27,8 +27,8 @@ def _command(scope: dict) -> tuple[str | None, list[str] | None]:
     """Return the command and the arguments one part of a task file sets. Takes that part. Returns the
     command and the arguments, each None when the part does not set it."""
     args = scope.get("args")
-    texts = [text for text in map(_text, args) if text is not None] if isinstance(args, list) else None
-    return _text(scope.get("command")), texts
+    texts = [text for text in map(command_text, args) if text is not None] if isinstance(args, list) else None
+    return command_text(scope.get("command")), texts
 
 
 def _for_platform(scope: dict, platform: str | None, replaces_arguments: bool):

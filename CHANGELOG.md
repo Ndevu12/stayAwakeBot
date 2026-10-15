@@ -135,6 +135,10 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - **An editor task that runs a disguised payload is found however the task file sets the command it
   runs**, including the settings for one platform and the command a task file sets for all its tasks.
+- **An editor task that hands a font file to a font tool is not a disguised payload.** A task that
+  converts or subsets a font with a font tool is no longer reported as infected. Every other task that
+  names a font file still is, and a task that runs a payload disguised as an Embedded OpenType font is
+  now found too.
 - **saw reads a known loader's marker as an infection however it is quoted or spaced.** Written with
   double quotes, or with spaces inside its brackets, it was read only as something to check.
 
