@@ -9,12 +9,14 @@ fire on a lifecycle event (SessionStart is the folderOpen analogue — it runs o
 from __future__ import annotations
 
 import re
+import shlex
 
 from stayawake.bots.security.models import CONFIRMED, Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, load_jsonc, build_confirmed_loader_check, REMOTE_FETCH_INTO_INTERPRETER)
 from stayawake.bots.security.matchers.command_shape import not_plain
 from stayawake.bots.security.matchers.editor_task import command_lines, command_text, named
+from stayawake.utils.invocation import resolve_invocation
 
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
 
@@ -22,6 +24,13 @@ _REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 _FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf|eot)\b", re.IGNORECASE)
 _EDITOR_VARIABLE = re.compile(r"\$\{[^${}\s]{1,200}\}")
 _EXECUTABLE_SUFFIX = re.compile(r"\.(?:exe|cmd|bat)$", re.IGNORECASE)
+_OUTPUT_OPTIONS = frozenset({"-o", "--out", "--output", "--out-file", "--output-file"})
+_CODE_TAKING_FLAGS = frozenset({"--eval", "--print", "--command", "--execute", "--exec", "--run", "--require",
+                                "--import", "--preload", "--loader"})
+_SHORT_FLAGS = re.compile(r"-[A-Za-z]{1,20}")
+_CODE_TAKING_LETTERS = frozenset("eEpcxr")
+_PLAIN_PATH = re.compile(r"[\w./@+-]{1,500}")
+_FONT_ENDING = re.compile(r"\.(?:woff2?|ttf|otf|eot)$", re.IGNORECASE)
 
 
 def _one_call_of_a_font_tool(line: str, font_tools: frozenset[str]) -> bool:
@@ -32,6 +41,56 @@ def _one_call_of_a_font_tool(line: str, font_tools: frozenset[str]) -> bool:
     if not words or not_plain(plain):
         return False
     return _EXECUTABLE_SUFFIX.sub("", words[0]).lower() in font_tools
+
+
+def _output_values(words: list[str]) -> list[str]:
+    """List the values a command line gives its output options. Takes the words. Returns the values."""
+    values = []
+    for i, word in enumerate(words):
+        option, equals, value = word.partition("=")
+        if option in _OUTPUT_OPTIONS and (equals or i + 1 < len(words)):
+            values.append(value if equals else words[i + 1])
+    return values
+
+
+def _hands_over_code(word: str) -> bool:
+    """Tell whether a word is a flag that hands a program code or a file to load, alone or among other
+    single-letter flags. Takes the word. Returns the answer."""
+    flag = word.partition("=")[0]
+    if flag in _CODE_TAKING_FLAGS:
+        return True
+    return bool(_SHORT_FLAGS.fullmatch(flag)) and not _CODE_TAKING_LETTERS.isdisjoint(flag[1:])
+
+
+def _only_writes_fonts(line: str) -> bool:
+    """Tell whether a command line is one plain call, handed no code or preload by a flag, that names a
+    font file only as the file an output option writes, and whose program is not a font. Takes the line.
+    Returns the answer."""
+    plain = _EDITOR_VARIABLE.sub("variable", line)
+    if not_plain(plain):
+        return False
+    try:
+        words = shlex.split(plain)
+    except ValueError:
+        return False
+    if any(_hands_over_code(word) for word in words):
+        return False
+    written = [value for value in _output_values(words) if _FONT_EXEC.search(value)]
+    if not written or not all(_PLAIN_PATH.fullmatch(value) and _FONT_ENDING.search(value)
+                              for value in written):
+        return False
+    if len(_FONT_EXEC.findall(plain)) != sum(len(_FONT_EXEC.findall(value)) for value in written):
+        return False
+    return not _FONT_EXEC.search(resolve_invocation(words).payload_path or "")
+
+
+def _may_run_a_font(line: str, font_tools: frozenset[str], *, lifts: bool = True) -> bool:
+    """Tell whether a command line names a font file it may run. Takes the line, the font tools' names and
+    whether a plain call of a font tool, or a line that only writes fonts, is let through. Returns the
+    answer."""
+    if not _FONT_EXEC.search(line):
+        return False
+    return not (lifts and (_one_call_of_a_font_tool(line, font_tools) or _only_writes_fonts(line)))
 
 
 def _changes_what_a_name_runs(task: dict, task_file: dict) -> bool:
@@ -53,10 +112,8 @@ def _font_named_by(task: dict, task_file: dict, font_tools: frozenset[str]) -> s
     written = task.get("command")
     if written is not None and command_text(written) is None:
         lines.append(str(written))
-    if _changes_what_a_name_runs(task, task_file):
-        font_tools = frozenset()
-    return next((line for line in lines
-                 if _FONT_EXEC.search(line) and not _one_call_of_a_font_tool(line, font_tools)), None)
+    lifts = not _changes_what_a_name_runs(task, task_file)
+    return next((line for line in lines if _may_run_a_font(line, font_tools, lifts=lifts)), None)
 
 
 _PANELS_HIDDEN = {"terminal.integrated.hideOnStartup": ("always", "whenempty"),
@@ -164,11 +221,11 @@ class StructuralJsonMatcher(Matcher):
 
     # ── Claude Code hooks ──────────────────────────────────────────────────────────
     @staticmethod
-    def _hook_payload(cmd, loader_check):
+    def _hook_payload(cmd, loader_check, font_tools=frozenset(), *, lifts=True):
         """The command runs an unmistakable payload → a reason string, else None."""
         if _REMOTE_FETCH.search(cmd):
             return "remote fetch → interpreter"
-        if _FONT_EXEC.search(cmd):
+        if _may_run_a_font(cmd, font_tools, lifts=lifts):
             return "executes a font/binary"
         if loader_check and loader_check(cmd):
             return "known loader fingerprint"
@@ -179,6 +236,9 @@ class StructuralJsonMatcher(Matcher):
         hooks = data.get("hooks")
         if not isinstance(hooks, dict):
             return out
+        runs_payload_signature = by_kind.get("claude-hook-runs-payload", {})
+        font_tools = frozenset(str(name).lower() for name in runs_payload_signature.get("font_tools", ()))
+        lifts = "env" not in data
         for event, groups in hooks.items():
             if not isinstance(groups, list):
                 continue
@@ -192,7 +252,7 @@ class StructuralJsonMatcher(Matcher):
                     cmd = hook.get("command")
                     if not isinstance(cmd, str):
                         continue
-                    payload = self._hook_payload(cmd, loader_check)
+                    payload = self._hook_payload(cmd, loader_check, font_tools, lifts=lifts)
                     if payload and "claude-hook-runs-payload" in by_kind:
                         out.append(self._emit(by_kind["claude-hook-runs-payload"], rel,
                                               f"{event} hook — {payload}: {cmd[:70]}"))
