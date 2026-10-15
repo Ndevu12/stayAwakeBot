@@ -20,22 +20,22 @@ _REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 _FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf)\b", re.IGNORECASE)
 
 
-_HIDDEN_PRESENTATION = {"reveal": {"never", "silent"}, "panel": {"dedicated"},
-                        "echo": {False}, "showReuseMessage": {False}, "focus": {False}}
+def _named(value) -> str | None:
+    """Return a task setting's name in lower case, as the editor reads it. Takes the value. Returns the
+    name, or None when the value is not a name."""
+    return value.lower() if isinstance(value, str) else None
 
 
 def _conceals_itself(task: dict) -> bool:
-    """Whether the task keeps its own execution off the screen.
-
-    `hide` removes it from the task list; a presentation that never reveals, does not echo the
-    command or suppresses the reuse message runs it without the terminal surfacing it."""
+    """Tell whether a task keeps itself out of sight. Takes the task. Returns True when it is hidden
+    from the task list, does not bring its terminal forward when it starts, or does not show the
+    command it runs."""
     if task.get("hide") is True:
         return True
     presentation = task.get("presentation")
     if not isinstance(presentation, dict):
         return False
-    return any(presentation.get(key) in values
-               for key, values in _HIDDEN_PRESENTATION.items() if key in presentation)
+    return _named(presentation.get("reveal")) in ("never", "silent") or presentation.get("echo") is False
 
 
 class StructuralJsonMatcher(Matcher):
@@ -77,9 +77,12 @@ class StructuralJsonMatcher(Matcher):
     def _inspect(self, rel, base, data, by_kind):
         out = []
         for task in self._tasks(data):
-            run_on = (task.get("runOptions", {}) or {}).get("runOn") or task.get("runOn")
+            run_options = task.get("runOptions")
+            run_on = run_options.get("runOn") if isinstance(run_options, dict) else None
+            runs_on_open = (_named(run_on) == "folderopen" if run_on
+                            else task.get("runOn") == "folderOpen")
             cmd = str(task.get("command", ""))
-            if run_on == "folderOpen":
+            if runs_on_open:
                 # Auto-running is what the setting is FOR. Legitimate auto-run tasks are ordinary;
                 # legitimate auto-run tasks that hide themselves are not, so the pair is the signal.
                 kind = ("vscode-task-autorun" if _conceals_itself(task)

@@ -136,6 +136,10 @@ reader, not the mechanism or the weakness it closed.
 - **saw reads a known loader's marker as an infection however it is quoted or spaced.** Written with
   double quotes, or with spaces inside its brackets, it was read only as something to check.
 
+- **An editor task that stays in sight is not infected.** A task that runs when the folder opens and
+  keeps itself in sight, such as a background watch task in its own terminal, is reported for you to
+  check. A task that hides itself is still reported as infected. A task file with a setting of an
+  unexpected kind no longer stops the scan.
 - **saw's hooks never hang when started without input.** The push hook and the hook that
   runs after an amend or a rebase no longer hang when started without any input; they still check what
   they are given and run your own hook. Hooks an earlier saw installed are brought up to date without a
