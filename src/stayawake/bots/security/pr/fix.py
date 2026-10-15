@@ -13,7 +13,7 @@ from stayawake.utils import scratch
 from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
-from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC
+from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC, confirmed_for_removal
 from stayawake.bots.security.remediation import delivery, live, manifest
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
@@ -199,7 +199,7 @@ def _untrack_rollback(repo: Path) -> bool:
 def _manual_for(f0, path: str, repo: Path | None = None) -> "remediation.Manual":
     """Manual-review entry for a confirmed residual."""
     if getattr(f0, "vector", None) == "evil-merge":
-        related = getattr(f0, "related_paths", ()) or ()
+        related = getattr(f0, "related_paths", ()) or getattr(f0, "payload_paths", ()) or ()
         files = ", ".join(related) or "see evidence"
         sha = _merge_sha(f0) or path
         live = _present_related(repo, sha, related)
@@ -292,6 +292,9 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
     def _blocking(fs):
         return [f for f in fs if _is_blocking(f)]
 
+    def _removable(fs):
+        return [f for f in fs if confirmed_for_removal(f)]
+
     with status(f"scanning {label}…", enabled=spin):
         scan = _scan()
         findings = _freeze(scan.findings)
@@ -310,11 +313,11 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             scan=scan_target,
             keep=getattr(opts, "keep_dirs", ()) or (),
             lockfile_root=wt,
-            base_confirmed=bool(_blocking(findings)),
+            base_confirmed=bool(_removable(findings)),
             remove_lockfiles=not installed.lockfile_stays(),
             choose_dependencies=choose_dependencies)
         chosen_dependencies = choose_dependencies(findings)
-        if _blocking(findings) and not scan.error:
+        if _removable(findings) and not scan.error:
             removed = list(getattr(checkout.report, "removed_lockfiles", None) or ())
             if not installed.lockfile_stays():
                 removed += installed.remove_lockfiles_of(
@@ -383,7 +386,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                 sha = _merge_sha(f)
                 if not sha:
                     continue
-                conf = getattr(f, "confidence", None)
+                removable = confirmed_for_removal(f)
                 for rp in getattr(f, "related_paths", ()):
                     if rp in seen_cl:
                         continue
@@ -391,7 +394,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                         continue
                     disp = remediation.classify_recovery(
                         wt, _AtPath(f, rp), content_sig, merge_clean=merge_clean.get(rp))
-                    if conf == CONFIRMED and isinstance(disp, remediation.Recovery) and \
+                    if removable and isinstance(disp, remediation.Recovery) and \
                             remediation.apply_recovery(wt, disp, rollback, content_sig):
                         seen_cl.add(rp)
                         applied.append(remediation.Change("recover", disp.path, disp.label))

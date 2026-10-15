@@ -22,14 +22,7 @@ class NpmManifestMatcher(Matcher):
         for rel in target.iter_files():
             if rel.rsplit("/", 1)[-1] != "package.json":
                 continue
-            data = load_jsonc(target.read_text(rel) or "")
-            scripts = data.get("scripts") if isinstance(data, dict) else None
-            if not isinstance(scripts, dict):
-                continue
-            for key in self.LIFECYCLE_KEYS:
-                cmd = scripts.get(key)
-                if not isinstance(cmd, str):
-                    continue
+            for key, cmd in lifecycle_scripts(target.read_text(rel) or ""):
                 for sig, rx in compiled:
                     if rx.search(cmd):
                         findings.append(self._emit(sig, rel, f"{key}: {cmd[:80]}"))
@@ -41,3 +34,13 @@ class NpmManifestMatcher(Matcher):
                        severity=Severity.parse(sig["severity"]), path=rel,
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
                        evidence=ev, vector=sig["category"])
+
+
+def lifecycle_scripts(text: str) -> list[tuple[str, str]]:
+    """List the install-time scripts a package.json runs. Takes its text. Returns `(key, command)`
+    pairs in lifecycle order, none when the text holds no scripts."""
+    data = load_jsonc(text)
+    scripts = data.get("scripts") if isinstance(data, dict) else None
+    if not isinstance(scripts, dict):
+        return []
+    return [(key, scripts[key]) for key in NPM_LIFECYCLE_KEYS if isinstance(scripts.get(key), str)]

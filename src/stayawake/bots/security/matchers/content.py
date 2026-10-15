@@ -37,26 +37,33 @@ class ContentMatcher(Matcher):
                 continue
             fired: set[str] = set()
             for base_line, text in target.read_source_windows(rel):
-                lowered: str | None = None
-                for s, rx in sigs:
-                    if s["id"] in fired:
-                        continue
-                    pf = s.get("prefilter")
-                    if pf:
-                        if lowered is None:
-                            lowered = text.lower()
-                        if pf not in lowered:
-                            continue
-                    m = rx.search(text)
-                    if m and s.get("corroborate") and not _corroborated(
-                            s["corroborate"], text, m.start(), m.end()):
-                        continue
-                    if m:
-                        fired.add(s["id"])
-                        findings.append(Finding(
-                            signature_id=s["id"], category=s["category"],
-                            severity=Severity.parse(s["severity"]), path=rel,
-                            description=s["description"], remediation=s.get("remediation", "manual"),
-                            line=base_line + text.count("\n", 0, m.start()) + 1,
-                            evidence=evidence(text, m.start(), m.end()), vector=s["category"]))
+                for s, m in matching_signatures(text, [(s, rx) for s, rx in sigs if s["id"] not in fired]):
+                    fired.add(s["id"])
+                    findings.append(Finding(
+                        signature_id=s["id"], category=s["category"],
+                        severity=Severity.parse(s["severity"]), path=rel,
+                        description=s["description"], remediation=s.get("remediation", "manual"),
+                        line=base_line + text.count("\n", 0, m.start()) + 1,
+                        evidence=evidence(text, m.start(), m.end()), vector=s["category"]))
         return findings
+
+
+def matching_signatures(text: str, sigs) -> list:
+    """List the signatures one text carries, matched as the content scan matches a file. Takes the
+    text and `(signature, compiled pattern)` pairs already held to the file's globs. Returns
+    `(signature, match)` for each signature that fires, in the order given."""
+    out = []
+    lowered: str | None = None
+    for s, rx in sigs:
+        pf = s.get("prefilter")
+        if pf:
+            if lowered is None:
+                lowered = text.lower()
+            if pf not in lowered:
+                continue
+        m = rx.search(text)
+        if m and s.get("corroborate") and not _corroborated(s["corroborate"], text, m.start(), m.end()):
+            continue
+        if m:
+            out.append((s, m))
+    return out

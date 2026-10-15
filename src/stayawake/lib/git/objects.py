@@ -81,6 +81,23 @@ def link_targets(repo: str | Path, oids: list[str]) -> tuple[dict[str, str], boo
     return text_of, complete and len(text_of) == len(wanted)
 
 
+def blob_sizes(repo: str | Path, oids: list[str]) -> dict[str, int] | None:
+    """Ask the size of several stored blobs in one pass, reading none of them. Takes the repo and the
+    blob ids. Returns each blob's size, or None when git could not answer."""
+    wanted = list(dict.fromkeys(oids))
+    if not wanted:
+        return {}
+    sized = own_view_fed(repo, ["cat-file", "--batch-check"], "\n".join(wanted).encode())
+    if sized is None:
+        return None
+    sizes = {}
+    for line in sized.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[1] == "blob" and parts[2].isdigit():
+            sizes[parts[0]] = int(parts[2])
+    return sizes
+
+
 def read_blobs(repo: str | Path, oids: list[str], *, max_each: int,
                max_total: int) -> tuple[dict[str, bytes], dict[str, int]]:
     """Read stored blobs in one pass. Takes the repo, the blob ids, the largest blob to read and the
@@ -130,7 +147,11 @@ def blob_text(repo: str | Path, oid: str) -> str | None:
     """Read one stored blob as text, decoded and line-ended the way git's other text output reaches
     saw. Takes the repo and the object id. Returns the text, or None when git could not read it."""
     data = blob(repo, oid)
-    if data is None:
-        return None
+    return None if data is None else decode_text(data)
+
+
+def decode_text(data: bytes) -> str:
+    """Decode a stored blob as text, line-ended the way git's other text output reaches saw. Takes
+    the bytes. Returns the text."""
     encoding = "utf-8" if sys.flags.utf8_mode else locale.getencoding()
     return data.decode(encoding, "replace").replace("\r\n", "\n").replace("\r", "\n")

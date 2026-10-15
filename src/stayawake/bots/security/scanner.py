@@ -13,7 +13,8 @@ from typing import Any
 
 from stayawake.utils import textsafe
 from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL, RESIDUE,
-                                            ROLLBACK_DIR, Finding, ScanResult, Severity)
+                                            ROLLBACK_DIR, Finding, ScanResult, Severity,
+                                            reported_only)
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.signatures import every_signature
 from stayawake.lib import git as gitutil
@@ -112,6 +113,9 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
         shown = ", ".join(unique[:5]) + (" …" if len(unique) > 5 else "")
         result.error = f"{len(unique)} path(s) unreadable: {shown}"
     result.notes.extend(coverage_notes or [])
+    note = _payload_merge_note(result.findings)
+    if note:
+        result.notes.append(note)
     if root is not None:
         finding = _cleanup_residue(Path(root))
         if finding is not None:
@@ -121,6 +125,17 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
             if note:
                 result.notes.append(note)
     return result
+
+
+def _payload_merge_note(findings) -> str | None:
+    """Say which merge commits carry a known payload that only a rewrite of history takes out.
+    Takes the scan's findings. Returns the note, or None when there are none."""
+    merges = sorted({f.commit_sha[:10] for f in findings
+                     if f.vector == "evil-merge" and f.commit_sha and reported_only(f)})
+    if not merges:
+        return None
+    return (f"{len(merges)} merge commit(s) in this repository's history carry a known payload: "
+            f"{', '.join(merges)}. Run `saw fix amend` to take them out.")
 
 
 def _cleanup_residue(root: Path) -> Finding | None:
@@ -238,7 +253,7 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
             break
         scanned += len(target)
         result = scan_target(target, signatures, allowlist)
-        hits += [f for f in result.findings if f.confidence == CONFIRMED]
+        hits += [f for f in result.findings if f.confidence == CONFIRMED and not f.commit_sha]
         unread |= set(target.read_errors)
         if result.error:
             unread |= set(target.iter_files()) - {f.path for f in result.findings}

@@ -28,7 +28,8 @@ file is removed whole. `saw` never surgically edits a source file, so a fix cann
 code. Where a clean version cannot be proven safe to restore, the finding is **deferred to review**
 with the exact reason and the command to inspect it. When a merge finding is still live in the
 working tree, those files are restored on the review branch; the merge commit itself is left in
-place. `saw fix amend` is for payload that propagated into past commits, not for the working
+place. A merge commit that carries a known payload reads infected until `saw fix amend` takes it out
+of history. `saw fix amend` is for payload that propagated into past commits, not for the working
 tree alone. It replaces those commits and force-updates each branch they sat on. That
 force-update is the fix. It does not open a pull request, and it does not move tags. The
 previous objects remain until collected.
