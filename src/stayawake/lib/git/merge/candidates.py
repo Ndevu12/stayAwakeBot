@@ -40,7 +40,7 @@ def merge_commits(repo: str | Path, refs: tuple[str, ...] = _MERGE_REFS) -> list
     Cost: enumeration is one history walk; the per-candidate merge-tree confirm in
     `evil_merge_paths` then runs on the survivors. The first-parent diff is non-empty
     for nearly every real merge, so this trades the combined-diff prefilter's
-    aggressive (but unsound) drop for correctness; the `_MAX_CANDIDATES` cap in the
+    aggressive (but unsound) drop for correctness; the `MOST_MERGES_CHECKED` cap in the
     matcher bounds the confirm phase on pathological repositories. None when git could not list
     them.
     """

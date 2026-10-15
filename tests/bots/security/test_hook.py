@@ -874,12 +874,12 @@ class TestRunEventScope(_Isolated):
         _run(repo, "update-ref", "ORIG_HEAD", first)     # what a rebase/pull --rebase sets
         self.assertEqual(hook.run_event("post-rewrite", ["rebase"]), 1)
 
-    def test_post_rewrite_without_orig_head_is_skipped(self):
+    def test_post_rewrite_without_orig_head_scans_the_whole_tree(self):
         repo = _repo({".gitignore": _INFECTED})          # fresh repo → no ORIG_HEAD
         self._in_repo(repo)
-        with mock.patch.object(hook, "scan_target") as m:
-            self.assertEqual(hook.run_event("post-rewrite", ["amend"]), 0)
-            m.assert_not_called()
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(hook.run_event("post-rewrite", ["amend"]), 1)
+        self.assertIn("StayAwakeBot", err.getvalue())
 
     def test_infected_warning_is_branded_and_actionable(self):
         repo = _repo({".gitignore": _INFECTED})
