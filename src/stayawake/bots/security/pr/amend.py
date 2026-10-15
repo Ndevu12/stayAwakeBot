@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable, NamedTuple
 
 from stayawake.bots.security import version_scan
-from stayawake.bots.security.models import CONFIRMED
+from stayawake.bots.security.models import CONFIRMED, confirmed_for_removal
 from stayawake.utils import scratch
 from stayawake.bots.security.pr import arrival_questions, arrival_record
 from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
@@ -954,7 +954,7 @@ def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
     flat = every_signature(signatures)
     paths: list[str] = []
     for f in scan.findings:
-        if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):
+        if not confirmed_for_removal(f) or getattr(f, "advisory_only", False):
             continue
         if getattr(f, "commit_sha", None) and getattr(f, "related_paths", None):
             continue
@@ -1585,7 +1585,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         if committed is None or committed.error is not None:
             return _refuse(Cause.SCAN_DID_NOT_FINISH)
         _add_file_findings(scan, committed)
-    found.confirmed = any(getattr(f, "confidence", None) == CONFIRMED
+    found.confirmed = any(confirmed_for_removal(f)
                           and not getattr(f, "advisory_only", False) for f in scan.findings)
     sweeps = delivery.sweep_merges(repo, scan.findings)
     if sweeps.failed:
@@ -1812,7 +1812,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     decided: set[tuple[str, str]] = set()
     undecided: set[str] = set()
     for f in scan.findings:
-        if (getattr(f, "confidence", None) == CONFIRMED and not getattr(f, "advisory_only", False)
+        if (confirmed_for_removal(f) and not getattr(f, "advisory_only", False)
                 and getattr(f, "path", "")):
             _note_decided(repo, "HEAD", f.path, decided, undecided, unread)
     owned_paths = set(clean) | set(substitute) | set(purge) | swept

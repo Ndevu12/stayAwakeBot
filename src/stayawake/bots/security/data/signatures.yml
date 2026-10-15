@@ -17,7 +17,8 @@
 #   shown_as    the words saw shows a person for a finding (OPTIONAL; the category's words
 #               otherwise)
 #   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
-#               remove-file | remove-foreign-vscode | strip-gitignore-markers | manual
+#               remove-file | remove-foreign-vscode | strip-gitignore-markers | manual |
+#               report (reported; `saw fix` takes nothing out for it)
 #   confidence  verdict weight (OPTIONAL, default `confirmed`): confirmed | heuristic |
 #               informational (reported apart from the findings; never part of the verdict).
 #               Orthogonal to severity. Only a `confirmed` match drives an INFECTED
@@ -306,7 +307,7 @@ signatures:
   # ── Evil merge (git history) ─────────────────────────────────────────────────
   - id: evil-merge
     category: evil-merge
-    severity: high
+    severity: medium
     matcher: git-history
     confidence: heuristic
     kind: evil-merge
@@ -322,6 +323,15 @@ signatures:
     description: "Merge commit smuggling a worm loader payload past review (introduced hunk matches a loader signature)"
     shown_as: "a merge commit that slips in a hidden payload loader"
     remediation: manual
+  - id: evil-merge-payload
+    category: evil-merge
+    severity: critical
+    matcher: git-history
+    confidence: confirmed
+    kind: evil-merge
+    description: "Merge commit carrying a known payload past review (the merge's own text matches a confirmed signature)"
+    shown_as: "a merge commit that slips in a known payload"
+    remediation: report
 
   # ── A known worm's exfiltration / persistence branding (content) ─────────────
   - id: exfil-worm-branding

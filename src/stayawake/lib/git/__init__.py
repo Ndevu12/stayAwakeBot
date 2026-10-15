@@ -10,7 +10,7 @@ Submodules:
   borrowed — a saw-owned repository over the operator's objects (merge-tree, materialise)
   auth    — credential-safe GitHub HTTPS (github_https_auth)
   query   — read-only queries (file_text_at, file_commits, origin_slug, ref_exists, …)
-  merge   — evil-merge analysis (merge_commits, evil_merge_paths)
+  merge   — evil-merge analysis (merge_commits, evil_merge_paths, merge_evidence)
   write   — mutations (add_worktree, stage_all, commit_fix, push_branch, …)
 """
 from stayawake.lib.git.run import (run, run_ok, stdout, UNTRUSTED, SAW_OWNED, OPERATOR_PUSH,
@@ -53,7 +53,8 @@ from stayawake.lib.git.query import (
     ref_counts,
     remote_branches_matching,
 )
-from stayawake.lib.git.merge import merge_commits, evil_merge_paths, clean_merge_blob, borrowed_or_none
+from stayawake.lib.git.merge import (merge_commits, evil_merge_paths, merge_evidence, clean_merge_blob,
+                                    borrowed_or_none)
 from stayawake.lib.git.borrowed import borrow, Borrowed, BorrowError
 from stayawake.lib.git.write import (
     add_worktree,
@@ -84,7 +85,7 @@ __all__ = [
     "fetch_refs", "FetchResult",
     "remote_branches_matching", "ref_safe_segment", "choose_branch", "commit_count", "head_moves",
     "ref_counts",
-    "merge_commits", "evil_merge_paths", "clean_merge_blob", "borrowed_or_none",
+    "merge_commits", "evil_merge_paths", "merge_evidence", "clean_merge_blob", "borrowed_or_none",
     "borrow", "Borrowed", "BorrowError",
     "add_worktree", "remove_worktree", "release_worktree", "stage_all", "unstage_cached",
     "commit_fix", "CommitResult", "BOT_AUTHOR", "push_branch", "push_branch_result", "PushResult",

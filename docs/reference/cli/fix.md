@@ -8,7 +8,9 @@ Clean detected findings **on a branch**. By default `fix` prepares `security/aut
 stops — no push, no PR, no network — for you to review. On a confirmed infection it also clears
 the checkout you are standing in: the files it confirms, the installed tree, generated build
 outputs, and the lockfile (the lockfile is kept on CI). A merge finding that is still live in the
-working tree is restored there; the merge commit is left in history. `--pr` pushes and opens or
+working tree is restored there; the merge commit is left in history. A merge commit that carries a
+known payload reads infected until `saw fix amend` takes it out of history; for such a merge alone,
+`saw fix` changes nothing in your checkout. `--pr` pushes and opens or
 updates one rolling PR per repository. Bare `saw fix` publishes nothing.
 
 **Those removals happen in your working tree, as the run happens.** They are not staged on the

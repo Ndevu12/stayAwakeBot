@@ -34,7 +34,7 @@ class TestTheMergeCheck(unittest.TestCase):
 
     def test_a_merge_it_could_not_read_is_a_read_error(self):
         with mock.patch.object(gitutil, "merge_commits", return_value=["a" * 40]), \
-                mock.patch.object(gitutil, "evil_merge_paths", side_effect=query.Unread("x.js")):
+                mock.patch.object(gitutil, "merge_evidence", side_effect=query.Unread("x.js")):
             self.assertEqual(self._scan(), [])
         self.assertEqual(self.target.read_errors, [f"merge {'a' * 12}: x.js could not be read"])
 
