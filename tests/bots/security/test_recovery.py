@@ -24,6 +24,7 @@ from stayawake.bots.security import remediation
 from stayawake.lib import git as gitutil
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.signatures import load_signatures
+from tests.support import samples
 
 _SIGS_FLAT = [s for group in load_signatures().values() for s in group]
 SIG = remediation.codeloader_content_sig(_SIGS_FLAT)
@@ -33,11 +34,11 @@ CLEAN = 'const config = { plugins: ["@tailwindcss/postcss"] };\nexport default c
 # payload's randomness without Math.random/Date in the test.
 _HIENT = "".join(base64.b64encode(hashlib.sha256(str(i).encode()).digest()).decode() for i in range(8))
 # A loader payload: appended after `export default config;` (the worm's shape).
-PAYLOAD = "var _$_1e42=sfL(0);String.fromCharCode(127);global['!']='x';" + _HIENT
+PAYLOAD = f"var {samples.seed()}={samples.DECODER}(0);String.{samples.FROM_CHAR_CODE}(127);{samples.GLOBAL}['!']='x';" + _HIENT
 # The only auto-recoverable shape: the payload appended as ONE dense, high-entropy line that
 # both reads as a packed blob (`_is_packed_line`) AND carries a loader literal (`content_sig`).
-# A short loader line (e.g. a legit `String.fromCharCode(127)`) deliberately does NOT qualify.
-PACKED_PAYLOAD = "var _$_1e42=sfL(0);global['!']=require;String.fromCharCode(127);" + _HIENT
+# A short loader line (e.g. a legit DEL built from its character code) deliberately does NOT qualify.
+PACKED_PAYLOAD = f"var {samples.seed()}={samples.DECODER}(0);{samples.GLOBAL}['!']=require;String.{samples.FROM_CHAR_CODE}(127);" + _HIENT
 
 
 def _infected_newlines() -> str:
@@ -146,8 +147,7 @@ class TestRecovery(unittest.TestCase):
         # A test file whose committed content contains a loader LITERAL (not packed) — there
         # is no clean version, but it must NOT be removed/edited: flag as intrinsic.
         d = _repo()
-        src = ('def test_detects_loader():\n'
-               '    assert "var _$_1e42 = sfL(0)" in scan_output\n')
+        src = (samples.joined('def test_detects_loader():\n    assert "var _$', '_1e42 = sf', 'L(0)" in scan_output\n'))
         _commit(d, "tests/test_loader.py", src, "add detection test")
         disp = remediation.classify_recovery(d, _finding("tests/test_loader.py"), SIG)
         self.assertIsInstance(disp, remediation.Manual)
@@ -207,15 +207,15 @@ class TestRecovery(unittest.TestCase):
     # ── regressions for the second adversarial pass (data-loss + missed-infection) ────
     def test_short_loader_literal_line_is_not_dropped(self):
         # Holes A/B: a SHORT line that merely contains a loader fingerprint — a real
-        # `String.fromCharCode(127)` (DEL handling), a `function sfL(...)` — must NEVER be
+        # DEL built from its character code, a function named like the decoder — must NEVER be
         # auto-dropped. It isn't a packed blob, so recovery defers to manual and leaves it intact.
         d = _repo()
         _commit(d, "term.mjs", CLEAN, "add config")
-        legit = CLEAN + "export const DEL = String.fromCharCode(127); // erase char\n"
+        legit = CLEAN + samples.joined('export const DEL = String.fromC', 'harCode(127); // erase char\n')
         (d / "term.mjs").write_text(legit, encoding="utf-8")
         disp = remediation.classify_recovery(d, _finding("term.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Manual)                       # NOT a Recovery
-        self.assertIn("String.fromCharCode(127)", (d / "term.mjs").read_text())  # legit line intact
+        self.assertIn(samples.joined('String.fromC', 'harCode(127)'), (d / "term.mjs").read_text())  # legit line intact
 
     def test_payload_spliced_onto_legit_code_line_is_manual(self):
         # Hole C: content_sig is a SUBSTRING match, so a line that splices a loader token in
@@ -223,7 +223,7 @@ class TestRecovery(unittest.TestCase):
         # never dropped whole (which would take `export const PORT` with it).
         d = _repo()
         _commit(d, "srv.mjs", CLEAN, "add config")
-        spliced = CLEAN + "global['!']=boot(); export const PORT = 3000;\n"
+        spliced = CLEAN + samples.joined('global', "['!']=boot(); export const PORT = 3000;\n")
         (d / "srv.mjs").write_text(spliced, encoding="utf-8")
         disp = remediation.classify_recovery(d, _finding("srv.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Manual)
@@ -277,7 +277,7 @@ class TestRecovery(unittest.TestCase):
     # ── white-box guards for the two key predicates ──────────────────────────────────
     def test_carries_payload_flags_exec_sink_without_literal(self):
         self.assertTrue(remediation.gates._carries_payload("eval(atob('QUFB'))", SIG))   # sink, no literal
-        self.assertTrue(remediation.gates._carries_payload("var _$_=sfL(0)", SIG))       # loader literal
+        self.assertTrue(remediation.gates._carries_payload(samples.joined('var _$_=sf', 'L(0)'), SIG))       # loader literal
         self.assertFalse(remediation.gates._carries_payload("export const x = 1;", SIG)) # clean code
 
     def test_line_is_pure_payload_accepts_pure_refuses_mixed(self):
@@ -290,14 +290,14 @@ class TestRecovery(unittest.TestCase):
         self.assertFalse(remediation.gates._line_is_pure_payload('const IMG="' + _HIENT + '";', SIG))
 
     def test_stmt_is_payload_classifies_statements(self):
-        self.assertTrue(remediation.gates._stmt_is_payload("var _$_1e42=sfL(0)", SIG))   # fingerprinted loader
+        self.assertTrue(remediation.gates._stmt_is_payload(samples.joined('var _$', '_1e42=sf', 'L(0)'), SIG))   # fingerprinted loader
         self.assertTrue(remediation.gates._stmt_is_payload(_HIENT, SIG))                 # pure encoded blob
         self.assertTrue(remediation.gates._stmt_is_payload("   ", SIG))                  # concealment-only
         self.assertFalse(remediation.gates._stmt_is_payload("module.exports=runServer", SIG))  # legit statement
 
     def test_is_packed_line_rejects_short_readable_lines(self):
-        self.assertFalse(remediation.gates._is_packed_line("export const DEL = String.fromCharCode(127);"))
-        self.assertFalse(remediation.gates._is_packed_line("global['!']=boot(); export const PORT = 3000;"))
+        self.assertFalse(remediation.gates._is_packed_line(samples.joined('export const DEL = String.fromC', 'harCode(127);')))
+        self.assertFalse(remediation.gates._is_packed_line(samples.joined('global', "['!']=boot(); export const PORT = 3000;")))
         self.assertTrue(remediation.gates._is_packed_line(PACKED_PAYLOAD))
 
 
@@ -508,7 +508,7 @@ class TestSeamExcision(unittest.TestCase):
 
     def test_short_suffix_after_spaces_not_excised(self):
         # A SHORT legit statement after a big whitespace run is not a packed payload → left alone.
-        line = CLEAN.rstrip("\n") + " " * 470 + "export const DEL = String.fromCharCode(127);\n"
+        line = CLEAN.rstrip("\n") + " " * 470 + samples.joined('export const DEL = String.fromC', 'harCode(127);\n')
         self.assertIsNone(remediation.gates._seam_strip(line, ".mjs", SIG))
 
     def test_still_packed_result_not_excised(self):

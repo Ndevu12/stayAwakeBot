@@ -12,6 +12,7 @@ from unittest import mock
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
+from tests.support import samples
 
 SIGS = load_signatures()
 
@@ -27,12 +28,12 @@ class TestScannerEvasions(unittest.TestCase):
 
     def test_nul_byte_source_is_still_scanned(self):
         # C1: one NUL byte must not make a source file "binary" / invisible.
-        (self.d / "nul.mjs").write_bytes(b"/*\x00*/ var _$_1e42 = sfL(0); export default {};")
+        (self.d / "nul.mjs").write_bytes(f"/*\x00*/ var {samples.seed()} = {samples.DECODER}(0); export default {{}};".encode())
         self.assertIn("loader-seed-var", _scan(self.d))
 
     def test_a_loader_in_the_middle_of_a_large_binary_is_found(self):
         filler = b"\x00" * 1_500_000
-        body = b"\x89PNG\r\n\x1a\n" + filler + b"\nglobal['_V']='8-12';\n" + filler
+        body = b"\x89PNG\r\n\x1a\n" + filler + f"\n{samples.GLOBAL}['_V']='8-12';\n".encode() + filler
         (self.d / "hero.png").write_bytes(body)
         self.assertIn("loader-global-v-marker", _scan(self.d))
 
@@ -45,7 +46,7 @@ class TestScannerEvasions(unittest.TestCase):
         # A genuine binary asset (real PNG magic, no payload) → no false positive, even though the
         # confirmed content tier now head-scans non-source files and the magic-byte masquerade check
         # runs on images (#1146). Real magic → masquerade short-circuits; no loader token → no content
-        # hit. (The old fixture here — a fake-magic `.png` embedding `var _$_ = sfL(` — is a payload
+        # hit. (The old fixture here — a fake-magic `.png` embedding a loader's seed and decoder call — is a payload
         # under a benign extension and is now correctly CAUGHT; see test_tail_residuals.)
         (self.d / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + bytes(range(64)) * 8)
         self.assertEqual(_scan(self.d), set())
@@ -53,7 +54,7 @@ class TestScannerEvasions(unittest.TestCase):
     def test_oversized_source_file_tail_is_scanned(self):
         # C2: payload appended past the size cap is still found via head+tail scan.
         opts = ScanOptions(max_file_bytes=200)
-        (self.d / "big.mjs").write_bytes(b"// pad\n" * 100 + b"\nString.fromCharCode(127);eval(1);\n")
+        (self.d / "big.mjs").write_bytes(b"// pad\n" * 100 + f"\nString.{samples.FROM_CHAR_CODE}(127);eval(1);\n".encode())
         self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
 
     def test_oversized_source_file_middle_is_scanned(self):
@@ -62,7 +63,7 @@ class TestScannerEvasions(unittest.TestCase):
         # payload sits between the 100 B head and 100 B tail and is invisible; the windowed
         # content reader streams the whole body so it is found.
         opts = ScanOptions(max_file_bytes=200)
-        body = b"// pad\n" * 60 + b"\nString.fromCharCode(127);eval(1);\n" + b"// pad\n" * 60
+        body = b"// pad\n" * 60 + f"\nString.{samples.FROM_CHAR_CODE}(127);eval(1);\n".encode() + b"// pad\n" * 60
         (self.d / "mid.mjs").write_bytes(body)
         self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
 
@@ -71,7 +72,7 @@ class TestScannerEvasions(unittest.TestCase):
         # window-local one — a payload after thousands of interior lines reports that absolute line.
         opts = ScanOptions(max_file_bytes=200)
         pre = b"// pad\n" * 500                      # 500 lines before the payload
-        (self.d / "line.mjs").write_bytes(pre + b"String.fromCharCode(127);eval(1);\n" + b"// pad\n" * 50)
+        (self.d / "line.mjs").write_bytes(pre + samples.joined('String.fromC', 'harCode(127);eval(1);\n').encode("latin-1") + b"// pad\n" * 50)
         t = LocalRepoTarget(self.d, "t", opts)
         f = next(f for f in scan_target(t, SIGS, []).findings
                  if f.signature_id == "loader-fromcharcode-127")
@@ -82,7 +83,7 @@ class TestScannerEvasions(unittest.TestCase):
         # overlap exists exactly so a boundary can't split a match. Here window=200, step=100, so the
         # payload at byte ~190 spans the 200-byte boundary; the second window ([100,300)) holds it whole.
         opts = ScanOptions(max_file_bytes=200)
-        payload = b"String.fromCharCode(127);eval(1);"
+        payload = samples.joined('String.fromC', 'harCode(127);eval(1);').encode("latin-1")
         body = b"x" * (190 - 0) + payload + b"y" * 400
         (self.d / "straddle.mjs").write_bytes(body)
         self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
@@ -94,7 +95,7 @@ class TestScannerEvasions(unittest.TestCase):
             with self.subTest(name=name):
                 for old in self.d.iterdir():
                     old.unlink()
-                (self.d / name).write_bytes(pad + b"String.fromCharCode(127);eval(1);\n" + pad)
+                (self.d / name).write_bytes(pad + samples.joined('String.fromC', 'harCode(127);eval(1);\n').encode("latin-1") + pad)
                 self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
 
     def test_large_spam_source_scans_without_catastrophic_backtracking(self):
@@ -109,7 +110,7 @@ class TestScannerEvasions(unittest.TestCase):
     def test_case_and_member_access_mutations_detected(self):
         # C3: case-flips, let/const, member access, hex arg must not evade.
         (self.d / "m.mjs").write_text(
-            "LET _$_AB = SFL(0)\nString['fromCharCode'](0x7F)\neval(_$_AB)\n", encoding="utf-8")
+            samples.joined('LET _', '$_AB = SF', "L(0)\nString['fromCh", "arCode'](0x7F)\neval(_$_AB)\n"), encoding="utf-8")
         ids = _scan(self.d)
         self.assertIn("loader-seed-var", ids)
         self.assertIn("loader-decoder-fn", ids)

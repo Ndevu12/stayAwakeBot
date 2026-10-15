@@ -15,8 +15,9 @@ from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security.targets.base import Target
 from stayawake.bots.security.targets.history import HistoryTarget
+from tests.support import samples
 
-LOADER = "global['_V']=function(x){return x};require('child_process').exec('id');\n"
+LOADER = samples.marked_loader()
 FILLER = "// " + "a" * 96 + "\n"
 
 

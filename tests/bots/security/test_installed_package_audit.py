@@ -18,6 +18,7 @@ from stayawake.bots.security.matchers.installed_package_audit import InstalledPa
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets.base import ScanOptions, Target
+from tests.support import samples
 
 _REAL_SIGS = load_signatures()
 _MARKER = "String.fromCharCode(1" + "27)"          # a CONFIRMED code-loader fingerprint, assembled so
@@ -308,11 +309,11 @@ def _scan_entries(target):
 
 class TestInstalledEntryLoader(unittest.TestCase):
     def test_loader_in_main_entry_flagged(self):
-        t = _npm_entry_repo({"evil": ("index.js", "var _$_1e42 = sfL(0);\nString.fromCharCode(127);\n")})
+        t = _npm_entry_repo({"evil": ("index.js", f"var {samples.seed()} = {samples.DECODER}(0);\nString.{samples.FROM_CHAR_CODE}(127);\n")})
         self.assertIn("installed-entry-loader", _scan_entries(t))
 
     def test_loader_in_nested_main_flagged(self):
-        t = _npm_entry_repo({"evil": ("lib/main.js", "global['!'] = 1; var _$_a = sfL(0);\n")})
+        t = _npm_entry_repo({"evil": ("lib/main.js", f"{samples.GLOBAL}['!'] = 1; var {samples.seed('a')} = {samples.DECODER}(0);\n")})
         self.assertIn("installed-entry-loader", _scan_entries(t))
 
     def test_legit_entries_are_clean(self):

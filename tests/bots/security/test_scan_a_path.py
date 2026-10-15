@@ -16,6 +16,7 @@ from stayawake.bots.security.service import workers
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.utils import exitcodes
+from tests.support import samples
 
 _NEEDS_POSIX_NONROOT = (os.name == "posix"
                         and not (hasattr(os, "geteuid") and os.geteuid() == 0))
@@ -174,7 +175,7 @@ class TestWhatANonRepositoryScanSays(unittest.TestCase):
         # per-file payload. The earlier version of this test planted only the last, which a
         # partitionable matcher scopes on its own, so it could not fail.
         (self.d / "other.js").write_text("const x = eval(atob('Zm9v'));\n", encoding="utf-8")
-        (self.d / "payload.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        (self.d / "payload.js").write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
         os.symlink("/Users/ndevu/.ssh/authorized_keys", self.d / "redirect-link")
         (self.d / "node_modules" / "evilpkg").mkdir(parents=True)
         (self.d / "node_modules" / "evilpkg" / "package.json").write_text(
@@ -286,7 +287,7 @@ class TestNamingAFileLosesNoDetection(unittest.TestCase):
 
     def test_a_source_payload_named_directly(self):
         def build(d):
-            (d / "loader.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+            (d / "loader.js").write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
             return "loader.js"
         self._assert_no_loss(build, "source file")
 
@@ -320,7 +321,7 @@ class TestWhatTheVerdictIsAbout(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
         (self.repo / "src").mkdir()
         (self.repo / "src" / "clean.js").write_text("export const ok = 1;\n", encoding="utf-8")
-        (self.repo / "src" / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        (self.repo / "src" / "bad.js").write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
         self.cfg = Path(tempfile.mkdtemp()) / "c.yml"
         self.cfg.write_text("allowlist: []\n", encoding="utf-8")
 
@@ -432,7 +433,7 @@ class TestNamingADirectoryLosesNoDetection(unittest.TestCase):
         (d / "src").mkdir()
         (d / "src" / "ok.js").write_text("export const ok = 1;\n", encoding="utf-8")
         (d / "other").mkdir()
-        (d / "other" / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        (d / "other" / "bad.js").write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
         self.assertTrue(_signatures_reported(d, "bad.js"), "the sibling payload is not detected")
         self.assertEqual(_signatures_reported(d / "src", "bad.js"), set(),
                          "a sibling outside the named directory reached its verdict")
@@ -538,7 +539,7 @@ class TestALinkIntoACredentialStoreIsNotFollowed(unittest.TestCase):
     def test_an_ordinary_destination_is_still_read_through(self):
         other = self.base / "work"
         other.mkdir()
-        (other / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        (other / "bad.js").write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
         link = self.proj / "current"
         os.symlink(str(other), str(link))
         self.assertTrue(_signatures_reported(link, "bad.js"),
@@ -610,7 +611,7 @@ class TestWhatTheWalkSkippedByName(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         (d / "dist" / "node_modules").mkdir(parents=True)
         (d / "dist" / "keep.js").write_text("export const ok = 1;\n", encoding="utf-8")
-        (d / "dist" / "node_modules" / "x.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        (d / "dist" / "node_modules" / "x.js").write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
         report = _report_of(d / "dist")
         self.assertIn("Folders the `exclude_dirs` setting leaves out were not scanned", report)
 
@@ -635,7 +636,7 @@ class TestAWriteSinkIsNeverReadThrough(unittest.TestCase):
         keys = self.base / "home" / ".ssh"
         keys.mkdir(parents=True)
         self.key = keys / "id_rsa"
-        self.key.write_text("ssh-rsa AAAATOPSECRETKEYMATERIAL\nvar _$_dead = 1;\n",
+        self.key.write_text(samples.joined('ssh-rsa AAAATOPSECRETKEYMATERIAL\nvar _$', '_dead = 1;\n'),
                             encoding="utf-8")
         os.symlink(str(self.key), str(self.proj / "keys.js"))
 
@@ -671,7 +672,7 @@ class TestAWriteSinkIsNeverReadThrough(unittest.TestCase):
         # is the only path that reaches the MIDDLE of a file. The needle sits at 1.5MB so it can
         # come from nowhere else.
         big = self.base / "home" / ".ssh" / "id_rsa_big.js"
-        big.write_text("x" * 1_500_000 + '\nconst _$_ab12 = "KEYNEEDLE";\n' + "y" * 1_600_000,
+        big.write_text("x" * 1_500_000 + samples.joined('\nconst _', '$_ab12 = "KEYNEEDLE";\n') + "y" * 1_600_000,
                        encoding="utf-8")
         os.symlink(str(big), str(self.proj / "windowed.js"))
         # Asserted on what was FOUND, not on the secret's text: the evidence preview is truncated,
@@ -684,7 +685,7 @@ class TestAWriteSinkIsNeverReadThrough(unittest.TestCase):
         other = self.base / "shared"
         other.mkdir()
         payload = other / "lib.js"
-        payload.write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        payload.write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
         os.symlink(str(payload), str(self.proj / "aliased.js"))
         self.assertTrue(_signatures_reported(self.proj, "aliased.js"),
                         "an ordinary aliased file stopped being read")
@@ -699,7 +700,7 @@ class TestAPatternThatMatchesNothingNamesNothing(unittest.TestCase):
         self.d = Path(tempfile.mkdtemp())
         for name in ("svc-a", "other"):
             subprocess.run(["git", "init", "-q", str(self.d / name)], check=True)
-        (self.d / "other" / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        (self.d / "other" / "bad.js").write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
 
     def _names(self, pattern):
         return sorted(t.label.name for t in resolve_local_targets([pattern], ScanOptions()))
@@ -718,7 +719,7 @@ class TestAPatternThatMatchesNothingNamesNothing(unittest.TestCase):
 
     def test_a_real_file_whose_name_holds_a_star_is_that_file(self):
         named = self.d / "star*name.js"
-        named.write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        named.write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
         self.assertEqual(self._names(str(named)), ["star*name.js"])
 
 
@@ -729,7 +730,7 @@ class TestATargetThatReadNothingSaysWhy(unittest.TestCase):
     def test_a_directory_whose_whole_content_was_pruned_explains_itself(self):
         d = Path(tempfile.mkdtemp())
         (d / "dist").mkdir()
-        (d / "dist" / "bundle.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        (d / "dist" / "bundle.js").write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
         report = _report_of(d) + _stderr_of(d)
         self.assertIn("carries no verdict", report)
         self.assertIn("Folders the `exclude_dirs` setting leaves out were not scanned", report)
@@ -814,7 +815,7 @@ class TestAFolderThatCouldNotBeReadIsNotClean(unittest.TestCase):
         (self.d / "ok.js").write_text("export const ok = 1;\n", encoding="utf-8")
         self.shut = self.d / "src"
         self.shut.mkdir()
-        (self.shut / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        (self.shut / "bad.js").write_text(f"var {samples.seed('ab12')} = 1;\n", encoding="utf-8")
         os.chmod(self.shut, 0o000)
         self.addCleanup(os.chmod, self.shut, 0o755)
 

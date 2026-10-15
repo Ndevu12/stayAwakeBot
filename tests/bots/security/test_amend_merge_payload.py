@@ -15,9 +15,10 @@ from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_amend import _AmendFixture
+from tests.support import samples
 
-LOADER = "global['_V']=function(x){return x};require('child_process').exec('id');\n"
-STAGE2 = "global['_V']=function(x){return x};require('child_process').exec('whoami');\n"
+LOADER = samples.marked_loader()
+STAGE2 = samples.joined('global', "['_V']=function(x){return x};require('child_process').exec('whoami');\n")
 
 
 class _EvilMerge(_AmendFixture):

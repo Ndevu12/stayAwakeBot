@@ -24,6 +24,7 @@ from stayawake.bots.security import service
 from stayawake.bots.security.service import workers as scan_workers
 from stayawake.bots.security.service.workers import WorkerScan
 from stayawake.bots.security.models import ScanReport, ScanResult
+from tests.support import samples
 
 
 def _scan(cfg_text, target_dir, **kw):
@@ -98,7 +99,7 @@ class TestScanFailClosed(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             subprocess.run(["git", "init", "-q", d], check=True)
             f = Path(d) / "loader.js"
-            f.write_text("var _$_ab12 = 1;\n")                 # loader-seed-var (confirmed signature)
+            f.write_text(f"var {samples.seed('ab12')} = 1;\n")                 # loader-seed-var (confirmed signature)
             os.chmod(f, 0o000)
             try:
                 self.assertEqual(_scan("allowlist: []\n", d), 2)

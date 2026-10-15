@@ -11,6 +11,7 @@ from stayawake.bots.security.hygiene import audit_checks, process
 from stayawake.bots.security.hygiene.models import ROTATION_UNSAFE_IDS
 from stayawake.bots.security.obfuscation.entry import analyze_file
 from stayawake.utils.procsnap import Process, Snapshot
+from tests.support import samples
 
 
 def _loader() -> str:
@@ -211,14 +212,14 @@ class TestItDoesNotPrintThePayload(unittest.TestCase):
 
     def test_the_code_itself_never_reaches_the_finding(self):
         marker = "A8-CAMPAIGN-MARKER"
-        payload = f"global['_V']='{marker}';var _$_ab12=1;const x=eval(atob('c2xlZXA='));"
+        payload = f"{samples.GLOBAL}['_V']='{marker}';var {samples.seed('ab12')}=1;const x=eval(atob('c2xlZXA='));"
         issues = _check(_snapshot(Process(pid=50, argv=("node", "-e", payload))))
         self.assertEqual(len(issues), 1)
         self.assertNotIn(marker, issues[0].detail)
         self.assertNotIn("eval(atob", issues[0].detail)
 
     def test_it_carries_a_fingerprint_so_two_runs_can_be_compared(self):
-        payload = "var _$_ab12=1;const x=eval(atob('c2xlZXA='));"
+        payload = samples.joined('var _$', "_ab12=1;const x=eval(atob('c2xlZXA='));")
         issues = _check(_snapshot(Process(pid=51, argv=("node", "-e", payload))))
         self.assertIn("fingerprint", issues[0].detail)
 
