@@ -1471,7 +1471,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         from stayawake.bots.security.scanner import scan_target
         from stayawake.bots.security.targets import LocalRepoTarget
         font = "assets/brand.woff2"
-        poisoned = "GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-Hulud has Appeared\n"
+        poisoned = samples.joined('GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-', 'Hulud has Appeared\n')
         self.write(self.d, font, poisoned)
         self.commit(self.d, "add the brand font")
         self.git(self.d, "checkout", "-qb", "delbranch")
@@ -1497,7 +1497,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         from stayawake.bots.security.scanner import scan_target
         from stayawake.bots.security.targets import LocalRepoTarget
         font = "assets/brand.woff2"
-        poisoned = "GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-Hulud has Appeared\n"
+        poisoned = samples.joined('GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-', 'Hulud has Appeared\n')
         self.write(self.d, font, poisoned)
         self.commit(self.d, "add the brand font")
         self.git(self.d, "checkout", "-qb", "delbranch")
@@ -1514,7 +1514,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
                                  pusher=lambda *a: PushResult(True))
         self.assertTrue(outcome.completed, self._causes(outcome))
         hist = self.git(self.d, "log", "--all", "-p", "--", font)
-        self.assertNotIn("A Mini Shai-Hulud", hist, "the payload is gone from all history")
+        self.assertNotIn(samples.joined('A Mini Shai-', 'Hulud'), hist, "the payload is gone from all history")
 
     def test_a_blocked_commit_without_a_resolver_still_isolates(self):
         """Without an operator, a confirmed commit that cannot be auto-replaced still isolates — the
@@ -1522,7 +1522,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         from stayawake.bots.security.scanner import scan_target
         from stayawake.bots.security.targets import LocalRepoTarget
         font = "assets/brand.woff2"
-        poisoned = "GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-Hulud has Appeared\n"
+        poisoned = samples.joined('GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-', 'Hulud has Appeared\n')
         self.write(self.d, font, poisoned)
         self.commit(self.d, "add the brand font")
         self.git(self.d, "checkout", "-qb", "delbranch")
@@ -1571,8 +1571,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         The cleaned blob is re-scanned in full, so the path is not routed to excise — it is left to
         refuse rather than force-pushed as clean."""
         cfg = "postcss.config.mjs"
-        clean = ("const config = {};\nexport default config;\n"
-                 "A Mini Shai-Hulud has Appeared\n")
+        clean = (samples.joined('const config = {};\nexport default config;\nA Mini Shai-', 'Hulud has Appeared\n'))
         self.write(self.d, cfg, _seam_line(clean))
         self.commit(self.d, "C0 config carries a loader AND a second payload")
         self.write(self.d, "app.js", "ok\n")

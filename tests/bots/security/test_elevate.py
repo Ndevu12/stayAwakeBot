@@ -13,6 +13,7 @@ import unittest.mock
 from pathlib import Path
 
 from stayawake.utils import elevate
+from tests.support import samples
 
 
 class TestItWillNotBeHandedAnAttackersSudo(unittest.TestCase):
@@ -86,10 +87,10 @@ class TestItAsksOnlyWhenThereIsSomebodyToAsk(unittest.TestCase):
         seen = []
         class Done:
             returncode = 0
-        elevate.run_as_root(["/bin/kill", "-KILL", "9; rm -rf /"], sudo=lambda: "/usr/bin/sudo",
+        elevate.run_as_root(["/bin/kill", "-KILL", samples.joined('9; r', 'm -rf /')], sudo=lambda: "/usr/bin/sudo",
                             ask=lambda: True, run=lambda argv, **kw: seen.append(argv) or Done())
         self.assertIsInstance(seen[0], list)
-        self.assertIn("9; rm -rf /", seen[0], "the argument was split or interpolated")
+        self.assertIn(samples.joined('9; r', 'm -rf /'), seen[0], "the argument was split or interpolated")
 
 
 class TestItAsksWhereverSudoCouldPrompt(unittest.TestCase):
