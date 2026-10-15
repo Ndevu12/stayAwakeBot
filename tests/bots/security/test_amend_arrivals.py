@@ -23,6 +23,7 @@ from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_amend import _AmendFixture
+from tests.support import samples
 
 PAYLOAD = "public/fonts/fa-solid-900.woff2"
 PADDING = ("public/fonts/fa-regular-400.woff2", ".vscode/launch.json")
@@ -653,7 +654,7 @@ class TestWhatIsPutToTheOperator(_Delivery):
         self.commit(self.d, "add docs")
         self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
         self.write(self.d, "vendor/loader.js",
-                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+                   samples.marked_loader())
         self.write(self.d, "vendor/helper.txt", "helper\n")
         self.write(self.d, "docs/notes.md", "# notes\n")
         self.commit(self.d, "Merge pull request #7 from feature")
@@ -680,7 +681,7 @@ class TestWhatIsPutToTheOperator(_Delivery):
         self.commit(self.d, "add docs")
         self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
         self.write(self.d, "vendor/loader.js",
-                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+                   samples.marked_loader())
         self.write(self.d, "docs/notes.md", "# notes\n")
         self.commit(self.d, "Merge pull request #7 from feature")
         scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
@@ -712,7 +713,7 @@ class TestWhatIsPutToTheOperator(_Delivery):
         self.commit(self.d, "add docs")
         self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
         self.write(self.d, "vendor/loader.js",
-                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+                   samples.marked_loader())
         self.write(self.d, "vendor/helper.txt", "helper\n")
         self.commit(self.d, "Merge pull request #7 from feature")
         scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())

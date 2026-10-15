@@ -19,6 +19,7 @@ from stayawake.bots.security.service import workers as scan_workers
 from stayawake.bots.security.resolution import LocalTarget, REPOSITORY
 from stayawake.bots.security.service.workers import WorkerScan, LocalScanJob
 from stayawake.bots.security.models import ScanResult
+from tests.support import samples
 
 
 def _make_repo(base: str, name: str, body: str) -> str:
@@ -29,9 +30,9 @@ def _make_repo(base: str, name: str, body: str) -> str:
     return d
 
 
-# `var _$_ab12 = 1;` is the confirmed `loader-seed-var` signature — repeating it across files/repos
+# A seed variable is the confirmed `loader-seed-var` signature — repeating it across files/repos
 # produces many findings that TIE on (severity, path), the case a clean-only fixture can't exercise.
-_LOADER = "var _$_ab12 = 1;\nvar _$_cd34 = 2;\n"
+_LOADER = f"var {samples.seed('ab12')} = 1;\nvar {samples.seed('cd34')} = 2;\n"
 
 
 def _make_infected_repo(base: str, name: str) -> str:
@@ -126,7 +127,7 @@ class TestFailClosed(unittest.TestCase):
         good = _make_repo(base, "good", "console.log('ok');\n")
         bad = _make_repo(base, "bad", "console.log('ok');\n")
         blocked = Path(bad) / "loader.js"
-        blocked.write_text("var _$_ab12 = 1;\n")
+        blocked.write_text(samples.joined('var _$', '_ab12 = 1;\n'))
         os.chmod(blocked, 0o000)
         try:
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):

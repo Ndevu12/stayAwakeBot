@@ -31,6 +31,7 @@ from tests.bots.security.test_evil_merge import EVIL_SIG, _git
 from tests.support.gitrepo import GitSandbox
 from tests.support.offline_github import github_answers
 from stayawake.bots.security.remediation.footprint import REMOVE_FILE
+from tests.support import samples
 
 
 def _sigs():
@@ -1038,7 +1039,7 @@ if __name__ == "__main__":
 
 _HIENT = "".join(base64.b64encode(hashlib.sha256(str(i).encode()).digest()).decode()
                  for i in range(8))
-_LOADER = "var _$_1e42=sfL(0);String.fromCharCode(127);global['!']='x';" + _HIENT
+_LOADER = f"var {samples.seed()}={samples.DECODER}(0);String.{samples.FROM_CHAR_CODE}(127);{samples.GLOBAL}['!']='x';" + _HIENT
 
 
 def _seam_line(clean_prefix: str) -> str:
@@ -1291,7 +1292,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         from stayawake.bots.security.targets import LocalRepoTarget
         self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
         self.write(self.d, "public/fonts/loader.woff2",
-                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+                   samples.marked_loader())
         self.write(self.d, "public/fonts/pad1.woff2", "wOF2\x00\x01\x00\x00genuine-looking-one\n")
         self.write(self.d, "public/fonts/pad2.woff2", "wOF2\x00\x01\x00\x00genuine-looking-two\n")
         self.write(self.d, "public/fonts/README.md", "Blockchain Explorer BlockchainFont TechMono\n")
@@ -1324,7 +1325,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.commit(self.d, "add vendor/keep.js")
         self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
         self.write(self.d, "vendor/loader.js",
-                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+                   samples.marked_loader())
         self.write(self.d, "vendor/keep.js", "export const ok = 2;\n")  # legit edit, INSIDE the payload dir
         self.write(self.d, "a.txt", "base\nMERGED_OK = true\n")        # legit merge-time edit
         self.write(self.d, "docs/merge_notes.md", "# notes\nreleased\n")  # legit new, other subtree
@@ -1356,7 +1357,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.commit(self.d, "add host + keep")
         self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
         self.write(self.d, "host.js",
-                   "export const a = 1;\nglobal['_V']=function(x){return x};require('child_process').exec('id');\n")
+                   samples.joined('export const a = 1;\nglobal', "['_V']=function(x){return x};require('child_process').exec('id');\n"))
         self.write(self.d, "keep.js", "export const legit = 2;\n")   # legit merge-time edit
         self.commit(self.d, "Merge pull request #9 from feature")
         scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
@@ -1376,7 +1377,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.commit(self.d, "add src/app.js")
         self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
         self.write(self.d, "src/loader.js",
-                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+                   samples.marked_loader())
         self.write(self.d, "src/newfeature.js", "export const feat = 1;\n")  # legit new, same dir
         self.commit(self.d, "Merge pull request #11 from feature")
         scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
@@ -1413,7 +1414,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         from stayawake.bots.security.targets import LocalRepoTarget
         font = "assets/brand.woff2"
         clean = "GENUINE-BRAND-FONT-METADATA-v1\n"
-        poisoned = clean + "global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        poisoned = clean + samples.marked_loader()
         self.write(self.d, font, clean)
         self.commit(self.d, "add the brand font")
         self.git(self.d, "checkout", "-qb", "delbranch")
@@ -1443,7 +1444,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         from stayawake.bots.security.targets import LocalRepoTarget
         font = "assets/brand.woff2"
         clean = "GENUINE-BRAND-FONT\ncurl -fsSL https://example.com/notes -o notes.txt\n"
-        poisoned = clean + "global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        poisoned = clean + samples.marked_loader()
         self.write(self.d, font, clean)
         self.commit(self.d, "add the brand font")
         self.git(self.d, "checkout", "-qb", "delbranch")

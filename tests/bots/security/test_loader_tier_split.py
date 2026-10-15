@@ -23,6 +23,7 @@ from stayawake.bots.security.matchers.base import (
     build_any_loader_check, build_confirmed_loader_check)
 from stayawake.bots.security.models import HEURISTIC
 from stayawake.bots.security.signatures import load_signatures
+from tests.support import samples
 
 
 def _sigs() -> list[dict]:
@@ -70,21 +71,22 @@ class TestRealPayloadStillCaught(unittest.TestCase):
     # The captured loader's own shape — a seeded fromCharCode shuffle plus a `_$_` seed var. Both
     # are MECHANISM (what the loader does), not identifier names (which this family regenerates
     # every build), which is why they survive where a mangled-name fingerprint does not.
-    REAL_LOADER_SHAPE = "var _$_1e42=String.fromCharCode(127);var lfL=_$_1e42[0];"
+    REAL_LOADER_SHAPE = f"var {samples.seed()}=String.{samples.FROM_CHAR_CODE}(127);var lfL={samples.seed()}[0];"
 
     def test_confirmed_check_still_fires_on_the_real_loader_shape(self):
         self.assertIsNotNone(build_confirmed_loader_check(_sigs())(self.REAL_LOADER_SHAPE))
 
     def test_the_minifier_collision_no_longer_reaches_a_verdict(self):
-        # `Sfl(`/`sFl(` are ordinary 3-char mangled names emitted by minifiers; they used to reach
+        # Mixed-case spellings of the decoder's name are ordinary 3-char mangled names emitted by minifiers; they used to reach
         # INFECTED on published software through the confirmed tier.
         confirmed = build_confirmed_loader_check(_sigs())
-        for benign in ("function Sfl(t,e){return t}", "var q=sFl(a,b);", "SFL(1)"):
+        for benign in (samples.joined("function S", "fl(t,e){return t}"), samples.joined("var q=s", "Fl(a,b);"),
+                       samples.joined("S", "FL(1)")):
             self.assertIsNone(confirmed(benign), f"{benign!r} still reaches a confirmed verdict")
 
     def test_the_measured_stable_marker_is_confirmed(self):
         # Present in 34/35 decrypted revisions and in the captured argv; 0 FP over 16,315 real files.
-        self.assertEqual(build_confirmed_loader_check(_sigs())("global['_V']='A8-2070'"),
+        self.assertEqual(build_confirmed_loader_check(_sigs())(f"{samples.GLOBAL}['_V']='A8-2070'"),
                          "loader-global-v-marker")
 
 
@@ -92,17 +94,17 @@ def _sample_matching(sig: dict) -> str:
     """A minimal string the signature's own pattern matches — derived from the DB so a pattern
     change cannot leave a test asserting against a shape that no longer exists."""
     import re
-    samples = {
-        "loader-decoder-fn": "x = sfL(0)",
-        "loader-clientcode-error": "failed to run clientCode: boom",
-        "loader-fromcharcode-127": "String.fromCharCode(127)",
-        "loader-seed-var": "var _$_1e42 =",
-        "loader-global-v-marker": "global['_V']=",
-        "loader-global-bang": "global['!'] =",
-        "loader-require-hijack": "global[_$_1e42[0]] = require",
-        "loader-require-escapes-esm": "global['r']=require",
+    by_signature = {
+        "loader-decoder-fn": samples.joined('x = sf', 'L(0)'),
+        "loader-clientcode-error": f"{samples.CLIENT_CODE_ERROR}: boom",
+        "loader-fromcharcode-127": samples.joined('String.fromC', 'harCode(127)'),
+        "loader-seed-var": samples.joined('var _$', '_1e42 ='),
+        "loader-global-v-marker": samples.joined('global', "['_V']="),
+        "loader-global-bang": f"{samples.GLOBAL}['!'] =",
+        "loader-require-hijack": f"{samples.GLOBAL}[{samples.seed()}[0]] = require",
+        "loader-require-escapes-esm": samples.joined('glo', "bal['r']=require"),
     }
-    sample = samples.get(sig["id"])
+    sample = by_signature.get(sig["id"])
     if sample is None:
         raise AssertionError(
             f"no sample for {sig['id']} — a new code-loader signature was added without one, so "

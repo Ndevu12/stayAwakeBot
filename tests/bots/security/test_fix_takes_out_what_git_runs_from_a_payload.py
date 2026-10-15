@@ -25,8 +25,9 @@ from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.targets.base import ScanOptions
 from stayawake.lib.git import operator_config
 from tests.support.gitrepo import GitSandbox
+from tests.support import samples
 
-PAYLOAD = "global['_V']='8-12';"
+PAYLOAD = f"{samples.GLOBAL}['_V']='8-12';"
 PAYLOAD_FILE = "#!/usr/bin/env node\n" + PAYLOAD + "\n"
 
 
@@ -209,8 +210,7 @@ class TestWhatIsNotAKnownPayloadStays(_GitSettingsCheckout):
         hook.write_text('#!/bin/sh\ncurl -s -X POST -d \'{"serverUrl": "https://ci.example.com"}\' '
                         'https://hooks.example.com/notify\n', encoding="utf-8")
         hook.chmod(hook.stat().st_mode | stat.S_IXUSR)
-        self.configure('[hook "msg"]\n\tcommand = node -e "const DEL = String.fromCharCode(127)"\n'
-                       '\tevent = commit-msg\n')
+        self.configure(samples.joined('[hook "msg"]\n\tcommand = node -e "const DEL = String.fromC', 'harCode(127)"\n\tevent = commit-msg\n'))
         before = self.config_bytes()
         result = self.checkout()
         self.assertTrue(result.infected, "the scan confirms these as main does")
