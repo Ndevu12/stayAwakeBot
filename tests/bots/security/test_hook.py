@@ -21,6 +21,7 @@ from stayawake.bots.security import hook, hook_outcome, hook_report, hookscript
 from stayawake.bots.security.dependencies import db
 from stayawake.bots.security.models import ScanResult
 from tests.bots.security._osv_fixtures import mal_record, osv_zip
+from tests.support import samples
 
 _INFECTED = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"   # confirmed worm markers
 
@@ -1793,7 +1794,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         self.assertEqual(hook.hookscript.verdict(mine), hook.hookscript.FOREIGN)
         self.assertEqual(hook.hookscript.altered_hooks(), [])
         header = hook.hookscript.render("post-merge", "/x/saw", None).splitlines()[1]
-        self.assertTrue(hook.hookscript.claims_ours(header + "\nrm -rf /\n"))
+        self.assertTrue(hook.hookscript.claims_ours(header + samples.joined("\nrm -r", "f /\n")))
 
     def test_what_is_moved_aside_is_said_without_where_it_was(self):
         deep = self._managed()

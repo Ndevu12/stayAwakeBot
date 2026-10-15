@@ -1,41 +1,27 @@
 #!/usr/bin/env python3
-"""Self-scan guard: this repo's COMMITTED files must scan CLEAN under its OWN committed allowlist.
-
-The repo deliberately ships infected fixtures and detector tests that embed inert IoC literals;
-`config/security.yml` allowlists each by signature, scoped to `tests/**`. If a new IoC lands under
-`tests/` (or anywhere tracked) without a matching signature-scoped allowlist entry, the security gate
-(security-sentinel.yml) goes red — this test makes that fail FAST, locally and in `CI — install & test`,
-naming the fix instead of surfacing as an opaque CI failure.
-
-It scans only git-**tracked** files — what actually ships / what the gate certifies. An untracked or
-gitignored artifact in a developer's working tree (a local `venv/`, `__pycache__/` bytecode, gitignored
-incident notes) is NOT part of the committed repo and must never make the tool flag ITSELF as infected:
-for a security tool, a spurious self-INFECTED is a real trust problem, and it is exactly the local-vs-CI
-split that made this test pass in CI (clean checkout) but fail on a working machine. A real IoC still
-has to be COMMITTED to matter, and every tracked file is scanned in full.
-
-It also pins the invariant the CI gate relies on: a bare `path_glob` does NOT suppress (the scanner
-ignores rules without a `signature`), so the allowlist must stay signature-scoped — the exact bug that
-broke the gate (a path-only inline allowlist).
-"""
+"""saw's own committed files scan clean with no allowlist, and so does what Python compiles from them. A test
+that needs a sample payload builds it when it runs, through tests/support/samples.py."""
 from __future__ import annotations
 
+import py_compile
+import shutil
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 from stayawake.bots.security.scanner import scan_target
+from stayawake.bots.security.service.config import _options
 from stayawake.bots.security.signatures import load_signatures
-from stayawake.bots.security.service.config import _read_config, _options
 from stayawake.bots.security.targets import LocalRepoTarget
 
 REPO = Path(__file__).resolve().parents[1]
 
 
 def _tracked_files() -> tuple[str, ...]:
-    """Repo-relative paths of git-TRACKED files that exist on disk — the committed repo (what ships),
-    excluding any untracked/gitignored working-tree artifact (`venv/`, `__pycache__/`, local docs).
-    Empty tuple if this is not a git checkout (a source tarball) — the gate then skips."""
+    """List the committed files that exist on disk. Returns their repository-relative paths, or nothing
+    when this is not a git checkout."""
     try:
         out = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"],
                              capture_output=True, text=True, check=True).stdout
@@ -44,29 +30,37 @@ def _tracked_files() -> tuple[str, ...]:
     return tuple(p for p in out.split("\0") if p and (REPO / p).is_file())
 
 
-class TestSelfScanClean(unittest.TestCase):
-    def test_committed_repo_scans_clean_under_committed_allowlist(self):
-        tracked = _tracked_files()
-        if not tracked:
-            self.skipTest("not a git checkout — nothing tracked to self-scan")
-        cfg = REPO / "config" / "security.yml"
-        self.assertTrue(cfg.exists(), f"missing committed config: {cfg}")
-        conf = _read_config(str(cfg))
-        settings = conf.get("settings", {})
-        opts = _options(settings)
-        sigs = load_signatures(settings.get("signatures_path"))
-        allowlist = conf.get("allowlist") or []
-        # Scan the TRACKED files with the committed allowlist. include_only restricts the per-file
-        # matchers to exactly the committed set (#1325); a CONFIRMED finding here = INFECTED verdict.
-        with LocalRepoTarget(str(REPO), "self", opts, include_only=tracked) as target:
-            result = scan_target(target, sigs, allowlist)
-        self.assertFalse(
-            result.infected,
-            "this repo's COMMITTED files flagged INFECTED under its own committed allowlist. A new IoC "
-            "under tests/ likely needs a signature-scoped entry "
-            "({signature: <id>, path_glob: \"tests/**\"}) in config/security.yml. Offending: "
-            + "; ".join(f"{f.signature_id}@{f.path}"
-                        for f in result.findings if f.confidence == "confirmed")[:400])
+def _findings_in(root: Path, files: tuple[str, ...]) -> list[str]:
+    with LocalRepoTarget(str(root), "self", _options({}), include_only=files) as target:
+        result = scan_target(target, load_signatures(), [])
+    wanted = set(files)
+    return sorted(f"{f.signature_id} in {f.path}" for f in result.findings if f.path in wanted)
+
+
+class TestSawsOwnTreeScansClean(unittest.TestCase):
+    def setUp(self):
+        self.tracked = _tracked_files()
+        if not self.tracked:
+            self.skipTest("not a git checkout")
+
+    def test_no_committed_file_has_a_finding_with_no_allowlist(self):
+        self.assertEqual(_findings_in(REPO, self.tracked), [],
+                         "build the sample when the test runs, through tests/support/samples.py")
+
+    def test_nothing_python_compiles_from_them_has_a_finding(self):
+        root = Path(tempfile.mkdtemp(prefix="self-scan-compiled-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        compiled = []
+        for path in self.tracked:
+            if path.endswith(".py"):
+                target = Path(path).with_suffix(f".{sys.implementation.cache_tag}.pyc")
+                (root / target).parent.mkdir(parents=True, exist_ok=True)
+                py_compile.compile(str(REPO / path), cfile=str(root / target), doraise=True)
+                compiled.append(str(target))
+        self.assertTrue(compiled)
+        self.assertEqual(_findings_in(root, tuple(compiled)), [],
+                         "join a sample's pieces when the test runs (samples.joined), never with + or "
+                         "side by side, which Python joins when it compiles")
 
 
 if __name__ == "__main__":

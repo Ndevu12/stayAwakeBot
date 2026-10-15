@@ -19,7 +19,6 @@ from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets.base import ScanOptions, Target
 from tests.support import pattern_samples, samples
 
-REPO = Path(__file__).resolve().parents[2]
 
 
 def _findings(target, sigs):
@@ -56,7 +55,7 @@ class TestContentPrefilter(unittest.TestCase):
         stripped = [{k: v for k, v in s.items() if k != "prefilter"} for s in content]
         fixtures = samples.write_fixtures(Path(tempfile.mkdtemp(prefix="fixtures-")) / "fixtures")
         self.addCleanup(shutil.rmtree, fixtures.parent, True)
-        for root in (fixtures, REPO):
+        for root in (fixtures,):
             target = Target(root, str(root), ScanOptions())
             with_pf = _findings(target, content)
             without_pf = _findings(target, stripped)

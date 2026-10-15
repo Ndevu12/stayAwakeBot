@@ -19,10 +19,11 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.targets.base import ScanOptions
+from tests.support import samples
 from tests.support.gitrepo import GitSandbox
 
 MARKERS = "temp_auto_push.bat\nbranch_structure.json\n"
-LOADER = "var _$_ab12 = 1;\n"
+LOADER = f"var {samples.seed('ab12')} = 1;\n"
 
 
 class _Merges(GitSandbox):
@@ -125,7 +126,7 @@ class TestAMergeThatCarriesAKnownPayload(_Merges):
 class TestSawFixOnAMergeThatCarriesAKnownPayload(_Merges):
     def test_saw_fix_restores_nothing_the_merge_wrote(self):
         rng = random.Random(7)
-        packed = "sfL('" + "".join(rng.choice(string.ascii_letters + string.digits + "+/")
+        packed = f"{samples.DECODER}('" + "".join(rng.choice(string.ascii_letters + string.digits + "+/")
                                    for _ in range(220)) + "')\n"
         repo = self.merged(".gitignore", "node_modules/\n" + MARKERS, conflict=False)
         self.git(repo, "reset", "-q", "--hard", "HEAD~1")
