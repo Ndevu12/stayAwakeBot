@@ -2013,7 +2013,7 @@
 <h1 id="audit-a-machine">Audit a machine<a class="headerlink" href="#audit-a-machine" title="Permanent link">&para;</a></h1>
 <p>A repository scan says nothing about the machine it runs on. <code>saw audit</code> looks at the host: cached
 credentials, editor settings, the start-up surface, and — with <code>--repo</code> — a repository's branch
-protection. It is read-only, and it never cleans anything. Host denials are
+protection. It is read-only, and it never cleans anything. Putting saw's controls in place is
 <a href="../harden-this-machine/"><code>saw harden</code></a>. Flags: <a href="../../reference/cli/audit/">CLI
 reference</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>audit<span class="w">                       </span><span class="c1"># hygiene + start-up surface + rotation verdict</span>
@@ -2075,7 +2075,7 @@ hygiene</a> before acting on one.</p>
 <p><strong>A clean audit is not a clean bill of health.</strong> It covers this machine, at this moment, over the
 surfaces this build examines — not your images, not your registries, not the accounts your machine
 is enrolled in, and not whether an installed file is the one its publisher released. Where a check
-could not run, a location it needed could not be read, or a surface is not covered on your
+could not run, a location it needed could not be read, or a check is not available on your
 platform, the run says so and treats credential rotation as unsafe rather than reporting a clean
 machine.</p>
 <p>Three results not to over-read:</p>

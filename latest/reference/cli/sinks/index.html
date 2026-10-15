@@ -1890,10 +1890,10 @@ re-distribute a live payload.</p>
 <table>
 <thead>
 <tr>
-<th>Sink</th>
+<th>Output</th>
 <th>Flag</th>
 <th>Evidence</th>
-<th>Destination</th>
+<th>Where it goes</th>
 </tr>
 </thead>
 <tbody>
@@ -1957,8 +1957,8 @@ instead, so nothing is lost to scrollback, and the path is printed on stderr in 
 on disk; <code>saw scan --json</code> carries it in full. And <code>saw</code> never deletes it; your operating system
 clears its temporary directory on its own schedule, which may be at reboot or not at all. If you
 want the report kept somewhere you chose, pass <code>-d DIR</code> and it goes there instead.</p>
-<p><code>--json</code> turns the spill off: that payload already carries every finding in full, so there is
-nothing to rescue from scrollback. A <code>-d DIR</code> you asked for is still written.</p>
+<p>With <code>--json</code> no full report is written: the JSON already carries every finding in full. A <code>-d DIR</code>
+you asked for is still written.</p>
 <h2 id="the-dependencies-to-remove">The dependencies to remove<a class="headerlink" href="#the-dependencies-to-remove" title="Permanent link">&para;</a></h2>
 <p>When a scan flags a dependency, the commands that remove each known-malicious package, and the
 versions an advisory affects, are given once per run: last on the terminal, below the report's path

@@ -1806,7 +1806,7 @@ core, and one large repository is split across workers too. Override it when you
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>saw<span class="w"> </span>scan<span class="w"> </span>-j<span class="w"> </span><span class="m">1</span><span class="w">                 </span><span class="c1"># force sequential, e.g. on a low-memory box</span>
 </code></pre></div>
 <p>A persisted report is byte-identical either way.</p>
-<p><strong>Keep a copy.</strong> A scan writes nothing by default. Pick a sink — see <a href="../../reference/cli/sinks/">report
+<p><strong>Keep a copy.</strong> A scan writes nothing by default. Pick an output — see <a href="../../reference/cli/sinks/">report
 sinks</a>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>saw<span class="w"> </span>scan<span class="w"> </span>--json<span class="w"> </span>&gt;<span class="w"> </span>report.json<span class="w">     </span><span class="c1"># full evidence, to a pipe</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>saw<span class="w"> </span>scan<span class="w"> </span>--sarif<span class="w"> </span>scan.sarif<span class="w">       </span><span class="c1"># for GitHub code scanning</span>
