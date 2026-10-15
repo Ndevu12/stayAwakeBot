@@ -136,6 +136,9 @@ reader, not the mechanism or the weakness it closed.
 - **A git hook whose text only shares words with a decoy file is not a payload.** A hook that prints the
   name of a project, for example, is no longer reported as infected. A hook that carries a known payload
   still is.
+- **An image saved under another image format's name is for you to check, not a payload.** An SVG
+  picture saved as a `.png`, for example, is reported as something to check by hand, not as infected.
+  A file under an image's name that holds code is still reported as infected.
 - **What deno or bun runs is what saw checks.** A running program or an entry that starts at login and
   runs a script with `deno run`, `deno serve` or `bun run`, code with `deno eval` or `bun --print`, or a
   program read from standard input is checked for that script, code or program.

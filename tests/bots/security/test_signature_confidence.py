@@ -27,6 +27,7 @@ GRADED_BELOW_CONFIRMED = {
     "oversized-config-line": "heuristic",
     "runner-credentials-committed": "heuristic",
     "runner-registration-config": "heuristic",
+    "svg-under-an-image-name": "heuristic",
     "symlink-escapes-repo": "heuristic",
     "tampered-installed-package": "heuristic",
     "vscode-allow-automatic-tasks-alone": "heuristic",

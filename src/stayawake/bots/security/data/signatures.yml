@@ -164,6 +164,17 @@ signatures:
     remediation: remove-file
     confidence: confirmed
 
+  - id: svg-under-an-image-name
+    category: fake-font
+    severity: low
+    matcher: heuristic
+    kind: svg-under-an-image-name
+    file_globs: ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp", "*.ico"]
+    description: "Image file that holds an SVG document running nothing (ordinary misnamed image; review it)"
+    shown_as: "an image saved under another image format's name; check it"
+    remediation: manual
+    confidence: heuristic
+
   # ── Oversized single line in a config file (obfuscation heuristic) ────────────
   - id: oversized-config-line
     category: code-loader
