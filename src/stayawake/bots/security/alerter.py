@@ -15,6 +15,7 @@ from stayawake.utils import docs_site, env, textsafe
 from stayawake.lib.adapters.slack import send_slack
 from stayawake.lib.adapters import github_api
 from stayawake.utils.timeutil import utc_stamp
+from stayawake.bots.security.found import confirmed_first, left_out_line
 
 LABEL = "stayawakebot-security"
 
@@ -36,9 +37,13 @@ def _issue_body(result: dict) -> str:
              f"**Findings:** {result['summary']['total']} "
              f"(max severity: {result['summary']['max_severity']})", "", "| Severity | Signature | Path |",
              "|----------|-----------|------|"]
-    for f in result.get("findings", [])[:25]:
+    findings = result.get("findings", [])
+    shown = confirmed_first(findings, lambda f: f.get("confidence"))[:25]
+    for f in shown:
         loc = textsafe.table_cell(f["path"] + (f":{f['line']}" if f.get("line") else ""))
         lines.append(f"| {f['severity']} | {textsafe.table_cell(f['signature_id'])} | {loc} |")
+    if len(findings) > len(shown):
+        lines += ["", left_out_line(len(findings) - len(shown))]
     # Published to someone else's tracker under the tool's name, so it claims only what the scan
     # established — it used to name a cleanup script this project has never contained.
     lines += ["", "**To remediate:** run `saw fix --pr` against this repository to open a reviewable "
