@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **The commands that remove a compromised dependency end with a link to read before you run
+  them**, on the terminal, in the written report and in a fix pull request. The page says what
+  each command changes, what it may break, and what to do first when a known-malicious package
+  was installed.
 - **`saw hook install` also puts saw's hooks in the folder git runs every repository's hooks from**,
   when that folder is yours alone, keeping your own hooks there running.
 - **`saw hook install` also scans the repositories you already have, with git 2.54 or later.**

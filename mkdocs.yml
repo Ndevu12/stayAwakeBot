@@ -120,6 +120,7 @@ nav:
       - how-to/scan-remote.md
       - how-to/scan-on-clone.md
       - how-to/fix-findings.md
+      - how-to/remove-a-compromised-dependency.md
       - how-to/audit-a-machine.md
       - how-to/harden-this-machine.md
       - how-to/harden-a-repo.md

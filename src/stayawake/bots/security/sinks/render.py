@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from stayawake.bots.security.dependencies.remediation import (
-    dependency_actions, markdown_lines)
+    WHAT_THEY_CHANGE_MARKDOWN, dependency_actions, markdown_lines)
 from stayawake.bots.security.found import described, is_a_commit, what_it_is
 from stayawake.bots.security.host_note import scan_host_note
 from stayawake.bots.security.redaction import redact, render_redacted
@@ -306,7 +306,7 @@ def _action_block(payload: dict[str, Any]) -> list[str]:
                          ("affected by an advisory — move off these", actions.vulnerable)):
         if group:
             out += [f"# {title}"] + markdown_lines(group, _ACTION_LIMIT) + [""]
-    return out + ["```", ""]
+    return out + ["```", "", WHAT_THEY_CHANGE_MARKDOWN, ""]
 
 
 def render_markdown(payload: dict[str, Any]) -> str:

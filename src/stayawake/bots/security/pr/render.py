@@ -7,7 +7,7 @@ from stayawake.utils import textsafe
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security import remediation
 from stayawake.bots.security.dependencies.remediation import (
-    dependency_actions, markdown_lines)
+    WHAT_THEY_CHANGE_MARKDOWN, dependency_actions, markdown_lines)
 from stayawake.core import proposal
 from stayawake.bots.security.pr.constants import ISSUE_LABEL
 
@@ -153,7 +153,7 @@ def dependency_action_lines(findings=(), advisories=()) -> list[str]:
                          ("affected by an advisory — move off these", actions.vulnerable)):
         if group:
             lines += [f"# {title}"] + markdown_lines(group, ACTION_LIMIT) + [""]
-    return lines + ["```"]
+    return lines + ["```", "", WHAT_THEY_CHANGE_MARKDOWN]
 
 
 def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=(), findings=(),
