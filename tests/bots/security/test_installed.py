@@ -412,5 +412,23 @@ class TestWhatTheOperatorIsToldToDo(unittest.TestCase):
         self.assertNotIn("reinstall", installed.Report().note())
 
 
+class TestAMergeSawOnlyReportsKeepsTheInstalledTree(unittest.TestCase):
+    def test_a_merge_saw_only_reports_does_not_reach_the_remover(self):
+        from stayawake.bots.security.models import REPORT_ONLY, Finding, ScanResult, Severity
+
+        called = []
+
+        def spy(root, **kw):
+            called.append(root)
+            return installed.Report()
+
+        finding = Finding("evil-merge-payload", "evil-merge", Severity.CRITICAL, "4d9ff7b1d5", "merge",
+                          remediation=REPORT_ONLY, vector="evil-merge", commit_sha="4d9ff7b1d5" * 4,
+                          payload_paths=(".gitignore",), confidence="confirmed")
+        merged = ScanResult("owner/repo", "local", [finding])
+        _prepare_fix_against([merged, merged, merged], spy)
+        self.assertEqual(called, [])
+
+
 if __name__ == "__main__":
     unittest.main()

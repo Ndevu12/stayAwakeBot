@@ -9,7 +9,7 @@ import unicodedata
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
-from stayawake.bots.security.models import CONFIRMED, SAW_DIR
+from stayawake.bots.security.models import SAW_DIR, confirmed_for_removal
 from stayawake.bots.security.remediation import (changes as ch, git_settings, installed, manifest,
                                                   preserve)
 from stayawake.bots.security.remediation.oracle import (ABSENT, REFUSED, UNREADABLE,
@@ -153,7 +153,7 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
                   if any(read.error for read in reads) else "")
     findings = list({(f.path, getattr(f, "signature_id", None)): f
                      for read in reads for f in read.findings
-                     if getattr(f, "confidence", None) == CONFIRMED}.values())
+                     if confirmed_for_removal(f)}.values())
     settings_taken = git_settings.take_out_payload_settings(
         repo, [f for read in reads for f in read.findings], signatures, opts)
     stored = StoredContent(repo, signatures, allowlist, opts)
@@ -193,7 +193,7 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
         scan_error = "your checkout was not read in full, so it is not clean"
     findings += [f for f in {(f.path, getattr(f, "signature_id", None)): f
                              for read in later for f in read.findings
-                             if getattr(f, "confidence", None) == CONFIRMED}.values()
+                             if confirmed_for_removal(f)}.values()
                  if f.path not in {g.path for g in findings}]
     payload_digests |= _digests(repo, findings, limit)
     removed = clean(repo, findings, signatures, allowlist, opts)

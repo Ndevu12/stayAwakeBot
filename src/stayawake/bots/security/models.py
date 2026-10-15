@@ -19,8 +19,9 @@ RESIDUE = "residue"
 INFORMATIONAL = "informational"
 CONFIDENCE_LEVELS = (CONFIRMED, HEURISTIC, RESIDUE, INFORMATIONAL)
 
+REPORT_ONLY = "report"
 REMEDIATION_VERBS = ("manual", "recover", "remove-file", "remove-foreign-vscode",
-                     "strip-gitignore-markers", "remove-git-exec-payload")
+                     "strip-gitignore-markers", "remove-git-exec-payload", REPORT_ONLY)
 
 CLEAN = "clean"
 RESIDUE_VERDICT = "residue"
@@ -91,6 +92,18 @@ class Finding:
         d = asdict(self)
         d["severity"] = self.severity.label()
         return d
+
+
+def reported_only(finding) -> bool:
+    """Tell whether saw only reports a finding and takes nothing out for it. Takes the finding.
+    Returns the answer."""
+    return getattr(finding, "remediation", None) == REPORT_ONLY
+
+
+def confirmed_for_removal(finding) -> bool:
+    """Tell whether a finding is confirmed evidence that saw's removal acts on. Takes the finding.
+    Returns the answer: confirmed, and not one saw only reports."""
+    return getattr(finding, "confidence", None) == CONFIRMED and not reported_only(finding)
 
 
 @dataclass

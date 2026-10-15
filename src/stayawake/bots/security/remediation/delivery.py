@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Mapping
 
-from stayawake.bots.security.models import CONFIRMED
+from stayawake.bots.security.models import CONFIRMED, confirmed_for_removal, reported_only
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.merge import detect as mergedetect
 from stayawake.lib.git.objects import read_blobs
@@ -142,11 +142,12 @@ def confirmed_commits(findings) -> list:
         sha = getattr(f, "commit_sha", None)
         if not related or not sha or sha in seen:
             continue
-        confirmed = getattr(f, "confidence", None) == CONFIRMED
+        confirmed = confirmed_for_removal(f)
         ext = set(related) & external
         if not (confirmed or ext):
             continue
-        own = set(getattr(f, "payload_paths", ()) or (related if confirmed else ()))
+        own = (set() if reported_only(f)
+               else set(getattr(f, "payload_paths", ()) or (related if confirmed else ())))
         anchors = tuple(sorted((own | ext) & set(related)))
         seen.add(sha)
         found.append((f, anchors))

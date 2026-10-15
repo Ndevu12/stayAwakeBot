@@ -4,6 +4,7 @@ parents, gated through corroboration so benign conflict resolutions don't false-
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass, field
 import sys
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import posixpath
 from stayawake.lib.git.query import (GITLINK_MODE, changed_paths, entries_at, file_text_at,
                                      list_tree, parents, Unread)
 from stayawake.lib.git.borrowed import Borrowed, BorrowError, borrow
-from stayawake.lib.git.merge.corroborate import corroborated
+from stayawake.lib.git.merge.corroborate import ReadBudget, carried_payloads, corroborated
 
 
 def born_at_merge(repo: str | Path, merge_sha: str, paths) -> set[str]:
@@ -114,25 +115,51 @@ def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,
     produced no finding; the first-parent diff is byte-identity-agnostic and reaches it. The
     SAME corroboration gate is then applied, so a benign octopus stays clean.
     """
+    return merge_evidence(repo, merge_sha, content_sig, obfuscation_reason,
+                          borrowed=borrowed).flagged
+
+
+@dataclass(frozen=True)
+class MergeEvidence:
+    """What one merge brought in beyond a clean merge of its parents.
+
+    `flagged` is what `evil_merge_paths` returns. `payloads` maps each path the merge deviates on
+    to the known payload it carries, and `unread` lists the paths whose payload could not be checked
+    or ruled out."""
+
+    flagged: dict[str, str] = field(default_factory=dict)
+    payloads: dict[str, object] = field(default_factory=dict)
+    unread: tuple[str, ...] = ()
+
+
+def merge_evidence(repo: str | Path, merge_sha: str, content_sig=None, obfuscation_reason=None,
+                   payload_sig=None, *, borrowed: Borrowed | None = None,
+                   budget: ReadBudget | None = None) -> MergeEvidence:
+    """Read what a merge brought in beyond a clean merge of its parents. Takes what
+    `evil_merge_paths` takes, and `payload_sig`, the callable `carried_payloads` applies to each path
+    the merge deviates on (None checks no payload), and the scan's read budget it draws on (a fresh
+    one when None). Returns the `MergeEvidence`. Raises `Unread` when git could not read the merge."""
     ps = parents(repo, merge_sha)
     if ps is None:
         raise Unread(f"merge {merge_sha[:12]}")
     if len(ps) < 2:
-        return {}
+        return MergeEvidence()
     if len(ps) != 2:
-        return _flag(repo, merge_sha, ps, ps[0], None, content_sig, obfuscation_reason)
+        return _flag(repo, merge_sha, ps, ps[0], None, content_sig, obfuscation_reason, payload_sig,
+                     budget)
     with borrowed_or_none(repo, borrowed) as replay:
         merged = replay.merge_tree(ps[0], ps[1]) if replay is not None else None
         if merged is None:
-            return _flag(repo, merge_sha, ps, ps[0], None, content_sig, obfuscation_reason)
+            return _flag(repo, merge_sha, ps, ps[0], None, content_sig, obfuscation_reason,
+                         payload_sig, budget)
         return _flag(replay.path, merge_sha, ps, merged.tree, merged.conflicted, content_sig,
-                     obfuscation_reason)
+                     obfuscation_reason, payload_sig, budget)
 
 
 def _flag(repo: str | Path, merge_sha: str, ps: list[str], base_tree: str, conflicted,
-          content_sig, obfuscation_reason) -> dict[str, str]:
+          content_sig, obfuscation_reason, payload_sig, budget) -> MergeEvidence:
     """The corroborated paths `merge_sha` changed against `base_tree`, read in `repo` — the
-    borrowed-objects repository whenever `base_tree` was written there."""
+    borrowed-objects repository whenever `base_tree` was written there — and the payloads they carry."""
     deviating = changed_paths(repo, base_tree, merge_sha, diff_filter="AM")
     flagged: dict[str, str] = {}
     for path in deviating:
@@ -142,4 +169,11 @@ def _flag(repo: str | Path, merge_sha: str, ps: list[str], base_tree: str, confl
                                    obfuscation_reason=obfuscation_reason)
         if ok:
             flagged[path] = reason
-    return flagged
+    if payload_sig is None or not deviating:
+        return MergeEvidence(flagged)
+    try:
+        payloads, unread = carried_payloads(repo, base_tree, merge_sha, sorted(deviating), ps,
+                                            payload_sig, budget or ReadBudget())
+    except Unread:
+        payloads, unread = {}, tuple(sorted(deviating))
+    return MergeEvidence(flagged, payloads, unread)

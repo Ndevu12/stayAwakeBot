@@ -144,6 +144,12 @@ reader, not the mechanism or the weakness it closed.
   runs after an amend or a rebase no longer hang when started without any input; they still check what
   they are given and run your own hook. Hooks an earlier saw installed are brought up to date without a
   warning.
+- **A merge commit that slips in a known payload reads infected**, at critical, and the scan names
+  `saw fix amend` to take it out of the repository's history, also once the files themselves are
+  clean. A merge commit that only adds code of its own is shown at medium, in yellow, as something to
+  check by hand. For such a merge alone, `saw fix` changes nothing in your checkout. A file a merge
+  brought in that cannot be read in full is named, and that merge is never reported clean. An allowlist
+  entry that names `evil-merge` does not cover a merge that carries a known payload.
 - **An issue or pull request that lists findings says how many more there are.** The issue saw opens
   for an infected repository, the issue it opens when it cannot open a fix, and the fix pull request's
   list to review show the confirmed findings first and end with how many more there are; no finding

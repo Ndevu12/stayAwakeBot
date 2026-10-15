@@ -17,6 +17,7 @@ from unittest import mock
 from stayawake.bots.security import hookscript, outbound, push_record, version_scan
 from stayawake.bots.security.dependencies import db
 from stayawake.bots.security.matchers import git_history
+from stayawake.lib.git.merge import MergeEvidence
 from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
 from stayawake.bots.security.targets import HistoryTarget, LocalRepoTarget, PushedTarget, ScanOptions
 from stayawake.lib.git import objects, pushed
@@ -736,7 +737,8 @@ class TestAPushNamesOnlyWhatItAdds(unittest.TestCase):
         target = PushedTarget(".", "x", ScanOptions(), {}, {}, ["m" * 40])
         with mock.patch.object(git_history.gitutil, "merge_commits",
                                side_effect=AssertionError("walked every merge")), \
-                mock.patch.object(git_history.gitutil, "evil_merge_paths", return_value={}) as judged, \
+                mock.patch.object(git_history.gitutil, "merge_evidence",
+                                  return_value=MergeEvidence()) as judged, \
                 mock.patch.object(git_history.gitutil, "borrowed_or_none",
                                   return_value=contextlib.nullcontext(None)):
             git_history.GitHistoryMatcher().scan(target, [{"id": "e", "kind": "evil-merge"}])
