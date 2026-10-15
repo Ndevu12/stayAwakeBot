@@ -9,15 +9,17 @@ exercise the signatures — so the ~9x speedup can never cost a detection.
 """
 from __future__ import annotations
 
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
 from stayawake.bots.security.matchers.content import ContentMatcher
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets.base import ScanOptions, Target
+from tests.support import samples
 
 REPO = Path(__file__).resolve().parents[2]
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 def _findings(target, sigs):
@@ -42,7 +44,9 @@ class TestContentPrefilter(unittest.TestCase):
     def test_prefilter_is_verdict_identical(self):
         content = self._content_sigs()
         stripped = [{k: v for k, v in s.items() if k != "prefilter"} for s in content]
-        for root in (FIXTURES, REPO):
+        fixtures = samples.write_fixtures(Path(tempfile.mkdtemp(prefix="fixtures-")) / "fixtures")
+        self.addCleanup(shutil.rmtree, fixtures.parent, True)
+        for root in (fixtures, REPO):
             target = Target(root, str(root), ScanOptions())
             with_pf = _findings(target, content)
             without_pf = _findings(target, stripped)

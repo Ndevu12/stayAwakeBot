@@ -11,8 +11,8 @@ from pathlib import Path
 from stayawake.bots.security.signatures import load_signatures          # noqa: E402
 from stayawake.bots.security.scanner import scan_target                 # noqa: E402
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
+from tests.support import samples
 
-FIX = Path(__file__).resolve().parent / "fixtures"
 SIGS = load_signatures()
 
 EXPECTED_IN_INFECTED = {
@@ -31,9 +31,9 @@ EXPECTED_IN_INFECTED = {
 
 class TestScanner(unittest.TestCase):
     def _scan(self, name, allow=None):
-        copy = Path(tempfile.mkdtemp(prefix="fixture-")) / name
-        self.addCleanup(shutil.rmtree, copy.parent, True)
-        shutil.copytree(FIX / name, copy)
+        folder = samples.write_fixtures(Path(tempfile.mkdtemp(prefix="fixture-")) / "fixtures")
+        self.addCleanup(shutil.rmtree, folder.parent, True)
+        copy = folder / name
         t = LocalRepoTarget(copy, name, ScanOptions())
         return scan_target(t, SIGS, allow or [])
 

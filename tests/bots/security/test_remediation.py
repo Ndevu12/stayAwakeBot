@@ -19,17 +19,17 @@ from stayawake.bots.security import remediation                     # noqa: E402
 from stayawake.bots.security.models import ROLLBACK_DIR, SAW_DIR
 from stayawake.bots.security.remediation.footprint import REMOVE_FILE
 
-FIX = Path(__file__).resolve().parent / "fixtures" / "infected"
 SIGS = load_signatures()
 
 
 from stayawake.bots.security.remediation import changes
+from tests.support import samples
 
 
 class TestRemediation(unittest.TestCase):
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp()) / "repo"
-        shutil.copytree(FIX, self.repo)
+        samples.write_infected_project(self.repo)
         self.q = self.repo / ROLLBACK_DIR
 
     def _findings(self):
