@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import random
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,8 +17,8 @@ from unittest import mock
 
 from stayawake.bots.security.taint import analyzer, flow, model
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
+from tests.support import samples
 
-_FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestDecodeAnchorDerivation(unittest.TestCase):
@@ -123,7 +124,9 @@ class TestGateEquivalence(unittest.TestCase):
                              f"gate diverged from the un-gated arms on: {src!r}")
 
     def test_gate_equals_ungated_on_shipped_fixtures(self):
-        files = list(_FIXTURES.rglob("*")) if _FIXTURES.is_dir() else []
+        folder = samples.write_fixtures(Path(tempfile.mkdtemp(prefix="fixtures-")) / "fixtures")
+        self.addCleanup(shutil.rmtree, folder.parent, True)
+        files = list(folder.rglob("*"))
         checked = 0
         for f in files:
             if not f.is_file():

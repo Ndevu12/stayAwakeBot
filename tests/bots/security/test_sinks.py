@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -21,6 +22,7 @@ from stayawake.bots.security import redaction, service as sec_service
 from stayawake.bots.security.models import Finding, ScanResult, ScanReport, Severity
 from stayawake.bots.security.sinks import TerminalSink, JsonSink, FileSink
 from stayawake.bots.security.sinks.render import render_terminal
+from tests.support import samples
 
 PAYLOAD = "String.fromCharCode(127)_EVIL_" + ("Z" * 80) + "_TAIL"
 
@@ -147,7 +149,8 @@ class TestExitCodeVerdict(unittest.TestCase):
             return sec_service.scan(None, paths=[str(repo)], no_stream=True)
 
     def test_infected_exits_1(self):
-        seed = Path(__file__).parent / "fixtures" / "infected"
+        seed = samples.write_infected_project(Path(tempfile.mkdtemp(prefix="seed-")) / "infected")
+        self.addCleanup(shutil.rmtree, seed.parent, True)
         self.assertEqual(self._scan(self._git_repo(seed)), 1)
 
     def test_clean_exits_0(self):
