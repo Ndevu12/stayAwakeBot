@@ -1923,7 +1923,7 @@ git command, and never stop a push. See <a href="../../../how-to/scan-on-clone/"
 </tr>
 <tr>
 <td><code>uninstall</code></td>
-<td>Remove saw's hooks and restore any hook of yours they ran before.</td>
+<td>Remove saw's hooks, from new clones and from the repositories you gave them to or they have run in, and restore any hook of yours they ran before.</td>
 </tr>
 <tr>
 <td><code>status</code></td>
@@ -1944,7 +1944,7 @@ git command, and never stop a push. See <a href="../../../how-to/scan-on-clone/"
 <li><strong>Your repositories stay current.</strong> Whenever one of saw's hooks runs, a saw hook that is missing or
   out of date there is put back. Your own hooks keep running and are left as they are.</li>
 <li><strong>Nothing is deleted.</strong> Whatever saw sets aside is kept, with a record of where it came from, for
-  you to examine. A hook that could not be put back is named.</li>
+  you to examine. What could not be put back is said, with the command to run.</li>
 <li><strong><a href="../audit/"><code>saw audit</code></a> reports</strong> a hook saw did not install, or one of saw's that was changed;
   <code>saw hook repair</code> puts it back.</li>
 <li><strong>Scans are quick and bounded.</strong> A pull, a switch or a file checkout scans only what changed. Each scan has a time
