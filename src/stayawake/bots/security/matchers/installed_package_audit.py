@@ -107,11 +107,13 @@ def _tampered(sig, t) -> Finding:
         vector=sig["category"], composed_evidence=True)
 
 def _confirmed_lifecycle_patterns(all_signatures):
-    """Compiled patterns of the CONFIRMED npm-lifecycle signatures (matcher `npm-manifest`, not
-    `heuristic`) — the FP-safe install-time IoCs, reused from the signature DB (one source, no copy)."""
+    """Compiled patterns of the npm-lifecycle signatures (matcher `npm-manifest`) that are confirmed
+    when an INSTALLED dependency carries them — `confidence_when_installed`, else `confidence` — the
+    FP-safe install-time IoCs, reused from the signature DB (one source, no copy)."""
     return [(s["id"], re.compile(s["pattern"], re.IGNORECASE))
             for s in (all_signatures or [])
-            if s.get("matcher") == "npm-manifest" and s.get("confidence") != "heuristic"
+            if s.get("matcher") == "npm-manifest"
+            and s.get("confidence_when_installed", s.get("confidence")) != "heuristic"
             and s.get("pattern")]
 
 

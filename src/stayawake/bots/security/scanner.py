@@ -16,9 +16,16 @@ from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL,
                                             ROLLBACK_DIR, Finding, ScanResult, Severity,
                                             reported_only)
 from stayawake.bots.security.matchers import REGISTRY
+from stayawake.bots.security.dependencies.installed import stated_at
 from stayawake.bots.security.signatures import every_signature
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.run import one_pass, stalls_recorded
+
+
+def _grade(confidence) -> str:
+    """Return the grade a stated confidence gives a finding. Takes the confidence. Returns it when it
+    is heuristic, residue or informational, else confirmed."""
+    return confidence if confidence in (HEURISTIC, RESIDUE, INFORMATIONAL) else CONFIRMED
 
 
 def _accepts_all_signatures(matcher) -> bool:
@@ -84,10 +91,8 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     `-j 1`. Findings are consumed in `matcher_order` (the signatures' matcher order), preserving the
     matcher-major insertion order that the final `(-severity, path)` stable sort relies on for ties."""
     result = ScanResult(target=display, source=source)
-    confidence_of = {s["id"]: (s["confidence"]
-                               if s.get("confidence") in (HEURISTIC, RESIDUE, INFORMATIONAL)
-                               else CONFIRMED)
-                     for s in all_sigs}
+    confidence_of = {s["id"]: _grade(s.get("confidence")) for s in all_sigs}
+    when_installed = {s["id"]: s for s in all_sigs if "confidence_when_installed" in s}
     for name in matcher_order:
         for finding in by_matcher.get(name, []):
             if _allowed(finding, allowlist or []):
@@ -100,7 +105,9 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
                 finding.confidence = INFORMATIONAL
                 result.informational.append(finding)
             else:
-                finding.confidence = confidence_of.get(finding.signature_id, CONFIRMED)
+                signature = when_installed.get(finding.signature_id)
+                finding.confidence = (_grade(stated_at(signature, "confidence", finding.path))
+                                      if signature else confidence_of.get(finding.signature_id, CONFIRMED))
                 result.findings.append(finding)
     # Stable, useful ordering: severity desc, then path.
     result.findings.sort(key=lambda f: (-int(f.severity), f.path))

@@ -21,6 +21,7 @@ GRADED_BELOW_CONFIRMED = {
     "loader-decoder-fn": "heuristic",
     "npm-lifecycle-agent-yolo": "heuristic",
     "npm-lifecycle-exec": "heuristic",
+    "npm-lifecycle-remote-fetch": "heuristic",
     "obfuscated-build-artifact": "heuristic",
     "obfuscated-source-file": "heuristic",
     "oversized-config-line": "heuristic",
