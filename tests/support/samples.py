@@ -33,6 +33,7 @@ def marked_loader(command: str = "id") -> str:
 
 
 _FONT = joined("fa-solid-", "400.woff2")
+FONT_PAYLOAD = joined("./public/fonts/", _FONT)
 
 
 def loader_line() -> str:

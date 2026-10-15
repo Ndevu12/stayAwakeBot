@@ -133,6 +133,8 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **An editor task that runs a disguised payload is found however the task file sets the command it
+  runs**, including the settings for one platform and the command a task file sets for all its tasks.
 - **saw reads a known loader's marker as an infection however it is quoted or spaced.** Written with
   double quotes, or with spaces inside its brackets, it was read only as something to check.
 
