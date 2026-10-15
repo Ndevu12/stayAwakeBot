@@ -13,17 +13,12 @@ import re
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, load_jsonc, build_confirmed_loader_check, REMOTE_FETCH_INTO_INTERPRETER)
+from stayawake.bots.security.matchers.editor_task import command_lines, named
 
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
 
 _REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 _FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf)\b", re.IGNORECASE)
-
-
-def _named(value) -> str | None:
-    """Return a task setting's name in lower case, as the editor reads it. Takes the value. Returns the
-    name, or None when the value is not a name."""
-    return value.lower() if isinstance(value, str) else None
 
 
 def _conceals_itself(task: dict) -> bool:
@@ -35,7 +30,7 @@ def _conceals_itself(task: dict) -> bool:
     presentation = task.get("presentation")
     if not isinstance(presentation, dict):
         return False
-    return _named(presentation.get("reveal")) in ("never", "silent") or presentation.get("echo") is False
+    return named(presentation.get("reveal")) in ("never", "silent") or presentation.get("echo") is False
 
 
 class StructuralJsonMatcher(Matcher):
@@ -79,9 +74,8 @@ class StructuralJsonMatcher(Matcher):
         for task in self._tasks(data):
             run_options = task.get("runOptions")
             run_on = run_options.get("runOn") if isinstance(run_options, dict) else None
-            runs_on_open = (_named(run_on) == "folderopen" if run_on
+            runs_on_open = (named(run_on) == "folderopen" if run_on
                             else task.get("runOn") == "folderOpen")
-            cmd = str(task.get("command", ""))
             if runs_on_open:
                 # Auto-running is what the setting is FOR. Legitimate auto-run tasks are ordinary;
                 # legitimate auto-run tasks that hide themselves are not, so the pair is the signal.
@@ -90,8 +84,10 @@ class StructuralJsonMatcher(Matcher):
                 if kind in by_kind:
                     out.append(self._emit(by_kind[kind], rel,
                                           f"task '{task.get('label','?')}' runOn=folderOpen"))
-            if re.search(r"\.(woff2?|ttf|otf)\b", cmd) and "vscode-task-runs-font" in by_kind:
-                out.append(self._emit(by_kind["vscode-task-runs-font"], rel, cmd[:90]))
+            runs_font = next((line for line in (str(task.get("command", "")), *command_lines(task, data))
+                              if _FONT_EXEC.search(line)), None)
+            if runs_font is not None and "vscode-task-runs-font" in by_kind:
+                out.append(self._emit(by_kind["vscode-task-runs-font"], rel, runs_font[:90]))
         if base == "settings.json" and "vscode-allow-automatic-tasks" in by_kind:
             value = data.get("task.allowAutomaticTasks")
             if value is True or (isinstance(value, str) and value != "off"):
