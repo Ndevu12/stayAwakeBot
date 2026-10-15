@@ -2,17 +2,14 @@
 """Remove an installed dependency tree from a repository."""
 from __future__ import annotations
 
-import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from stayawake.utils import env
-from stayawake.utils.pathsafe import every_file_arrived, is_safe_write_target
+from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.dependencies import layout
-from stayawake.bots.security.dependencies.resolvers.npm import NpmResolver
 from stayawake.bots.security.models import ROLLBACK_DIR
-from stayawake.bots.security.remediation.changes import rollback_path
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 
 INSTALLED_DIR = layout.INSTALLED_DIR
@@ -24,74 +21,6 @@ _DERIVED_FILES = frozenset({".pnp.cjs", ".pnp.loader.mjs", ".pnp.data.json"})
 _ONLY_THESE_INSIDE = {".yarn": frozenset({"cache", "unplugged", "install-state.gz"})}
 _BUILD_OUTPUTS = frozenset({"dist", "build", "out", ".next"})
 _NOT_A_BUILD = frozenset({".git", INSTALLED_DIR, ROLLBACK_DIR, ".venv"})
-_NOT_WALKED = frozenset({".git", ROLLBACK_DIR})
-
-
-@dataclass(frozen=True)
-class InstalledPackage:
-    """One package as it exists on disk."""
-    name: str
-    version: str | None
-    path: Path
-
-    @property
-    def identity(self) -> tuple[str, str | None]:
-        return self.name, self.version
-
-
-@dataclass
-class RemovalPlan:
-    """What may be removed, and what is kept."""
-    root: Path
-    derivable: list[InstalledPackage] = field(default_factory=list)
-    preserve: list[InstalledPackage] = field(default_factory=list)
-    lockfiles: list[Path] = field(default_factory=list)
-    reason: str | None = None
-
-    @property
-    def safe_to_remove(self) -> bool:
-        return self.reason is None and bool(self.derivable)
-
-    @property
-    def project_is_declared(self) -> bool:
-        """Whether anything states what this project should contain."""
-        return bool(self.lockfiles)
-
-
-def installed_packages(root: Path) -> list[InstalledPackage]:
-    """Packages present under the installed tree."""
-    tree = root / INSTALLED_DIR
-    if not _is_real_directory(tree):
-        return []
-    return _packages_under(tree)
-
-
-def _packages_under(tree: Path) -> list[InstalledPackage]:
-    found: list[InstalledPackage] = []
-    try:
-        entries = sorted(tree.iterdir())
-    except OSError:
-        return found
-    for entry in entries:
-        if entry.name.startswith("."):
-            if _is_real_directory(entry):
-                for held in _scoped_children(entry):
-                    found += _packages_under(held / INSTALLED_DIR)
-            continue
-        scoped = _scoped_children(entry) if entry.name.startswith("@") else [entry]
-        for package in scoped:
-            if not _is_real_directory(package):
-                continue
-            found.append(_read_package(package))
-            found += _packages_under(package / INSTALLED_DIR)
-    return found
-
-
-def _scoped_children(scope: Path) -> list[Path]:
-    try:
-        return sorted(scope.iterdir())
-    except OSError:
-        return []
 
 
 def kept_paths(root: Path, keep) -> list[Path]:
@@ -191,158 +120,6 @@ def _is_real_directory(path: Path) -> bool:
         return path.is_dir() and not path.is_symlink()
     except OSError:
         return False
-
-
-def _sits_where_its_name_says(package: InstalledPackage) -> bool:
-    """True when the package's path matches its name."""
-    parts = package.name.split("/")
-    location = package.path.parts[-len(parts):]
-    return list(location) == parts
-
-
-def _read_package(package: Path) -> InstalledPackage:
-    try:
-        data = json.loads((package / "package.json").read_text(encoding="utf-8", errors="replace"))
-    except (OSError, ValueError):
-        data = {}
-    name = data.get("name") if isinstance(data, dict) else None
-    version = data.get("version") if isinstance(data, dict) else None
-    return InstalledPackage(name=name or package.name,
-                            version=version if isinstance(version, str) else None,
-                            path=package)
-
-
-def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Path],
-                 keep=()) -> RemovalPlan:
-    """Split the installed tree by what `declared` proves. Does not write."""
-    plan = RemovalPlan(root=root, lockfiles=lockfiles)
-    if not lockfiles:
-        plan.reason = "no lockfile declares what the tree should contain"
-        return plan
-    if not declared:
-        plan.reason = "the lockfile declares nothing, so it cannot reconstruct the tree"
-        return plan
-    for package in installed_packages(root):
-        if not is_safe_write_target(package.path, root):
-            continue
-        if kept_by_operator(package.path, root, keep):
-            continue
-        if package.version and package.identity in declared and _sits_where_its_name_says(package):
-            plan.derivable.append(package)
-        else:
-            plan.preserve.append(package)
-    if not plan.derivable:
-        plan.reason = "no installed package matches the lockfile, so none is proven derivable"
-    return plan
-
-
-def apply_removal(plan: RemovalPlan, rollback: Path) -> tuple[int, int]:
-    """Copy aside what no lockfile accounts for, then remove it with the rest.
-
-    Takes the plan and this run's rollback store. Returns how many packages were copied and how
-    many were removed. Nothing is removed before its copy has been read back.
-    """
-    if not plan.safe_to_remove:
-        return 0, 0
-    unaccounted = 0
-    copied: list[InstalledPackage] = []
-    for package in plan.preserve:
-        destination = rollback / package.path.relative_to(plan.root)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(package.path, destination, symlinks=True, dirs_exist_ok=True)
-        if not every_file_arrived(package.path, destination):
-            raise OSError(f"the copy of {package.path} is incomplete, so nothing was removed")
-        copied.append(package)
-        unaccounted += 1
-    removed = 0
-    for package in sorted(plan.derivable + copied, key=lambda p: len(p.path.parts), reverse=True):
-        if not package.path.exists():
-            continue
-        if not is_safe_write_target(package.path, plan.root):
-            continue
-        shutil.rmtree(package.path, ignore_errors=False)
-        removed += 1
-    return unaccounted, removed
-
-
-def _sweep_unaccounted(root: Path, rollback: Path) -> int:
-    """Copy out and remove whatever is still under the installed tree.
-
-    Takes the repository root and this run's rollback store. Returns how many entries were
-    removed. Nothing is deleted before its copy is read back.
-    """
-    tree = root / INSTALLED_DIR
-    if not _is_real_directory(tree):
-        return 0
-    removed = 0
-    try:
-        entries = sorted(tree.iterdir())
-    except OSError:
-        return 0
-    for entry in entries:
-        if not entry.is_symlink() and not is_safe_write_target(entry, root):
-            continue
-        destination = rollback / entry.relative_to(root)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if entry.is_symlink():
-            if not destination.is_symlink() and not destination.exists():
-                destination.symlink_to(entry.readlink())
-            entry.unlink()
-            removed += 1
-            continue
-        if entry.is_dir():
-            shutil.copytree(entry, destination, symlinks=True, dirs_exist_ok=True)
-            if not every_file_arrived(entry, destination):
-                raise OSError(f"the copy of {entry} is incomplete, so nothing was removed")
-            shutil.rmtree(entry)
-            removed += 1
-            continue
-        shutil.copy2(entry, destination)
-        if not destination.is_file():
-            raise OSError(f"the copy of {entry} is incomplete, so nothing was removed")
-        entry.unlink()
-        removed += 1
-    return removed
-
-
-def _installed_remnants(root: Path) -> tuple[int, bool]:
-    """What is still under the installed tree, and whether it could be listed.
-
-    Takes the repository root. Returns the number of entries still there and whether the tree could
-    be read at all; an unreadable tree counts as holding something.
-    """
-    tree = root / INSTALLED_DIR
-    try:
-        if not tree.is_dir():
-            return 0, True
-        return sum(1 for _ in tree.iterdir()), True
-    except OSError:
-        return 1, False
-
-
-def next_rollback(root: Path, base: Path) -> Path:
-    """A new subdirectory under `base` for this run."""
-    for index in range(1, 1000):
-        candidate = base / f"installed-{index}"
-        if not candidate.exists():
-            return candidate
-    raise OSError(f"cannot make a fresh rollback store under {base}")
-
-
-def declared_from_lockfiles(root: Path) -> tuple[set[tuple[str, str]], list[Path]]:
-    """Declared (name, version) pairs and the lockfiles they came from."""
-    target = LocalRepoTarget(root, str(root), ScanOptions())
-    declared, lockfiles = set(), []
-    for dependency in NpmResolver().resolve(target):
-        path = root / dependency.source_path
-        if path.name not in _LOCKFILES:
-            continue
-        if not is_safe_write_target(path, root):
-            continue
-        declared.add((dependency.purl.name, dependency.purl.version))
-        if path not in lockfiles:
-            lockfiles.append(path)
-    return declared, lockfiles
 
 
 def lockfile_stays() -> bool:
@@ -550,24 +327,13 @@ def remove_derived(path: Path, root: Path) -> bool:
     return not path.exists()
 
 
-def remove_installed(root: Path, *, confirmed: bool, remove_lockfiles: bool = True,
-                     lockfile_root: Path | None = None, keep=(), committed=None,
-                     confirms=None) -> Report:
-    """Remove what a finding of this confidence allows. Bounded to `root`.
-
-    Takes the repository root, whether its infection is confirmed, whether the lockfile goes, the
-    tree the lockfiles are read from and the directories to keep, with `committed(path)` and
-    `confirms(path)` for the lane that reads them. Returns what was removed. A confirmed infection
-    loses every reproducible directory whole, and only `keep` holds one back; anything less copies
-    what no lockfile accounts for aside, keeps what the repository tracks and a reader calls clean,
-    and removes the rest.
-    """
-    if confirmed:
-        return remove_confirmed(root, remove_lockfiles=remove_lockfiles,
-                                lockfile_root=lockfile_root, keep=keep)
-    return remove_rebuildable(root, remove_lockfiles=remove_lockfiles,
-                              lockfile_root=lockfile_root, keep=keep, committed=committed,
-                              confirms=confirms)
+def remove_installed(root: Path, *, remove_lockfiles: bool = True,
+                     lockfile_root: Path | None = None, keep=()) -> Report:
+    """Remove the installed tree, the generated outputs and the lockfiles of a confirmed infection.
+    Bounded to `root`. Takes the repository root, whether the lockfile goes, the tree the lockfiles
+    are read from and the directories to keep. Returns what was removed."""
+    return remove_confirmed(root, remove_lockfiles=remove_lockfiles,
+                            lockfile_root=lockfile_root, keep=keep)
 
 
 def _still_there(path: Path) -> bool:
@@ -666,94 +432,3 @@ def lockfiles_under(root: Path) -> list[Path]:
             continue
         found.append(path)
     return found
-
-
-def remove_rebuildable(root: Path, *, keep=(), committed=None, remove_lockfiles: bool = True,
-                       lockfile_root: Path | None = None, confirms=None) -> Report:
-    """Remove this repository's installed tree, lockfile, and generated outputs. Bounded to `root`.
-
-    Takes the repository root, the directory names to keep, `committed(path) -> list[str]`,
-    whether the lockfile goes and the tree the lockfiles are read from. Returns what was removed.
-    What no lockfile accounts for is copied aside and then removed with the rest.
-    """
-    report = Report()
-    try:
-        if not root.is_dir():
-            return report
-    except OSError:
-        return report
-
-    proof = lockfile_root if lockfile_root is not None else root
-    declared, lockfiles = declared_from_lockfiles(proof)
-    plan = plan_removal(root, declared, lockfiles, keep)
-    rollback: Path | None = None
-
-    def _evidence() -> Path:
-        nonlocal rollback
-        if rollback is None:
-            candidate = next_rollback(root, rollback_path(root))
-            if not is_safe_write_target(candidate, root):
-                raise OSError(f"the rollback store is not inside {root}")
-            candidate.mkdir(parents=True, exist_ok=True)
-            if not is_safe_write_target(candidate, root):
-                raise OSError(f"the rollback store is not inside {root}")
-            rollback = candidate
-            report.copies = _relative_to(candidate, root) or candidate
-        return rollback
-
-    copies: list[Path] = []
-    if remove_lockfiles:
-        for lockfile in lockfiles:
-            if not lockfile.is_file() or lockfile.is_symlink():
-                continue
-            if not is_safe_write_target(lockfile, proof):
-                continue
-            rel = _relative_to(lockfile, proof)
-            if rel is None:
-                continue
-            destination = _evidence() / rel
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(lockfile, destination)
-            copies.append(lockfile)
-
-    if plan.safe_to_remove:
-        unaccounted, removed = apply_removal(plan, _evidence())
-        report.unaccounted_packages = unaccounted
-        report.removed_packages = removed
-        report.removed_strays = _sweep_unaccounted(root, _evidence())
-        leftover = root / INSTALLED_DIR
-        if _is_real_directory(leftover) and is_safe_write_target(leftover, root):
-            shutil.rmtree(leftover)
-    kept, readable = _installed_remnants(root)
-    if kept:
-        report.installed_entries_kept = kept
-        report.installed_tree_kept = (
-            "it could not be read" if not readable
-            else plan.reason or "it is not this repository's to remove")
-
-    if plan.project_is_declared:
-        for build in build_output_dirs(root, keep=keep):
-            destination = _evidence() / build.name
-            shutil.copytree(build, destination, symlinks=True, dirs_exist_ok=True)
-            if not every_file_arrived(build, destination):
-                raise OSError(f"the copy of {build} is incomplete, so nothing was removed")
-            if remove_generated(build, root, committed(build) if committed else (), keep,
-                            confirms):
-                report.removed_builds.append(build.name)
-
-    seen: set[Path] = set()
-    for lockfile in copies:
-        lockfile.unlink()
-        report.removed_lockfiles.append(lockfile)
-        seen.add(lockfile.resolve())
-        rel = _relative_to(lockfile, proof)
-        if rel is None or proof == root:
-            continue
-        live = root / rel
-        if live.resolve() in seen:
-            continue
-        if live.is_file() and not live.is_symlink() and is_safe_write_target(live, root):
-            live.unlink()
-            seen.add(live.resolve())
-
-    return report

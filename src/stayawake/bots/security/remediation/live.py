@@ -181,7 +181,7 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
     else:
         present = [p for p in theirs if os.path.lexists(Path(repo) / p)]
         try:
-            report = installed.remove_installed(repo, confirmed=True, keep=keep,
+            report = installed.remove_installed(repo, keep=keep,
                                                 remove_lockfiles=remove_lockfiles,
                                                 lockfile_root=lockfile_root)
         except OSError as exc:

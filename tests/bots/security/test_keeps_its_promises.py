@@ -152,8 +152,7 @@ class TestAConfirmedRunClearsAGeneratedTreeWhole(_Project):
     """Check what a confirmed run leaves in a generated directory."""
 
     def _run(self, keep=()):
-        installed.remove_installed(self.d, confirmed=True, remove_lockfiles=False,
-                                   keep=keep, committed=_committed_under(self.d))
+        installed.remove_installed(self.d, remove_lockfiles=False, keep=keep)
 
     def test_what_the_project_commits_there_goes_too(self):
         self.commit(self.d, "commits both trees")
@@ -176,8 +175,7 @@ class TestAKeepEntryNamesThisRepository(_Project):
         (self.d / installed.INSTALLED_DIR / "pkg" / "index.js").write_text("x\n")
         (self.d / "data").symlink_to(installed.INSTALLED_DIR)
         self.assertEqual([], installed.kept_paths(self.d, ("data",)))
-        installed.remove_installed(self.d, confirmed=True, keep=("data",),
-                                   committed=_committed_under(self.d))
+        installed.remove_installed(self.d, keep=("data",))
         self.assertFalse((self.d / installed.INSTALLED_DIR / "pkg").exists())
 
     def test_a_directory_of_this_repository_is_still_kept(self):
@@ -189,16 +187,14 @@ class TestAKeepEntryNamesThisRepository(_Project):
 class TestAKeepEntryNamesWhatTheFilesystemNames(_Project):
     @unittest.skipUnless(_folds_case(), "this filesystem tells cases apart")
     def test_a_different_case_keeps_the_directory_it_names(self):
-        report = installed.remove_installed(self.d, confirmed=True, keep=("Dist",),
-                                            committed=_committed_under(self.d))
+        report = installed.remove_installed(self.d, keep=("Dist",))
         self.assertTrue((self.d / "dist").exists())
         self.assertIn("left in place as you asked", report.note())
 
     @unittest.skipIf(_folds_case(), "this filesystem folds case")
     def test_a_different_case_names_nothing_and_is_said(self):
         self.assertNotIn(self.d / "dist", installed.kept_paths(self.d, ("Dist",)))
-        report = installed.remove_installed(self.d, confirmed=True, keep=("Dist",),
-                                            committed=_committed_under(self.d))
+        report = installed.remove_installed(self.d, keep=("Dist",))
         self.assertFalse((self.d / "dist").exists())
         self.assertIn("name nothing here", report.note())
 
@@ -206,8 +202,7 @@ class TestAKeepEntryNamesWhatTheFilesystemNames(_Project):
         self.assertEqual([self.d / "later"], installed.kept_paths(self.d, ("later",)))
 
     def test_an_entry_naming_nothing_on_disk_is_said(self):
-        report = installed.remove_installed(self.d, confirmed=True, keep=("later",),
-                                            committed=_committed_under(self.d))
+        report = installed.remove_installed(self.d, keep=("later",))
         self.assertIn("name nothing here", report.note())
 
 
@@ -217,7 +212,7 @@ class TestALinkedOutputDirectoryLosesTheLink(_Project):
         real.mkdir()
         (real / "bundle.js").write_text("payload\n")
         (self.d / "out").symlink_to(real)
-        installed.remove_installed(self.d, confirmed=True, committed=_committed_under(self.d))
+        installed.remove_installed(self.d)
         self.assertFalse((self.d / "out").is_symlink())
         self.assertTrue((real / "bundle.js").is_file())
 
@@ -233,8 +228,7 @@ class TestKeepingReachesEveryRemoval(_Project):
         (self.d / "vendor" / "package-lock.json").write_text("{}\n")
 
     def _remove(self, keep):
-        installed.remove_installed(self.d, confirmed=True, keep=keep,
-                                   committed=_committed_under(self.d))
+        installed.remove_installed(self.d, keep=keep)
 
     def test_the_installed_tree_survives_when_it_is_named(self):
         self._remove(("node_modules",))
@@ -281,8 +275,7 @@ class TestKeepingReachesEveryRemoval(_Project):
                          installed.kept_paths(self.d, ("dist/assets",)))
 
     def test_the_run_says_what_it_left_because_it_was_asked(self):
-        report = installed.remove_installed(self.d, confirmed=True, keep=("vendor",),
-                                            committed=_committed_under(self.d))
+        report = installed.remove_installed(self.d, keep=("vendor",))
         self.assertIn("left in place as you asked", report.note())
         self.assertIn("vendor", report.note())
 
@@ -329,8 +322,7 @@ class TestAnOutputDirectoryIsNotJudgedByTheRepository(GitSandbox):
         (self.d / "dist" / "myproj-1.0.tar.gz").write_bytes(b"a source release\n")
 
     def _run(self):
-        return installed.remove_installed(self.d, confirmed=True,
-                                          committed=_committed_under(self.d))
+        return installed.remove_installed(self.d)
 
     def test_they_go_whatever_the_project_says_about_itself(self):
         self._run()
@@ -341,8 +333,7 @@ class TestAnOutputDirectoryIsNotJudgedByTheRepository(GitSandbox):
         self.assertIn("out", self._run().note())
 
     def test_naming_them_is_what_keeps_them(self):
-        installed.remove_installed(self.d, confirmed=True, keep=("out", "dist"),
-                                   committed=_committed_under(self.d))
+        installed.remove_installed(self.d, keep=("out", "dist"))
         self.assertTrue((self.d / "out" / "experiment-results.csv").is_file())
         self.assertTrue((self.d / "dist" / "myproj-1.0.tar.gz").is_file())
 
