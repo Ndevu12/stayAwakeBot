@@ -26,6 +26,17 @@ NPM_LIFECYCLE_KEYS = ("preinstall", "install", "postinstall", "prepublish",
                       "predependencies", "dependencies", "postdependencies")
 
 
+def stated_at(signature: dict, field: str, path: str):
+    """Return what a signature states for a finding at a path. Takes the signature, the field (such as
+    `confidence` or `severity`) and the path, relative to the scanned folder. Returns the value it
+    states for an installed package (`<field>_when_installed`) when the path lies inside a node_modules
+    folder and it states one, else its own."""
+    installed = f"{field}_when_installed"
+    if installed in signature and "node_modules" in path.split("/")[:-1]:
+        return signature[installed]
+    return signature.get(field)
+
+
 @dataclass
 class InstalledPackage:
     ecosystem: str

@@ -6,7 +6,7 @@ import re
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, load_jsonc
-from stayawake.bots.security.dependencies.installed import NPM_LIFECYCLE_KEYS
+from stayawake.bots.security.dependencies.installed import NPM_LIFECYCLE_KEYS, stated_at
 
 
 class NpmManifestMatcher(Matcher):
@@ -31,7 +31,7 @@ class NpmManifestMatcher(Matcher):
     @staticmethod
     def _emit(sig, rel, ev):
         return Finding(signature_id=sig["id"], category=sig["category"],
-                       severity=Severity.parse(sig["severity"]), path=rel,
+                       severity=Severity.parse(stated_at(sig, "severity", rel)), path=rel,
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
                        evidence=ev, vector=sig["category"])
 

@@ -151,6 +151,10 @@ reader, not the mechanism or the weakness it closed.
 - **A routine cleanup of your home folder is not a home wipe.** A command that tidies up stray files,
   such as `.DS_Store`, is no longer reported as code that destroys your files. Code that wipes your
   home folder is still reported as infected.
+- **A project's own install script that downloads and runs a setup script is for you to check.** It
+  is reported as something to check by hand, not as infected, and `saw fix` leaves your installed
+  packages and lockfile in place for it. The known worm's install script, and an installed package
+  whose install script runs a download, still read infected.
 - **saw's hooks never hang when started without input.** The push hook and the hook that
   runs after an amend or a rebase no longer hang when started without any input; they still check what
   they are given and run your own hook. Hooks an earlier saw installed are brought up to date without a
