@@ -168,10 +168,10 @@ def check_runner_persistence() -> list[HygieneIssue]:
         severity="warning",
         title="Self-hosted GitHub Actions runner registered on this host",
         # Conditional framing — a legitimately-operated runner is not itself malicious; we
-        # flag it because an UNEXPECTED one is the worm's persistence (reported name SHA1HULUD).
+        # flag it because an UNEXPECTED one is a known persistence foothold.
         detail="A self-hosted runner is installed/registered — " + "; ".join(where)
                + ". If you did not set this up, it runs attacker workflows and survives credential "
-               "rotation (reported runner name SHA1HULUD).",
+               "rotation.",
         remediation="Do NOT rotate credentials first. Remove the registration "
                     "(./config.sh remove) and service, rebuild from a known-clean image, then "
                     f"rotate LAST: {_WIPER_NOTE}.",

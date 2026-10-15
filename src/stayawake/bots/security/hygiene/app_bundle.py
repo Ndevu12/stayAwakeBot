@@ -378,22 +378,17 @@ def _depth(root: Path, directory: Path) -> int:
 
 
 def _unexamined_note(unbounded: int, truncated: int, never_entered: list[Path]) -> HygieneIssue | None:
-    """What the walk did NOT read. A bound that is not reported reads as coverage of what it cut."""
-    parts: list[str] = []
-    if truncated:
-        parts.append(f"{truncated} tree(s) hold more modules than one audit reads")
-    if unbounded:
-        parts.append(f"{unbounded} do not end within the lookback")
-    if never_entered:
-        parts.append(f"{len(never_entered)} could not be opened")
-    if not parts:
+    """Say that some files of the applications installed here were not checked in full. Takes the
+    counts of files and trees cut short, and the folders that could not be opened. Returns the
+    issue, or None when every file was checked."""
+    if not (unbounded or truncated or never_entered):
         return None
     return HygieneIssue(
         id="app-bundle-partly-examined",
         severity="info",
-        title="Some application modules were not examined",
-        detail="Not every module an installed application loads was read: " + "; ".join(parts) + ".",
-        remediation="Read them by hand, or reinstall the applications they belong to.",
+        title="Some application files were not checked in full",
+        detail="This result does not cover every file of the applications installed here.",
+        remediation="Reinstall any application you do not recognise.",
     )
 
 

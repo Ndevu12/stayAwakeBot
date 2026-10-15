@@ -197,7 +197,7 @@ def settle(find=agents.installed, write=None, record: Path | None = None,
             text = stepped
         if failed or not _still_holds(before, text, agent, gone, set_to):
             out.outcomes.append(Outcome(agent.name, agent.config, NOT_WRITTEN,
-                                        "the change did not read back as exactly that change"))
+                                        "the change could not be confirmed"))
             continue
         try:
             if _read(agent.config) != before:

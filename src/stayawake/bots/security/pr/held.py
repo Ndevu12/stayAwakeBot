@@ -75,12 +75,12 @@ def _held_at(repo: Path, treeish: str, paths: list[str], stored) -> tuple[str, .
     found = live.entries(repo, ["ls-tree", "-r", "-z", "--full-tree", treeish],
                          live.literal_pathspecs(), staged=False, key=key)
     if found is None:
-        raise _Unanswered(f"git could not list {treeish}")
+        raise _Unanswered("git could not list the files of a stored version")
     held = []
     for path in paths:
         verdicts = [stored.confirms(path, entry) for entry in found.get(key(path), ())]
         if any(v is None for v in verdicts):
-            raise _Unanswered(f"could not read {path} at {treeish}")
+            raise _Unanswered(f"git could not read {path} in a stored version")
         if any(verdicts):
             held.append(path)
     return tuple(held)

@@ -57,14 +57,12 @@ def check_autorun(jobs: int | None = None) -> list[HygieneIssue]:
         issues.append(HygieneIssue(
             id=REMOVALS_DROPPED_ID, severity="info",
             title="saw could not keep every removal it had recorded",
-            detail=f"{dropped} start-up entries removed earlier are no longer tracked, so if one "
-                   "comes back it will read as new rather than as returned.",
+            detail="A start-up entry removed earlier would be reported as new if it comes back.",
             remediation="Audit again after checking the start-up surface by hand."))
     if not written:
         issues.append(HygieneIssue(
             id=BASELINE_UNSAVED_ID, severity="info",
             title="This audit could not be remembered for the next run",
-            detail="saw could not update its own record of the start-up surface, so what it calls "
-                   "new — or back — will not move on from this run.",
+            detail="The next audit will report today's start-up entries as new again.",
             remediation="Make saw's state directory writable by the account running the audit."))
     return issues

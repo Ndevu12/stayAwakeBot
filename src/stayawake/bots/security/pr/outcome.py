@@ -327,7 +327,8 @@ _PHRASE = {
     Cause.HISTORY_PARTLY_READ:
         "{detail} file version(s) in past commits were not read in full — review them yourself",
     Cause.LARGE_FILES_NOT_READ_IN_FULL:
-        "{detail} large binary or Git LFS file version(s) in past commits were not read in full",
+        "{detail} file version(s) in past commits are kept in Git LFS and were not checked. "
+        "Run `git lfs fetch --all`, then run this again.",
     Cause.PAST_COMMITS_READ_IN_PART:
         "only {detail} of the file versions the repository keeps were read — review the rest "
         "yourself",

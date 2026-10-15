@@ -429,7 +429,7 @@ class TestCoverageIsNeverSilentlyBounded(unittest.TestCase):
         with mock.patch.object(app_bundle, "_MAX_TAIL_BYTES", 512):
             issues = host.check()
         self.assertEqual([i.id for i in issues], ["app-bundle-partly-examined"])
-        self.assertIn("lookback", issues[0].detail)
+        self.assertIn("does not cover every file", issues[0].detail)
 
     def test_stopping_early_is_reported(self):
         host = _Host()

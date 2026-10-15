@@ -1373,7 +1373,7 @@ class TestScanScopeHonesty(unittest.TestCase):
         # The terminal now states WHAT WAS READ and links the gap list; the gaps themselves are
         # pinned on the docs page by test_scope_docs, which is where they moved.
         scope = self._flowed([]).split("Scope:")[1]
-        self.assertIn("known drop-paths", scope)
+        self.assertNotIn("drop-paths", scope)
         self.assertIn("Not exhaustive", scope)             # the caveat survives the move
 
         # The claim is tied to the probe's real behaviour by
@@ -1392,17 +1392,17 @@ class TestScanScopeHonesty(unittest.TestCase):
         # those" is inapplicable once something was FOUND, and claiming to have read the persistence
         # surface restates the over-claim the #1332 UNKNOWN verdict just withdrew.
         clean = self._flowed([])
-        self.assertIn("a clean result does not exclude what was not scanned", clean)
-        self.assertIn("read the host persistence surface and known drop-paths", clean)
+        self.assertIn("Scope: this machine, not your online accounts. Not exhaustive.", clean)
+        self.assertNotIn("drop-paths", clean)
 
         found = self._flowed([hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F")])
         self.assertIn("scope your response wider", found)
-        self.assertNotIn("a clean result does not exclude what was not scanned", found)
+        self.assertNotIn("Not exhaustive.", found)
 
         unknown = self._flowed([hygiene.HygieneIssue("persistence-surface-unverified", "unknown",
                                                      "T", "D", "F")])
-        self.assertIn("read the part of the persistence surface it could", unknown)
-        self.assertNotIn("a clean result does not exclude what was not scanned", unknown)
+        self.assertIn("the start-up entries above were not all read", unknown)
+        self.assertNotIn("Not exhaustive.", unknown)
 
     def test_unreadable_surface_is_disclosed_even_during_an_active_incident(self):
         # REGRESSION: `rotation_safety` is a PRIORITY function — active persistence DOMINATES, so
@@ -1412,7 +1412,7 @@ class TestScanScopeHonesty(unittest.TestCase):
         both = self._flowed([
             hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F"),
             hygiene.HygieneIssue("persistence-surface-unverified", "unknown", "T", "D", "F")])
-        self.assertIn("read the part of the persistence surface it could", both)
+        self.assertIn("the start-up entries above were not all read", both)
         self.assertNotIn("reads the host persistence surface and a targeted set", both)
         self.assertIn("scope your response wider", both)      # still the incident-scoping wording
 
@@ -1426,7 +1426,7 @@ class TestScanScopeHonesty(unittest.TestCase):
         for non_incident_id in ("branch-unprotected", "editor-workspace-trust-off"):
             with self.subTest(id=non_incident_id):
                 out = self._flowed([hygiene.HygieneIssue(non_incident_id, "warning", "T", "D", "F")])
-                self.assertIn("other locations were not examined", out)
+                self.assertIn("Not exhaustive.", out)
                 self.assertNotIn("scope your response", out.lower())
 
     def test_active_persistence_ids_get_incident_wording(self):
@@ -1438,7 +1438,7 @@ class TestScanScopeHonesty(unittest.TestCase):
             with self.subTest(id=incident_id):
                 out = self._flowed([hygiene.HygieneIssue(incident_id, "warning", "T", "D", "F")])
                 self.assertIn("scope your response wider", out)
-                self.assertNotIn("other locations were not examined", out)
+                self.assertNotIn("Not exhaustive.", out)
 
     def test_credential_exposure_is_not_scoped_as_an_incident(self):
         # The tier `_banner` grades APART from active persistence. A plaintext credential renders a
@@ -1452,7 +1452,7 @@ class TestScanScopeHonesty(unittest.TestCase):
         for cred_id in sorted(models.CREDENTIAL_EXPOSURE_IDS):
             with self.subTest(id=cred_id):
                 out = self._flowed([hygiene.HygieneIssue(cred_id, "warning", "T", "D", "F")])
-                self.assertIn("other locations were not examined", out)
+                self.assertIn("Not exhaustive.", out)
                 self.assertNotIn("scope your response", out.lower())
 
     def test_unreadable_locations_are_named_even_when_persistence_outranks_them(self):
@@ -1468,13 +1468,13 @@ class TestScanScopeHonesty(unittest.TestCase):
         self.assertIn("authorized_keys", both)
         self.assertIn("do NOT rotate", both)                  # the persistence verdict still leads
         # …and the scope note's admission of a partial read now has a referent in the report.
-        self.assertIn("read the part of the persistence surface it could", " ".join(both.split()))
+        self.assertIn("the start-up entries above were not all read", " ".join(both.split()))
 
     def test_unverified_surface_sentence_is_pinned(self):
         # Without this, deleting the whole `surface_unverified` arm passed all 1352 tests.
         out = self._flowed([hygiene.HygieneIssue("persistence-surface-unverified", "unknown",
                                                  "T", "D", "F")])
-        self.assertIn("the surface above was not fully read", out)
+        self.assertIn("the start-up entries above were not all read", out)
 
     def test_incident_tier_is_the_single_authority_for_both_consumers(self):
         # The STRUCTURAL pin. Five review rounds each found the scope note contradicting the banner
@@ -1518,7 +1518,7 @@ class TestScanScopeHonesty(unittest.TestCase):
         # Keychain is INFO and documented as normal — that operator is under a green all-clear, and
         # the note must not contradict it (the same proportionality `_banner` already implements).
         info_only = self._flowed([hygiene.HygieneIssue("cached-github-keychain", "info", "T", "D", "F")])
-        self.assertIn("other locations were not examined", info_only)
+        self.assertIn("Not exhaustive.", info_only)
         self.assertNotIn("scope your response", info_only.lower())
 
     def test_scope_note_never_changes_the_verdict_or_exit_code(self):
@@ -1581,12 +1581,15 @@ class TestPlatformBoundaryIsDisclosed(unittest.TestCase):
         # The one gap that must stay on the TERMINAL: a Windows user reading "no findings" has to
         # know nothing was enumerated, not that nothing was there.
         note = self._note("win32")
-        self.assertIn("no host persistence surface is enumerated", note)
+        self.assertIn("start-up entries are not checked on this platform.", note)
         self.assertNotIn("read the host persistence surface and", note)
 
-    def test_on_posix_it_still_claims_what_it_does_read(self):
+    def test_on_posix_it_says_what_it_covers_and_names_no_place_it_reads(self):
         for platform in ("darwin", "linux"):
-            self.assertIn("read the host persistence surface and", self._note(platform))
+            note = self._note(platform)
+            self.assertIn("Scope: this machine, not your online accounts.", note)
+            self.assertNotIn("known drop-paths", note)
+            self.assertNotIn("not checked on this platform", note)
 
     def test_the_note_never_becomes_a_finding_or_moves_the_exit_code(self):
         # Presentation only, on every platform — the #1341 contract.

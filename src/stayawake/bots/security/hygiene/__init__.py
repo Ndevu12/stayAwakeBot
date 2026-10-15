@@ -251,57 +251,20 @@ _SCOPE_DOCS = docs_site.WHAT_A_CLEAN_AUDIT_MEANS
 
 
 def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
-    """REVEAL what this audit does not scan, so no result is read as a host all-clear over the
-    locations supply-chain malware stages in. These are tracked GAPS on a path to closure ( global
-    npm prefix, Docker images/volumes, `/var/tmp`-class survivors and other mounts,
-    account-level state, and the Windows autorun surface — enumerated nowhere in the tool, so a
-    Windows host produces no persistence findings at all), never accepted out-of-scope. Always shown; presentation only — never a
-    finding, never affects the verdict or exit code.
-
-    The probed drop-paths are named from what the code ACTUALLY probes — home, `/tmp`, and the system
-    temp dir (`tempfile.gettempdir()`, which is `/var/folders/…` on macOS, not `/tmp`). Naming a path
-    the probe does not read, or omitting one it does, is the same defect this note exists to remove.
-
-    Both halves track the run state, because one fixed sentence misdescribes two of the three:
-
-    * WHAT WAS READ — when the persistence surface could not be fully enumerated, a flat
-      "reads the host persistence surface" would restate, as the report's last word, the very over-claim
-      the verdict four lines above just withdrew.
-    * WHAT IT MEANS — "a clean result does not exclude those" is inapplicable once something WAS found;
-      a responder needs the compromise scoped WIDER than this list, not a clean-run caveat.
-    """
+    """Build the line that says what an audit's result covers. Takes the audit's issues, whether to
+    colour, and the width. Returns the lines."""
     ids = {i.id for i in issues}
     surface_unverified = bool(ids & {SURFACE_UNREADABLE_ID, BLOCKED_SURFACE_ID})
+    parts = []
     if not persistence_surface_is_enumerable():
-        surface_read = "no host persistence surface is enumerated on this platform"
+        parts.append("start-up entries are not checked on this platform")
     elif surface_unverified:
-        surface_read = "read the part of the persistence surface it could, plus known drop-paths"
-    elif SURFACE_ABSENT_ID in ids:
-        surface_read = "found no persistence surface present, and read known drop-paths"
-    else:
-        surface_read = "read the host persistence surface and known drop-paths"
-    # "Scope your response past what is listed here" presupposes an active compromise whose extent may
-    # exceed the list — so it is gated on that EXACT tier, asked of `incident_tier()`, the same
-    # authority `_banner` consults. Credential exposure is deliberately NOT that: the run says the
-    # host is not implicated, so it takes the neutral wording below rather than contradicting the
-    # green rotation verdict printed above it.
-    if incident_tier({i.id for i in issues}) == TIER_ACTIVE_PERSISTENCE:
-        means = "scope your response wider than this list."
-    elif surface_unverified:
-        means = "and the surface above was not fully read."
-    elif issues:
-        means = "other locations were not examined."
-    else:
-        means = "a clean result does not exclude what was not scanned."
-    # A gap list that omits an axis reads as COVERAGE of it, which is the failure this note exists to
-    # prevent. `saw audit` is a DISK scanner: an account-level foothold (a self-hosted runner registered
-    # against the org) survives a full host rebuild and is invisible here — so it is named, not implied
-    # ONE line, and the gap LIST lives in the docs. Every gap still has to be stated somewhere —
-    # an unlisted axis reads as coverage of it — but stating them here put a paragraph of things we
-    # did NOT do at the end of every run, which is the noise this note was accused of being.
-    # clig.dev: don't print by default what the reader can look up, and guard the signal-to-noise.
+        parts.append("the start-up entries above were not all read")
+    if incident_tier(ids) == TIER_ACTIVE_PERSISTENCE:
+        parts.append("scope your response wider than this list")
+    means = f" — {'; '.join(parts)}." if parts else "."
     processes = live_process_scope_note()
-    text = f"Scope: {surface_read}. Not exhaustive — {means} {_SCOPE_DOCS}"
+    text = f"Scope: this machine, not your online accounts. Not exhaustive{means} {_SCOPE_DOCS}"
     lines = block(text, indent=2, width=width, marker=f"{MARKER['meta']} ",
                   code=SEVERITY["info"], color=color)
     if processes:

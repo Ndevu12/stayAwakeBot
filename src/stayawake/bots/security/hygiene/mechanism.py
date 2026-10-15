@@ -303,11 +303,11 @@ def git_config_predicate() -> str | None:
         return None                       # nothing on disk to be configured to run
     listing = _list_global_config()
     if listing is None:
-        return ("A global git configuration exists but git could not be run to read it, so what it "
-                "makes git execute was not examined.")
+        return ("Your global git settings could not be read because git could not be run, so whether "
+                "they make git run a program is not known. Check that git runs, then audit again.")
     if listing.returncode != 0:
-        return ("A global git configuration exists but git would not list it, so what it makes git "
-                "execute was not examined.")
+        return ("git would not list your global git settings, so whether they make git run a program "
+                "is not known. Check them with `git config --global --list`.")
     return None
 
 

@@ -350,7 +350,7 @@ class TestTheGitDiscriminatorAsksAboutTheFileNotTheTool(unittest.TestCase):
                 mechanism.subprocess, "run",
                 return_value=subprocess.CompletedProcess([], 128, "", "fatal: bad config")):
             os.environ.pop("GIT_CONFIG_GLOBAL", None)
-            self.assertIn("would not list it", mechanism.git_config_predicate())
+            self.assertIn("would not list your global git settings", mechanism.git_config_predicate())
 
     def test_a_configuration_inside_an_unreadable_directory_still_counts_as_existing(self):
         # `Path.is_file()` answers False for a path it may not stat on this interpreter, so an
