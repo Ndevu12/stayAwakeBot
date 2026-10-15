@@ -136,6 +136,10 @@ reader, not the mechanism or the weakness it closed.
 - **saw reads a known loader's marker as an infection however it is quoted or spaced.** Written with
   double quotes, or with spaces inside its brackets, it was read only as something to check.
 
+- **saw's hooks never hang when started without input.** The push hook and the hook that
+  runs after an amend or a rebase no longer hang when started without any input; they still check what
+  they are given and run your own hook. Hooks an earlier saw installed are brought up to date without a
+  warning.
 - **An issue or pull request that lists findings says how many more there are.** The issue saw opens
   for an infected repository, the issue it opens when it cannot open a fix, and the fix pull request's
   list to review show the confirmed findings first and end with how many more there are; no finding

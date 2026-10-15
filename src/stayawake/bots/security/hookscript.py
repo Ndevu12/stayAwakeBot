@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import sys
+from functools import partial
 from hashlib import sha256
 from pathlib import Path
 from typing import Callable
@@ -20,8 +21,6 @@ from stayawake.lib.git.exec_surface import HOOK_NAMES  # noqa: F401  (re-export)
 
 MARKER = "stayawake-scan-on-clone"
 HOOKS = ("post-checkout", "post-merge", "post-rewrite", "pre-push")
-_READS_STDIN = frozenset({"pre-push"})
-_READS_PAIRS = frozenset({"post-rewrite"})
 LOCATION = "git-hook"
 
 
@@ -196,52 +195,19 @@ def _parts(event: str, saw: str, config: str | None) -> tuple[str, str, str]:
     return head, f'_local="$(dirname "$0")/{event}.local"\n', f'{shlex.quote(saw)} hook run{cfg} {event}'
 
 
-def _inbound_script(head: str, local: str, run_saw: str) -> str:
-    return (head
-            + f'{run_saw} "$@" </dev/null || true\n'
-            + local
-            + '[ -x "$_local" ] && "$_local" "$@" || true\n'
-            + "exit 0\n")
+_INPUT_GUARD = '[ -e /dev/fd/0 ] || [ ! -d /dev/fd ] || exec </dev/null\n'
 
 
-def _rewrite_script(head: str, local: str, run_saw: str) -> str:
-    return (head
-            + local
-            + _FEED_PAIRS
-            + '_pairs="$(cat)"\n'
-            + f'_feed | {run_saw} "$@" || true\n'
-            + _CHAIN_PAIRS
-            + "exit 0\n")
+def _read_input(name: str) -> str:
+    """Return the script lines that read a hook's input into the shell variable `name`, and never wait
+    when git gave the hook no input. Takes the variable's name. Returns the lines."""
+    return _INPUT_GUARD + f'{name}="$(cat)"\n'
 
 
-def _push_script(head: str, local: str, run_saw: str, chain: str) -> str:
-    return (head
-            + local
-            + chain
-            + '_refs="$(cat)"\n'
-            + f'_feed | {run_saw} "$@" || true\n'
-            + '_feed | _chain "$@"\n'
-            + 'exit $?\n')
-
-
-def render(event: str, saw: str, config: str | None) -> str:
-    """Return the hook script saw installs for `event`, calling the `saw` executable."""
-    parts = _parts(event, saw, config)
-    if event in _READS_PAIRS:
-        return _rewrite_script(*parts)
-    if event in _READS_STDIN:
-        return _push_script(*parts, _CHAIN)
-    return _inbound_script(*parts)
-
-
-def render_previous(event: str, saw: str, config: str | None) -> str | None:
-    """Return the hook script an earlier saw installed for `event`, or None when it is the current one."""
-    parts = _parts(event, saw, config)
-    if event in _READS_PAIRS:
-        return _inbound_script(*parts)
-    if event in _READS_STDIN:
-        return _push_script(*parts, _PREVIOUS_CHAIN)
-    return None
+def _read_input_as_earlier(name: str) -> str:
+    """Return the line an earlier saw used to read a hook's input into the shell variable `name`. Takes
+    the variable's name. Returns the line."""
+    return f'{name}="$(cat)"\n'
 
 
 def _chain_text(lfs_missing: str) -> str:
@@ -256,67 +222,87 @@ def _chain_text(lfs_missing: str) -> str:
 
 _CHAIN = _chain_text("This repository uses Git LFS, but git-lfs was not found on your path. Install Git LFS, "
                      "then push again.")
-_PREVIOUS_CHAIN = _chain_text("This repository uses Git LFS, but git-lfs was not found on your path.")
+_CHAIN_WITHOUT_INSTALL_ADVICE = _chain_text("This repository uses Git LFS, but git-lfs was not found on your path.")
 _FEED_PAIRS = '_feed() { [ -z "$_pairs" ] || printf \'%s\\n\' "$_pairs"; }\n'
 _CHAIN_PAIRS = 'if [ -x "$_local" ]; then _feed | "$_local" "$@"; fi\n'
 
 
+def _inbound_script(head: str, local: str, run_saw: str) -> str:
+    return (head
+            + f'{run_saw} "$@" </dev/null || true\n'
+            + local
+            + '[ -x "$_local" ] && "$_local" "$@" || true\n'
+            + "exit 0\n")
+
+
+def _rewrite_script(head: str, local: str, run_saw: str, read: Callable[[str], str] = _read_input) -> str:
+    return (head
+            + local
+            + _FEED_PAIRS
+            + read("_pairs")
+            + f'_feed | {run_saw} "$@" || true\n'
+            + _CHAIN_PAIRS
+            + "exit 0\n")
+
+
+def _push_script(head: str, local: str, run_saw: str, chain: str = _CHAIN,
+                 read: Callable[[str], str] = _read_input) -> str:
+    return (head
+            + local
+            + chain
+            + read("_refs")
+            + f'_feed | {run_saw} "$@" || true\n'
+            + '_feed | _chain "$@"\n'
+            + 'exit $?\n')
+
+
+_SCRIPTS_NEWEST_FIRST: dict[str, tuple[Callable[[str, str, str], str], ...]] = {
+    "post-checkout": (_inbound_script,),
+    "post-merge": (_inbound_script,),
+    "post-rewrite": (_rewrite_script,
+                     partial(_rewrite_script, read=_read_input_as_earlier),
+                     _inbound_script),
+    "pre-push": (_push_script,
+                 partial(_push_script, read=_read_input_as_earlier),
+                 partial(_push_script, chain=_CHAIN_WITHOUT_INSTALL_ADVICE, read=_read_input_as_earlier)),
+}
+
+
+def render(event: str, saw: str, config: str | None) -> str:
+    """Return the hook script saw installs for `event`, calling the `saw` executable."""
+    return _SCRIPTS_NEWEST_FIRST[event][0](*_parts(event, saw, config))
+
+
+def render_earlier(event: str, saw: str, config: str | None) -> list[str]:
+    """Return every hook script an earlier saw installed for `event`, newest first, calling the `saw`
+    executable."""
+    return [write(*_parts(event, saw, config)) for write in _SCRIPTS_NEWEST_FIRST[event][1:]]
+
+
 _QUOTED = r"(?:[\w@%+=:,./-]{1,1024}|'(?:[^'\n]|'\"'\"'){0,1024}')"
-_HEAD = (r"#!/bin/sh\n"
-         r"# " + re.escape(MARKER) + r" \((?P<event>{events})\) — installed by "
-         r"`saw hook install` \(#1195\)\. Must never fail git\.\n")
 _SAW_CMD = rf"(?P<command>(?P<saw>{_QUOTED}) hook run(?P<cfg>(?: --config {_QUOTED})?) (?P=event))"
-_LOCAL = r'_local="\$\(dirname "\$0"\)/(?P=event)\.local"\n'
+_EVENT_SLOT = "SAWEVENTSLOT"
+_SAW_SLOT = "SAWPROGRAMSLOT"
 
 
-def _events_regex(events) -> str:
-    return "|".join(re.escape(e) for e in events)
+def _template(write: Callable[[str, str, str], str], event: str) -> re.Pattern:
+    """Compile the pattern of the script `write` produces for `event`, with any saw and config. Takes the
+    script's writer and the event. Returns the pattern."""
+    text = re.escape(write(*_parts(_EVENT_SLOT, _SAW_SLOT, None)))
+    text = text.replace(re.escape(f"{_SAW_SLOT} hook run {_EVENT_SLOT}"), _SAW_CMD, 1)
+    text = text.replace(_EVENT_SLOT, f"(?P<event>{re.escape(event)})", 1)
+    return re.compile(text.replace(_EVENT_SLOT, "(?P=event)"))
 
 
-def _inbound_regex(events) -> re.Pattern:
-    return re.compile(
-        _HEAD.format(events=_events_regex(events))
-        + _SAW_CMD + r' \"\$@\" </dev/null \|\| true\n'
-        + _LOCAL
-        + r'\[ -x "\$_local" \] && "\$_local" "\$@" \|\| true\n'
-        + r"exit 0\n"
-    )
-
-
-def _push_regex(chain: str) -> re.Pattern:
-    return re.compile(
-        _HEAD.format(events=_events_regex(_READS_STDIN))
-        + _LOCAL
-        + re.escape(chain)
-        + r'_refs="\$\(cat\)"\n'
-        + r'_feed \| ' + _SAW_CMD + r' "\$@" \|\| true\n'
-        + r'_feed \| _chain "\$@"\n'
-        + r'exit \$\?\n'
-    )
-
-
-_TEMPLATES = (
-    _inbound_regex([e for e in HOOKS if e not in _READS_STDIN and e not in _READS_PAIRS]),
-    re.compile(
-        _HEAD.format(events=_events_regex(_READS_PAIRS))
-        + _LOCAL
-        + re.escape(_FEED_PAIRS)
-        + r'_pairs="\$\(cat\)"\n'
-        + r'_feed \| ' + _SAW_CMD + r' "\$@" \|\| true\n'
-        + re.escape(_CHAIN_PAIRS)
-        + r"exit 0\n"
-    ),
-    _push_regex(_CHAIN),
-    _inbound_regex(_READS_PAIRS),
-    _push_regex(_PREVIOUS_CHAIN),
-)
+_TEMPLATES = {event: tuple(_template(write, event) for write in writes)
+              for event, writes in _SCRIPTS_NEWEST_FIRST.items()}
 
 
 def _pristine_match(text: str):
     """Return the match for a hook script saw installs or an earlier saw installed, from whichever
     template fits, or None."""
-    return next((m for m in (t.fullmatch(text) for t in _TEMPLATES) if m), None)
-
+    return next((m for templates in _TEMPLATES.values() for m in (t.fullmatch(text) for t in templates) if m),
+                None)
 
 def is_ours(path: Path) -> bool:
     """Return True if the file at `path` carries saw's hook marker."""
@@ -362,7 +348,7 @@ def _is_previous(text: str, expected: tuple[str, str | None] | None = None) -> b
     if event is None:
         return False
     saw, config = expected or installed() or (saw_executable(), None)
-    return text == render_previous(event, saw, config)
+    return text in render_earlier(event, saw, config)
 
 
 def saw_command(text: str) -> list[str] | None:
