@@ -279,7 +279,7 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
     def test_a_line_not_in_gits_form_is_reported_not_verified(self):
         code, text = self.check("garbage\n")
         self.assertEqual(code, 2)
-        self.assertIn("NOT verified", text)
+        self.assertIn("not known to be clean", text)
 
     def test_git_failing_to_list_the_push_is_reported_not_verified(self):
         self.commit({".gitignore": _PAYLOAD})
@@ -287,7 +287,7 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
         with mock.patch.object(pushed, "own_view_fed", return_value=None):
             code, text = self.check(refs)
         self.assertEqual(code, 2)
-        self.assertIn("NOT verified", text)
+        self.assertIn("not known to be clean", text)
 
     def test_a_scan_that_runs_out_of_time_is_reported_and_finished_next_time(self):
         self.commit({".gitignore": _PAYLOAD})
@@ -302,8 +302,8 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
         with mock.patch.object(outbound, "_scan_batch", slow):
             code, text = self.check(refs)
         self.assertEqual(code, 2, text)
-        self.assertIn("did not finish checking", text)
-        self.assertIn("NOT verified", text)
+        self.assertIn("was not fully checked", text)
+        self.assertIn("not known to be clean", text)
         self.assertNotIn("no worm found", text)
         del os.environ["SAW_HOOK_TIMEOUT"]
         self.commit({"more.js": "export const y = 2;\n"})
@@ -418,7 +418,7 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
                 mock.patch.object(history.HistoryTarget, "_cat_file", unreadable):
             code, text = self.check(self.line("refs/heads/main"))
         self.assertEqual(code, 2, text)
-        self.assertIn("NOT verified", text)
+        self.assertIn("not known to be clean", text)
         self.assertNotIn("✓", text)
 
     def test_time_running_out_while_history_is_listed_is_never_called_clean(self):
@@ -437,7 +437,7 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
         self.assertEqual(code, 2, text)
         self.assertNotIn("✓", text)
         self.assertIn("your new changes", text)
-        self.assertIn("NOT verified", text)
+        self.assertIn("not known to be clean", text)
 
     def _with_history(self):
         self.commit({"a.js": "export const v = 1;\n"}, "v1")
@@ -483,7 +483,7 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
             code, text = self.check(f"refs/heads/main {local} refs/heads/main {_ZERO}\n",
                                     argv=("/new.git", "/new.git"))
         self.assertNotIn("your new changes", text)
-        self.assertIn("NOT verified", text)
+        self.assertIn("not known to be clean", text)
 
     def test_history_carried_from_a_url_push_is_later_worded_as_history(self):
         infected = self.commit({".gitignore": _PAYLOAD}, "infected")
@@ -577,8 +577,8 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
         with mock.patch.object(version_scan, "scan_target", side_effect=RuntimeError("boom")):
             code, text = self.check(self.line("refs/heads/main"))
         self.assertEqual(code, 2)
-        self.assertIn("could not check this push", text)
-        self.assertIn("NOT verified", text)
+        self.assertIn("could not be checked", text)
+        self.assertIn("not known to be clean", text)
         self.assertNotIn("RuntimeError", text)
 
     def test_a_deletion_in_a_sha256_repository_is_quiet(self):

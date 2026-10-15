@@ -22,7 +22,7 @@ saw hook status [--no-stream]
 | `install` | Give the hooks to every repository you clone or create from now on, and to the repositories you already have. |
 | `PATH...` | Repositories, folders or globs to give the hooks to. Without them: your configured local targets, else the repository you are in. |
 | `repair` | Put back every hook saw installed, and set aside whatever stood in its place. |
-| `uninstall` | Remove saw's hooks and restore any hook of yours they ran before. |
+| `uninstall` | Remove saw's hooks, from new clones and from the repositories you gave them to or they have run in, and restore any hook of yours they ran before. |
 | `status` | Whether the hooks are in place and will run. |
 | `-c`, `--config FILE` | Your config, whose allowlist the hooks scan with. A repository's own config is never read. |
 | `--no-stream` | Plain instant lines instead of live progress. Same as `STAYAWAKE_NO_STREAM=1`. |
@@ -32,7 +32,7 @@ saw hook status [--no-stream]
 - **Your repositories stay current.** Whenever one of saw's hooks runs, a saw hook that is missing or
   out of date there is put back. Your own hooks keep running and are left as they are.
 - **Nothing is deleted.** Whatever saw sets aside is kept, with a record of where it came from, for
-  you to examine. A hook that could not be put back is named.
+  you to examine. What could not be put back is said, with the command to run.
 - **[`saw audit`](audit.md) reports** a hook saw did not install, or one of saw's that was changed;
   `saw hook repair` puts it back.
 - **Scans are quick and bounded.** A pull, a switch or a file checkout scans only what changed. Each scan has a time

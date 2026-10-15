@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import yaml
+
 from stayawake.utils.config import load_yaml
 from stayawake.bots.security.resolution import DEFAULT_CONFIG
 
@@ -18,6 +20,16 @@ def _announce(source: str | Path, cfg: dict) -> None:
 
 
 ALLOWLIST_SHAPE = "config `allowlist` must be a list of {signature, path_glob} mappings."
+
+
+def usable(config_path: str) -> bool:
+    """Tell whether a config file exists and its allowlist can be applied, printing nothing. Takes its
+    path. Returns the answer."""
+    try:
+        cfg = load_yaml(config_path)
+    except (OSError, ValueError, yaml.YAMLError):
+        return False
+    return isinstance(cfg, dict) and allowlist_ok(cfg)
 
 
 def allowlist_ok(cfg: dict) -> bool:
@@ -51,7 +63,12 @@ def resolve_config(config_path: str | None, *, act_on: str = "the current reposi
         print(f"error: config '{config_path}' not found. Pass --config <path>, or omit it to act on "
               f"{act_on}.", file=sys.stderr)
         return None
-    cfg = load_yaml(config_path) or {}
+    try:
+        cfg = load_yaml(config_path) or {}
+    except (OSError, ValueError, yaml.YAMLError):
+        print(f"error: config '{config_path}' cannot be read. Correct it, or pass another with "
+              "--config <path>.", file=sys.stderr)
+        return None
     if not isinstance(cfg, dict) or not allowlist_ok(cfg):
         print(f"error: {ALLOWLIST_SHAPE}", file=sys.stderr)
         return None

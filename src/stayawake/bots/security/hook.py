@@ -6,6 +6,7 @@ pull is checked before anything in it is executed.
 """
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import os
@@ -14,7 +15,7 @@ import shutil
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from stayawake.utils import atomicwrite, env, procsnap
@@ -31,9 +32,15 @@ from stayawake.bots.security.found import what_it_is, where_it_is
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.hook_report import BRAND as _BRAND, command as _cmd, paint_at as _paint
+from stayawake.bots.security.hook_outcome import (
+    BROKEN_LINK, CHAINED, CHANGED, HOOKS_FOLDER_REFUSED, HOOKS_FOLDER_UNKNOWN, IN_PLACE, LEFT, NOT_PUT_IN_PLACE,
+    NOT_SAWS, NOTED, OUT_OF_DATE, PRESERVED, PUT_BACK, RECORD_NOT_WRITTEN, REPAIRED, REPOSITORYS_OWN,
+    RESTORED, RUNS_FROM_ELSEWHERE, SAVED_COPY_IN_THE_WAY, SET_ASIDE, SETTINGS_NOT_SET, SETTINGS_SWITCHED_OFF,
+    SETTLED as _SETTLED, STILL_IN_SETTINGS, UNREAD, UNVERIFIED, UPDATED, WRITTEN, YOUR_PUSH_HOOK_KEPT,
+    YOURS_RUNS_AFTER, Action, lines as _outcome_lines)
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.bots.security.scanner import scan_target
-from stayawake.bots.security.config import resolve_config
+from stayawake.bots.security.config import resolve_config, usable as _config_usable
 
 _MARKER = hookscript.MARKER
 _HOOKS = hookscript.HOOKS
@@ -51,6 +58,10 @@ _AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `p
 
 class HookError(Exception):
     """A hook saw would have to overwrite; the install stops and names it."""
+
+
+class SavedCopyInTheWay(HookError):
+    """A hook of the person's and its saved copy are both where saw's hook goes."""
 
 
 
@@ -168,21 +179,19 @@ def _settings_hook_state(event: str) -> tuple[str | None, list[str], str | None]
     return (command[0] if command else None), events, (enabled[0] if enabled else None)
 
 
-_NOT_IN_SETTINGS = "could not be set in your git settings, so saw's scan runs where its folder hooks do"
-
-
-def _settle_hooks_folder(saw: str, config: str | None) -> tuple[Path | None, list[Action]]:
+def _settle_hooks_folder(saw: str, config: str | None,
+                         written: _WrittenFolders | None = None) -> tuple[Path | None, list[Action]]:
     """Put saw's hooks in the folder git runs every repository's hooks from, when that folder is the
-    operator's alone. Takes the saw executable and the operator config. Returns the folder saw's hooks
-    are in, or None, and what was done."""
+    operator's alone. Takes the saw executable, the operator config and the list of folders written
+    into, which it extends. Returns the folder saw's hooks are in, or None, and what was done."""
     read, hp = _hookspath_git_uses()
     if not read or not hp or _same_path(os.path.expanduser(hp), _hooks_dir()):
         return None, []
     folder = os.path.expanduser(hp)
     problem = _hooks_folder_problem(folder)
     if problem is not None:
-        return None, [Action(NOTED, Path(folder), f"{problem}, so saw's hooks were not put there")]
-    return Path(folder), _settle(Path(folder), saw, config, own=False)
+        return None, [Action(NOTED, Path(folder), HOOKS_FOLDER_REFUSED, reason=problem)]
+    return Path(folder), _settle(Path(folder), saw, config, own=False, written=written)
 
 
 def _hooks_folders_to_record(settled: Path | None) -> list[Path]:
@@ -205,26 +214,26 @@ def _settle_settings_hooks(saw: str, config: str | None) -> list[Action]:
         try:
             command, events, enabled = _settings_hook_state(event)
         except HookError:
-            actions.append(Action(NOTED, where, _NOT_IN_SETTINGS))
+            actions.append(Action(NOTED, where, SETTINGS_NOT_SET))
             continue
         if enabled == "false":
-            actions.append(Action(NOTED, where, "switched off in your git settings, so it was left off"))
+            actions.append(Action(NOTED, where, SETTINGS_SWITCHED_OFF))
             continue
         if command == wanted and events == [event]:
-            actions.append(Action(IN_PLACE, where, "saw's scan, run by git 2.54 and later"))
+            actions.append(Action(IN_PLACE, where))
             continue
         if not (gitutil.run_ok(None, ["config", "--global", f"hook.{name}.command", wanted],
                                context=gitutil.OPERATOR_CONFIG)
                 and gitutil.run_ok(None, ["config", "--global", "--replace-all", f"hook.{name}.event", event],
                                    context=gitutil.OPERATOR_CONFIG)):
-            actions.append(Action(NOTED, where, _NOT_IN_SETTINGS))
+            actions.append(Action(NOTED, where, SETTINGS_NOT_SET))
             continue
         try:
             command, events, _ = _settings_hook_state(event)
         except HookError:
             command, events = None, []
-        actions.append(Action(UPDATED, where, "saw's scan, run by git 2.54 and later")
-                       if command == wanted and events == [event] else Action(NOTED, where, _NOT_IN_SETTINGS))
+        actions.append(Action(UPDATED, where, WRITTEN)
+                       if command == wanted and events == [event] else Action(NOTED, where, SETTINGS_NOT_SET))
     return actions
 
 
@@ -265,7 +274,8 @@ def why_saws_hooks_may_not_run() -> str | None:
     also = " saw's scan in your git settings still runs." if _settings_hooks_set() else ""
     read, hp = _hookspath_git_uses()
     if not read:
-        return "git's hooks setting could not be read, so whether saw's hooks run is NOT verified."
+        return ("git's hooks setting could not be read, so it is not known whether new clones are scanned. "
+                "Check it with `git config --global --get core.hooksPath`.")
     if hp == "":
         return "git is set to run every repository's hooks from its top folder, so saw's hooks will not run." + also
     if hp is not None and not _is_saws_hooks_folder(hp):
@@ -316,28 +326,6 @@ def _same_path(a: str | Path, b: str | Path) -> bool:
         return str(a) == str(b)
 
 
-IN_PLACE = "in place"
-NOTED = "noted"
-UPDATED = "updated"
-RESTORED = "restored"
-REPAIRED = "repaired"
-SET_ASIDE = "set aside"
-PRESERVED = "preserved"
-LEFT = "left"
-CHAINED = "chained"
-UNVERIFIED = "could not verify"
-UNREAD = "could not read"
-_SETTLED = frozenset({IN_PLACE, NOTED, UPDATED, RESTORED, REPAIRED, SET_ASIDE, PRESERVED, LEFT, CHAINED})
-
-
-@dataclass(frozen=True)
-class Action:
-    """One thing `saw hook` did, or could not do, to one path."""
-    state: str
-    path: Path
-    detail: str = ""
-
-
 def _write_verified(dest: Path, text: str, hooks_dir: Path) -> bool:
     """Write `text` to `dest` as an executable file in one step and return True only if reading it
     back gives `text`."""
@@ -358,25 +346,26 @@ def _runnable_as_your_own(preserved: Path) -> bool:
     return True
 
 
-def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list[Action]:
+def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool,
+            written: _WrittenFolders | None = None) -> list[Action]:
     """Make `hooks_dir` carry the hooks saw installs, moving aside whatever stands in their way, and
-    return what was done to each path. In saw's own directory (`own`) nothing foreign stays."""
+    return what was done to each path. In saw's own directory (`own`) nothing foreign stays. A folder
+    that is not saw's own is added to `written` before anything in it changes."""
     actions: list[Action] = []
     expected = (saw, config)
     if hooks_dir.is_symlink() or hooks_dir.parent.is_symlink():
-        return [Action(UNVERIFIED, hooks_dir, "is a link, so nothing was written through it")]
+        return [Action(UNVERIFIED, hooks_dir, NOT_PUT_IN_PLACE)]
     if not own and _inside_what_saw_keeps(hooks_dir):
-        return [Action(UNVERIFIED, hooks_dir, "lies inside what saw keeps for itself, so nothing was written")]
+        return [Action(UNVERIFIED, hooks_dir, NOT_PUT_IN_PLACE)]
     atomicwrite.make_folder(hooks_dir)
     if not hooks_dir.is_dir():
-        return [Action(UNVERIFIED, hooks_dir, "is not a directory")]
+        return [Action(UNVERIFIED, hooks_dir, NOT_PUT_IN_PLACE)]
     if own:
         for p in sorted(hooks_dir.iterdir()):
             if p.name in _HOOKS:
                 continue
             folder = hookscript.set_aside(p)
-            actions.append(Action(SET_ASIDE, p, f"not a hook saw installs, kept at {folder}") if folder
-                           else Action(UNVERIFIED, p, "could not be moved aside, so it was left as it is"))
+            actions.append(Action(SET_ASIDE, p, NOT_SAWS) if folder else Action(UNVERIFIED, p, NOT_PUT_IN_PLACE))
     yielded: set[str] = set()
     if not own:
         for event in _HOOKS:
@@ -385,71 +374,69 @@ def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list
                 if event in _YIELDS_TO_THE_OPERATOR:
                     yielded.add(event)
                     continue
-                raise HookError(
+                raise SavedCopyInTheWay(
                     f"{hooks_dir / f'{event}.local'} already exists — refusing to overwrite a preserved "
                     "hook. Resolve it by hand, then re-run `saw hook install`.")
+        if written is not None and not written.append(Path(os.path.realpath(hooks_dir))):
+            return [Action(UNVERIFIED, hooks_dir, NOT_PUT_IN_PLACE)]
     for event in _HOOKS:
         dest = hooks_dir / event
         if event in yielded:
-            actions.append(Action(LEFT, dest, f"your {event} and {event}.local are both here, so "
-                                              "saw's check was not added"))
+            actions.append(Action(LEFT, dest, YOUR_PUSH_HOOK_KEPT))
             continue
         wanted = _hook_script(event, saw, config)
         state = hookscript.verdict(dest, expected)
         if state == hookscript.PRISTINE:
             actions.append(Action(IN_PLACE, dest))
             continue
-        outcome, detail = UPDATED, "a hook saw installs"
+        outcome, kind = UPDATED, WRITTEN
         if state in (hookscript.ALTERED, hookscript.STALE) or (state == hookscript.FOREIGN and own):
-            folder = hookscript.set_aside(dest)
-            if folder is None:
-                actions.append(Action(UNVERIFIED, dest, "could not be moved aside, so it was left as it is"))
+            if hookscript.set_aside(dest) is None:
+                actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
                 continue
-            outcome, detail = _kept(state, folder)
+            outcome, kind = _kept(state)
         elif state == hookscript.FOREIGN and dest.is_symlink() and not dest.is_file():
-            folder = hookscript.set_aside(dest)
-            if folder is None:
-                actions.append(Action(UNVERIFIED, dest, "could not be moved aside, so it was left as it is"))
+            if hookscript.set_aside(dest) is None:
+                actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
                 continue
-            outcome, detail = SET_ASIDE, f"a link to nothing, kept at {folder}"
+            outcome, kind = SET_ASIDE, BROKEN_LINK
         elif state == hookscript.FOREIGN:
             preserved = hooks_dir / f"{event}.local"
             try:
                 atomicwrite.rename_in(hooks_dir, dest.name, preserved.name)
             except OSError:
-                actions.append(Action(UNVERIFIED, dest, "could not be set aside as your own, so it was left as it is"))
+                actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
                 continue
             if not _runnable_as_your_own(preserved):
                 try:
                     atomicwrite.rename_in(hooks_dir, preserved.name, dest.name)
                 except OSError:
-                    actions.append(Action(UNVERIFIED, preserved, "was set aside as your own but could not be made to run"))
+                    actions.append(Action(UNVERIFIED, preserved, NOT_PUT_IN_PLACE))
                     continue
-                actions.append(Action(UNVERIFIED, dest, "could not be set aside as your own, so it was left as it is"))
+                actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
                 continue
-            actions.append(Action(PRESERVED, preserved, "your hook, now run after saw's"))
+            actions.append(Action(PRESERVED, preserved, YOURS_RUNS_AFTER))
         if not _write_verified(dest, wanted, hooks_dir):
-            actions.append(Action(UNVERIFIED, dest, "written but could not be read back as written"))
+            actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
             continue
-        actions.append(Action(outcome, dest, detail))
+        actions.append(Action(outcome, dest, kind))
     return actions
 
 
-def _kept(state: str, folder: Path) -> tuple[str, str]:
-    """Return the outcome and detail for a hook of `state` moved aside into `folder`."""
+def _kept(state: str) -> tuple[str, str]:
+    """Name the outcome and its kind for a hook moved aside. Takes the hook's state. Returns them."""
     if state == hookscript.ALTERED:
-        return REPAIRED, f"altered saw hook, kept at {folder}"
+        return REPAIRED, CHANGED
     if state == hookscript.STALE:
-        return UPDATED, f"a hook saw installs naming another saw or config, or not runnable, kept at {folder}"
-    return SET_ASIDE, f"not a hook saw installs, kept at {folder}"
+        return UPDATED, OUT_OF_DATE
+    return SET_ASIDE, NOT_SAWS
 
 
-def _print_actions(actions: list[Action], stream) -> None:
-    for a in actions:
-        level = "ok" if a.state in (IN_PLACE, NOTED, UPDATED, LEFT) else "warn" if a.state in (UNVERIFIED, UNREAD) else "dim"
-        line = (f"  {a.state}: {textsafe.plain(str(a.path), limit=4096)}"
-                + (f" — {textsafe.plain(a.detail, limit=4096)}" if a.detail else ""))
-        print(_paint(line, level, stream), file=stream)
+def _print_actions(actions: list[Action], stream, *, again: str, removing: bool = False) -> None:
+    """Print what was done and what is left, one line for each kind. Takes the actions, the stream, the
+    command that tries again, and whether saw's hooks were being removed."""
+    for text, level in _outcome_lines(actions, again=again, removing=removing):
+        print(_paint(f"  {text}", level, stream), file=stream)
 
 
 _global_template_dir = hookscript.global_template_dir
@@ -498,34 +485,67 @@ def settle_hooks(config_path: str | None = None, *, repositories: list[Path] | N
         return Settling(code=2, problem=(
             f"git's template folder is set to a relative path ({textsafe.plain(existing, limit=4096)}); "
             "make it absolute, then install."))
+    theirs = bool(existing) and not _same_path(existing, template_dir())
+    target = existing if theirs else str(template_dir())
+    written = _WrittenFolders(saw, config, target)
+    hooks_folder = None
     try:
-        if existing and not _same_path(existing, template_dir()):
-            actions = _settle(Path(existing) / "hooks", saw, config, own=False)
+        if theirs:
+            actions = _settle(Path(existing) / "hooks", saw, config, own=False, written=written)
             actions += [a for a in _settle_own_only() if a.state != IN_PLACE]
-            target = existing
         else:
             actions = _settle(_hooks_dir(), saw, config, own=True)
             if not gitutil.run_ok(None, ["config", "--global", "init.templateDir",
                                          str(template_dir())], context=gitutil.OPERATOR_CONFIG):
                 return Settling(code=2, problem="could not set git to give new clones saw's hooks.")
-            target = str(template_dir())
         actions += _settle_settings_hooks(saw, config)
-        hooks_folder, folder_actions = _settle_hooks_folder(saw, config)
+        hooks_folder, folder_actions = _settle_hooks_folder(saw, config, written)
         actions += folder_actions
     except HookError as exc:
         return Settling(code=2, problem=str(exc))
-    except OSError as exc:
-        return Settling(code=3, problem=textsafe.plain(str(exc)))
-    if not hookscript.declare(saw, config, Path(target) / "hooks", _hooks_folders_to_record(hooks_folder)):
-        actions.append(Action(UNVERIFIED, hookscript.declaration_path(),
-                              "the record of what was installed could not be written"))
+    except OSError:
+        return Settling(code=3, problem=_NOT_PUT_IN_PLACE)
+    if not _record_what_was_written(saw, config, target, hooks_folder, written):
+        actions.append(Action(UNVERIFIED, hookscript.declaration_path(), RECORD_NOT_WRITTEN))
     handled = [Path(target) / "hooks", _hooks_dir()]
     try:
-        actions += _seed_repositories(repositories or [], saw, config, handled)
+        actions += _seed_repositories(repositories or [], saw, config, handled, written)
         actions += _keep_seeded_current(saw, config, handled)
-    except OSError as exc:
-        return Settling(code=3, problem=textsafe.plain(str(exc)))
+    except OSError:
+        return Settling(code=3, problem=_NOT_PUT_IN_PLACE)
     return Settling(actions=actions, target=target, may_not_run=why_saws_hooks_may_not_run())
+
+
+def _record_what_was_written(saw: str, config: str | None, target: str, hooks_folder: Path | None,
+                             written: _WrittenFolders) -> bool:
+    """Record what install put in place and every folder of the person's it wrote saw's hooks into.
+    Takes the saw executable, the operator config, the template folder, the hooks folder settled and
+    the folders written into. Returns True when the record reads back."""
+    return (hookscript.declare(saw, config, Path(target) / "hooks", _hooks_folders_to_record(hooks_folder))
+            and written.recorded)
+
+
+_NOT_PUT_IN_PLACE = "saw's hooks could not all be put in place. Run `saw hook install` to try again."
+
+
+class _WrittenFolders:
+    """The hooks folders of the person's an install changes, each recorded on disk before saw first
+    changes it, so an install stopped at any point leaves the record uninstall needs."""
+
+    def __init__(self, saw: str, config: str | None, target: str):
+        self.saw, self.config, self.target = saw, config, target
+        self.folders: list[Path] = []
+        self.recorded = True
+
+    def append(self, folder: Path) -> bool:
+        """Record a folder about to be changed. Takes it. Returns True when it is recorded; a folder
+        that is not is left unchanged."""
+        self.folders.append(folder)
+        recorded = hookscript.installed() is not None or hookscript.declare(
+            self.saw, self.config, Path(self.target) / "hooks", hookscript.installed_hooks_folders())
+        recorded = recorded and hookscript.remember_hooks_written([folder])
+        self.recorded &= recorded
+        return recorded
 
 
 def _repositories_named(patterns: list[str]) -> list[Path]:
@@ -539,28 +559,77 @@ def _repositories_named(patterns: list[str]) -> list[Path]:
     return roots
 
 
-def _seed_repositories(roots: list[Path], saw: str, config: str | None,
-                       handled: list[Path]) -> list[Action]:
+def _seed_repositories(roots: list[Path], saw: str, config: str | None, handled: list[Path],
+                       written: _WrittenFolders) -> list[Action]:
     """Give repositories that already exist saw's hooks. Takes the repository roots, the saw
-    executable, the operator config and the hooks directories already handled, which it extends.
-    Returns what was done in each."""
+    executable, the operator config, the hooks directories already handled, which it extends, and
+    the record of folders written into. Returns what was done in each."""
     actions: list[Action] = []
+    given: list[Path] = []
+    refused: dict[str, str] = {}
     for root in roots:
         hooks_dir = hookscript.repository_hooks_dir(root)
         if hooks_dir is None:
-            actions.append(Action(UNREAD, root, "git could not say where this repository's hooks are"))
+            actions.append(Action(UNREAD, root, HOOKS_FOLDER_UNKNOWN, root))
             continue
+        if hookscript.repository_redirects_hooks(root):
+            actions.append(Action(LEFT, root, RUNS_FROM_ELSEWHERE, root))
+            continue
+        shared = os.path.realpath(hooks_dir)
         if any(_same_path(hooks_dir, t) for t in handled):
+            if shared in refused:
+                actions.append(Action(UNVERIFIED, root, refused[shared], root))
             continue
         handled.append(hooks_dir)
-        if hookscript.repository_redirects_hooks(root):
-            actions.append(Action(LEFT, root, "its hooks path runs hooks from elsewhere, so saw's do not run here"))
-        else:
-            try:
-                actions += _settle(hooks_dir, saw, config, own=False)
-            except HookError as exc:
-                actions.append(Action(UNVERIFIED, root, str(exc)))
+        try:
+            settled = _settle(hooks_dir, saw, config, own=False, written=written)
+            if any(a.state == UNVERIFIED for a in settled):
+                refused[shared] = NOT_PUT_IN_PLACE
+            actions += [replace(a, repository=root) for a in settled]
+        except SavedCopyInTheWay:
+            refused[shared] = SAVED_COPY_IN_THE_WAY
+            actions.append(Action(UNVERIFIED, root, SAVED_COPY_IN_THE_WAY, root))
+            continue
+        except OSError:
+            refused[shared] = NOT_PUT_IN_PLACE
+            actions.append(Action(UNVERIFIED, root, NOT_PUT_IN_PLACE, root))
+        given.append(root)
+    if not (_remember_repositories(given) and written.recorded):
+        actions.append(Action(UNVERIFIED, _cache_path(), RECORD_NOT_WRITTEN))
     return actions
+
+
+def _remember_repositories(roots: list[Path]) -> bool:
+    """Add repositories saw's hooks were given to the list saw keeps current and removes them from,
+    keeping what is remembered about each, and each it cannot reach now. Takes the roots. Returns
+    False when they could not be recorded, or recording them would replace a list it cannot read."""
+    if not roots:
+        return True
+    if os.path.lexists(_cache_path()) and not os.access(_cache_path(), os.R_OK):
+        return False
+    try:
+        cache = _load_cache()
+        for root in roots:
+            cache.setdefault(os.path.realpath(root), "")
+        return atomicwrite.replace(_cache_path(), json.dumps(cache), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                                   at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    except OSError:
+        return False
+
+
+def _repositories_named_by(patterns: list[str]) -> tuple[list[Path], list[str], list[str]]:
+    """Find the repositories each path or glob names. Takes the patterns. Returns each repository
+    root once, the patterns that name nothing on disk, and those that name no repository."""
+    roots: list[Path] = []
+    missing: list[str] = []
+    empty: list[str] = []
+    for pattern in patterns:
+        found = _repositories_named([pattern])
+        if not found:
+            named = os.path.expanduser(pattern)
+            (empty if os.path.lexists(named) or glob.glob(named) else missing).append(pattern)
+        roots += [r for r in found if not any(_same_path(r, k) for k in roots)]
+    return roots, missing, empty
 
 
 def install(config_path: str | None = None, *, no_stream: bool = False,
@@ -574,13 +643,13 @@ def install(config_path: str | None = None, *, no_stream: bool = False,
     here = _repo_root() if standing_in else None
     patterns = list(repositories or configured or ([str(here)] if here else []))
     with busy("installing scan-on-clone…", no_stream=no_stream):
-        done = settle_hooks(config_path, repositories=_repositories_named(patterns))
+        roots, missing, empty = _repositories_named_by(patterns)
+        done = settle_hooks(config_path, repositories=roots)
     if done.problem is not None:
         print(f"error: {done.problem}", file=sys.stderr)
         return done.code
     config = os.path.abspath(config_path) if config_path else None
-    actions, target = done.actions, done.target
-    settled = done.settled
+    settled = done.settled and not missing and not empty
 
     out = _tape(no_stream)
     if settled:
@@ -589,14 +658,28 @@ def install(config_path: str | None = None, *, no_stream: bool = False,
     else:
         print(_paint("scan-on-clone is NOT fully installed — see below.", "warn", out), file=out)
     if config:
-        print(f"  scanning with operator config: {config}", file=out)
-    _print_actions(actions, out)
+        print(f"  scanning with your config: {textsafe.plain(config, limit=4096)}", file=out)
+    for pattern in missing:
+        print(_paint(f"  {_shown(pattern)} does not exist, so no repository there got saw's hooks.",
+                     "warn", out), file=out)
+    if empty:
+        from stayawake.bots.security.resolution import no_repository_in
+        print(_paint("  " + no_repository_in([_shown(p) for p in empty], so_nothing_was="given saw's hooks there",
+                                              name_one="saw hook install"), "warn", out), file=out)
+    _print_actions(done.actions, out, again="saw hook install")
     print(_paint("  repositories you clone or create from now on get the hooks too.", "dim", out),
           file=out)
     print(_paint("  remove: saw hook uninstall", "dim", out), file=out)
     _warn_hookspath(out)
     _advise_git_update(out)
     return 0 if settled else 3
+
+
+def _shown(path: str) -> str:
+    """Show a path the person named, with their home folder as ~. Takes the path. Returns it."""
+    home = os.path.expanduser("~")
+    plain = textsafe.plain(os.path.expanduser(path), limit=4096)
+    return "~" + plain[len(home):] if plain == home or plain.startswith(home + os.sep) else plain
 
 
 def _settle_own_only() -> list[Action]:
@@ -608,9 +691,8 @@ def _settle_own_only() -> list[Action]:
     for p in sorted(own.iterdir()):
         if p.name in _HOOKS and hookscript.verdict(p, hookscript.installed()) == hookscript.PRISTINE:
             continue
-        folder = hookscript.set_aside(p)
-        actions.append(Action(SET_ASIDE, p, f"not a hook saw installs, kept at {folder}") if folder
-                       else Action(UNVERIFIED, p, "could not be moved aside, so it was left as it is"))
+        actions.append(Action(SET_ASIDE, p, NOT_SAWS) if hookscript.set_aside(p)
+                       else Action(UNVERIFIED, p, NOT_PUT_IN_PLACE))
     return actions
 
 
@@ -670,9 +752,13 @@ def repair(*, no_stream: bool = False) -> int:
         return 2
     saw = recorded[0] if os.path.isfile(recorded[0]) else _saw_executable()
     config = recorded[1]
-    if config and resolve_config(config) is None:
-        print(f"error: the config recorded at install, {textsafe.plain(config, limit=4096)}, is gone. "
-              "Run `saw hook install -c` with its new location, then repair.", file=sys.stderr)
+    if config and not os.path.isfile(config):
+        print("error: the config your hooks scan with is gone. Run `saw hook install -c <your config>`, "
+              "then `saw hook repair`.", file=sys.stderr)
+        return 2
+    if config and not _config_usable(config):
+        print("error: the config your hooks scan with cannot be read. Correct it, or run "
+              "`saw hook install -c <your config>`, then `saw hook repair`.", file=sys.stderr)
         return 2
     template_dirs = _installed_hooks_dirs()
     actions: list[Action] = []
@@ -693,20 +779,17 @@ def repair(*, no_stream: bool = False) -> int:
     except HookError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    except OSError as exc:
-        print(f"error: {textsafe.plain(str(exc))}", file=sys.stderr)
+    except OSError:
+        print("error: not every hook could be put back. Run `saw hook repair` to try again.", file=sys.stderr)
         return 3
     if not hookscript.declare(saw, config, hookscript.installed_into(), _hooks_folders_to_record(hooks_folder)):
-        actions.append(Action(UNVERIFIED, hookscript.declaration_path(), "the record of what was installed could not be written"))
+        actions.append(Action(UNVERIFIED, hookscript.declaration_path(), RECORD_NOT_WRITTEN))
     out = _tape(no_stream)
     settled = all(a.state in _SETTLED for a in actions)
     print(_paint("✓ every hook saw installs is in place.", "ok", out) if settled
           else _paint("Not every hook could be put back — see below. Nothing was deleted.", "warn", out),
           file=out)
-    _print_actions(actions, out)
-    if any(a.state in (REPAIRED, SET_ASIDE) for a in actions):
-        print(_paint(f"  moved-aside files are kept under {hookscript.set_aside_dir()}", "dim", out),
-              file=out)
+    _print_actions(actions, out, again="saw hook repair")
     return 0 if settled else 3
 
 
@@ -718,15 +801,18 @@ def _keep_seeded_current(saw: str, config: str | None, seeded_by: list[Path]) ->
     for repo in hookscript.seeded_repositories():
         d = hookscript.repository_hooks_dir(repo)
         if d is None:
-            actions.append(Action(UNREAD, repo, "git could not say where this repository's hooks are"))
+            actions.append(Action(UNREAD, repo, HOOKS_FOLDER_UNKNOWN, repo))
             continue
         if any(_same_path(d, t) for t in seeded_by):
             continue
         seeded_by.append(d)
         if hookscript.repository_redirects_hooks(repo):
-            actions.append(Action(LEFT, repo, "its hooks path runs hooks from elsewhere, so saw's do not run here"))
+            actions.append(Action(LEFT, repo, RUNS_FROM_ELSEWHERE, repo))
             continue
-        actions += _repair_repository(d, saw, config)
+        try:
+            actions += [replace(a, repository=repo) for a in _repair_repository(d, saw, config)]
+        except OSError:
+            actions.append(Action(UNVERIFIED, repo, NOT_PUT_IN_PLACE, repo))
     return actions
 
 
@@ -784,9 +870,9 @@ def _repair_repository(hooks_dir: Path, saw: str, config: str | None, *, restore
     actions: list[Action] = []
     if (hooks_dir.is_symlink() or hooks_dir.parent.is_symlink()
             or (os.path.lexists(hooks_dir) and not hooks_dir.is_dir())):
-        return [Action(UNVERIFIED, hooks_dir, "is not a directory of its own, so nothing was written")]
+        return [Action(UNVERIFIED, hooks_dir, NOT_PUT_IN_PLACE)]
     if _inside_what_saw_keeps(hooks_dir):
-        return [Action(UNVERIFIED, hooks_dir, "lies inside what saw keeps for itself, so nothing was written")]
+        return [Action(UNVERIFIED, hooks_dir, NOT_PUT_IN_PLACE)]
     if restore:
         atomicwrite.make_folder(hooks_dir)
     elif not hooks_dir.is_dir():
@@ -801,18 +887,17 @@ def _repair_repository(hooks_dir: Path, saw: str, config: str | None, *, restore
         elif state in (hookscript.ALTERED, hookscript.STALE, hookscript.ABSENT):
             folder = hookscript.set_aside(dest) if state != hookscript.ABSENT else None
             if state != hookscript.ABSENT and folder is None:
-                actions.append(Action(UNVERIFIED, dest, "could not be moved aside, so it was left as it is"))
+                actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
             elif _write_verified(dest, _hook_script(event, saw, config), hooks_dir):
-                outcome, detail = (RESTORED, "a hook saw installs was not here") if state == hookscript.ABSENT \
-                    else _kept(state, folder)
-                actions.append(Action(outcome, dest, detail))
+                outcome, kind = (RESTORED, PUT_BACK) if state == hookscript.ABSENT else _kept(state)
+                actions.append(Action(outcome, dest, kind))
             else:
-                actions.append(Action(UNVERIFIED, dest, "written but could not be read back as written"))
+                actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
         elif state == hookscript.FOREIGN:
-            actions.append(Action(LEFT, dest, "not a hook saw installs; this repository's own"))
+            actions.append(Action(LEFT, dest, REPOSITORYS_OWN))
         chained = hooks_dir / f"{event}.local"
         if restore and chained.exists():
-            actions.append(Action(CHAINED, chained, "runs after saw's hook; not saw's, left as it is"))
+            actions.append(Action(CHAINED, chained, YOURS_RUNS_AFTER))
     return actions
 
 
@@ -825,33 +910,16 @@ def uninstall(*, no_stream: bool = False) -> int:
     expected = hookscript.installed()
     try:
         with busy("removing scan-on-clone…", no_stream=no_stream):
+            handled: list[Path] = []
             for hooks_dir, own in _installed_hooks_dirs(with_hooks_folders=True):
-                if hooks_dir.is_symlink() or not hooks_dir.is_dir():
-                    continue
-                for event in _HOOKS:
-                    dest = hooks_dir / event
-                    state = hookscript.verdict(dest, expected)
-                    gone = False
-                    if state == hookscript.PRISTINE:
-                        dest.unlink()
-                        removed = gone = True
-                    elif state in (hookscript.ALTERED, hookscript.STALE):
-                        folder = hookscript.set_aside(dest)
-                        what = "altered saw hook" if state == hookscript.ALTERED else "a hook saw installs naming another saw or config"
-                        actions.append(Action(SET_ASIDE, dest, f"{what}, kept at {folder}") if folder
-                                       else Action(UNVERIFIED, dest, "could not be moved aside, so it was left as it is"))
-                        removed = removed or folder is not None
-                        gone = folder is not None
-                    preserved = hooks_dir / f"{event}.local"
-                    if os.path.lexists(preserved) and not own and gone:
-                        preserved.rename(dest)          # restore the foreign hook we chained to
-                if own:
-                    for p in sorted(hooks_dir.iterdir()):
-                        folder = hookscript.set_aside(p)
-                        actions.append(Action(SET_ASIDE, p, f"not a hook saw installs, kept at {folder}") if folder
-                                       else Action(UNVERIFIED, p, "could not be moved aside, so it was left as it is"))
-    except OSError as exc:
-        print(f"error: {textsafe.plain(str(exc))}", file=sys.stderr)
+                handled.append(hooks_dir)
+                taken, found = _remove_from(hooks_dir, expected, own=own)
+                removed, actions = removed or taken, actions + found
+            taken, found = _remove_from_repositories(expected, handled)
+            removed, actions = removed or taken, actions + found
+    except OSError:
+        print("error: saw's hooks could not all be removed. Run `saw hook uninstall` to try again.",
+              file=sys.stderr)
         return 3
     if existing and _same_path(existing, template_dir()):
         gitutil.run_ok(None, ["config", "--global", "--unset", "init.templateDir"],
@@ -867,29 +935,111 @@ def uninstall(*, no_stream: bool = False) -> int:
         except HookError:
             still_set = True
         if still_set:
-            actions.append(Action(UNVERIFIED, Path(f"hook.{name}"), "is still set in your git settings; remove it "
-                                  f"with `git config --global --remove-section hook.{name}`"))
-    if not any(a.state == UNVERIFIED and str(a.path).startswith("hook.saw-") for a in actions):
+            actions.append(Action(UNVERIFIED, Path(f"hook.{name}"), STILL_IN_SETTINGS))
+    finished = all(a.state in _SETTLED for a in actions)
+    if finished:
         hookscript.forget()
     out = _tape(no_stream)
-    print(_paint("✓ scan-on-clone uninstalled.", "ok", out) if removed
-          else "scan-on-clone was not installed.", file=out)
-    _print_actions(actions, out)
-    print(_paint("  note: repos already cloned keep the hook in their .git/hooks — remove per-repo "
-                 "if wanted.", "dim", out), file=out)
-    return 0 if all(a.state in _SETTLED for a in actions) else 3
+    if not finished:
+        print(_paint("scan-on-clone is NOT fully uninstalled — see below.", "warn", out), file=out)
+    else:
+        print(_paint("✓ scan-on-clone uninstalled.", "ok", out) if removed
+              else "scan-on-clone was not installed.", file=out)
+    _print_actions(actions, out, again="saw hook uninstall", removing=True)
+    return 0 if finished else 3
+
+
+def _remove_from(hooks_dir: Path, expected, *, own: bool, repository: Path | None = None,
+                 git_runs_it: bool = True) -> tuple[bool, list[Action]]:
+    """Remove saw's hooks from one hooks directory, set aside one that was changed, and put back the
+    person's own hook that saw's ran before; in saw's own directory nothing stays. Takes the
+    directory, the recorded saw and config, whether the directory is saw's own, the repository it
+    serves, and whether git runs hooks from it, where a hook of the person's left aside without saw's
+    beside it is put back too. Returns whether anything was removed, and what else was done or could
+    not be."""
+    removed = False
+    actions: list[Action] = []
+    if hooks_dir.is_symlink() or not hooks_dir.is_dir():
+        return removed, actions
+    if not os.access(hooks_dir, os.R_OK | os.X_OK):
+        return removed, [Action(UNVERIFIED, hooks_dir, NOT_PUT_IN_PLACE, repository)]
+    for event in _HOOKS:
+        dest = hooks_dir / event
+        preserved = hooks_dir / f"{event}.local"
+        yours = not own and os.path.lexists(preserved)
+        state = hookscript.verdict(dest, expected)
+        if state in (hookscript.ALTERED, hookscript.STALE):
+            if hookscript.set_aside(dest) is None:
+                actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE, repository))
+                continue
+            removed = True
+            actions.append(Action(SET_ASIDE, dest, CHANGED if state == hookscript.ALTERED else "", repository))
+        elif state != hookscript.PRISTINE and not (state == hookscript.ABSENT and yours and git_runs_it):
+            continue
+        try:
+            if yours:
+                preserved.rename(dest)
+            elif state == hookscript.PRISTINE:
+                dest.unlink()
+        except OSError:
+            actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE, repository))
+            continue
+        removed = True
+    if own:
+        for p in sorted(hooks_dir.iterdir()):
+            actions.append(Action(SET_ASIDE, p, NOT_SAWS) if hookscript.set_aside(p)
+                           else Action(UNVERIFIED, p, NOT_PUT_IN_PLACE))
+    return removed, actions
+
+
+def _remove_from_repositories(expected, handled: list[Path]) -> tuple[bool, list[Action]]:
+    """Remove saw's hooks from every hooks directory of the person's install wrote them into and every
+    repository saw keeps them current in, and put back the person's own. Takes the recorded saw and
+    config, and the hooks directories already handled. Returns whether anything was removed, and what
+    else was done or could not be."""
+    removed = False
+    actions: list[Action] = []
+    for given in hookscript.hooks_written():
+        hooks_dir = Path(os.path.realpath(given))
+        if any(_same_path(hooks_dir, t) for t in handled) or _inside_what_saw_keeps(hooks_dir):
+            continue
+        handled.append(hooks_dir)
+        try:
+            taken, found = _remove_from(hooks_dir, expected, own=False, repository=hooks_dir.parent)
+        except OSError:
+            actions.append(Action(UNVERIFIED, hooks_dir, NOT_PUT_IN_PLACE, hooks_dir.parent))
+            continue
+        removed, actions = removed or taken, actions + found
+    for repo in hookscript.seeded_repositories():
+        redirected = hookscript.repository_redirects_hooks(repo)
+        found_at = (hookscript.repository_own_hooks_dir(repo) if redirected
+                    else hookscript.repository_hooks_dir(repo))
+        if found_at is None:
+            actions.append(Action(UNREAD, repo, HOOKS_FOLDER_UNKNOWN, repo))
+            continue
+        hooks_dir = Path(os.path.realpath(found_at))
+        if any(_same_path(hooks_dir, t) for t in handled) or _inside_what_saw_keeps(hooks_dir):
+            continue
+        handled.append(hooks_dir)
+        try:
+            taken, found = _remove_from(hooks_dir, expected, own=False, repository=repo,
+                                        git_runs_it=not redirected)
+        except OSError:
+            actions.append(Action(UNVERIFIED, repo, NOT_PUT_IN_PLACE, repo))
+            continue
+        removed, actions = removed or taken, actions + found
+    return removed, actions
 
 
 def status(*, no_stream: bool = False) -> int:
-    """Report whether scan-on-clone is active and where its state lives."""
+    """Report whether scan-on-clone is active and what would stop it."""
     with busy("checking scan-on-clone…", no_stream=no_stream):
         existing = _global_template_dir()
-        ours = existing and _same_path(existing, template_dir())
         hooks_dir = Path(existing) / "hooks" if existing else _hooks_dir()
         present = [e for e in _HOOKS if _is_ours(hooks_dir / e)]
         recorded = hookscript.installed()
         recorded_runs = hookscript.recorded_saw_runs()
-        config_gone = bool(recorded and recorded[1] and resolve_config(recorded[1]) is None)
+        config_gone = bool(recorded and recorded[1] and not _config_usable(recorded[1]))
         altered = hookscript.altered_hooks()
         disabled = env.hook_disabled()
         settings_hooks_set = _settings_hooks_set()
@@ -908,20 +1058,16 @@ def status(*, no_stream: bool = False) -> int:
                      "(with -c if you used one) so `saw hook repair` knows what to put back.", "warn", out),
               file=out)
     if not recorded_runs:
-        print(_paint(f"  ⚠ the saw recorded at install, {textsafe.plain(recorded[0], limit=4096)}, is gone or "
-                     "cannot run; clones are not scanned until `saw hook repair` points the hooks at this "
-                     "saw.", "warn", out), file=out)
+        print(_paint("  ⚠ the saw your hooks run is gone or cannot run. Run `saw hook repair` so clones "
+                     "are scanned again.", "warn", out), file=out)
     if config_gone:
-        print(_paint(f"  ⚠ the config recorded at install, {textsafe.plain(recorded[1], limit=4096)}, is gone; "
-                     "clones are scanned without your allowlist until `saw hook install -c` records its "
-                     "new location.", "warn", out), file=out)
+        print(_paint("  ⚠ the config your hooks scan with is gone, so clones are scanned without your "
+                     "allowlist. Run `saw hook install -c <your config>`.", "warn", out), file=out)
     if altered:
         print(_paint(f"  ⚠ {len(altered)} file(s) are not what saw installs, where saw's hooks run "
                      "— see `saw audit`; put them back with `saw hook repair`.", "warn", out), file=out)
-    print(f"  hooks for new clones: {textsafe.plain(existing or '(none)', limit=4096)}"
-          f"{'  (saw)' if ours else ''}", file=out)
-    print(f"  hooks dir: {textsafe.plain(str(hooks_dir), limit=4096)}", file=out)
-    print(f"  scan cache: {_cache_path()}", file=out)
+    if present and not existing:
+        print(_paint("  ⚠ new clones do not get saw's hooks. Run `saw hook install`.", "warn", out), file=out)
     if disabled:
         print(_paint("  SAW_HOOK_DISABLED is set — the hook is currently a no-op.", "warn", out),
               file=out)
@@ -939,9 +1085,10 @@ def _repo_root() -> Path | None:
 
 def _load_cache() -> dict:
     try:
-        return json.loads(_cache_path().read_text())
+        cache = json.loads(_cache_path().read_text())
     except (OSError, ValueError):
         return {}
+    return cache if isinstance(cache, dict) else {}
 
 
 def _policy_digest(config_path: str | None) -> str:
@@ -1220,8 +1367,8 @@ def run_event(event: str, argv: list[str], config_path: str | None = None,
             return outbound.check_push(argv, refs_text, config_path, no_stream=no_stream)
         return _run_event(event, argv, config_path, no_stream=no_stream, from_settings=from_settings)
     except BaseException:                   # noqa: BLE001 — last-resort: never break/confuse git
-        print(_paint(f"⚠  {_BRAND}: the scan did not complete — NOT verified. Run `saw scan` in "
-                     "this repository.", "warn", sys.stderr), file=sys.stderr)
+        print(_paint(f"⚠  {_BRAND}: the scan did not finish, so this repository is not known to be clean. "
+                     "Run `saw scan` in this repository.", "warn", sys.stderr), file=sys.stderr)
         return 2
 
 
@@ -1257,9 +1404,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         scanned = _scan_within_budget(root, include, config_path, display,
                                       [] if label == _FILES_WRITTEN else None)
     if scanned is _TIMED_OUT:
-        budget = env.hook_timeout()
-        print(_paint(f"⚠  {_BRAND}: scan of {shown} aborted after {budget:.0f}s (large tree) — "
-                     "NOT verified.", "warn", err), file=err)
+        print(_paint(f"⚠  {_BRAND}: {shown} was not fully scanned, so it is not known to be clean.",
+                     "warn", err), file=err)
         print("   " + _paint("Scan it yourself:", "dim", err) + " " + _cmd(rescan, err),
               file=err)
         return 2
@@ -1302,8 +1448,8 @@ def _tell(result, shown: str, rescan: str, quoted_root: str, *, root: Path | Non
         _warn_once(root, operation, lambda: _warn_infected(shown, quoted_root, result))
         return 1
     if result.error:
-        print(_paint(f"⚠  {_BRAND}: {shown} could not be scanned — NOT verified "
-                     f"({textsafe.plain(result.error, limit=200)}).", "warn", err), file=err)
+        print(_paint(f"⚠  {_BRAND}: {shown} could not be scanned, so it is not known to be clean.",
+                     "warn", err), file=err)
         print("   " + _paint("Scan it yourself:", "dim", err) + " " + _cmd(rescan, err),
               file=err)
         return 2

@@ -394,12 +394,12 @@ def _report(progress: _Progress, record: push_record.PushRecord, display: str, r
                              for e in own))
         if own_clean:
             lines += page.headline("unknown", f"{BRAND}: your new changes in this push{to} were "
-                                              "checked and no worm was found, but saw did not "
-                                              "finish checking the older history the push "
-                                              f"carries, so it is NOT verified.{later}")
+                                              "checked and no worm was found, but the older history "
+                                              "this push carries was not fully checked, so the push "
+                                              f"is not known to be clean.{later}")
         else:
-            lines += page.headline("unknown", f"{BRAND}: saw did not finish checking this "
-                                              f"push{to}, so it is NOT verified.{later}")
+            lines += page.headline("unknown", f"{BRAND}: this push{to} was not fully checked, so it "
+                                              f"is not known to be clean.{later}")
         lines += page.fix(f"saw scan --history {display}", label="check")
         code = 1 if progress.confirmed else 2
     elif progress.confirmed:
@@ -505,8 +505,8 @@ def _unverified(display: str, to: str, err, no_stream: bool) -> int:
     """Report a push saw could not check. Takes how the repository is shown, the destination text,
     the stream and whether to stream. Returns 2."""
     page = _Page.of(err)
-    lines = page.headline("unknown", f"{BRAND}: saw could not check this push{to}, so it is NOT "
-                                     "verified.")
+    lines = page.headline("unknown", f"{BRAND}: this push{to} could not be checked, so it is not "
+                                     "known to be clean.")
     if display:
         lines += page.fix(f"saw scan --history {display}", label="check")
     _emit(lines, err, no_stream)
