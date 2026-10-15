@@ -95,8 +95,8 @@ def keychain_predicate() -> str | None:
         return None
     r = _run(["security", "find-internet-password", "-s", _IMPOSSIBLE_KEYCHAIN_HOST])
     if r is None:
-        return ("`security` did not run, so the keychain was not read and nothing found here says "
-                "a credential is absent from it.")
+        return ("The keychain could not be read because `security` did not run, so whether it holds "
+                "a GitHub credential is not known.")
     if r.returncode == 0:
         return ("This host's credential store did not answer as expected, so the keychain was not "
                 "read.")
@@ -544,7 +544,7 @@ def _keychain_finding(store: KeychainStore) -> HygieneIssue:
             + reset +
             store.delete_command + "\n"
             "printf 'protocol=https\\nhost=github.com\\n\\n' | GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= GCM_INTERACTIVE=never git credential fill"
-            "   # VERIFY: an error on 'could not read Username' means nothing caches it anymore"
+            "   # if this prints 'could not read Username', no credential is cached any more"
         )
         remediation = ("Only if you don't rely on HTTPS auth: remove the cached token the VERIFIED way. "
                        "First confirm an alternate path (SSH / gh) actually authenticates, then resolve "

@@ -294,7 +294,7 @@ def settle(find=editors.installed, write=None, record: Path | None = None,
         if not _lands_where_it_was_aimed(text, corrected, planned):
             out.outcomes.append(EditorOutcome(
                 editor_here.name, editor_here.settings, NOT_WRITTEN,
-                "the corrected settings did not read back as exactly that change"))
+                "the corrected settings could not be confirmed"))
             continue
         try:                              # nobody saved over it between the read and the write
             if _read(editor_here.settings) != text:

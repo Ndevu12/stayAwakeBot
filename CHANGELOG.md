@@ -292,6 +292,8 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **`saw audit`, `saw harden` and `saw fix amend` say what they found and what to run in plain words.**
+  The audit's scope line says what it covers; checks that could not run say so and name the command.
 - **What `saw scan` says about what it could not check names the command to run.** The note on a
   repository's history names `saw fix amend` for files still stored with a payload, and a scan of the
   checked-out files names `saw scan --history`. The written report and the SARIF log quote each

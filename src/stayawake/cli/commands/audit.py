@@ -35,8 +35,7 @@ def register(sub) -> None:
     p.add_argument("-f", "--fail", "--fail-on-issues", action="store_true", dest="fail",
                    help="exit non-zero if any warning-level issue is found")
     p.add_argument("--verify", action="store_true", dest="verify_artifacts",
-                   help="content-scan what a weak signal points at, to corroborate it. Much "
-                        "slower, and bounded (does not touch saw scan)")
+                   help="also read the files a finding points to, to confirm it (slower)")
     p.set_defaults(func=run)
 
 

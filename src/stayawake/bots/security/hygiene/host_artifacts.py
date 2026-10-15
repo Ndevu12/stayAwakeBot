@@ -314,9 +314,9 @@ def _outside_a_control_issue(found: list[str]) -> HygieneIssue:
     return HygieneIssue(
         id="host-drop-artifact-outside-a-control",
         severity="warning",
-        title="A global resolution path here is not covered by a control",
-        detail="A control covers another on this machine; this one was left as it stood.",
-        remediation="Run `saw harden`, and do NOT rotate any credential yet.",
+        title="A global package folder is not covered by a saw harden control",
+        detail="A saw harden control is not in place for it.",
+        remediation="Run `saw harden`, and do not rotate any credential yet.",
     )
 
 

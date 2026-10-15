@@ -230,8 +230,8 @@ def check_editors(settings_path: Path | None = None, find=editors.installed) -> 
         issues.append(HygieneIssue(
             id=EDITORS_NOT_EXAMINED_ID,
             severity="unknown",
-            title="An editor on this machine was not examined",
-            detail="An editor here is not modelled, so no result covers it.",
+            title="An editor on this machine could not be checked",
+            detail="No result covers its settings.",
             remediation="Check its auto-run and trust settings yourself.", reference=_DOCS,
         ))
     return issues
