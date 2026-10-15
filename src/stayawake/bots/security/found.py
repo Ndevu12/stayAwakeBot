@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security.signatures import load_signatures
 
 _WHAT_IT_IS: dict[str, str] = {
@@ -86,3 +87,16 @@ def where_it_is(path: str, line: int | None, commit_sha: str | None) -> str:
     if is_a_commit(path, commit_sha):
         return f"commit {path}"
     return f"{path}:{line}" if line else path
+
+
+def left_out_line(left: int) -> str:
+    """Say how many findings a list left out and how to see them all. Takes the number left out.
+    Returns the line."""
+    return f"…and {left} more; `saw scan` lists them all."
+
+
+def confirmed_first(findings, confidence_of):
+    """Order findings so the confirmed ones come first, keeping their order otherwise. Takes the
+    findings and how to read one's confidence. Returns the ordered list."""
+    return sorted(findings, key=lambda finding: confidence_of(finding) != CONFIRMED)
+

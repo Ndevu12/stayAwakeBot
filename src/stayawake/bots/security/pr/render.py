@@ -10,6 +10,7 @@ from stayawake.bots.security.dependencies.remediation import (
     WHAT_THEY_CHANGE_MARKDOWN, dependency_actions, markdown_lines)
 from stayawake.core import proposal
 from stayawake.bots.security.pr.constants import ISSUE_LABEL
+from stayawake.bots.security.found import confirmed_first, left_out_line
 
 PARTIAL_MARK = "  [PARTIAL — manual review required]"
 
@@ -73,9 +74,12 @@ def _issue_body(slug: str, findings) -> str:
     lines = [f"StayAwakeBot detected self-propagating worm indicators in {textsafe.code(slug)} and could "
              "not open a fix PR automatically (no write access to this repository).",
              "", "## Indicators", ""]
-    for f in findings[:50]:
+    shown = confirmed_first(findings, lambda f: getattr(f, "confidence", None))[:50]
+    for f in shown:
         loc = f.path + (f":{f.line}" if getattr(f, "line", None) else "")
         lines.append(f"- **[{textsafe.sanitize(f.severity.label(), 20)}]** {textsafe.code(f.signature_id)} — {textsafe.code(loc)}")
+    if len(findings) > len(shown):
+        lines += ["", left_out_line(len(findings) - len(shown))]
     lines += ["", "A remediation has been generated. To apply it, grant the scanner repo + "
               "pull-request write access for an automated PR, or run "
               "`saw fix --pr` against a local clone to produce a patch.", "",
@@ -220,6 +224,8 @@ def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=(), findings
         for f in suspicious[:50]:
             loc = f.path + (f":{f.line}" if getattr(f, "line", None) else "")
             lines.append(f"- {textsafe.code(f.signature_id)} — {textsafe.code(loc)}")
+        if len(suspicious) > 50:
+            lines += ["", left_out_line(len(suspicious) - 50)]
     target = textsafe.code(base) if base else "the base branch"
     lines += ["", f"This removes it from {target}. Earlier commits still store it; "
               "`saw scan --history` lists them.", "",
