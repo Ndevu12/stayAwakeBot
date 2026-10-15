@@ -15,7 +15,8 @@ from stayawake.bots.security import host_note, remediator, resolution, scanner
 from stayawake.bots.security.guard import sweep
 
 _CONFIG = {"settings": {}, "targets": {}, "allowlist": []}
-_SCOPE = "Only the working tree was scanned; 3 earlier commits not examined."
+_SCOPE = ("This covers the files checked out now, not the 3 earlier commits. Run "
+          "`saw scan --history` to check those too.")
 
 
 def _never(*args, **kwargs):
@@ -50,7 +51,7 @@ class TestAScanOfHistoryDoesNotSayItSkippedHistory(unittest.TestCase):
         self.assertIn(_SCOPE, _scan(history=False, reads_history=True).notes)
 
     def test_the_line_it_removes_is_the_one_it_adds(self):
-        self.assertTrue(_SCOPE.startswith(scanner._WORKING_TREE_ONLY))
+        self.assertTrue(_SCOPE.startswith(scanner._CHECKED_OUT_ONLY))
 
 
 class TestTheHostNoteSaysWhereYouStand(unittest.TestCase):

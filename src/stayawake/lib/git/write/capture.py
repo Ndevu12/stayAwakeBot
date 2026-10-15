@@ -100,7 +100,7 @@ def _write_bundle(repo: str | Path, old_tips: list[str], new_tips: list[str],
                 return True, "git bundle verify could not run"
             if checked.returncode != 0:
                 detail = (checked.stderr or checked.stdout or "").strip()
-                return True, f"the capture did not read back: {detail}"
+                return True, f"the copy of your work could not be confirmed: {detail}"
             return True, ""
     except OSError as exc:
         return False, f"the captured objects could not be reached: {exc}"

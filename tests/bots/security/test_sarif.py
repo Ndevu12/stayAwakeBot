@@ -81,8 +81,8 @@ class TestSarifBuild(unittest.TestCase):
         self.assertNotIn("region", res["noline"]["locations"][0]["physicalLocation"])
 
     def test_message_redacts_evidence(self):
-        # A SARIF is an uploaded artifact: the message must fingerprint the payload, not
-        # quote it. Use a long payload so the 24-char preview can't contain the whole thing.
+        # A SARIF is an uploaded artifact: the message quotes a short preview, never the whole
+        # payload. Use a long payload so the 48-char preview can't contain the whole thing.
         payload_text = "EVIL_" + ("A" * 100) + "_TAIL"
         res = sarif.build_sarif(
             _payload([_result(findings=[_finding("s", evidence=payload_text)])])
@@ -90,7 +90,7 @@ class TestSarifBuild(unittest.TestCase):
         msg = res["message"]["text"]
         self.assertIn("desc s", msg)
         self.assertIn("redacted", msg)
-        self.assertIn("sha256:", msg)
+        self.assertIn(repr(payload_text[:48]) + "…", msg)
         self.assertNotIn(payload_text, msg)     # the full payload is never shipped
         self.assertNotIn("_TAIL", msg)
 

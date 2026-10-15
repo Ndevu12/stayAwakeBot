@@ -454,7 +454,7 @@ class TestTheReadingWithGitOnlyAdds(ExecSurfaceSandbox):
             raise RuntimeError("no answer")
         surface = read_exec_surface(repo, ask=broken)
         self.assertIn(repo / ".git" / "config", [c.entry.source for c in surface.commands])
-        self.assertTrue(any("stopped" in why for why in surface.unexamined))
+        self.assertTrue(any("could not read this repository's settings" in why for why in surface.unexamined))
 
     def test_a_pointer_that_cannot_be_followed_does_not_stop_it(self):
         repo = self.repo()

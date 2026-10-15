@@ -199,8 +199,8 @@ class Target:
             rel = p.relative_to(self.root)
         except ValueError:
             rel = p
-        note = (f"`{rel}` is a link into {label}; it was graded as a link and its destination was "
-                "not read.")
+        note = (f"`{rel}` points at a sensitive file outside this folder, so its content was not "
+                "read into this report.")
         if note not in self.coverage_notes:
             self.coverage_notes.append(note)
         return True

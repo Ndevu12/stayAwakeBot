@@ -42,8 +42,8 @@ def describe(state: str) -> str:
     """One clause for the finding, saying what the operator can act on."""
     return {
         PRESENT: "still present in the working tree byte-for-byte",
-        CHANGED: "the file changed after this merge — whether the introduced lines survive is "
-                 "UNVERIFIED, so do not read this as removed",
+        CHANGED: "the file changed after this merge, so the lines the merge added may still be "
+                 "there — check it",
         GONE: "the path no longer exists at HEAD, but the content remains in history and in any fork",
         UNKNOWN: "liveness could not be established",
     }.get(state, "liveness could not be established")

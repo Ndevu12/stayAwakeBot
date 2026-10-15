@@ -421,7 +421,7 @@ class TestDeepSweep(unittest.TestCase):
             (nm / f"m{i}.js").write_text("const ok = 1;\n")
         with mock.patch.object(ipa, "_DEEP_SWEEP_BUDGET", 1):       # exhausts after the first file
             r = self._scan(d, deep=True)
-        self.assertTrue(any("budget" in n and "partial" in n.lower() for n in r.notes),
+        self.assertTrue(any("could not be checked in full" in n for n in r.notes),
                         f"expected a truncation coverage note, got {r.notes}")
 
     def test_source_files_skips_nested_node_modules_and_symlinks(self):

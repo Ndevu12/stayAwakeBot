@@ -88,8 +88,8 @@ class GitHistoryMatcher(Matcher):
             signature_id=sig["id"], category=sig["category"],
             severity=Severity.parse(sig["severity"]), path=sha[:10],
             description=sig["description"], remediation=sig.get("remediation", "manual"),
-            evidence=f"{len(evil)} corroborated path(s) introduced beyond a clean "
-                     f"3-way merge; e.g. {paths[:3]} ({why}); "
+            evidence=f"{len(evil)} file(s) this merge added that neither side had; "
+                     f"e.g. {paths[:3]} ({why}); "
                      f"{_liveness_note(target.repo_root, sha, paths)}; "
                      f"by {meta.get('author_email','?')}",
             vector="evil-merge", related_paths=tuple(paths),

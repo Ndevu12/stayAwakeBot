@@ -100,7 +100,7 @@ def _coverage(p: Path) -> str:
 _UNREAD_ARCHIVE = "archives and binaries are not opened"
 _UNREAD_PARTIAL = "a file could not be read"
 _UNREAD_DIR = "a folder could not be listed"
-_UNREAD_EXCLUDED = "a .git folder is never scanned"
+_UNREAD_EXCLUDED = "a .git folder is checked by `saw scan`, not here"
 _UNREAD_ESCAPING = "a symlink points outside the folder"
 _UNREAD_SPECIAL = "a device or pipe must not be opened"
 

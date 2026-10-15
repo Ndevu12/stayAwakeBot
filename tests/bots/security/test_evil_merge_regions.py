@@ -187,8 +187,8 @@ class TestLivenessSaysWhetherItIsStillThere(_MergeFixture):
         self._commit("later edit")
         state = introduced_liveness(self.d, sha, "app.js")
         self.assertEqual(state, CHANGED)
-        self.assertIn("UNVERIFIED", describe(state))
-        self.assertNotIn("removed", describe(state).replace("do not read this as removed", ""))
+        self.assertIn("may still be there", describe(state))
+        self.assertNotIn("removed", describe(state))
 
     def test_a_deleted_path_still_says_it_survives_in_history(self):
         from stayawake.lib.git.merge.liveness import introduced_liveness, GONE, describe

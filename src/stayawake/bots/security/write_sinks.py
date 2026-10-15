@@ -48,7 +48,7 @@ WRITE_SINKS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
-CONTROL_EXEC_LABEL = "git's own exec surface (hooks/config)"
+CONTROL_EXEC_LABEL = "git's own hooks and settings"
 
 _CONTROL_SUFFIX = ".git"
 _NESTED_CONTROL = ("modules", "worktrees")
