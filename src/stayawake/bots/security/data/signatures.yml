@@ -275,6 +275,16 @@ signatures:
     remediation: remove-foreign-vscode
     confidence: confirmed
 
+  - id: vscode-allow-automatic-tasks-alone
+    category: vscode-autorun
+    severity: low
+    matcher: structural-json
+    confidence: heuristic
+    kind: vscode-allow-automatic-tasks-alone
+    description: "settings.json enables task.allowAutomaticTasks with no hidden panel and no confirmed task beside it (ordinary configuration; review it if it is not yours)"
+    shown_as: "an editor setting that lets tasks run when the folder opens; check it is yours"
+    remediation: manual
+
   # ── AI/agent config auto-run — Claude Code hooks (.claude/settings.json) ──────
   - id: claude-hook-autorun
     category: agent-autorun

@@ -17,7 +17,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 
 SIGS = load_signatures()
-SIG = "vscode-allow-automatic-tasks"
+SETTING_IDS = {"vscode-allow-automatic-tasks", "vscode-allow-automatic-tasks-alone"}
 
 
 def _fires(value_json: str) -> bool:
@@ -26,7 +26,7 @@ def _fires(value_json: str) -> bool:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text('{ "task.allowAutomaticTasks": %s }' % value_json, encoding="utf-8")
     r = scan_target(LocalRepoTarget(d, "t", ScanOptions()), SIGS, [])
-    return SIG in {f.signature_id for f in r.findings}
+    return bool(SETTING_IDS & {f.signature_id for f in r.findings})
 
 
 class TestVscodeAutomaticTasks(unittest.TestCase):
@@ -51,7 +51,7 @@ class TestVscodeAutomaticTasks(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text('{ "editor.fontSize": 13 }', encoding="utf-8")
         r = scan_target(LocalRepoTarget(d, "t", ScanOptions()), SIGS, [])
-        self.assertNotIn(SIG, {f.signature_id for f in r.findings})
+        self.assertFalse(SETTING_IDS & {f.signature_id for f in r.findings})
 
 
 if __name__ == "__main__":

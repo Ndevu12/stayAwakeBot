@@ -16,6 +16,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.targets.base import ScanOptions
+from tests.support import samples
 from tests.support.gitrepo import GitSandbox
 from tests.support.scratchroot import OwnTempRoot
 
@@ -28,6 +29,9 @@ def _said(result, detail: bool = False) -> str:
     return render_fix_verdict(FixVerdict("p", BaseFix(BaseState.PREPARED, "p", "main"), state,
                                          checkout_detail=found), detail)
 GENUINE_FONT = b"wOFF\x00\x01\x00\x00genuine third-party font bytes\n"
+
+
+_HIDES_THE_TERMINAL = samples.joined('  "terminal.integrated.hide', 'OnStartup": "always",\n')
 
 
 class _Checkout(OwnTempRoot):
@@ -216,8 +220,8 @@ class TestAConfirmedFindingNoRemovalCanExpress(GitSandbox):
         self.commit(self.root, "a starting point")
         (self.root / ".vscode").mkdir(parents=True)
         (self.root / ".vscode" / "settings.json").write_text(
-            '{\n  // our ADR-14 says keep this\n  "editor.rulers": [100],\n'
-            '  "task.allowAutomaticTasks": "on"\n}\n')
+            '{\n  // our ADR-14 says keep this\n  "editor.rulers": [100],\n' + _HIDES_THE_TERMINAL
+            + '  "task.allowAutomaticTasks": "on"\n}\n')
         (self.root / "notes.md").write_text("my own work\n")
 
     def _checkout(self):
@@ -406,7 +410,7 @@ class TestAStrippedFileIsNotRecordedAsDeleted(GitSandbox):
         super().setUp()
         self.repo = self.new_repo("strip", user__name="Tester")
         self.write(self.repo, ".vscode/settings.json",
-                   '{\n  "editor.tabSize": 2,\n  "task.allowAutomaticTasks": "on"\n}\n')
+                   '{\n  "editor.tabSize": 2,\n' + _HIDES_THE_TERMINAL + '  "task.allowAutomaticTasks": "on"\n}\n')
         self.write(self.repo, "src/index.js", "a\n")
         self.commit(self.repo, "init")
         self.write(self.repo, "src/index.js", "b\n")
@@ -427,7 +431,7 @@ class TestARefusedEditIsReportedOnce(GitSandbox):
         super().setUp()
         self.repo = self.new_repo("refused", user__name="Tester")
         self.write(self.repo, ".vscode/settings.json",
-                   '{\n  "editor.tabSize": 2,\n  "task.allowAutomaticTasks": "on"\n}\n')
+                   '{\n  "editor.tabSize": 2,\n' + _HIDES_THE_TERMINAL + '  "task.allowAutomaticTasks": "on"\n}\n')
         self.commit(self.repo, "init")
 
     def test_it_is_named_once_and_the_run_is_not_clean(self):
