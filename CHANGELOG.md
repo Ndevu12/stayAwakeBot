@@ -134,6 +134,10 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 
+- **saw's hooks check what landed.** A pull, a rebase or a branch switch no longer spends seconds
+  re-checking every merge in the repository each time. An amended or rebased commit is scanned for
+  what it changed. Hooks an earlier saw installed are brought up to date without a warning, and the
+  push hook says to install Git LFS when a repository needs it.
 - **The text a scan quotes from a file for a finding starts at a whole word**, where it could start
   partway through one, as in a `.gitignore` finding that showed `ode_modules`. An allowlist entry that
   names such a finding's `evidence` needs the new text; until it is updated, the finding is reported

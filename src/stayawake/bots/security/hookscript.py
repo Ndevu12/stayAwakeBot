@@ -21,6 +21,7 @@ from stayawake.lib.git.exec_surface import HOOK_NAMES  # noqa: F401  (re-export)
 MARKER = "stayawake-scan-on-clone"
 HOOKS = ("post-checkout", "post-merge", "post-rewrite", "pre-push")
 _READS_STDIN = frozenset({"pre-push"})
+_READS_PAIRS = frozenset({"post-rewrite"})
 LOCATION = "git-hook"
 
 
@@ -32,6 +33,11 @@ def template_dir() -> Path:
 def hooks_dir() -> Path:
     """Return the hooks directory inside saw's template directory."""
     return template_dir() / "hooks"
+
+
+def history_checked_path() -> Path:
+    """Return the file of the commit, by repository, whose merges saw's hooks last found clean."""
+    return Path(env.xdg_cache_home()) / "saw" / "hook-history-checked.json"
 
 
 def settings_scan_path() -> Path:
@@ -181,36 +187,78 @@ def settings_command(event: str, saw: str, config: str | None) -> str:
     return f'[ ! -f {quoted} ] || [ ! -x {quoted} ] || {quoted} hook run{cfg} --from-settings {event} "$@" || true; :'
 
 
-def render(event: str, saw: str, config: str | None) -> str:
-    """Return the hook script saw installs for `event`, calling the `saw` executable."""
+def _parts(event: str, saw: str, config: str | None) -> tuple[str, str, str]:
+    """Return the header, the line naming the person's own hook, and the saw command of the script
+    for `event`."""
     cfg = f" --config {shlex.quote(config)}" if config else ""
     head = ("#!/bin/sh\n"
             f"# {MARKER} ({event}) — installed by `saw hook install` (#1195). Must never fail git.\n")
-    local = f'_local="$(dirname "$0")/{event}.local"\n'
-    run_saw = f'{shlex.quote(saw)} hook run{cfg} {event}'
-    if event not in _READS_STDIN:
-        return (head
-                + f'{run_saw} "$@" </dev/null || true\n'
-                + local
-                + '[ -x "$_local" ] && "$_local" "$@" || true\n'
-                + "exit 0\n")
+    return head, f'_local="$(dirname "$0")/{event}.local"\n', f'{shlex.quote(saw)} hook run{cfg} {event}'
+
+
+def _inbound_script(head: str, local: str, run_saw: str) -> str:
+    return (head
+            + f'{run_saw} "$@" </dev/null || true\n'
+            + local
+            + '[ -x "$_local" ] && "$_local" "$@" || true\n'
+            + "exit 0\n")
+
+
+def _rewrite_script(head: str, local: str, run_saw: str) -> str:
     return (head
             + local
-            + _CHAIN
+            + _FEED_PAIRS
+            + '_pairs="$(cat)"\n'
+            + f'_feed | {run_saw} "$@" || true\n'
+            + _CHAIN_PAIRS
+            + "exit 0\n")
+
+
+def _push_script(head: str, local: str, run_saw: str, chain: str) -> str:
+    return (head
+            + local
+            + chain
             + '_refs="$(cat)"\n'
             + f'_feed | {run_saw} "$@" || true\n'
             + '_feed | _chain "$@"\n'
             + 'exit $?\n')
 
 
-_CHAIN = ('_feed() { [ -z "$_refs" ] || printf \'%s\\n\' "$_refs"; }\n'
-          '_chain() {\n'
-          'if [ -x "$_local" ]; then "$_local" "$@"; return $?; fi\n'
-          'git config --local --get lfs.repositoryformatversion >/dev/null 2>&1 || { cat >/dev/null; return 0; }\n'
-          'command -v git-lfs >/dev/null 2>&1 || { echo "This repository uses Git LFS, but '
-          'git-lfs was not found on your path." >&2; return 2; }\n'
-          'git lfs pre-push "$@"\n'
-          '}\n')
+def render(event: str, saw: str, config: str | None) -> str:
+    """Return the hook script saw installs for `event`, calling the `saw` executable."""
+    parts = _parts(event, saw, config)
+    if event in _READS_PAIRS:
+        return _rewrite_script(*parts)
+    if event in _READS_STDIN:
+        return _push_script(*parts, _CHAIN)
+    return _inbound_script(*parts)
+
+
+def render_previous(event: str, saw: str, config: str | None) -> str | None:
+    """Return the hook script an earlier saw installed for `event`, or None when it is the current one."""
+    parts = _parts(event, saw, config)
+    if event in _READS_PAIRS:
+        return _inbound_script(*parts)
+    if event in _READS_STDIN:
+        return _push_script(*parts, _PREVIOUS_CHAIN)
+    return None
+
+
+def _chain_text(lfs_missing: str) -> str:
+    return ('_feed() { [ -z "$_refs" ] || printf \'%s\\n\' "$_refs"; }\n'
+            '_chain() {\n'
+            'if [ -x "$_local" ]; then "$_local" "$@"; return $?; fi\n'
+            'git config --local --get lfs.repositoryformatversion >/dev/null 2>&1 || { cat >/dev/null; return 0; }\n'
+            f'command -v git-lfs >/dev/null 2>&1 || {{ echo "{lfs_missing}" >&2; return 2; }}\n'
+            'git lfs pre-push "$@"\n'
+            '}\n')
+
+
+_CHAIN = _chain_text("This repository uses Git LFS, but git-lfs was not found on your path. Install Git LFS, "
+                     "then push again.")
+_PREVIOUS_CHAIN = _chain_text("This repository uses Git LFS, but git-lfs was not found on your path.")
+_FEED_PAIRS = '_feed() { [ -z "$_pairs" ] || printf \'%s\\n\' "$_pairs"; }\n'
+_CHAIN_PAIRS = 'if [ -x "$_local" ]; then _feed | "$_local" "$@"; fi\n'
 
 
 _QUOTED = r"(?:[\w@%+=:,./-]{1,1024}|'(?:[^'\n]|'\"'\"'){0,1024}')"
@@ -221,31 +269,53 @@ _SAW_CMD = rf"(?P<command>(?P<saw>{_QUOTED}) hook run(?P<cfg>(?: --config {_QUOT
 _LOCAL = r'_local="\$\(dirname "\$0"\)/(?P=event)\.local"\n'
 
 
-def _events_regex(reads_stdin: bool) -> str:
-    return "|".join(re.escape(e) for e in HOOKS if (e in _READS_STDIN) is reads_stdin)
+def _events_regex(events) -> str:
+    return "|".join(re.escape(e) for e in events)
 
 
-_PRISTINE_INBOUND = re.compile(
-    _HEAD.format(events=_events_regex(reads_stdin=False))
-    + _SAW_CMD + r' \"\$@\" </dev/null \|\| true\n'
-    + _LOCAL
-    + r'\[ -x "\$_local" \] && "\$_local" "\$@" \|\| true\n'
-    + r"exit 0\n"
-)
-_PRISTINE_PUSH = re.compile(
-    _HEAD.format(events=_events_regex(reads_stdin=True))
-    + _LOCAL
-    + re.escape(_CHAIN)
-    + r'_refs="\$\(cat\)"\n'
-    + r'_feed \| ' + _SAW_CMD + r' "\$@" \|\| true\n'
-    + r'_feed \| _chain "\$@"\n'
-    + r'exit \$\?\n'
+def _inbound_regex(events) -> re.Pattern:
+    return re.compile(
+        _HEAD.format(events=_events_regex(events))
+        + _SAW_CMD + r' \"\$@\" </dev/null \|\| true\n'
+        + _LOCAL
+        + r'\[ -x "\$_local" \] && "\$_local" "\$@" \|\| true\n'
+        + r"exit 0\n"
+    )
+
+
+def _push_regex(chain: str) -> re.Pattern:
+    return re.compile(
+        _HEAD.format(events=_events_regex(_READS_STDIN))
+        + _LOCAL
+        + re.escape(chain)
+        + r'_refs="\$\(cat\)"\n'
+        + r'_feed \| ' + _SAW_CMD + r' "\$@" \|\| true\n'
+        + r'_feed \| _chain "\$@"\n'
+        + r'exit \$\?\n'
+    )
+
+
+_TEMPLATES = (
+    _inbound_regex([e for e in HOOKS if e not in _READS_STDIN and e not in _READS_PAIRS]),
+    re.compile(
+        _HEAD.format(events=_events_regex(_READS_PAIRS))
+        + _LOCAL
+        + re.escape(_FEED_PAIRS)
+        + r'_pairs="\$\(cat\)"\n'
+        + r'_feed \| ' + _SAW_CMD + r' "\$@" \|\| true\n'
+        + re.escape(_CHAIN_PAIRS)
+        + r"exit 0\n"
+    ),
+    _push_regex(_CHAIN),
+    _inbound_regex(_READS_PAIRS),
+    _push_regex(_PREVIOUS_CHAIN),
 )
 
 
 def _pristine_match(text: str):
-    """Return the match for a hook saw installs, from whichever per-event template fits, or None."""
-    return _PRISTINE_INBOUND.fullmatch(text) or _PRISTINE_PUSH.fullmatch(text)
+    """Return the match for a hook script saw installs or an earlier saw installed, from whichever
+    template fits, or None."""
+    return next((m for m in (t.fullmatch(text) for t in _TEMPLATES) if m), None)
 
 
 def is_ours(path: Path) -> bool:
@@ -283,6 +353,16 @@ def is_installed(text: str, expected: tuple[str, str | None] | None = None) -> b
         return False
     saw, config = expected or installed() or (saw_executable(), None)
     return text == render(event, saw, config)
+
+
+def _is_previous(text: str, expected: tuple[str, str | None] | None = None) -> bool:
+    """Return True if `text` is exactly the hook an earlier saw installed for its event with the
+    recorded `saw` and config."""
+    event = event_of(text)
+    if event is None:
+        return False
+    saw, config = expected or installed() or (saw_executable(), None)
+    return text == render_previous(event, saw, config)
 
 
 def saw_command(text: str) -> list[str] | None:
@@ -370,6 +450,7 @@ def in_managed_dir(path: Path) -> bool:
 
 PRISTINE = "pristine"
 STALE = "stale"
+OUTDATED = "outdated"
 ALTERED = "altered"
 FOREIGN = "foreign"
 ABSENT = "absent"
@@ -379,7 +460,8 @@ def verdict(path: Path, expected: tuple[str, str | None] | None = None) -> str:
     """Return what the file at `path` is to saw: `PRISTINE` (exactly the hook saw installs with
     the recorded `saw` and config, and runnable), `STALE` (shaped like one but naming another
     saw or config, or not runnable), `ALTERED` (claims to be one but is not), `FOREIGN` (not
-    saw's) or `ABSENT`."""
+    saw's) or `ABSENT`. A hook saw installs for another event than the one `path` is named for is
+    `ALTERED`."""
     try:
         if path.is_symlink() or not path.is_file():
             return ABSENT if not path.is_symlink() and not path.exists() else FOREIGN
@@ -387,7 +469,13 @@ def verdict(path: Path, expected: tuple[str, str | None] | None = None) -> str:
     except OSError:
         return FOREIGN
     if is_pristine(text):
-        return PRISTINE if is_installed(text, expected) and os.access(path, os.X_OK) else STALE
+        if event_of(text) != path.name:
+            return ALTERED
+        if not os.access(path, os.X_OK):
+            return STALE
+        if is_installed(text, expected):
+            return PRISTINE
+        return OUTDATED if _is_previous(text, expected) else STALE
     return ALTERED if claims_ours(text) else FOREIGN
 
 
@@ -455,7 +543,7 @@ def altered_hooks(unread: list | None = None) -> list[Path]:
             found += [d / e for e in HOOKS if not os.path.lexists(d / e)]
         for p in children:
             state = verdict(p, expected)
-            if state == ALTERED or (own and state not in (PRISTINE, STALE)) or (own and state == STALE and recorded):
+            if state == ALTERED or (own and state not in (PRISTINE, STALE, OUTDATED)) or (own and state == STALE and recorded):
                 found.append(p)
     if recorded:
         for repo in seeded_repositories():

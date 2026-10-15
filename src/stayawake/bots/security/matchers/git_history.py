@@ -29,7 +29,7 @@ def _obfuscation_reason(path: str, delta: str, baseline: str) -> str | None:
     return verdict.reason if verdict else None
 
 
-_MAX_CANDIDATES = 2000
+MOST_MERGES_CHECKED = 2000
 
 _LOADER_REASON_PREFIX = "merge-introduced hunk matches signature:"
 
@@ -65,7 +65,7 @@ class GitHistoryMatcher(Matcher):
             if merges is None:
                 target.read_errors.append("the merge commits could not be listed")
                 return findings
-            for sha in merges[:_MAX_CANDIDATES]:
+            for sha in merges[:MOST_MERGES_CHECKED]:
                 try:
                     evil = gitutil.evil_merge_paths(target.repo_root, sha, content_sig=content_sig,
                                                     obfuscation_reason=_obfuscation_reason,

@@ -10,6 +10,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -31,6 +32,7 @@ from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.bots.security.found import what_it_is, where_it_is
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security.hook_policy import operator_policy
+from stayawake.bots.security.matchers.git_history import MOST_MERGES_CHECKED
 from stayawake.bots.security.hook_report import BRAND as _BRAND, command as _cmd, paint_at as _paint
 from stayawake.bots.security.hook_outcome import (
     BROKEN_LINK, CHAINED, CHANGED, HOOKS_FOLDER_REFUSED, HOOKS_FOLDER_UNKNOWN, IN_PLACE, LEFT, NOT_PUT_IN_PLACE,
@@ -106,6 +108,7 @@ def _hookspath_git_uses() -> tuple[bool, str | None]:
 
 
 _MOST_ENVIRONMENT_ENTRIES = 10_000
+_SAWS_OWN = frozenset({hookscript.PRISTINE, hookscript.OUTDATED})
 
 
 def _hookspath_from_environment(environ) -> tuple[bool, str | None]:
@@ -312,7 +315,7 @@ def _is_saws_hooks_folder(folder: str) -> bool:
     for installed_into in hookscript.installed_hooks_folders() if folder else []:
         if _same_path(os.path.expanduser(folder), installed_into):
             recorded = hookscript.installed()
-            return all(hookscript.verdict(installed_into / event, recorded) == hookscript.PRISTINE
+            return all(hookscript.verdict(installed_into / event, recorded) in _SAWS_OWN
                        for event in _HOOKS)
     return folder != "" and _same_path(os.path.expanduser(folder), _hooks_dir())
 
@@ -389,7 +392,7 @@ def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool,
         if state == hookscript.PRISTINE:
             actions.append(Action(IN_PLACE, dest))
             continue
-        outcome, kind = UPDATED, WRITTEN
+        outcome, kind = UPDATED, OUT_OF_DATE if state == hookscript.OUTDATED else WRITTEN
         if state in (hookscript.ALTERED, hookscript.STALE) or (state == hookscript.FOREIGN and own):
             if hookscript.set_aside(dest) is None:
                 actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
@@ -689,7 +692,7 @@ def _settle_own_only() -> list[Action]:
         return []
     actions: list[Action] = []
     for p in sorted(own.iterdir()):
-        if p.name in _HOOKS and hookscript.verdict(p, hookscript.installed()) == hookscript.PRISTINE:
+        if p.name in _HOOKS and hookscript.verdict(p, hookscript.installed()) in _SAWS_OWN:
             continue
         actions.append(Action(SET_ASIDE, p, NOT_SAWS) if hookscript.set_aside(p)
                        else Action(UNVERIFIED, p, NOT_PUT_IN_PLACE))
@@ -893,6 +896,10 @@ def _repair_repository(hooks_dir: Path, saw: str, config: str | None, *, restore
                 actions.append(Action(outcome, dest, kind))
             else:
                 actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
+        elif state == hookscript.OUTDATED:
+            actions.append(Action(UPDATED, dest, OUT_OF_DATE)
+                           if _write_verified(dest, _hook_script(event, saw, config), hooks_dir)
+                           else Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE))
         elif state == hookscript.FOREIGN:
             actions.append(Action(LEFT, dest, REPOSITORYS_OWN))
         chained = hooks_dir / f"{event}.local"
@@ -974,12 +981,12 @@ def _remove_from(hooks_dir: Path, expected, *, own: bool, repository: Path | Non
                 continue
             removed = True
             actions.append(Action(SET_ASIDE, dest, CHANGED if state == hookscript.ALTERED else "", repository))
-        elif state != hookscript.PRISTINE and not (state == hookscript.ABSENT and yours and git_runs_it):
+        elif state not in _SAWS_OWN and not (state == hookscript.ABSENT and yours and git_runs_it):
             continue
         try:
             if yours:
                 preserved.rename(dest)
-            elif state == hookscript.PRISTINE:
+            elif state in _SAWS_OWN:
                 dest.unlink()
         except OSError:
             actions.append(Action(UNVERIFIED, dest, NOT_PUT_IN_PLACE, repository))
@@ -1126,6 +1133,67 @@ def _remember_settings_scan(root: Path, key: str) -> None:
     atomicwrite.replace(hookscript.settings_scan_path(), json.dumps(held))
 
 
+_COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+
+
+def _history_checked(root: Path, config_path: str | None) -> str | None:
+    """Name the commit whose merges a hook last found clean in a repository under the current rules.
+    Takes the root and the operator config. Returns the commit, or None when there is none, the rules
+    have changed, or the commit is no longer in the repository."""
+    try:
+        held = json.loads(hookscript.history_checked_path().read_text())
+    except (OSError, ValueError):
+        return None
+    key = held.get(os.path.realpath(root)) if isinstance(held, dict) else None
+    if not isinstance(key, str) or ":" not in key:
+        return None
+    commit, rules = key.split(":", 1)
+    if not _COMMIT_ID.fullmatch(commit) or rules != _policy_digest(config_path):
+        return None
+    return commit if gitutil.run_ok(root, ["cat-file", "-e", f"{commit}^{{commit}}"]) else None
+
+
+def _remember_history(root: Path, head: str, config_path: str | None) -> None:
+    """Record the commit whose merges a hook found clean in a repository. Takes the root, the commit and
+    the operator config. A write that fails is skipped."""
+    try:
+        try:
+            held = json.loads(hookscript.history_checked_path().read_text())
+        except (OSError, ValueError):
+            held = {}
+        held = {r: k for r, k in held.items() if os.path.isdir(r)} if isinstance(held, dict) else {}
+        held[os.path.realpath(root)] = _clean_key(head, config_path)
+        atomicwrite.replace(hookscript.history_checked_path(), json.dumps(held),
+                            mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    except OSError:
+        pass
+
+
+def _merges_to_check(root: Path, label: str, config_path: str | None) -> list[str] | None:
+    """Name the merges a hook event checks. Takes the root, what the event scans and the operator
+    config. Returns every merge on every ref (None) at a clone or when git cannot list them, else the
+    merges in HEAD's history after the commit last found clean, or all of HEAD's history when there is
+    none."""
+    if label == "clone":
+        return None
+    checked = _history_checked(root, config_path)
+    return gitutil.merge_commits(root, ("HEAD", f"^{checked}") if checked else ("HEAD",))
+
+
+def _is_shallow(root: Path) -> bool:
+    """Tell whether a repository holds only part of its history. Takes the root. Returns the answer;
+    True when git could not say."""
+    return gitutil.stdout(root, ["rev-parse", "--is-shallow-repository"]).strip() != "false"
+
+
+def _history_found_clean(result, merges: list[str] | None) -> bool:
+    """Tell whether a scan checked every merge it was given and found none to report. Takes the result
+    and the merges it was given. Returns the answer; False when it was given no list, or more than it
+    checks."""
+    return (merges is not None and len(merges) <= MOST_MERGES_CHECKED and result.error is None
+            and not any(f.category == "evil-merge" for f in result.findings))
+
+
 def _remember(root: Path, key: str) -> None:
     """Record a scanned repository, and the clean scan it may skip next time. Takes the root and
     the clean key, or "" when the scan was not clean. A write that fails is skipped."""
@@ -1143,10 +1211,12 @@ def _scanned_clean(root: Path, key: str) -> bool:
     return key in (_load_cache().get(os.path.realpath(root)), _settings_scans().get(os.path.realpath(root)))
 
 
-def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None = None):
-    """Decide what a hook event scans. Takes the event, its arguments, the repository root and the
-    operator config. Returns `(include_only, label)`: `None` for the whole tree, a tuple of paths, or
-    `(False, None)` when there is nothing to scan."""
+def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None = None,
+                rewritten: str = ""):
+    """Decide what a hook event scans. Takes the event, its arguments, the repository root, the
+    operator config and the commits git rewrote, as git hands them to post-rewrite. Returns
+    `(include_only, label)`: `None` for the whole tree, a tuple of paths, or `(False, None)` when there
+    is nothing to scan."""
     if event == "post-checkout":
         old, new, flag = (argv + ["", "", ""])[:3]
         if flag != "1":
@@ -1166,13 +1236,30 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
             return None, "pull"
         return (changed, "pull") if changed else (False, None)
     if event == "post-rewrite":
-        if not gitutil.run_ok(root, ["rev-parse", "--verify", "ORIG_HEAD"]):
-            return False, None
-        changed = _changed_files(root, "ORIG_HEAD", "HEAD")
-        if changed is None:
+        ranges = _rewritten_pairs(rewritten)
+        if gitutil.run_ok(root, ["rev-parse", "--verify", "ORIG_HEAD"]):
+            ranges.append(("ORIG_HEAD", "HEAD"))
+        if not ranges:
             return None, "rewrite"
-        return (changed, "rewrite") if changed else (False, None)
+        changed: set[str] = set()
+        for old, new in ranges:
+            files = _changed_files(root, old, new)
+            if files is None:
+                return None, "rewrite"
+            changed.update(files)
+        return (tuple(sorted(changed)), "rewrite") if changed else (False, None)
     return False, None
+
+
+def _rewritten_pairs(text: str) -> list[tuple[str, str]]:
+    """Read the commits git rewrote, as it hands them to post-rewrite. Takes the text. Returns each old
+    and new commit; a line that does not name two commits is left out."""
+    pairs = []
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and _COMMIT_ID.fullmatch(fields[0]) and _COMMIT_ID.fullmatch(fields[1]):
+            pairs.append((fields[0], fields[1]))
+    return pairs
 
 
 def _is_a_file_checkout(event: str, argv: list[str]) -> bool:
@@ -1365,7 +1452,9 @@ def run_event(event: str, argv: list[str], config_path: str | None = None,
             if not from_settings:
                 _bring_up_to_date()
             return outbound.check_push(argv, refs_text, config_path, no_stream=no_stream)
-        return _run_event(event, argv, config_path, no_stream=no_stream, from_settings=from_settings)
+        rewritten = ("" if sys.stdin.isatty() else sys.stdin.read()) if event == "post-rewrite" else ""
+        return _run_event(event, argv, config_path, no_stream=no_stream, from_settings=from_settings,
+                          rewritten=rewritten)
     except BaseException:                   # noqa: BLE001 — last-resort: never break/confuse git
         print(_paint(f"⚠  {_BRAND}: the scan did not finish, so this repository is not known to be clean. "
                      "Run `saw scan` in this repository.", "warn", sys.stderr), file=sys.stderr)
@@ -1373,7 +1462,7 @@ def run_event(event: str, argv: list[str], config_path: str | None = None,
 
 
 def _run_event(event: str, argv: list[str], config_path: str | None,
-               *, no_stream: bool = False, from_settings: bool = False) -> int:
+               *, no_stream: bool = False, from_settings: bool = False, rewritten: str = "") -> int:
     if env.hook_disabled():
         return 0
     root = _repo_root()
@@ -1384,7 +1473,7 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     if _is_a_file_checkout(event, argv):
         include, label, checked = _file_checkout_scope(root, config_path)
     else:
-        (include, label), checked = _scan_scope(event, argv, root, config_path), None
+        (include, label), checked = _scan_scope(event, argv, root, config_path, rewritten), None
     if label is None:
         return 0
 
@@ -1399,10 +1488,10 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         return 0
 
     err = sys.stderr
+    merges = [] if label == _FILES_WRITTEN else _merges_to_check(root, label, config_path)
     with spin_status(f"{_BRAND}: scanning {shown} for supply-chain worms…",
                      enabled=stream_enabled(err, force_off=no_stream)):
-        scanned = _scan_within_budget(root, include, config_path, display,
-                                      [] if label == _FILES_WRITTEN else None)
+        scanned = _scan_within_budget(root, include, config_path, display, merges)
     if scanned is _TIMED_OUT:
         print(_paint(f"⚠  {_BRAND}: {shown} was not fully scanned, so it is not known to be clean.",
                      "warn", err), file=err)
@@ -1410,6 +1499,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
               file=err)
         return 2
     result = scanned
+    if label != _FILES_WRITTEN and head and _history_found_clean(result, merges) and not _is_shallow(root):
+        _remember_history(root, head, config_path)
     if clean_key and not from_settings:
         _remember(root, "")
     operation = _operation_key(head, config_path, event, argv) if head else None
