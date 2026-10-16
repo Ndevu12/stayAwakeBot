@@ -10,8 +10,8 @@ from stayawake.bots.security.guard.constants import (
     ActionPin, CHECKOUT_ACTION, SETUP_PYTHON_ACTION)
 from stayawake.bots.security.guard.detect import (
     StrixRef, classify_pin, find_strix, WormGate, find_worm_gate, Freshness, LatestStrix,
-    latest_strix, freshness, GuardStatus, RemoteRead, GateProbe, probe_remote_gate, remote_gate,
-    check, render)
+    latest_strix, freshness, GuardStatus, RemoteRead, GateProbe, probe_remote_gate, read_error,
+    remote_gate, check, render)
 from stayawake.bots.security.guard.provision import (
     Pin, SetupPlan, SetupResult, resolve_pin, render_workflow, plan_setup, setup, render_setup)
 from stayawake.bots.security.guard.sweep import check_targets, setup_targets, drift_targets
@@ -26,7 +26,7 @@ __all__ = [
     "ActionPin", "CHECKOUT_ACTION", "SETUP_PYTHON_ACTION",
     "StrixRef", "classify_pin", "find_strix", "WormGate", "find_worm_gate", "Freshness",
     "LatestStrix", "latest_strix", "freshness", "GuardStatus", "RemoteRead", "GateProbe",
-    "probe_remote_gate", "remote_gate", "check", "render",
+    "probe_remote_gate", "read_error", "remote_gate", "check", "render",
     "Pin", "SetupPlan", "SetupResult", "resolve_pin", "render_workflow", "plan_setup", "setup",
     "render_setup", "check_targets", "setup_targets", "drift_targets", "drift_one", "render_drift",
     "DriftOutcome", "github_api", "gitutil",

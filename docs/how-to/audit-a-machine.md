@@ -46,8 +46,9 @@ ran, which cannot be told from the host — and every write can overwrite whatev
 
 ## On a "Not checked" section
 
-Your machine did not let some checks finish — a tool they need is missing, or a path they read is
-not readable by you. Each one names what stopped it.
+Some checks did not finish or could not give an answer — a tool they need is missing, a path or a
+store they read is not readable by you, or GitHub could not be read for `--repo`. Each one names what
+stopped it.
 
 Fix what it names and re-run, or inspect that surface yourself. Until you do, read the rest of the
 report as covering everything **except** those surfaces. If one of them reads the start-up surface,

@@ -34,7 +34,8 @@ def register(sub) -> None:
     p.add_argument("-b", "--branch", default="main",
                    help="branch to check protection for (default: main)")
     p.add_argument("-f", "--fail", "--fail-on-issues", action="store_true", dest="fail",
-                   help="exit non-zero if any warning-level issue is found")
+                   help="exit non-zero if any warning-level issue is found, or if --repo could not "
+                        "check whether the branch requires the worm gate")
     p.add_argument("--verify", action="store_true", dest="verify_artifacts",
                    help="also read the files a finding points to, to confirm it (slower)")
     p.set_defaults(func=run)
@@ -65,5 +66,5 @@ def run(a: argparse.Namespace) -> int:
     # blocked probe is a gap in what the run covered, while 3 is a hazard in what it found.
     if any(o.state == hygiene.BLOCKED for o in outcomes):
         return exitcodes.INCOMPLETE
-    warnings = [i for i in issues if i.severity == "warning"]
-    return 1 if (a.fail and warnings) else 0
+    gating = [i for i in issues if i.severity == "warning" or i.id in hygiene.UNCHECKED_GATE_IDS]
+    return 1 if (a.fail and gating) else 0

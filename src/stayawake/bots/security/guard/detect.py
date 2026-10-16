@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from stayawake.lib import github_workflow
+from stayawake.lib import github_branch_protection, github_workflow
 from stayawake.lib.adapters import github_api
 from stayawake.lib import auth
 from stayawake.lib import git as gitutil
@@ -374,6 +374,7 @@ class GuardStatus:
     ref: StrixRef | None = None
     fresh: Freshness | None = None
     required: bool | None = None
+    protected_by: str = ""
     branch: str | None = None
     error: str | None = None
     mechanism: str | None = None
@@ -441,7 +442,7 @@ def _remote_workflows(owner: str, repo: str, token: str | None) -> RemoteRead:
     return RemoteRead(out)
 
 
-def _read_error(slug: str, cause: str, retry_after: int | None = None) -> str:
+def read_error(slug: str, cause: str, retry_after: int | None = None) -> str:
     """Turn a real remote-read failure cause into an accurate, actionable message — never blaming the
     token for what is usually just 'this repo has no CI'. `not_found` is handled upstream as
     the calm no-CI state and never reaches here."""
@@ -455,13 +456,6 @@ def _read_error(slug: str, cause: str, retry_after: int | None = None) -> str:
     if cause == "network":
         return f"network error reading {slug}"
     return f"couldn't read {slug} ({cause})"
-
-
-def _context_required(prot: dict | None, context: str) -> bool:
-    rsc = (prot or {}).get("required_status_checks") or {}
-    contexts = set(rsc.get("contexts") or [])
-    contexts |= {c.get("context") for c in (rsc.get("checks") or []) if isinstance(c, dict)}
-    return context in contexts
 
 
 @dataclass
@@ -505,7 +499,7 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
             return GuardStatus(present=False, no_ci=True, branch=branch)
         if rr.cause is not None:
             return GuardStatus(present=False, branch=branch,
-                               error=_read_error(slug, rr.cause, rr.retry_after))
+                               error=read_error(slug, rr.cause, rr.retry_after))
         workflows = rr.workflows
         reader = _remote_action_reader(owner, name, token)
     else:
@@ -522,11 +516,12 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
     ref = gate.strix
     fresh = None if offline else freshness(ref, token, latest=latest)
     required: bool | None = None
+    protected_by = ""
     if slug and token:
         owner, _, name = slug.partition("/")
-        prot = github_api.get_branch_protection(owner, name, branch, token)
-        required = _context_required(prot, ref.job)
-    return GuardStatus(present=True, ref=ref, fresh=fresh, required=required,
+        prot = github_branch_protection.read(owner, name, branch, token)
+        required, protected_by = ref.job in prot.required_checks, prot.held_by if prot.protected else ""
+    return GuardStatus(present=True, ref=ref, fresh=fresh, required=required, protected_by=protected_by,
                        config=grade_config(ref), branch=branch if slug else None)
 
 
@@ -617,7 +612,8 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
     if remote:
         if status.required is True:
             lines.append("  " + paint("✓ required", ok, on=color) +
-                         f"  — branch protection on {status.branch} requires “{r.job}”")
+                         f"  — {status.branch} is protected {status.protected_by or 'by branch protection'}, "
+                         f"which requires “{r.job}”")
         elif status.required is False:
             lines.append("  " + paint("⚠ not a required check", warn, on=color) +
                          f"  — {status.branch} protection does NOT require “{r.job}”; an infected PR can still merge")

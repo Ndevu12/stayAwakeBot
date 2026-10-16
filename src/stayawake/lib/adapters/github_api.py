@@ -447,13 +447,35 @@ def get_branch_protection(owner: str, repo: str, branch: str,
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(
-        f"{_API}/repos/{owner}/{repo}/branches/{branch}/protection",
+        f"{_API}/repos/{owner}/{repo}/branches/{urllib.parse.quote(branch, safe='/')}/protection",
         headers=headers, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
             return json.loads(resp.read().decode())
     except Exception:  # noqa: BLE001 — 404/403/network all mean "treat as unprotected"
         return None
+
+
+_RULES_PER_PAGE = 100
+_MOST_RULE_PAGES = 10
+
+
+def get_branch_rules(owner: str, repo: str, branch: str, token: str | None) -> ApiRead:
+    """Read the active ruleset rules that apply to a branch (GitHub REST "Get rules for a branch").
+    Takes the owner, the repository, the branch and the token. Returns an `ApiRead` whose `value` is
+    every rule, read page by page; otherwise `cause` says why they could not all be read."""
+    path = f"/repos/{owner}/{repo}/rules/branches/{urllib.parse.quote(branch, safe='/')}"
+    rules: list = []
+    for page in range(1, _MOST_RULE_PAGES + 1):
+        read = _do_request(f"{path}?per_page={_RULES_PER_PAGE}&page={page}", token=token)
+        if read.cause is not None:
+            return read
+        if not isinstance(read.value, list):
+            return ApiRead(cause="http_error", detail="GitHub returned no list of rules")
+        rules += read.value
+        if len(read.value) < _RULES_PER_PAGE:
+            return ApiRead(value=rules)
+    return ApiRead(cause="http_error", detail="the branch has more rules than were read")
 
 
 def latest_release(owner: str, repo: str, token: str | None = None) -> dict | None:
