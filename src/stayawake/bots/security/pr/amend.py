@@ -12,6 +12,7 @@ from typing import Callable, NamedTuple
 
 from stayawake.bots.security import version_scan
 from stayawake.bots.security.models import CONFIRMED, confirmed_for_removal
+from stayawake.core.identity.classify import classify_push_stderr, what_the_remote_said
 from stayawake.utils import scratch
 from stayawake.bots.security.pr import arrival_questions, arrival_record
 from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
@@ -1236,6 +1237,16 @@ def _push_to(repo: Path, slug: str, branch: str, dest: str, token: str | None,
     return force_update_head(repo, slug, branch, token, lease=lease)
 
 
+def _refusal(branch: str, result) -> Reason:
+    """Name why the push of a branch was refused. Takes the branch and the push's result. Returns the
+    reason: a refusal over a private email address with its next step, else the refusal with what the
+    remote said."""
+    stderr = getattr(result, "stderr", "") or ""
+    if classify_push_stderr(stderr).reason == "private_email":
+        return Reason(Cause.PUSH_REFUSED_PRIVATE_EMAIL, branch)
+    return Reason(Cause.PUSH_REFUSED, branch, said=what_the_remote_said(stderr))
+
+
 def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, *,
                          pusher, lease: str | None = None,
                          sha12: str = "") -> BranchResult:
@@ -1243,10 +1254,9 @@ def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, 
     result = _push_to(repo, slug, branch, dest, token, lease, pusher,
                       force=aside is None)
     if aside is not None:
-        return BranchResult(branch, False,
-                            aside if result.ok else Reason(Cause.PUSH_REFUSED, branch))
+        return BranchResult(branch, False, aside if result.ok else _refusal(branch, result))
     if not result.ok:
-        return BranchResult(branch, False, Reason(Cause.PUSH_REFUSED, branch))
+        return BranchResult(branch, False, _refusal(branch, result))
     if pusher is not None:
         return BranchResult(branch, True)
     known, remote = _read_remote_head(repo, slug, branch, token)

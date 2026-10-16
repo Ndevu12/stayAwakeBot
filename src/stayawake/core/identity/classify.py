@@ -2,7 +2,18 @@
 """Classify git-push / GitHub failures so the ladder never lies with 'no write access'."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+
+NOREPLY_NEXT_STEP = ("commit with your GitHub noreply address: "
+                     "`git config --global user.email <id>+<login>@users.noreply.github.com`, "
+                     "then run this again")
+
+_LARGEST_STDERR_READ = 8192
+_LARGEST_WORDS = 240
+_ADDRESS = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,20}://\S{0,2048}")
+_CREDENTIAL = re.compile(r"(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{1,255}")
+_REJECTED = re.compile(r"!\s{0,8}\[(?:remote )?rejected\][^()\n]{0,512}\(([^()\n]{1,512})\)")
 
 
 @dataclass(frozen=True)
@@ -18,6 +29,8 @@ def classify_push_stderr(stderr: str | None) -> PushFailure:
     low = text.lower()
     if not text:
         return PushFailure("unknown", "")
+    if "gh007" in low or "email privacy restrictions" in low:
+        return PushFailure("private_email", text)
     # A rule violation or a non-fast-forward is a POLICY result, not an ACCESS one. Both used to
     # fall through to "unknown" and walk the fork ladder, which reports a taken branch as read-only.
     if ("gh013" in low or "gh006" in low or "repository rule violations" in low
@@ -51,6 +64,20 @@ def classify_push_stderr(stderr: str | None) -> PushFailure:
     return PushFailure("unknown", text)
 
 
+def what_the_remote_said(stderr: str | None) -> str:
+    """Read why a push was refused, in the remote's own words. Takes git's output for the push.
+    Returns the remote's error lines and each refused ref's reason, joined and bounded, with every
+    address and credential taken out, or the last line git printed when there are none."""
+    lines = [line.strip() for line in (stderr or "")[-_LARGEST_STDERR_READ:].splitlines() if line.strip()]
+    said = [line.split(":", 2)[2].strip() for line in lines if line.lower().startswith("remote: error:")]
+    said += [found.group(1).strip() for line in lines for found in [_REJECTED.search(line)] if found]
+    if not said:
+        said = [line for line in lines if not line.lower().startswith(("to ", "error: failed to push"))][-1:]
+    words = "; ".join(dict.fromkeys(said))
+    words = _CREDENTIAL.sub("[hidden]", _ADDRESS.sub("[address]", words))
+    return words[:_LARGEST_WORDS]
+
+
 def push_failure_message(failure: PushFailure) -> str:
     """One-line operator guidance for a classified push failure."""
     if failure.reason == "workflow_scope":
@@ -58,6 +85,8 @@ def push_failure_message(failure: PushFailure) -> str:
                 "`gh auth refresh -h github.com -s repo,workflow` or `saw auth app register`")
     if failure.reason == "signed_commits":
         return "rejected: branch requires signed commits — re-sign the branch, then retry"
+    if failure.reason == "private_email":
+        return f"rejected: GitHub keeps your email address private — {NOREPLY_NEXT_STEP}"
     if failure.reason == "occupied":
         return ("rejected by repository policy: the branch is taken or the update is not a "
                 "fast-forward — this is not an access problem")

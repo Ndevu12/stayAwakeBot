@@ -10,7 +10,8 @@ marketplace App remains optional backlog.
 from __future__ import annotations
 
 from stayawake.core.identity.capabilities import Capability
-from stayawake.core.identity.classify import PushFailure, classify_push_stderr, push_failure_message
+from stayawake.core.identity.classify import (NOREPLY_NEXT_STEP, PushFailure, classify_push_stderr,
+                                              push_failure_message, what_the_remote_said)
 from stayawake.core.identity.gate import require
 from stayawake.core.identity.intents import Intent, requirements
 from stayawake.core.identity.outcomes import Decision, UpgradePath
@@ -19,5 +20,5 @@ from stayawake.core.identity.session import Session, resolve_session
 __all__ = [
     "Capability", "Intent", "Decision", "UpgradePath", "Session",
     "PushFailure", "require", "resolve_session", "requirements",
-    "classify_push_stderr", "push_failure_message",
+    "classify_push_stderr", "push_failure_message", "what_the_remote_said", "NOREPLY_NEXT_STEP",
 ]

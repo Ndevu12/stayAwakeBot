@@ -21,6 +21,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Iterable, Sequence
 
+from stayawake.core.identity.classify import NOREPLY_NEXT_STEP
 from stayawake.utils import textsafe
 
 
@@ -54,6 +55,7 @@ class Cause(Enum):
     RECONSTRUCTION_UNAVAILABLE = "reconstruction-unavailable"
     REPLAY_FAILED = "replay-failed"
     PUSH_REFUSED = "push-refused"
+    PUSH_REFUSED_PRIVATE_EMAIL = "push-refused-private-email"
     NOT_PERMITTED_TO_REWRITE = "not-permitted-to-rewrite"
     REMOTE_REFS_UNREADABLE = "remote-refs-unreadable"
     SIGNING_UNAVAILABLE = "signing-unavailable"
@@ -116,6 +118,9 @@ class Reason:
     """The things to go and look at, when `detail` is a count rather than an identifier. A count
     with nothing named is not actionable: "2 confirmed past commits" leaves the operator with
     nowhere to start."""
+    said: str = ""
+    """What the remote said when it refused, in its own words, with addresses and credentials
+    taken out."""
 
 
 @dataclass(frozen=True)
@@ -268,6 +273,9 @@ _PHRASE = {
     Cause.RECONSTRUCTION_UNAVAILABLE: "the replacement could not be built",
     Cause.REPLAY_FAILED: "the replay failed; branches left as they stood",
     Cause.PUSH_REFUSED: "the push was refused",
+    Cause.PUSH_REFUSED_PRIVATE_EMAIL:
+        "the push of {detail} was refused because GitHub keeps your email address private — "
+        + NOREPLY_NEXT_STEP,
     Cause.TAGS_AT_REPLACED_COMMIT: "tags still point at it",
     Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS:
         "still reachable from {detail} — a tag, stash, or another ref can put it back; clear it there too",
@@ -352,6 +360,7 @@ _NOT_FULLY_UPDATED = "the remote was not fully updated"
 
 
 _DETAIL_ROOM = 120
+_SAID_ROOM = 240
 
 
 def names_that_fit(names, room: int = _DETAIL_ROOM) -> str:
@@ -378,7 +387,9 @@ def _clause(reason: Reason) -> str:
     phrase = _PHRASE.get(reason.cause, _UNNAMED_CAUSE)
     if "{detail}" in phrase:
         phrase, detail = phrase.format(detail=detail), textsafe.plain(reason.subjects, 120)
-    return f"{phrase} ({detail})" if detail else phrase
+    clause = f"{phrase} ({detail})" if detail else phrase
+    said = textsafe.plain(reason.said, _SAID_ROOM)
+    return f"{clause} — the remote said: {said}" if said else clause
 
 
 def _quoted(names: Iterable[str]) -> str:
