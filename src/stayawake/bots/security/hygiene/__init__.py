@@ -164,7 +164,7 @@ def _safe(text: str) -> str:
     return out if len(out) < _REPORT_FIELD_LIMIT else out + " […]"   # a cut is never silent
 
 
-def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
+def _banner(issue_ids: set[str], *, color: bool, width: int, content_scanned: bool = False) -> list[str]:
     """The incident banner, GRADED to the evidence (proportionality — see models): the full
     harden → rebuild → rotate-LAST runbook leads ONLY on active host persistence; a lone
     credential EXPOSURE gets a calm, proportionate note (not "harden and rebuild" over a cached
@@ -181,10 +181,10 @@ def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
         steps, ordered = credential_exposure_note(), False
     elif tier == TIER_UNCONFIRMED_STAGING:
         head = "⚠️  The same staging artifact in more than one place — not evidence of a live implant:"
-        steps, ordered = unconfirmed_staging_note(), False
+        steps, ordered = unconfirmed_staging_note(content_scanned=content_scanned), False
     elif tier == TIER_LEFT_OUTSIDE_A_CONTROL:
         head = "⚠️  A global resolution path was left outside a control — not evidence of a live implant:"
-        steps, ordered = left_outside_a_control_note(), False
+        steps, ordered = left_outside_a_control_note(content_scanned=content_scanned), False
     else:
         return []
     return ([paint(head, SEVERITY["warning"], on=color)] +
@@ -304,10 +304,12 @@ def _blocked_block(issues: list[HygieneIssue], *, color: bool, width: int) -> li
     return out + [""]
 
 
-def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) -> str:
+def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80,
+           content_scanned: bool = False) -> str:
     """Human-facing audit report. `color` (ANSI, gated by the caller via
     core.terminal.supports_color) and `width` (terminal columns, from core.render.term_width)
-    default to plain/80 so a piped or test invocation is deterministic. Findings are grouped
+    default to plain/80 so a piped or test invocation is deterministic. `content_scanned` says the
+    audit already content-scanned what it found (`saw audit --verify`). Findings are grouped
     worst-first (warnings to act on, then weaker items to review); long detail/fix/runbook lines
     wrap to `width` with a hanging indent. The run-level rotation-safety verdict always
     leads — reachable even when no individual finding is present."""
@@ -358,7 +360,7 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
     lines = [f"Local security hygiene — {n} finding{'' if n == 1 else 's'}: " + ", ".join(counts), ""]
     lines += rotation + [""]
 
-    banner = _banner({i.id for i in issues}, color=color, width=width)
+    banner = _banner({i.id for i in issues}, color=color, width=width, content_scanned=content_scanned)
     if banner:
         lines += banner + [""]
     lines += unrun

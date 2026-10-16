@@ -9,7 +9,7 @@ import socket
 import stat
 import sys
 import tempfile
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from stayawake.utils import hostdenial
@@ -150,11 +150,16 @@ def _staged_secret_scanner(dirs, unread: list[Path]) -> Path | None:
     return None
 
 
+def _temp_dirs() -> list[Path]:
+    """List this host's temporary folders, each once. Returns them."""
+    return _distinct_dirs([Path("/tmp"), Path(tempfile.gettempdir())])
+
+
 def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path], list[Path]]:
     """Return (strong, weak, unread, controlled). `weak` are (description, path, kind) triples;
     `controlled` are the locations a host control already holds."""
     home = Path.home()
-    tmp_dirs = _distinct_dirs([Path("/tmp"), Path(tempfile.gettempdir())])
+    tmp_dirs = _temp_dirs()
     strong: list[str] = []
     weak: list[tuple[str, Path, str]] = []
     unread: list[Path] = []
@@ -284,6 +289,50 @@ def _usable_prefix(raw: str | None) -> Path | None:
     return Path(raw)
 
 
+_NOT_CLEARED = "The program that used them can be the harmful part."
+
+
+@dataclass
+class _FoundCleanByAScan(HygieneIssue):
+    """A weak indicator whose contents a scan read in full and found no markers in."""
+
+
+def _staging_found_clean_issue(found: list[str]) -> HygieneIssue:
+    """The staging finding once a scan read every place in full and found no markers: the same finding
+    and the same rotation hold, saying what the scan found. Takes the places found. Returns it."""
+    return HygieneIssue(
+        id="host-drop-artifacts-staging",
+        severity="warning",
+        title="The same staging artifact is in more than one place on this host",
+        detail=f"{len(found)} places. Ordinary tooling puts one there, not several. A scan of what they "
+               f"hold found no worm markers. {_NOT_CLEARED}",
+        remediation="Confirm you put them there. If you did not, run `saw harden`. "
+                    "Either way, do NOT rotate any credential yet.",
+    )
+
+
+def _staging_not_read_in_full_issue(found: list[str]) -> HygieneIssue:
+    """The staging finding once a scan could not finish reading every place: the same finding and the same
+    rotation hold, saying so. Takes the places found. Returns it."""
+    return HygieneIssue(
+        id="host-drop-artifacts-staging",
+        severity="warning",
+        title="The same staging artifact is in more than one place on this host",
+        detail=f"{len(found)} places. Ordinary tooling puts one there, not several. The scan could not "
+               "finish reading every place, so what they hold is not known to be clean.",
+        remediation="Inspect them yourself, or run `saw harden`. Either way, do NOT rotate any credential "
+                    "yet.",
+    )
+
+
+def _outside_a_control_not_read_in_full_issue(found: list[str]) -> HygieneIssue:
+    """The finding of a location left outside a control once a scan could not finish reading it, saying
+    so. Takes the places found. Returns it."""
+    issue = _outside_a_control_issue(found)
+    return replace(issue, detail=issue.detail + " The scan could not finish reading it, so what it holds "
+                                                "is not known to be clean.")
+
+
 def _corroborated_issue(found: list[str], *, active: bool) -> HygieneIssue:
     """The corroborated finding. `active` distinguishes evidence of a live implant from staging in
     more than one place: same severity and the same rotation gate either way, different claim."""
@@ -320,22 +369,38 @@ def _outside_a_control_issue(found: list[str]) -> HygieneIssue:
     )
 
 
-def _escalate_with_scan(issue: HygieneIssue, weak: list[tuple[str, Path, str]]) -> HygieneIssue:
+def _escalate_with_scan(issue: HygieneIssue, weak: list[tuple[str, Path, str]],
+                        found_clean: HygieneIssue | None = None,
+                        not_read_in_full: HygieneIssue | None = None) -> HygieneIssue:
     """Content-scan every corroborated candidate; markers may only ESCALATE.
 
     The existence finding is built first and returned unchanged unless a scan finds payload, so a
     clean or failed scan can never lower a corroborated grade. `_verify_weak_artifact` scanned
-    `weak[0]` alone, which let a clean first location mask an infected second.
+    `weak[0]` alone, which let a clean first location mask an infected second. `found_clean`, when
+    given, is returned in its place once every candidate was read in full and found clean;
+    `not_read_in_full`, when given, once a candidate was not.
     """
+    every_place_clean = bool(weak)
+    first_failure = None
     for item in weak:
         graded, failure = _scan_or_reason(item[:2])
         if failure is not None:                            # an aborted scan must not lose the finding
-            return replace(issue, detail=issue.detail +
-                           f" (a content scan of {item[1]} could not complete: "
-                           f"{failure} — the artifacts above were still found.)")
+            first_failure = first_failure or (item[1], failure)
+            every_place_clean = False
+            continue
         for g in graded or []:
             if g.id == "host-artifact-content-infected":
                 return g
+        every_place_clean = every_place_clean and bool(graded) and all(
+            isinstance(g, _FoundCleanByAScan) for g in graded)
+    if every_place_clean:
+        return found_clean or issue
+    if weak and not_read_in_full is not None:
+        return not_read_in_full
+    if first_failure is not None:
+        place, failure = first_failure
+        return replace(issue, detail=issue.detail + f" (a content scan of {place} could not complete: "
+                                                    f"{failure} — the artifacts above were still found.)")
     return issue
 
 
@@ -366,12 +431,15 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         active = bool(strong) or len(_toolchains_represented(staged)) >= 2
         issue = _corroborated_issue(found, active=active)
         if verify:
-            issue = _escalate_with_scan(issue, weak)
+            issue = (_escalate_with_scan(issue, weak) if active else
+                     _escalate_with_scan(issue, weak, _staging_found_clean_issue(found),
+                                         _staging_not_read_in_full_issue(found)))
         return [issue] + extra
     if controlled and staged:
         issue = _outside_a_control_issue([desc for desc, _p, _k in staged])
         if verify:
-            issue = _escalate_with_scan(issue, staged)
+            issue = _escalate_with_scan(issue, staged, None, _outside_a_control_not_read_in_full_issue(
+                [desc for desc, _p, _k in staged]))
         return [issue] + extra
     if verify:
         graded, failure = _scan_or_reason(weak[0][:2])
@@ -445,7 +513,6 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
     # tree: 488 files fully read, no archives, nothing to find — the loader lived only in argv.
     # Short sentences, plain words: the previous single sentence nested parentheses, said "not read"
     # twice, and ended on the reassuring half so the warning read as an all-clear.
-    _NOT_CLEARED = "The program that used them can be the harmful part."
     if v.scanned_clean:
         outcome = f"A scan found no markers. {_NOT_CLEARED}"
     elif v.too_large:
@@ -456,7 +523,7 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
         outcome = "Part of it was unreadable."
     else:
         outcome = "It could not be scanned."
-    return [HygieneIssue(
+    return [(_FoundCleanByAScan if v.scanned_clean else HygieneIssue)(
         id="host-drop-artifact-weak",
         severity="info",
         title="Something unusual is on this host (weak indicator)",

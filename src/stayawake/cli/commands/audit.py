@@ -53,7 +53,8 @@ def run(a: argparse.Namespace) -> int:
         with status(f"checking {label}…", enabled=progress_on):
             outcomes.append(hygiene.run_check(label, check))
     issues = [i for o in outcomes for i in o.issues]
-    report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width())
+    report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width(),
+                            content_scanned=a.verify_artifacts)
     Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream_requested(a))).line(report)
     # persistence surface that could not be verified withholds the all-clear → exit 3 ("rotation
     # unsafe / not verified"), regardless of -f, because rotating into a live wiper is data-loss. The
