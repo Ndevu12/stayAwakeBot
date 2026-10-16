@@ -1,0 +1,20 @@
+# The shell port programs the Erlang VM runs for itself, and the processes that start them.
+# From erlang/otp at 0903361d:
+#   lib/os_mon/src/disksup.erl:396             open_port({spawn, "sh -s disksup 2>&1"}, [stream])
+#   erts/emulator/sys/unix/erl_child_setup.c:365  a spawn command runs as `sh -c <command>`
+#   erts/emulator/sys/unix/sys_drivers.c:131-143,1638-1639  the helper's argv[0]
+#   erts/etc/common/erlexec.c:382-388,543-552  the VM's argv[0], <bindir>/beam.smp
+#
+#   ports     each port program: the arguments its shell runs with, and the command the VM spawns
+#   shells    the names that shell is started as
+#   helpers   the argv[0] of the helper that starts every port program, exactly
+#   vms       the program names the VM runs as
+version: 1
+
+ports:
+  - argv: [-s, disksup]
+    spawned_as: "sh -s disksup 2>&1"
+
+shells: [sh, /bin/sh]
+helpers: [erl_child_setup, erl_child_setup.debug, erl_child_setup.valgrind]
+vms: [beam.smp, beam]

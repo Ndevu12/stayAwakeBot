@@ -142,6 +142,9 @@ reader, not the mechanism or the weakness it closed.
   once instead of twice, with the same verdict.
 - **`saw fix amend` says how to make a signature it needs** when the repository signs its commits and
   none can be made, and to run it again once one can.
+- **Erlang's own disk helper is no longer reported as code that is not on disk.** On a machine running
+  an Erlang program, `saw audit` no longer calls rotating credentials unsafe because of it, and `saw harden`
+  and `saw watch` leave it alone; every other shell handed its program on standard input is still reported.
 - **An editor task that hides itself is found however its file says so.** A task that runs when the
   folder opens and hides itself now reads as one that hides, read the way the editor reads it. A task
   the editor shows is still for you to check.
