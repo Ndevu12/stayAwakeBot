@@ -133,6 +133,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **A package that only builds a control character is no longer reported as a loader.** A terminal password
+  prompt such as getpass, installed or in a project's own files, no longer makes the project infected or
+  rotating credentials unsafe; every loader that runs what it builds is still confirmed.
 - **`saw discard --branch` says when the fix branch was never pushed,** or when it cannot check origin
   for a copy, instead of reporting that deleting the remote branch failed.
 - **A git command runs saw's check once.** A clone, checkout, pull, rebase or push now runs saw's check

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher, build_confirmed_loader_check
+from stayawake.bots.security.matchers.base import Matcher, build_corroborated_loader_check
 from stayawake.bots.security.obfuscation import analyze_file, is_generated_context
 from stayawake.bots.security.obfuscation.heuristics import _AUTHORED_OBFUSCATABLE_EXTS
 
@@ -25,7 +25,7 @@ class ObfuscationMatcher(Matcher):
                                  and build_artifact_sig is not None)
         if not source_sig and not inspect_build_outputs:
             return []
-        content_sig = build_confirmed_loader_check(all_signatures or signatures)
+        content_sig = build_corroborated_loader_check(all_signatures or signatures)
         findings: list[Finding] = []
         for rel in target.iter_files():
             if _ext(rel) not in _AUTHORED_OBFUSCATABLE_EXTS:
