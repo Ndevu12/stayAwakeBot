@@ -14,10 +14,11 @@ from . import settings as editorsettings
 from . import approvals as agentapprovals
 from stayawake.utils import elevate, hostdenial, textsafe
 from stayawake.utils.own_command import saw_through_sudo
+from . import hold_aside
 from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
                      NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
                      NOT_WHERE_IT_WAS_NAMED, OCCUPIED, REMOVED, SELF_ENFORCING, UNKNOWN,
-                     PathOutcome, apply_one, remove_one)
+                     PathOutcome, apply_one, remove_one, KIT_LEFT, KIT_REMOVED)
 
 __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
            "NEEDS_ROOT", "IN_A_LIVE_INSTALL", "NOT_HERE_YET", "REMOVED",
@@ -61,6 +62,15 @@ _CLAIM_AS_YOU = ("saw harden's controls are in place on this machine, but your a
                  "them. Run `{sudo_saw} harden` so only an administrator can.")
 _NEEDS_ROOT_NOTE = "Run `{sudo_saw} harden` to place the rest."
 _NOT_EVERYWHERE = "Some of saw harden's controls are not in place on this machine."
+_KIT_REMOVED = ("saw deleted a known worm's staging kit from this machine. Do NOT rotate any credential "
+                "yet: run `saw audit` first.")
+_KIT_LEFT = ("A known worm's staging kit could not be fully removed. Run `saw audit` before anything "
+             "else, and do NOT rotate any credential yet.")
+_MOVED_ASIDE = ("Something was where a control goes, so saw moved it aside, beside where it was, and "
+                "placed the control. `saw harden --take-back` puts it back, unless it is a known worm's "
+                "staging kit.")
+_MOVED_ASIDE_LEFT = ("Something saw moved aside could not be put back after its control could not be "
+                     "placed; it is still beside where it was. Run `saw audit`.")
 _STUCK_ONE = ("A control could not be placed because something else is already there. "
               "Run `saw audit` to see what.")
 _STUCK_MANY = ("{count} controls could not be placed because something else is already there. "
@@ -95,6 +105,16 @@ _EDITORS_NOT_BACK = ("An editor setting saw changed could not be put back. Run `
 _AGENTS_NOT_BACK = ("An AI agent setting saw changed could not be put back. Run `saw harden "
                     "--take-back` again.")
 _TAKEN_BACK_OR_ABSENT = frozenset({REMOVED, NOTHING_TO_REMOVE, OCCUPIED})
+_PUT_BACK_LINES = {
+    hold_aside.PUT_BACK: "What saw had moved aside so a control could be placed has been put back.",
+    hold_aside.KEPT_ASIDE: ("What was where a control goes is a known worm's staging kit, so saw kept it "
+                            "aside. Run `saw audit` before anything else."),
+    hold_aside.PATH_TAKEN: ("Something saw had moved aside was not put back, because something else is "
+                            "now where it was. Run `saw audit`."),
+    hold_aside.NOT_PUT_BACK: ("Something saw had moved aside could not be put back; it is still beside "
+                              "where it was. Run `saw audit`."),
+}
+_LEFT_ASIDE = frozenset({hold_aside.PATH_TAKEN, hold_aside.NOT_PUT_BACK})
 _SOMETHING_ELSE_THERE = ("A location saw guards holds something saw did not put there. "
                          "`saw audit` checks what is in it.")
 _EDITORS_NOT_LOOKED_UP = ("The editor settings saw changed could not be looked up, so they were "
@@ -144,6 +164,7 @@ def take_back(*, folders=_global_folders, remove=remove_one,
         agents_back = None
     outcomes = [remove(p) for p in folders()]
     done = bool(outcomes) and all(o.state in _TAKEN_BACK_OR_ABSENT for o in outcomes)
+    done = done and not any(o.put_back in _LEFT_ASIDE for o in outcomes)
     done = done and not left_running and editors_back is not None and editors_back.done
     done = done and agents_back is not None and agents_back.done
     placed_nothing = (done and unscheduled == schedule.NOTHING_TO_REMOVE
@@ -151,6 +172,9 @@ def take_back(*, folders=_global_folders, remove=remove_one,
                       and not editors_back.restored and not editors_back.kept
                       and not agents_back.restored)
     lines = [(_NOTHING_PLACED if placed_nothing else _TOOK_BACK) if done else _NOT_ALL_BACK, ""]
+    for state, line in _PUT_BACK_LINES.items():
+        if any(o.put_back == state for o in outcomes):
+            lines.extend([line, ""])
     if left_running:
         lines.extend([_WATCH_LEFT, ""])
     if editors_back is None or editors_back.unreadable_record:
@@ -206,8 +230,18 @@ def _what_to_do(outcomes) -> list[str]:
     No path is printed. Six of them, each with its own explanation, is what an operator was given
     for a result they could not act on any of.
     """
-    counted = Counter(o.state for o in outcomes)
+    left_aside = [o for o in outcomes if o.moved_aside and o.state not in _HELD]
+    kit_left = [o for o in outcomes if o.kit == KIT_LEFT]
+    counted = Counter(o.state for o in outcomes if o not in left_aside and o not in kit_left)
     out: list[str] = []
+    if any(o.kit == KIT_REMOVED for o in outcomes):
+        out.append(_KIT_REMOVED)
+    if kit_left:
+        out.append(_KIT_LEFT)
+    if any(o.moved_aside and o.state in _HELD for o in outcomes):
+        out.append(_MOVED_ASIDE)
+    if left_aside:
+        out.append(_MOVED_ASIDE_LEFT)
     if counted[NEEDS_ROOT]:
         out.append(_NEEDS_ROOT_NOTE.format(sudo_saw=saw_through_sudo()))
     if counted[LEFT_OPEN_OVER_CONTENT]:

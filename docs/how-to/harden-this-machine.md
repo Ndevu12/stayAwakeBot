@@ -24,7 +24,8 @@ When saw is installed in a virtual environment or with pipx, `sudo` does not fin
 the command the result gives you: it names the saw you ran by its full path.
 
 A write counts as in place only after it is read back. An unverifiable write is unknown, never
-success. Anything already in use is left unchanged — clear it, then run again. If a running process
+success. Something already where a control goes is moved aside so the control can be placed; a known
+worm's staging kit there is deleted instead. If a running process
 still holds code that is not on disk, the command refuses until that process is captured.
 
 To remove the controls it placed:
@@ -33,7 +34,7 @@ To remove the controls it placed:
 saw harden --take-back
 ```
 
-It removes only what it placed, and reports anything it did not. Add `sudo` for the ones root
+It removes only what it placed, puts back what it moved aside, and reports anything it did not. Add `sudo` for the ones root
 holds.
 
 It does not claim that one control protects anything else.

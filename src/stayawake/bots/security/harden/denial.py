@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import os
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from stayawake.utils import hostdenial
 from stayawake.utils.pathsafe import trusted_ancestor
+
+from stayawake.bots.security.hygiene import staging_kit
+
+from . import hold_aside, remove_kit
 
 
 ENFORCING = "enforcing"
@@ -26,6 +30,8 @@ UNKNOWN = "unknown"
 OCCUPIED = "occupied"
 
 _ROOT_DETAIL = "in place; only root can remove it"
+_MOVE_NEEDS_ROOT_DETAIL = ("something is where this control goes, and only an administrator can move it "
+                           "aside and lock the control here — run again with sudo")
 _LOCK_NEEDS_ROOT_DETAIL = ("only an administrator can lock a folder on this system — run again with "
                            "sudo; nothing was left in its place")
 _SELF_DETAIL = ("in place; anything running as you can remove it — run again with sudo to make it "
@@ -37,6 +43,9 @@ class PathOutcome:
     path: Path
     state: str
     detail: str
+    moved_aside: bool = False
+    put_back: str = ""
+    kit: str = ""
 
 
 def _occupied(path: Path) -> PathOutcome:
@@ -291,7 +300,41 @@ def _inside_a_node_installation(path: Path) -> bool:
 
 
 def apply_one(path: Path) -> PathOutcome:
-    """Create the denial at `path` if the location is free; never remove what is already there.
+    """Place the denial at `path`: where something is already there, move it aside beside the
+    location first; never remove it. Takes the location. Returns what was done."""
+    outcome = _apply(path, may_move=True)
+    if outcome.kit == KIT_LEFT:
+        return outcome
+    beside = _remove_kits_beside(path)
+    if not beside:
+        return outcome
+    return replace(outcome, kit=KIT_LEFT if beside == KIT_LEFT else KIT_REMOVED)
+
+
+def _remove_kits_beside(path: Path) -> str:
+    """Delete every known worm's staging kit saw had moved aside, or was removing, beside `path`.
+    Takes the location. Returns KIT_LEFT when one could not be fully removed, KIT_REMOVED when one
+    was, and "" when there was none."""
+    from .live import capture_path
+    try:
+        beside = [*staging_kit.held_aside(path), *staging_kit.being_removed(path)]
+    except OSError:
+        return ""
+    found = ""
+    for entry in beside:
+        if not _is_the_kit(entry):
+            continue
+        removal = remove_kit.remove(entry, capture_path(), named_for=path)
+        if removal.left is not None or removal.mismatch:
+            found = KIT_LEFT
+        elif removal.removed and found != KIT_LEFT:
+            found = KIT_REMOVED
+    return found
+
+
+def _apply(path: Path, *, may_move: bool) -> PathOutcome:
+    """Create the denial at `path` if the location is free, or with `may_move` once what is there
+    has been moved aside; never remove what is already there.
 
     Privilege is asked of the PATH, not of the command: most locations a payload stages into are
     the operator's own, and refusing to act on any of them until the whole run is root turns a
@@ -319,7 +362,7 @@ def apply_one(path: Path) -> PathOutcome:
         return _unknown(path, "could not be read")
     if st is not None:
         if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or not hostdenial.empty_dir(path):
-            return _occupied(path)
+            return _override(path) if may_move else _occupied(path)
     elif not _create_where_it_was_named(path):
         if not hostdenial.privileged() and not hostdenial.can_write_into(path):
             return PathOutcome(path, NEEDS_ROOT,
@@ -327,16 +370,16 @@ def apply_one(path: Path) -> PathOutcome:
         return _unknown(path, "could not be created")
     made = _held_open(path) if st is None else None
     try:
-        return _seal(path, made)
+        return _seal(path, made, may_move)
     finally:
         if made is not None:
             os.close(made)
 
 
-def _seal(path: Path, made: int | None) -> PathOutcome:
+def _seal(path: Path, made: int | None, may_move: bool) -> PathOutcome:
     """Make the empty folder at `path` read-only and lock it, handing back what this run changed when
-    either fails. Takes the location and an open descriptor on the folder this run created there (None
-    when it was there before). Returns the outcome."""
+    either fails. Takes the location, an open descriptor on the folder this run created there (None
+    when it was there before) and whether what arrives may still be moved aside. Returns the outcome."""
     owner_before = _owner_of(path)
     try:
         os.chmod(path, 0o555, follow_symlinks=False)
@@ -345,18 +388,95 @@ def _seal(path: Path, made: int | None) -> PathOutcome:
     except (OSError, NotImplementedError):
         return _hand_back_what_was_made(path, owner_before, "could not be written", made)[0]
     if not _still_empty_dir(path):
-        return _hand_back(path, owner_before)
+        return _override_what_arrived(path, _hand_back(path, owner_before), may_move)
     if not _sealed_over_nothing(path):
         handed, removed = _hand_back_what_was_made(path, owner_before, "could not be verified", made)
         if removed and hostdenial.lock_needs_privilege() and not hostdenial.privileged():
             return PathOutcome(path, NEEDS_ROOT, _LOCK_NEEDS_ROOT_DETAIL)
-        return handed
+        return _override_what_arrived(path, handed, may_move)
     held = hostdenial.held_by(path)
     if held == hostdenial.ROOT_HELD:
         return PathOutcome(path, ENFORCING, _ROOT_DETAIL)
     if held == hostdenial.SELF_HELD:
         return PathOutcome(path, SELF_ENFORCING, _SELF_DETAIL)
     return _hand_back_what_was_made(path, owner_before, "could not be verified", made)[0]
+
+
+_PLACED = frozenset({ENFORCING, SELF_ENFORCING})
+KIT_REMOVED, KIT_LEFT = "removed", "left"
+
+
+def _is_the_kit(path: Path) -> bool:
+    """Tell whether what is at `path` is the known worm's staging kit. Takes the location. Returns
+    False for anything this cannot tell, so nothing it cannot recognise is deleted."""
+    try:
+        return staging_kit.holds_a_kit(path)
+    except OSError:
+        return False
+
+
+def _remove_the_kit(path: Path) -> PathOutcome | None:
+    """Delete the known worm's staging kit at `path` and place the denial there. Takes the location.
+    Returns the outcome, or None when it is not the kit to delete."""
+    from .live import capture_path
+    removal = remove_kit.remove(path, capture_path())
+    if removal.mismatch:
+        return _unknown(path, "what was here changed while saw removed it, so it was put back and no "
+                              "control was placed")
+    if removal.left is not None:
+        return PathOutcome(path, UNKNOWN, "a known worm's staging kit could not be fully removed", kit=KIT_LEFT)
+    if not removal.removed:
+        return None
+    return replace(_apply(path, may_move=False), kit=KIT_REMOVED)
+
+
+def _override_what_arrived(path: Path, handed: PathOutcome, may_move: bool) -> PathOutcome:
+    """Move aside what arrived while the location was open, and place the denial once more. Takes the
+    location, what handing it back found and whether a move is still allowed. Returns the outcome."""
+    if handed.state == LEFT_OPEN_OVER_CONTENT and may_move:
+        return _override(path)
+    return handed
+
+
+def _override(path: Path) -> PathOutcome:
+    """Move what is at `path` aside, beside it, and place the denial there; put it back when the
+    denial could not be placed. Takes the location. Returns the outcome: placed, for an
+    administrator, or the reason neither could be done."""
+    if _is_the_kit(path):
+        removed = _remove_the_kit(path)
+        if removed is not None:
+            return removed
+    if hostdenial.lock_needs_privilege() and not hostdenial.privileged():
+        return PathOutcome(path, NEEDS_ROOT, _MOVE_NEEDS_ROOT_DETAIL)
+    held = hold_aside.hold(path)
+    if held is None:
+        return _unknown(path, "could not be read")
+    try:
+        return _move_and_place(path, held)
+    finally:
+        held.close()
+
+
+def _move_and_place(path: Path, held: hold_aside.Held) -> PathOutcome:
+    """Move what is held at `path` aside and place the denial there; put it back when the denial could
+    not be placed. Takes the location and what is held there. Returns the outcome."""
+    seen = held.seen
+    moved = hold_aside.move_aside(path, held)
+    if moved.mismatch:
+        return _unknown(path, "what was here changed while saw moved it, so it was put back and no "
+                              "control was placed")
+    if moved.held is None:
+        if not hostdenial.privileged():
+            return PathOutcome(path, NEEDS_ROOT, _MOVE_NEEDS_ROOT_DETAIL)
+        return _occupied(path)
+    placed = _apply(path, may_move=False)
+    if placed.state in _PLACED:
+        return replace(placed, moved_aside=True)
+    if hold_aside.put_back_this(path, moved.held, seen):
+        return placed
+    return PathOutcome(path, UNKNOWN, "saw moved what was here aside, could not place the control and "
+                                      "could not put it back, so it is still beside where it was",
+                       moved_aside=True)
 
 
 _NOT_THERE, _UNREADABLE, _LEADS_ELSEWHERE, _CLEAR = "not-there", "unreadable", "elsewhere", "clear"
@@ -387,7 +507,27 @@ def _unreadable(path: Path) -> PathOutcome:
     return PathOutcome(path, NEEDS_ROOT, "could not be read")
 
 
-def remove_one(path: Path) -> PathOutcome:
+def remove_one(path: Path, *, keeps_aside=None) -> PathOutcome:
+    """Take back the denial at `path`, then put back what saw moved aside to place it, while the
+    location is free and it is not something to keep aside. Takes the location and
+    `keeps_aside(held) -> bool` (default: the known staging kit stays aside). Returns the outcome."""
+    outcome = _remove_denial(path)
+    if outcome.state not in (REMOVED, NOTHING_TO_REMOVE):
+        return outcome
+    back = hold_aside.put_back(path, keeps_aside or _stays_aside)
+    return outcome if back == hold_aside.NOTHING_HELD else replace(outcome, put_back=back)
+
+
+def _stays_aside(held: Path) -> bool:
+    """Tell whether something saw moved aside must stay aside: the known staging kit, or a link to one.
+    Takes where it is held. Returns True for either, and for anything this cannot tell; raises
+    OSError when what a link leads to cannot be read."""
+    if os.path.islink(held):
+        return staging_kit.holds_a_kit(Path(os.path.realpath(held)))
+    return staging_kit.holds_a_kit(held)
+
+
+def _remove_denial(path: Path) -> PathOutcome:
     """Take back a denial this tool placed, and nothing else.
 
     What it will remove is decided by SHAPE, the same way a denial is recognised: an empty

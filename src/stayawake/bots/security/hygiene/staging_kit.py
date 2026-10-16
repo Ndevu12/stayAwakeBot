@@ -110,9 +110,19 @@ def holds_a_kit(folder: Path) -> bool:
         return False
     for kit in kits():
         held = _manifest(folder / kit.manifest)
-        if held is None or set(held) != kit.only_keys:
+        if held is not None and is_a_kit(kit.manifest, held):
+            return True
+    return False
+
+
+def is_a_kit(manifest: str, held: dict) -> bool:
+    """Tell whether what a manifest holds is a known worm's staging kit's: only the kit's keys, naming
+    one or more of its packages and nothing else. Takes the manifest's file name and what it holds.
+    Returns the answer."""
+    for kit in kits():
+        if kit.manifest != manifest or set(held) != kit.only_keys:
             continue
-        named = [held[key] for key in kit.only_keys]
-        if all(isinstance(v, dict) and v and set(v) <= kit.packages for v in named):
+        if all(isinstance(held[key], dict) and held[key] and set(held[key]) <= kit.packages
+               for key in kit.only_keys):
             return True
     return False

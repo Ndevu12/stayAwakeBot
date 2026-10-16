@@ -53,11 +53,14 @@ If a running process still holds code that is not on disk, it refuses: capture t
 If it could not examine what is running on this machine, it refuses as well. Neither depends on
 whether you gave it root.
 
-Anything already in use is left unchanged.
+Where something is already where a control goes, it is moved aside, beside where it was, and the control
+is placed. A known worm's staging kit there is deleted instead, and only the facts about it are kept.
+Where only an administrator can do this, the result says to run it again with sudo.
 
 When something where saw's git hooks run is not what saw installed, the result says so and
 names it. This command does not touch hooks; [`saw hook repair`](hook.md) puts them back.
 
-`--take-back` removes the controls this command placed, and reports anything it did not remove.
+`--take-back` removes the controls this command placed, puts back what it moved aside (never a
+staging kit), and reports anything it did not remove or put back.
 
 See [audit a machine](../../how-to/audit-a-machine.md) for the read-only view of the same host.
