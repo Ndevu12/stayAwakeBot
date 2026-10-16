@@ -45,8 +45,12 @@ class HygieneIssue:
 
 _WIPER_NOTE = "rotating can trigger a reported wiper that deletes your home directory"
 
+WORM_STAGING_KIT_ID = "host-worm-staging-kit"
+
 ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persistence",
                           "host-drop-artifacts",
+                          # a known worm's staging kit: that worm ran on this host
+                          WORM_STAGING_KIT_ID,
                           # a content-scan (--verify) found CONFIRMED worm code on the host
                           "host-artifact-content-infected",
                           # worm code appended to a module an installed application loads at startup

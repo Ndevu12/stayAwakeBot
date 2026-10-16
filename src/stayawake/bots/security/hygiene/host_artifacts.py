@@ -15,7 +15,8 @@ from pathlib import Path
 from stayawake.utils import hostdenial
 from stayawake.utils.pathsafe import canonical_id, grade
 
-from .models import (HOST_ARTIFACT_SCAN_BLOCKED_ID, HygieneIssue, _WIPER_NOTE,
+from . import staging_kit
+from .models import (HOST_ARTIFACT_SCAN_BLOCKED_ID, WORM_STAGING_KIT_ID, HygieneIssue, _WIPER_NOTE,
                      could_not_read)
 
 #
@@ -405,6 +406,83 @@ def _escalate_with_scan(issue: HygieneIssue, weak: list[tuple[str, Path, str]],
 
 
 def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
+    """Detect a known worm's staging kit and the drop-files this wave stages on a developer
+    workstation. Takes whether to content-scan what it finds (`saw audit --verify`). Returns the
+    findings: the staging kit's first, then the drop-files' as graded below."""
+    kit_issues, kit_unread = _staging_kit_issues()
+    return kit_issues + _graded_drop_files(verify, also_unread=kit_unread)
+
+
+def _staging_kits() -> tuple[list[Path], list[Path], list[Path], list[Path]]:
+    """Find a known worm's staging kit in each global module folder, in what `saw harden` could not
+    finish removing from it, and in what it moved aside. Returns the folders holding one in each of the
+    three, and those that could not be read."""
+    in_place: list[Path] = []
+    left: list[Path] = []
+    aside: list[Path] = []
+    unread: list[Path] = []
+    for location in _global_folders():
+        try:
+            if staging_kit.holds_a_kit(location):
+                in_place.append(location)
+            left += _kits_beside(location, staging_kit.being_removed)
+            aside += _kits_beside(location, staging_kit.held_aside)
+        except OSError:
+            unread.append(location)
+    return in_place, left, aside, unread
+
+
+def _kits_beside(location: Path, entries_beside) -> list[Path]:
+    """List the entries beside a location that hold a known worm's staging kit. Takes the location and
+    the reader of the entries beside it. Returns them; none when the location is not there and the
+    folder it would be in cannot be listed. Raises OSError when an entry, or the folder beside a location
+    that is there, cannot be read."""
+    try:
+        beside = entries_beside(location)
+    except OSError:
+        try:
+            os.lstat(location)
+        except FileNotFoundError:
+            return []
+        except OSError:
+            pass
+        raise
+    return [entry for entry in beside if staging_kit.holds_a_kit(entry)]
+
+
+_STILL_HERE = "It is still on this host, and that worm ran on this host at some point."
+
+
+def _staging_kit_issues() -> tuple[list[HygieneIssue], list[Path]]:
+    """The findings for a known worm's staging kit: one for a kit in place, one for a kit `saw harden`
+    could not finish removing and one for a kit it moved aside. Returns them, and the folders that could
+    not be read."""
+    in_place, left, aside, unread = _staging_kits()
+    issues = []
+    if in_place:
+        issues.append(_staging_kit_issue("A known worm's staging kit is on this host",
+                                         "That worm ran on this host at some point."))
+    if left:
+        issues.append(_staging_kit_issue("A known worm's staging kit is on this host",
+                                         f"saw harden could not finish removing it. {_STILL_HERE}"))
+    if aside:
+        issues.append(_staging_kit_issue("A known worm's staging kit is held aside on this host",
+                                         f"saw harden moved it aside. {_STILL_HERE}"))
+    return issues, unread
+
+
+def _staging_kit_issue(title: str, detail: str) -> HygieneIssue:
+    """One staging kit finding. Takes its title and detail. Returns it."""
+    return HygieneIssue(
+        id=WORM_STAGING_KIT_ID,
+        severity="warning",
+        title=title,
+        detail=detail,
+        remediation="Run `saw harden`, and do NOT rotate any credential yet.",
+    )
+
+
+def _graded_drop_files(verify: bool = False, also_unread: list[Path] = ()) -> list[HygieneIssue]:
     """Detect host filesystem drop-files this wave stages on a developer workstation.
 
     FP-bounded: a strong/specific IoC or a corroborated set (>=2) is a `warning`; a lone weak
@@ -421,7 +499,8 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
     strong, weak, unread, controlled = _host_artifacts()
     weak_descs = [desc for desc, _, _ in weak]
     found = strong + weak_descs
-    extra = [could_not_read(dict.fromkeys(unread))] if unread else []
+    unread = list(dict.fromkeys([*unread, *also_unread]))
+    extra = [could_not_read(unread)] if unread else []
     if not found:
         return extra
     staged = _staged(weak)

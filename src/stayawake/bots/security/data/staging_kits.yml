@@ -1,0 +1,12 @@
+# The staging kits a known worm's code builds in a global module folder on a developer host, as their
+# manifests read.
+#
+#   manifest    the file the kit's folder holds at its top level
+#   only_keys   the keys that manifest holds, and nothing else
+#   packages    the packages it depends on: one or more of them, and nothing else
+version: 1
+
+kits:
+  - manifest: package.json
+    only_keys: [dependencies]
+    packages: [axios, socket.io-client]
