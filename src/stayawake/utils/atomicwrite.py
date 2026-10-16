@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import errno
 import os
 import secrets
 import shutil
 import stat
+import sys
 from pathlib import Path
 
 from stayawake.utils import pathsafe
@@ -181,6 +183,53 @@ def move_into(source: Path, folder: Path, name: str) -> None:
             os.close(destination)
     finally:
         os.close(origin)
+
+
+_RENAME_NOREPLACE = 1          # renameat2(2), Linux
+_RENAME_EXCL = 0x00000004       # renameatx_np(2), macOS
+
+
+def rename_beside(folder: Path, name: str, new_name: str) -> None:
+    """Rename an entry of a folder, a file, link or folder, to another name in the same folder, never
+    replacing what is already there and never following a link the writer does not trust. Takes the
+    folder, the entry and its new name. Raises `FileExistsError` when the new name is taken, and
+    `OSError` when the folder is reached through such a link or the rename could not be made."""
+    _one_entry(name)
+    _one_entry(new_name)
+    opened = pathsafe.open_folder(Path(folder))
+    try:
+        if _kernel_rename_no_replace(opened, name, new_name):
+            return
+        try:
+            os.lstat(new_name, dir_fd=opened)
+        except FileNotFoundError:
+            os.rename(name, new_name, src_dir_fd=opened, dst_dir_fd=opened)
+            return
+        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), new_name)
+    finally:
+        os.close(opened)
+
+
+def _kernel_rename_no_replace(folder: int, name: str, new_name: str) -> bool:
+    """Ask the kernel to rename an entry of an open folder without replacing the new name. Takes the
+    folder, the entry and the new name. Returns True when it was renamed, and False when this kernel or
+    filesystem has no such rename; raises `OSError` when it refused."""
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        call = libc.renameat2 if sys.platform.startswith("linux") else (
+            libc.renameatx_np if sys.platform == "darwin" else None)
+    except (OSError, AttributeError):
+        return False
+    if call is None:
+        return False
+    call.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    flag = _RENAME_NOREPLACE if sys.platform.startswith("linux") else _RENAME_EXCL
+    if call(folder, os.fsencode(name), folder, os.fsencode(new_name), flag) == 0:
+        return True
+    failed = ctypes.get_errno()
+    if failed in (errno.EINVAL, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP):
+        return False
+    raise OSError(failed, os.strerror(failed), new_name)
 
 
 def _copy_into(origin: int, entry: str, folder: int, name: str) -> bool:

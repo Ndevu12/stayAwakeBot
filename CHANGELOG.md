@@ -133,6 +133,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw harden` places its controls where something is already there.** It moves what is there aside,
+  and `saw harden --take-back` puts it back; a known worm's staging kit there is deleted instead, keeping only
+  the facts about it. Where only an administrator can do this, it says to run it again with sudo.
 - **`saw audit` recognises a known worm's staging kit.** It reports it as a sign that worm ran on this
   host, holds credential rotation and says to run `saw harden`, also when `saw harden` could not finish
   removing it. Anything else in those folders reads as before.

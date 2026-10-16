@@ -22,6 +22,7 @@ from stayawake.bots.security.harden import approvals as agentapprovals
 from stayawake.bots.security.harden import settings as editorsettings
 from stayawake.bots.security.harden import live
 from stayawake.bots.security.harden import denial
+from stayawake.bots.security.harden import hold_aside
 from stayawake.bots.security.harden import jsonc
 from stayawake.bots.security.hygiene import host_artifacts
 from stayawake.bots.security.hygiene.models import HygieneIssue, PROCESSES_NOT_READABLE_ID
@@ -509,30 +510,58 @@ class TestApplyOne(unittest.TestCase):
         self.d = Path(tempfile.mkdtemp(prefix="harden-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
 
-    def test_occupied_path_is_left_alone(self):
+    def _placed_over(self, target):
+        """Place the control where something is, where the owner can lock, as macOS lets them."""
+        with locked(), mock.patch.object(hostdenial, "lock_needs_privilege", return_value=False):
+            out = denial.apply_one(target)
+        held = hold_aside.held_aside(target)
+        self.assertEqual(len(held), 1)
+        return out, held[0]
+
+    def test_occupied_path_is_moved_aside_whole_and_the_control_placed(self):
         target = self.d / "taken"
         target.mkdir()
         (target / "payload").write_text("x")
-        with mock.patch.object(hostdenial, "holds", return_value=False):
-            out = denial.apply_one(target)
-        self.assertEqual(out.state, denial.OCCUPIED)
-        self.assertTrue((target / "payload").exists())
+        out, held = self._placed_over(target)
+        self.assertEqual((out.state, out.moved_aside), (denial.SELF_ENFORCING, True))
+        self.assertEqual((held / "payload").read_text(), "x")
 
-    def test_file_at_the_path_is_not_removed(self):
+    def test_a_file_at_the_path_is_moved_aside_not_removed(self):
         target = self.d / "file"
         target.write_text("x")
-        with mock.patch.object(hostdenial, "holds", return_value=False):
-            out = denial.apply_one(target)
-        self.assertEqual(out.state, denial.OCCUPIED)
-        self.assertTrue(target.is_file())
+        out, held = self._placed_over(target)
+        self.assertEqual(out.state, denial.SELF_ENFORCING)
+        self.assertEqual(held.read_text(), "x")
 
-    def test_symlink_at_the_path_is_not_followed(self):
+    def test_a_link_at_the_path_is_moved_aside_as_a_link_and_what_it_leads_to_is_untouched(self):
+        elsewhere = self.d / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "KEEPME").write_text("x")
         target = self.d / "link"
-        target.symlink_to(self.d / "elsewhere")
-        with mock.patch.object(hostdenial, "holds", return_value=False):
-            out = denial.apply_one(target)
-        self.assertEqual(out.state, denial.OCCUPIED)
-        self.assertTrue(target.is_symlink())
+        target.symlink_to(elsewhere)
+        out, held = self._placed_over(target)
+        self.assertEqual(out.state, denial.SELF_ENFORCING)
+        self.assertTrue(held.is_symlink())
+        self.assertEqual(os.readlink(held), str(elsewhere))
+        self.assertEqual({p.name for p in elsewhere.iterdir()}, {"KEEPME"})
+
+    def test_where_only_an_administrator_can_lock_an_occupant_is_left_in_place(self):
+        for kind in ("dir", "file", "link"):
+            with self.subTest(kind=kind):
+                target = self.d / kind
+                if kind == "dir":
+                    target.mkdir()
+                    (target / "payload").write_text("x")
+                elif kind == "file":
+                    target.write_text("x")
+                else:
+                    target.symlink_to(self.d)
+                with mock.patch.object(hostdenial, "lock_needs_privilege", return_value=True), \
+                     mock.patch.object(hostdenial, "privileged", return_value=False):
+                    out = denial.apply_one(target)
+                self.assertEqual(out.state, denial.NEEDS_ROOT)
+                self.assertTrue(os.path.lexists(target))
+                self.assertEqual(hold_aside.held_aside(target), [])
 
     def test_unverified_flag_is_unknown(self):
         target = self.d / "empty"
@@ -612,10 +641,11 @@ class TestApplyOne(unittest.TestCase):
              mock.patch.object(hostdenial, "empty_dir", empty_until_the_write), \
              mock.patch("stayawake.bots.security.harden.denial.os.chmod"), \
              mock.patch("stayawake.bots.security.harden.denial.os.chown"), \
+             mock.patch.object(hostdenial, "lock_needs_privilege", return_value=True), \
              mock.patch.object(hostdenial, "set_immutable") as setter:
             out = denial.apply_one(target)
         setter.assert_not_called()
-        self.assertEqual(out.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertEqual(out.state, denial.NEEDS_ROOT)
         self.assertNotIn("not changed", out.detail)
         self.assertTrue((target / "payload").exists())
 

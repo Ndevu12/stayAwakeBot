@@ -82,7 +82,7 @@ class TestWhatItDidNotMakeOrWhatHoldsAnythingIsNeverRemoved(_Location):
             os.chmod(path, 0o555)
             return False
         outcome = self._place(lock=arrive_then_refuse)
-        self.assertEqual(outcome.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertEqual(outcome.state, denial.NEEDS_ROOT)
         self.assertTrue((self.target / "payload.js").is_file())
 
     def test_a_folder_that_holds_something_by_the_time_it_would_be_removed_is_kept(self):
