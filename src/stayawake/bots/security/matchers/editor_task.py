@@ -79,3 +79,10 @@ def command_lines(task: dict, task_file: dict) -> list[str]:
         if line not in lines:
             lines.append(line)
     return lines
+
+
+def runs_when_the_folder_opens(task: dict) -> bool:
+    """Tell whether the editor runs a task when its folder opens. Takes the task. Returns the answer."""
+    run_options = task.get("runOptions")
+    run_on = run_options.get("runOn") if isinstance(run_options, dict) else None
+    return named(run_on) == "folderopen" if run_on else task.get("runOn") == "folderOpen"
