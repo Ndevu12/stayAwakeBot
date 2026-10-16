@@ -133,6 +133,8 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw discard --branch` says when the fix branch was never pushed,** or when it cannot check origin
+  for a copy, instead of reporting that deleting the remote branch failed.
 - **An editor task that hides itself is found however its file says so.** A task that runs when the
   folder opens and hides itself now reads as one that hides, read the way the editor reads it. A task
   the editor shows is still for you to check.
