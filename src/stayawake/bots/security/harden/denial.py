@@ -26,6 +26,8 @@ UNKNOWN = "unknown"
 OCCUPIED = "occupied"
 
 _ROOT_DETAIL = "in place; only root can remove it"
+_LOCK_NEEDS_ROOT_DETAIL = ("only an administrator can lock a folder on this system — run again with "
+                           "sudo; nothing was left in its place")
 _SELF_DETAIL = ("in place; anything running as you can remove it — run again with sudo to make it "
                 "root-owned")
 
@@ -194,6 +196,49 @@ def _hand_back(path: Path, owner: int, failure: str | None = None) -> PathOutcom
                        "with sudo before anything else")
 
 
+def _hand_back_what_was_made(path: Path, owner: int, failure: str,
+                             made: int | None) -> tuple[PathOutcome, bool]:
+    """Undo what this run changed at `path` as `_hand_back` does, then remove the folder this run
+    created there while it is still that folder and still empty. Takes the location, its owner
+    before, the reason, and an open descriptor on the folder made there (None when it was there
+    before). Returns the outcome and whether the folder was removed."""
+    handed = _hand_back(path, owner, failure)
+    if handed.state != UNKNOWN or made is None or not _remove_what_was_made(path, made):
+        return handed, False
+    return _unknown(path, f"{failure}; the folder this run created was removed"), True
+
+
+def _remove_what_was_made(path: Path, made: int) -> bool:
+    """Remove the folder this run created at `path`. Takes the location and an open descriptor on the
+    folder made there, which keeps its inode from being given to anything else. Returns True when it
+    was that folder, unlocked and empty, and is gone; anything else there, or anything put in it, is
+    left."""
+    try:
+        st = path.lstat()
+        held = os.fstat(made)
+    except OSError:
+        return False
+    if (stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode)
+            or (st.st_dev, st.st_ino) != (held.st_dev, held.st_ino)):
+        return False
+    if hostdenial.immutable(path) or not hostdenial.empty_dir(path):
+        return False
+    try:
+        os.rmdir(path)
+    except OSError:
+        return False
+    return not os.path.lexists(path)
+
+
+def _held_open(path: Path) -> int | None:
+    """Open the folder this run just created at `path` and hold it. Takes the location. Returns the
+    descriptor, which the caller closes, or None when it cannot be opened as a folder."""
+    try:
+        return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+
+
 def _reachable_by(path: Path, owner: int) -> bool:
     """Whether `owner` can now open the directory and remove what is in it.
 
@@ -280,23 +325,38 @@ def apply_one(path: Path) -> PathOutcome:
             return PathOutcome(path, NEEDS_ROOT,
                                "this location is not yours to write to — run again with sudo")
         return _unknown(path, "could not be created")
+    made = _held_open(path) if st is None else None
+    try:
+        return _seal(path, made)
+    finally:
+        if made is not None:
+            os.close(made)
+
+
+def _seal(path: Path, made: int | None) -> PathOutcome:
+    """Make the empty folder at `path` read-only and lock it, handing back what this run changed when
+    either fails. Takes the location and an open descriptor on the folder this run created there (None
+    when it was there before). Returns the outcome."""
     owner_before = _owner_of(path)
     try:
         os.chmod(path, 0o555, follow_symlinks=False)
         if hostdenial.privileged():
             os.chown(path, 0, 0, follow_symlinks=False)
     except (OSError, NotImplementedError):
-        return _hand_back(path, owner_before, "could not be written")
+        return _hand_back_what_was_made(path, owner_before, "could not be written", made)[0]
     if not _still_empty_dir(path):
         return _hand_back(path, owner_before)
     if not _sealed_over_nothing(path):
-        return _hand_back(path, owner_before, "could not be verified")
+        handed, removed = _hand_back_what_was_made(path, owner_before, "could not be verified", made)
+        if removed and hostdenial.lock_needs_privilege() and not hostdenial.privileged():
+            return PathOutcome(path, NEEDS_ROOT, _LOCK_NEEDS_ROOT_DETAIL)
+        return handed
     held = hostdenial.held_by(path)
     if held == hostdenial.ROOT_HELD:
         return PathOutcome(path, ENFORCING, _ROOT_DETAIL)
     if held == hostdenial.SELF_HELD:
         return PathOutcome(path, SELF_ENFORCING, _SELF_DETAIL)
-    return _hand_back(path, owner_before, "could not be verified")
+    return _hand_back_what_was_made(path, owner_before, "could not be verified", made)[0]
 
 
 _NOT_THERE, _UNREADABLE, _LEADS_ELSEWHERE, _CLEAR = "not-there", "unreadable", "elsewhere", "clear"
