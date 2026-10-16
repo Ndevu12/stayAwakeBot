@@ -2036,7 +2036,7 @@ same logic.</p>
 <p>The last line of the report is the verdict. Upload findings to code scanning with <code>--sarif</code>, and
 pass <code>--require-db</code> when the job must not lose advisory coverage silently.</p>
 <h2 id="prove-the-gate-is-enforced">Prove the gate is enforced<a class="headerlink" href="#prove-the-gate-is-enforced" title="Permanent link">&para;</a></h2>
-<p>A gate that branch protection does not <strong>require</strong> is decoration. <code>saw guard check</code> checks the
+<p>A gate that neither branch protection nor a ruleset <strong>requires</strong> is decoration. <code>saw guard check</code> checks the
 requirement, not just the file; <code>saw audit --repo owner/name -f</code> reports it alongside the rest of a
 repository's posture.</p>
 

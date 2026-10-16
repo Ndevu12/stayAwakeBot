@@ -1825,7 +1825,7 @@
 
 <h1 id="saw-audit"><code>saw audit</code><a class="headerlink" href="#saw-audit" title="Permanent link">&para;</a></h1>
 <p>Audit the machine: credential exposure, editor settings for every editor of the VS Code family installed here, what a coding agent may run without asking, the start-up surface, and optionally a
-repository's branch protection. Every run ends with a <strong>rotation-safety verdict</strong>. See <a href="../../../how-to/audit-a-machine/">audit a
+repository's branch protection and rulesets. Every run ends with a <strong>rotation-safety verdict</strong>. See <a href="../../../how-to/audit-a-machine/">audit a
 machine</a> for what to do with each outcome. Scope: <a href="../../../how-to/audit-a-machine/#what-a-clean-audit-does-and-does-not-mean">what a clean
 audit does and does not
 mean</a>.</p>
@@ -1841,7 +1841,7 @@ mean</a>.</p>
 <tbody>
 <tr>
 <td><code>--repo OWNER/NAME</code></td>
-<td>Also audit that repository's branch protection (needs a token).</td>
+<td>Also audit that repository's branch protection and rulesets (needs a token).</td>
 </tr>
 <tr>
 <td><code>-b</code>, <code>--branch NAME</code></td>
@@ -1849,7 +1849,7 @@ mean</a>.</p>
 </tr>
 <tr>
 <td><code>-f</code>, <code>--fail</code></td>
-<td>Fail the run on a weaker warning-level hygiene issue. The rotation-safety axis gates unconditionally, independent of this flag.</td>
+<td>Fail the run on a weaker warning-level hygiene issue, and when <code>--repo</code> could not check whether the branch requires the worm gate. The rotation-safety axis gates unconditionally, independent of this flag.</td>
 </tr>
 <tr>
 <td><code>--verify</code></td>

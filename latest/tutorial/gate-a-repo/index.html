@@ -2006,7 +2006,7 @@ permission (see <a href="../../reference/cli/credentials/">credentials</a>).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>guard<span class="w"> </span>check
 </code></pre></div>
 <p>It reports whether a gate exists, whether it is pinned to a SHA, whether the pin is current, and — for
-a remote repository — whether branch protection actually requires the check.</p>
+a remote repository — whether branch protection or a ruleset actually requires the check.</p>
 <h2 id="2-preview-then-install">2. Preview, then install<a class="headerlink" href="#2-preview-then-install" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>saw<span class="w"> </span>guard<span class="w"> </span>setup<span class="w"> </span>--dry-run<span class="w">     </span><span class="c1"># print the workflow that would be written</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>saw<span class="w"> </span>guard<span class="w"> </span>setup<span class="w">               </span><span class="c1"># write it into the working tree to review and commit</span>

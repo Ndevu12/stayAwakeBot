@@ -1977,8 +1977,8 @@ subcommands sweep repositories exactly like <a href="../scan/"><code>saw scan</c
 <h2 id="saw-guard-check"><code>saw guard check</code><a class="headerlink" href="#saw-guard-check" title="Permanent link">&para;</a></h2>
 <p>Read-only. For each repository: is a worm gate present, is the Strix pin a SHA rather than a tag, is
 it behind the latest release, is it configured so a finding reaches someone and so the scanning job
-holds no write access it does not need, and — for a remote repository — does branch protection
-actually <strong>require</strong> its check. A gate that is not required is decoration.</p>
+holds no write access it does not need, and — for a remote repository — does branch protection or
+a ruleset actually <strong>require</strong> its check. A gate that is not required is decoration.</p>
 <p>A gate reports when it comments, raises an alert, or keeps the evidence. One that does none of those
 still reports through a red <strong>required</strong> check — so <code>check</code> condemns it only once it knows the check
 is not required, or that the gate fails no merge at all, and otherwise says plainly that it could not
