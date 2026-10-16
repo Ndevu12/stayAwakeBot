@@ -15,6 +15,7 @@ from stayawake.bots.security.hygiene.mechanism import (FETCH_OR_DECODE_THEN_RUN,
 from stayawake.bots.security.matchers import command_shape
 from stayawake.bots.security.matchers.command_shape import SPLIT_QUOTES as _SPLIT_QUOTES
 from stayawake.bots.security.matchers.base import Matcher, build_any_payload_check
+from stayawake.bots.security.matchers.payload_command import may_run_a_font
 from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL, Finding,
                                             Severity)
 from stayawake.bots.security.obfuscation import analyze_file
@@ -45,6 +46,9 @@ _INLINE_INTERPRETER_CODE = re.compile(
     rf"|(?:pwsh|powershell)(?:\.exe)?\s{{1,8}}{_OPTS}-(?:c|command|e|ec|encodedcommand)(?![\w-])"
     r")", re.IGNORECASE)
 _SCRIPT_SHEBANG = re.compile(r"^#!.{0,200}?\b(?:node|nodejs|bun|deno)\b")
+_RENAMES_PROGRAMS = re.compile(
+    r"(?m)^[ \t]{0,40}(?:export[ \t]{1,8})?PATH=|\balias[ \t]{1,8}[\w.-]|\bfunction[ \t]{1,8}[\w.-]"
+    r"|[\w.-]{1,100}[ \t]{0,8}\([ \t]{0,8}\)")
 
 
 @dataclass(frozen=True)
@@ -151,10 +155,30 @@ def _unsafe_location(path: Path, surface: ExecSurface) -> str | None:
 class _Grader:
     """Grade one surface against the confirmed payload fingerprints."""
 
-    def __init__(self, surface: ExecSurface, payload_check, max_bytes: int):
+    def __init__(self, surface: ExecSurface, payload_check, max_bytes: int, font_tools: frozenset[str]):
         self.surface = surface
         self.payload_check = payload_check
         self.max_bytes = max_bytes
+        self.font_tools = font_tools
+
+    def _runs_a_font(self, text: str) -> bool:
+        """Tell whether a script runs a font file on one of its live lines; a plain call of a font tool, or
+        a line that only writes fonts, is let through unless the script sets PATH or defines a function or
+        alias. Takes the script's text. Returns the answer."""
+        lifts = not _RENAMES_PROGRAMS.search(text)
+        return any(may_run_a_font(line, self.font_tools, lifts=lifts)
+                   for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+    def _file_runs_a_font(self, path: Path) -> bool:
+        """Tell whether a program file runs a font file. Takes the file. Returns False when it cannot be
+        read or is not text."""
+        try:
+            if path.stat().st_size > self.max_bytes:
+                return False
+        except OSError:
+            return False
+        text = pathsafe.read_regular_text(path) or ""
+        return "\0" not in text and self._runs_a_font(text)
 
     def _payload_in_file(self, path: Path) -> str | None:
         try:
@@ -204,11 +228,14 @@ class _Grader:
         hit = self.payload_check(text)
         if hit:
             return Judgement(CONFIRMED, where, key, f"its command matches {hit}", value, c)
+        if may_run_a_font(text, self.font_tools):
+            return Judgement(CONFIRMED, where, key, "its command runs a font file", value, c)
         carriers = []
         for path in _pointed_files(text, self.surface, base):
             found = self._payload_in_file(path) or (
                 "a program that downloads or decodes code and runs it"
-                if self._fetches_or_decodes(path) else None)
+                if self._fetches_or_decodes(path) else None) or (
+                "a program that runs a font file" if self._file_runs_a_font(path) else None)
             if found:
                 carriers.append((path, found))
         if carriers:
@@ -256,6 +283,9 @@ class _Grader:
             return Judgement(CONFIRMED, hook.path, hook.name,
                              "hook downloads or decodes code and runs it", hook=hook,
                              payload_files=(hook.path,))
+        if hook.runs and self._runs_a_font(text):
+            return Judgement(CONFIRMED, hook.path, hook.name, "hook runs a font file", hook=hook,
+                             payload_files=(hook.path,))
         if not hook.runs:
             return None
         if hookscript.claims_ours(text):
@@ -282,11 +312,11 @@ class _Grader:
         return found
 
 
-def judge(surface: ExecSurface, payload_check, max_bytes: int) -> list[Judgement]:
+def judge(surface: ExecSurface, payload_check, max_bytes: int, font_tools: frozenset[str]) -> list[Judgement]:
     """Grade everything on a surface. Takes the surface, a `check(text) -> signature id | None`
-    over the confirmed payload fingerprints, and the largest file to read. Returns one judgement
-    per graded entry, in surface order."""
-    grader = _Grader(surface, payload_check, max_bytes)
+    over the confirmed payload fingerprints, the largest file to read and the font tools' names.
+    Returns one judgement per graded entry, in surface order."""
+    grader = _Grader(surface, payload_check, max_bytes, font_tools)
     out = [j for j in map(grader.command, surface.commands) if j is not None]
     out += [j for j in map(grader.hook, surface.hooks) if j is not None]
     return out + grader.includes()
@@ -299,6 +329,23 @@ def payload_check_for(signatures, *, holding_anywhere: bool = False) -> object:
     return build_any_payload_check([s for s in signatures if s.get("matcher") == "content"
                                     and not s.get("only_in_its_own_files")],
                                    holding_anywhere=holding_anywhere)
+
+
+def font_tools_of(signatures) -> frozenset[str]:
+    """Collect the font tools' names the signatures list. Takes every signature. Returns the names."""
+    return frozenset(str(name).lower() for s in signatures for name in s.get("font_tools", ()))
+
+
+def removable_payload_check(signatures):
+    """Build the check a remediation applies to a value before taking it out: a known payload held
+    anywhere, or a font file the value may run. Takes every signature. Returns `check(text) -> reason |
+    None`."""
+    known = payload_check_for(signatures, holding_anywhere=True)
+    font_tools = font_tools_of(signatures)
+
+    def check(text: str):
+        return known(text) or ("a font file it runs" if may_run_a_font(text, font_tools) else None)
+    return check
 
 
 def evidence_of(judgement: Judgement) -> str:
@@ -330,7 +377,8 @@ class GitExecSurfaceMatcher(Matcher):
         target.read_errors.extend(f"git configuration {why}" for why in surface.unexamined)
         max_bytes = getattr(target.opts, "max_file_bytes", 2_000_000)
         findings = []
-        for j in judge(surface, payload_check_for(all_signatures or signatures), max_bytes):
+        every = all_signatures or signatures
+        for j in judge(surface, payload_check_for(every), max_bytes, font_tools_of(every)):
             sig = by_id.get(_TIER_SIGNATURE[j.tier])
             if sig is None:
                 continue
