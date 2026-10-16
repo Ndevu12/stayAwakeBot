@@ -133,6 +133,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **An editor task that hides itself is found however its file says so.** A task that runs when the
+  folder opens and hides itself now reads as one that hides, read the way the editor reads it. A task
+  the editor shows is still for you to check.
 - **An editor task that hides itself to run an ordinary build is for you to check.** A task that keeps
   itself out of sight and runs only an ordinary build, install or watch command when the folder opens
   is now reported for you to check instead of read as infected. One that runs anything else still reads

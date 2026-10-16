@@ -15,7 +15,8 @@ from stayawake.bots.security.matchers.base import (
     Matcher, load_jsonc, build_confirmed_loader_check)
 from stayawake.bots.security.matchers.command_shape import runs_downloaded_or_decoded_code
 from stayawake.bots.security.matchers.editor_task import (
-    command_lines, command_text, named, runs_when_the_folder_opens)
+    command_lines, command_text, hidden_from_the_task_list, keeps_its_terminal_out_of_sight, named,
+    runs_when_the_folder_opens)
 from stayawake.bots.security.matchers.payload_command import may_run_a_font, plain_call
 
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
@@ -49,16 +50,11 @@ _PANELS_HIDDEN = {"terminal.integrated.hideOnStartup": ("always", "whenempty"),
 _TASK_LIST = "tasks"
 
 
-def _conceals_itself(task: dict) -> bool:
-    """Tell whether a task keeps itself out of sight. Takes the task. Returns True when it is hidden
-    from the task list, does not bring its terminal forward when it starts, or does not show the
-    command it runs."""
-    if task.get("hide") is True:
-        return True
-    presentation = task.get("presentation")
-    if not isinstance(presentation, dict):
-        return False
-    return named(presentation.get("reveal")) in ("never", "silent") or presentation.get("echo") is False
+def _conceals_itself(task: dict, task_file: dict | None = None) -> bool:
+    """Tell whether a task keeps itself out of sight, as the editor reads it. Takes the task and the task
+    file it sits in. Returns True when it is left out of the list of tasks to run, or on some platform
+    does not bring its terminal forward when it starts or does not show the command it runs."""
+    return hidden_from_the_task_list(task) or keeps_its_terminal_out_of_sight(task, task_file or {})
 
 
 _MOST_DEPENDENCY_HOPS = 4
@@ -183,7 +179,7 @@ class StructuralJsonMatcher(Matcher):
         tasks = load_jsonc(target.read_text(tasks_path) or "")
         if not isinstance(tasks, dict):
             return False
-        if any(runs_when_the_folder_opens(task) and _conceals_itself(task) for task in self._tasks(tasks)):
+        if any(runs_when_the_folder_opens(task) and _conceals_itself(task, tasks) for task in self._tasks(tasks)):
             return True
         return any(f.signature_id in confirmed for f in self._task_findings(tasks_path, tasks, by_kind))
 
@@ -201,7 +197,7 @@ class StructuralJsonMatcher(Matcher):
                 # Auto-running is what the setting is FOR. Legitimate auto-run tasks are ordinary;
                 # legitimate auto-run tasks that hide themselves are not, so the pair is the signal.
                 kind = "vscode-task-autorun-visible"
-                if _conceals_itself(task):
+                if _conceals_itself(task, data):
                     kind = ("vscode-task-hidden-ordinary"
                             if ordinary and _runs_only_ordinary_commands(task, data, tasks, ordinary,
                                                                          editor_types)
