@@ -1251,6 +1251,33 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
     return False, None
 
 
+def _a_rebase_is_under_way(root: Path) -> bool:
+    """Tell whether git holds a rebase in progress in a repository, by the state git keeps for one. Takes
+    the root. Returns the answer; False when git could not say."""
+    state = gitutil.stdout(root, ["rev-parse", "--git-path", "rebase-merge"]).strip()
+    try:
+        return bool(state) and (root / state).is_dir()
+    except OSError:
+        return False
+
+
+def _within_a_rebase(event: str, argv: list[str], root: Path, config_path: str | None, include, label):
+    """Note or narrow a hook scan by what a rebase already read. Takes the event, its arguments, the
+    root, the operator config, and the files the event scans with its label. Returns `(include_only,
+    label, checked)`: a checkout a rebase makes scans its files and notes what it read, the scan after a
+    rebase leaves out the files whose content was scanned clean at the same path, and any other scan is
+    returned as given with nothing noted."""
+    if not isinstance(include, tuple) or not include:
+        return include, label, None
+    largest = operator_policy(config_path).opts.max_file_bytes
+    if event == "post-checkout" and _a_rebase_is_under_way(root):
+        return include, label, clean_contents.seen(root, include, largest)
+    if event == "post-rewrite" and argv[:1] == ["rebase"]:
+        to_scan, checked = clean_contents.unknown(root, include, largest, _policy_digest(config_path))
+        return (to_scan, label, checked) if to_scan else (False, None, None)
+    return include, label, None
+
+
 def _rewritten_pairs(text: str) -> list[tuple[str, str]]:
     """Read the commits git rewrote, as it hands them to post-rewrite. Takes the text. Returns each old
     and new commit; a line that does not name two commits is left out."""
@@ -1473,7 +1500,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     if _is_a_file_checkout(event, argv):
         include, label, checked = _file_checkout_scope(root, config_path)
     else:
-        (include, label), checked = _scan_scope(event, argv, root, config_path, rewritten), None
+        include, label = _scan_scope(event, argv, root, config_path, rewritten)
+        include, label, checked = _within_a_rebase(event, argv, root, config_path, include, label)
     if label is None:
         return 0
 
@@ -1520,8 +1548,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
 
 
 def _remember_clean_contents(root: Path, checked, config_path: str | None) -> None:
-    """Record the contents a clean file-checkout scan read. Takes the root, what was seen before the
-    scan and the operator config. A store that cannot be written is skipped."""
+    """Record the contents a clean scan read. Takes the root, what was seen before the scan and the
+    operator config. A store that cannot be written is skipped."""
     try:
         clean_contents.remember(root, checked, _policy_digest(config_path))
     except (OSError, ValueError):
