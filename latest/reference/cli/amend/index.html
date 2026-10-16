@@ -2027,7 +2027,9 @@ repository.</p>
 <ul>
 <li>A credential that owns the repository or holds admin on it. Permission to push is not enough.</li>
 <li>A clone that is up to date with the remote branches you are amending.</li>
-<li><code>user.name</code> and <code>user.email</code> set, so the amend records who made it.</li>
+<li><code>user.name</code> and <code>user.email</code> set, so the amend records who made it. When your <code>user.email</code> is not a
+  GitHub noreply address, the amend is committed under your name with your GitHub account's noreply
+  address, so your own address is not published; the authors of your commits are kept.</li>
 <li>A signing key, if the repository signs commits or the commits being replaced are signed.</li>
 </ul>
 <h2 id="it-stops-before-moving-anything">It stops before moving anything<a class="headerlink" href="#it-stops-before-moving-anything" title="Permanent link">&para;</a></h2>
