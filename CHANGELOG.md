@@ -134,7 +134,7 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 - **A fix saw publishes keeps your email address private, and a refused push says why.** `saw fix amend`
-  and `saw fix --pr` commit under your GitHub account's noreply address when the address you commit with
+  commits its rewrite under your GitHub account's noreply address when the address you commit with
   differs, so your own address is not published; a push GitHub still refuses says why in GitHub's words.
 - **`saw audit --help` says the audit is read-only**, as its documentation does.
 - **A package that only builds a control character is no longer reported as a loader.** A terminal password

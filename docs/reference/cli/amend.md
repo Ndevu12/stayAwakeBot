@@ -40,7 +40,9 @@ repository.
 
 - A credential that owns the repository or holds admin on it. Permission to push is not enough.
 - A clone that is up to date with the remote branches you are amending.
-- `user.name` and `user.email` set, so the amend records who made it.
+- `user.name` and `user.email` set, so the amend records who made it. When your `user.email` is not a
+  GitHub noreply address, the amend is committed under your name with your GitHub account's noreply
+  address, so your own address is not published; the authors of your commits are kept.
 - A signing key, if the repository signs commits or the commits being replaced are signed.
 
 ## It stops before moving anything

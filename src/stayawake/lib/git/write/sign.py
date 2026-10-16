@@ -31,7 +31,7 @@ from __future__ import annotations
 import os
 import shutil
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from stayawake.lib.git import operator_config, owned
@@ -184,24 +184,41 @@ def committer_identity(repo: str | Path) -> tuple[str, str] | None:
     return (name, email) if name and email else None
 
 
-def signing_env(repo: str | Path, base: Mapping[str, str] | None = None) -> dict:
+def signing_env(repo: str | Path, base: Mapping[str, str] | None = None,
+                committer: tuple[str, str] | None = None) -> dict:
     """The environment for the rewriting command: the committer is the OPERATOR.
 
-    Taken from the repository's own `user.name`/`user.email`, overriding whatever
-    `GIT_COMMITTER_*` the ambient environment carries — a git hook and an in-progress rebase both
-    export those, which would attribute the rewrite to the commit being replayed. `GIT_AUTHOR_*`
-    is deliberately left untouched: preserving the original author is the caller's job.
+    Taken from `committer` when given, else from the repository's own `user.name`/`user.email`,
+    overriding whatever `GIT_COMMITTER_*` the ambient environment carries — a git hook and an
+    in-progress rebase both export those, which would attribute the rewrite to the commit being
+    replayed. `GIT_AUTHOR_*` is deliberately left untouched: preserving the original author is the
+    caller's job.
     """
     env = dict(os.environ if base is None else base)
     for var in _COMMITTER_VARS:
         env.pop(var, None)
-    operator_name = _config_value(repo, "user.name")
-    operator_email = _config_value(repo, "user.email")
+    if committer is not None:
+        operator_name, operator_email = committer
+    else:
+        operator_name = _config_value(repo, "user.name")
+        operator_email = _config_value(repo, "user.email")
     if operator_name:
         env["GIT_COMMITTER_NAME"] = operator_name
     if operator_email:
         env["GIT_COMMITTER_EMAIL"] = operator_email
     return _refuse_to_prompt(env)
+
+
+def signer_pinned(status: SigningStatus, configured: tuple[str, str]) -> SigningStatus:
+    """Name the signing key by the configured identity, for commits made under another committer
+    address. Takes the signing decision and the configured name and email. Returns the decision with
+    `user.signingkey` set to the identity git would have named the key by, or unchanged when no
+    signature is made, a key is already named, or the format names its key another way."""
+    held = dict(status.config)
+    if not status.available or held.get("user.signingkey") or status.signature_format == "ssh":
+        return status
+    name, email = configured
+    return replace(status, config=tuple(sorted({**held, "user.signingkey": f"{name} <{email}>"}.items())))
 
 
 def signing_args(status: SigningStatus) -> tuple[str, ...]:
