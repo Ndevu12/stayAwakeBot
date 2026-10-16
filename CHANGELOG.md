@@ -133,6 +133,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw audit` recognises a known worm's staging kit.** It reports it as a sign that worm ran on this
+  host, holds credential rotation and says to run `saw harden`, also when `saw harden` could not finish
+  removing it. Anything else in those folders reads as before.
 - **A branch a ruleset protects is no longer reported as unprotected.** `saw audit --repo` and `saw guard
   check` read the rulesets that apply to the branch as well as its branch protection, say which protects it, and
   still report a worm gate that neither requires.

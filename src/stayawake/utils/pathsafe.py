@@ -30,11 +30,12 @@ def read_regular_bytes(path: Path) -> bytes | None:
         return None
 
 
-def read_regular_no_follow(path: Path, limit: int) -> bytes | None:
+def read_regular_no_follow(path: Path, limit: int, *, same_as: os.stat_result | None = None) -> bytes | None:
     """Read a regular file without following a link and without waiting on anything that is not a
-    file. Takes the path and the most bytes to accept. Returns the bytes, or None when the path is
-    not a regular file, is larger than `limit`, or cannot be read."""
-    return _read_regular(path, limit, getattr(os, "O_NOFOLLOW", 0))
+    file. Takes the path, the most bytes to accept and, when given, the file first found there. Returns
+    the bytes, or None when the path is not a regular file, is larger than `limit`, is not the file
+    first found there, or cannot be read."""
+    return _read_regular(path, limit, getattr(os, "O_NOFOLLOW", 0), same_as)
 
 
 def read_regular_following(path: Path, limit: int) -> bytes | None:
@@ -44,9 +45,10 @@ def read_regular_following(path: Path, limit: int) -> bytes | None:
     return _read_regular(path, limit, 0)
 
 
-def _read_regular(path: Path, limit: int, extra_flags: int) -> bytes | None:
+def _read_regular(path: Path, limit: int, extra_flags: int,
+                  same_as: os.stat_result | None = None) -> bytes | None:
     """Open, check and read a regular file without blocking. Takes the path, the most bytes to
-    accept and extra open flags. Returns the bytes, or None."""
+    accept, extra open flags and, when given, the file it must be. Returns the bytes, or None."""
     try:
         fd = os.open(str(path), os.O_RDONLY | extra_flags | getattr(os, "O_NONBLOCK", 0))
     except OSError:
@@ -54,6 +56,8 @@ def _read_regular(path: Path, limit: int, extra_flags: int) -> bytes | None:
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            return None
+        if same_as is not None and (info.st_dev, info.st_ino) != (same_as.st_dev, same_as.st_ino):
             return None
         with os.fdopen(fd, "rb", closefd=False) as fh:
             return fh.read(limit + 1)[:limit]

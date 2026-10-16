@@ -39,19 +39,20 @@ class _AHome(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def _kit(self):
-        kit = self.home / ".node_modules"
-        (kit / "node_modules").mkdir(parents=True)
-        (kit / "package.json").write_text(json.dumps({"dependencies": {"axios": "^1.18.1",
-                                                                       "socket.io-client": "^4.8.3"}}))
-        for name in ("axios", "socket.io-client"):
-            package = kit / "node_modules" / name
+    def _packages(self):
+        folder = self.home / ".node_modules"
+        (folder / "node_modules").mkdir(parents=True)
+        manifest = {"name": "tools", "version": "1.0.0", "dependencies": {"axios": "^1.18.1", "lodash": "^4"}}
+        (folder / "package.json").write_text(json.dumps(manifest))
+        for name in ("axios", "lodash"):
+            package = folder / "node_modules" / name
             package.mkdir()
-            (package / "package.json").write_text(json.dumps({"name": name, "version": "1.0.0", "main": "index.js"}))
+            (package / "package.json").write_text(json.dumps({"name": name, "version": "1.0.0",
+                                                              "main": "index.js"}))
             (package / "index.js").write_text("module.exports = function () {};\n")
 
     def _staging(self):
-        self._kit()
+        self._packages()
         (self.home / ".node_libraries").mkdir(mode=0o700)
 
     def _only(self, verify: bool) -> HygieneIssue:
@@ -293,15 +294,15 @@ class TestAnythingShortOfAFullCleanReadKeepsItsAdvice(unittest.TestCase):
         self.assertIn("rotate credentials LAST", issues[0].remediation)
 
 
-class TestALoneKitReadsAsBefore(_AHome):
+class TestALoneFolderOfPackagesReadsAsBefore(_AHome):
     def test_without_verify(self):
-        self._kit()
+        self._packages()
         issue = self._only(verify=False)
         self.assertEqual((issue.id, issue.remediation), ("host-drop-artifact-weak", "Run `saw audit --verify`."))
         self.assertEqual(rotation_safety({issue.id}), ROTATION_SAFE_PENDING_CHECK)
 
     def test_with_verify(self):
-        self._kit()
+        self._packages()
         issue = self._only(verify=True)
         self.assertEqual(issue.id, "host-drop-artifact-weak")
         self.assertIn("A scan found no markers.", issue.detail)
