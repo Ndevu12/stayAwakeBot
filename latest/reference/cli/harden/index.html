@@ -1859,10 +1859,13 @@ asks for or sees your password. This happens only when your account administers 
 <p>If a running process still holds code that is not on disk, it refuses: capture that process first.
 If it could not examine what is running on this machine, it refuses as well. Neither depends on
 whether you gave it root.</p>
-<p>Anything already in use is left unchanged.</p>
+<p>Where something is already where a control goes, it is moved aside, beside where it was, and the control
+is placed. A known worm's staging kit there is deleted instead, and only the facts about it are kept.
+Where only an administrator can do this, the result says to run it again with sudo.</p>
 <p>When something where saw's git hooks run is not what saw installed, the result says so and
 names it. This command does not touch hooks; <a href="../hook/"><code>saw hook repair</code></a> puts them back.</p>
-<p><code>--take-back</code> removes the controls this command placed, and reports anything it did not remove.</p>
+<p><code>--take-back</code> removes the controls this command placed, puts back what it moved aside (never a
+staging kit), and reports anything it did not remove or put back.</p>
 <p>See <a href="../../../how-to/audit-a-machine/">audit a machine</a> for the read-only view of the same host.</p>
 
 
