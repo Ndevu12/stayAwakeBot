@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher, build_confirmed_loader_check
+from stayawake.bots.security.matchers.base import Matcher, build_corroborated_loader_check
 from stayawake.bots.security.dependencies import RESOLVERS, AdvisoryStore
 from stayawake.bots.security.dependencies.installed import INSTALLED_TREES
 from stayawake.bots.security.dependencies.purl import Purl
@@ -30,7 +30,7 @@ class InstalledPackageAuditMatcher(Matcher):
         hook_sig = by_id.get("installed-lifecycle-hook")
         entry_sig = by_id.get("installed-entry-loader")
         hook_patterns = _confirmed_lifecycle_patterns(all_signatures) if hook_sig is not None else []
-        entry_check = build_confirmed_loader_check(all_signatures) if (entry_sig is not None and all_signatures) else None
+        entry_check = build_corroborated_loader_check(all_signatures) if (entry_sig is not None and all_signatures) else None
         deep = bool(getattr(target.opts, "deep", False))
         budget = [_DEEP_SWEEP_BUDGET]
         truncated: list = []

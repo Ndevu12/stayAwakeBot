@@ -21,8 +21,9 @@ from stayawake.bots.security.targets.base import ScanOptions, Target
 from tests.support import samples
 
 _REAL_SIGS = load_signatures()
-_MARKER = "String.fromCharCode(1" + "27)"          # a CONFIRMED code-loader fingerprint, assembled so
-#                                                    this test file itself never trips the self-scan
+_MARKER = samples.joined("String.", samples.FROM_CHAR_CODE, "(127); ", "ev", "al(x)")   # a CONFIRMED
+#                                                    code-loader fingerprint with the call that runs what it
+#                                                    builds, assembled so this test file never trips the self-scan
 
 _MAL_SIG = {"id": "malicious-installed-package", "category": "supply-chain-dep",
             "severity": "critical", "description": "malicious installed", "corpus": True}
