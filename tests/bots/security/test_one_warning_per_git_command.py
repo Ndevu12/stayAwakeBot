@@ -69,6 +69,26 @@ class TestOneGitCommandShowsEachFindingOnce(unittest.TestCase):
         self._tell(_infected(_finding("a.js", 1)))
         self.assertIn("a.js:9", self._tell(_infected(_finding("a.js", 9)))[1])
 
+    def test_a_finding_past_the_ones_a_warning_names_is_named_by_the_next_hook(self):
+        first = self._tell(_infected(*[_finding(f"f{n}.js") for n in range(1, 6)], _finding("package.json")))
+        self.assertIn("…and 1 more", first[1])
+        self.assertNotIn("package.json", first[1])
+        code, printed = self._tell(_infected(_finding("package.json")))
+        self.assertEqual(code, 1)
+        self.assertIn("package.json", printed)
+
+    def test_a_finding_whose_fields_are_not_text_is_still_a_worm_warning(self):
+        odd = SimpleNamespace(signature_id="known-loader", category="code-loader", path=Path("a.js"),
+                              line="3", commit_sha=None, confidence=CONFIRMED)
+        self.assertEqual(hook._finding_digest(odd), hook._finding_digest(odd))
+        code, printed = self._tell(_infected(odd))
+        self.assertEqual(code, 1)
+        self.assertIn("WORM DETECTED", printed)
+        for missing in ("signature_id", "path"):
+            with self.subTest(missing=missing):
+                bare = SimpleNamespace(**{k: v for k, v in vars(odd).items() if k != missing})
+                self.assertTrue(hook._finding_digest(bare))
+
     def test_another_git_command_shows_them_all_again(self):
         self._tell(_infected(_finding("a.js")), command="100:5")
         self.assertIn("a.js", self._tell(_infected(_finding("a.js")), command="101:5")[1])

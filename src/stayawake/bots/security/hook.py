@@ -1379,6 +1379,15 @@ def _scan_within_budget(root: Path, include, config_path: str | None, display: s
     return box["result"]
 
 
+_MOST_FINDINGS_NAMED = 5
+
+
+def _named_in_a_warning(findings) -> list:
+    """Choose the findings an infected warning names, confirmed ones first. Takes the findings. Returns
+    them, at most `_MOST_FINDINGS_NAMED`."""
+    return sorted(findings, key=lambda f: f.confidence != CONFIRMED)[:_MOST_FINDINGS_NAMED]
+
+
 def _warn_infected(display: str, quoted_root: str, result, findings=None) -> None:
     """Warn that freshly landed code is infected. Takes the repository as shown, the repository
     quoted for a shell command, the scan result and the findings to name (all of its, when not
@@ -1387,10 +1396,10 @@ def _warn_infected(display: str, quoted_root: str, result, findings=None) -> Non
     findings = result.findings if findings is None else findings
     print("\n" + _paint(f"⚠  {_BRAND}: WORM DETECTED in freshly-landed code — {display}",
                         "warn", err), file=err)
-    for f in sorted(findings, key=lambda f: f.confidence != CONFIRMED)[:5]:
+    for f in _named_in_a_warning(findings):
         loc = textsafe.plain(where_it_is(f.path, f.line, f.commit_sha))
         print("     " + _paint("•", "warn", err) + f" {what_it_is(f.signature_id, f.category)}  —  {loc}", file=err)
-    extra = len(findings) - 5
+    extra = len(findings) - _MOST_FINDINGS_NAMED
     if extra > 0:
         print(_paint(f"     • …and {extra} more", "dim", err), file=err)
     print(_paint(f"   Until it is cleaned, do NOT {_AVOID}.", "warn", err), file=err)
@@ -1519,7 +1528,7 @@ _MOST_FINDINGS_HELD_SHOWN = 512
 
 def _finding_digest(finding) -> str:
     """Name one finding by what it is and where. Takes the finding. Returns the digest."""
-    parts = [finding.signature_id, finding.path or "", str(finding.line or ""), finding.commit_sha or ""]
+    parts = [str(getattr(finding, name, "") or "") for name in ("signature_id", "path", "line", "commit_sha")]
     return hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest()[:16]
 
 
@@ -1549,7 +1558,7 @@ def _warn_once(root: Path | None, command: str | None, findings, warn, *, now=ti
         return
     try:
         held = {r: k for r, k in _warnings_shown().items() if os.path.isdir(r)}
-        shown = sorted(already | {_finding_digest(f) for f in new})
+        shown = sorted(already | {_finding_digest(f) for f in _named_in_a_warning(new)})
         held[where] = {"operation": command, "at": now(), "shown": shown[:_MOST_FINDINGS_HELD_SHOWN]}
         atomicwrite.replace(hookscript.warnings_shown_path(), json.dumps(held),
                             mode=atomicwrite.AS_A_PLAIN_WRITE,
