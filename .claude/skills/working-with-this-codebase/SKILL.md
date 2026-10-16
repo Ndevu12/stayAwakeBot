@@ -111,6 +111,12 @@ Fixing a violation usually leaves the same class one level deeper — **includin
 just wrote**. Re-run on the amended tree, fresh, and tell the verifiers which residuals are already
 accepted so they hunt new ground. Two rounds have never been enough; three has been.
 
+**Clean means no likely finding and no silent, serious one is left — not that no contrived variant
+exists.** Fix the likely findings and record the contrived ones as accepted residuals. When a class keeps
+reappearing one variant deeper, close it with one rule at the right depth, then stop: the next variant is
+a recorded residual, not another patch. Size the check to the risk — a verbatim move with a measured
+differential needs a light check, not a full round.
+
 ## Pace: run what you changed, let CI run everything
 
 The full suite is minutes; the affected modules are seconds. Run the modules locally, push, and let
