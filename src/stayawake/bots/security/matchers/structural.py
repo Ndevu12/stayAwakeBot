@@ -13,14 +13,13 @@ import shlex
 
 from stayawake.bots.security.models import CONFIRMED, Finding, Severity
 from stayawake.bots.security.matchers.base import (
-    Matcher, load_jsonc, build_confirmed_loader_check, REMOTE_FETCH_INTO_INTERPRETER)
-from stayawake.bots.security.matchers.command_shape import not_plain
+    Matcher, load_jsonc, build_confirmed_loader_check)
+from stayawake.bots.security.matchers.command_shape import not_plain, runs_downloaded_or_decoded_code
 from stayawake.bots.security.matchers.editor_task import command_lines, command_text, named
 from stayawake.utils.invocation import resolve_invocation
 
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
 
-_REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 _FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf|eot)\b", re.IGNORECASE)
 _EDITOR_VARIABLE = re.compile(r"\$\{[^${}\s]{1,200}\}")
 _EXECUTABLE_SUFFIX = re.compile(r"\.(?:exe|cmd|bat)$", re.IGNORECASE)
@@ -223,8 +222,8 @@ class StructuralJsonMatcher(Matcher):
     @staticmethod
     def _hook_payload(cmd, loader_check, font_tools=frozenset(), *, lifts=True):
         """The command runs an unmistakable payload → a reason string, else None."""
-        if _REMOTE_FETCH.search(cmd):
-            return "remote fetch → interpreter"
+        if runs_downloaded_or_decoded_code(cmd):
+            return "downloads or decodes code and runs it"
         if _may_run_a_font(cmd, font_tools, lifts=lifts):
             return "executes a font/binary"
         if loader_check and loader_check(cmd):

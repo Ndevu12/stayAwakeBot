@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""The shape of a command line git hands to a program: whether it is one plain call of a named
-program, and whether a stage that downloads feeds a stage that runs what it reads as code."""
+"""The shape of a command line: whether it is one plain call of a named program, and whether it
+downloads or decodes code and runs it."""
 from __future__ import annotations
 
 import os
 import re
 import shlex
+
+from stayawake.bots.security.hygiene.mechanism import FETCH_OR_DECODE_THEN_RUN
 
 SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "tcsh", "csh",
                     "yash", "rbash", "pwsh", "powershell", "cmd", "source", "."})
@@ -32,6 +34,24 @@ _SHELL_READS_DOWNLOAD = re.compile(
     r"|(?:^|[;&|(])\s*(?:source|\.))\s*<\(\s*"
     r"(?:\S*/)?(?:curl|wget|nc|ncat|socat|aria2c|ssh|scp|rsync|ftp|tftp)\b")
 _MAX_DEPTH = 3
+_DECODE_THEN_EVAL = re.compile(
+    r"\b(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\(\s{0,8}[^;)\n]{0,64}?"
+    r"\b(?:atob|Buffer\.from|b64decode|fromCharCode|decompress|fromhex|unhexlify)\b")
+_FETCHED = (r"(?:urlopen|urlretrieve|requests\.get|https?\.get|fetch(?=\s{0,8}\()|DownloadString|DownloadFile"
+            r"|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|recv|file_get_contents|curl|wget)")
+_EVALUATOR = r"(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\("
+_FETCHED_RE = re.compile(rf"\b{_FETCHED}\b", re.IGNORECASE)
+_FETCH_THEN_EVAL = re.compile(
+    rf"\b{_EVALUATOR}[^\n]{{0,256}}?\b{_FETCHED}\b|\b{_FETCHED}\b[^\n]{{0,256}}?\b{_EVALUATOR}",
+    re.IGNORECASE)
+_POWERSHELL_EVAL = re.compile(
+    r"\|\s{0,8}(?:iex|Invoke-Expression)\b"
+    r"|\b(?:pwsh|powershell)(?:\.exe)?\b[^\n]{0,512}?\b(?:iex|Invoke-Expression)\b",
+    re.IGNORECASE)
+_SUBSTITUTED_FETCH = re.compile(
+    r"\b(?:sh|bash|zsh|dash|ksh)\s{1,8}-[a-zA-Z]{0,4}c\s{1,8}[\"']?\$\(\s{0,8}(?:curl|wget)\b",
+    re.IGNORECASE)
+SPLIT_QUOTES = re.compile(r"''|\"\"|\\(?=\w)")
 
 
 def _decoded(text: str) -> str:
@@ -165,6 +185,18 @@ def not_plain(text: str) -> list[str]:
             elif _inline(name, args):
                 reasons.append(f"it hands code to {name} inline")
     return list(dict.fromkeys(reasons))
+
+
+def runs_downloaded_or_decoded_code(text: str) -> bool:
+    """Tell whether a command line downloads or decodes code and runs it. Takes the text. Returns the
+    answer."""
+    joined = SPLIT_QUOTES.sub("", text)
+    return bool(FETCH_OR_DECODE_THEN_RUN.search(joined)
+                or _DECODE_THEN_EVAL.search(joined)
+                or _FETCH_THEN_EVAL.search(joined)
+                or (_POWERSHELL_EVAL.search(joined) and _FETCHED_RE.search(joined))
+                or _SUBSTITUTED_FETCH.search(joined)
+                or feeds_a_download_to_a_runner(text))
 
 
 def feeds_a_download_to_a_runner(text: str, _depth: int = 0) -> bool:

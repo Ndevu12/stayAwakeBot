@@ -13,6 +13,7 @@ from stayawake.bots.security import hookscript
 from stayawake.bots.security.hygiene.mechanism import (FETCH_OR_DECODE_THEN_RUN, _other_writable,
                                                        _under_scratch)
 from stayawake.bots.security.matchers import command_shape
+from stayawake.bots.security.matchers.command_shape import SPLIT_QUOTES as _SPLIT_QUOTES
 from stayawake.bots.security.matchers.base import Matcher, build_any_payload_check
 from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL, Finding,
                                             Severity)
@@ -43,24 +44,6 @@ _INLINE_INTERPRETER_CODE = re.compile(
     rf"|(?:sh|bash|zsh|dash|ksh)\s{{1,8}}{_OPTS}-[a-zA-Z]{{0,4}}c(?![\w-])"
     rf"|(?:pwsh|powershell)(?:\.exe)?\s{{1,8}}{_OPTS}-(?:c|command|e|ec|encodedcommand)(?![\w-])"
     r")", re.IGNORECASE)
-_DECODE_THEN_EVAL = re.compile(
-    r"\b(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\(\s{0,8}[^;)\n]{0,64}?"
-    r"\b(?:atob|Buffer\.from|b64decode|fromCharCode|decompress|fromhex|unhexlify)\b")
-_FETCHED = (r"(?:urlopen|urlretrieve|requests\.get|https?\.get|fetch(?=\s{0,8}\()|DownloadString|DownloadFile"
-            r"|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|recv|file_get_contents|curl|wget)")
-_EVALUATOR = r"(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\("
-_FETCHED_RE = re.compile(rf"\b{_FETCHED}\b", re.IGNORECASE)
-_FETCH_THEN_EVAL = re.compile(
-    rf"\b{_EVALUATOR}[^\n]{{0,256}}?\b{_FETCHED}\b|\b{_FETCHED}\b[^\n]{{0,256}}?\b{_EVALUATOR}",
-    re.IGNORECASE)
-_POWERSHELL_EVAL = re.compile(
-    r"\|\s{0,8}(?:iex|Invoke-Expression)\b"
-    r"|\b(?:pwsh|powershell)(?:\.exe)?\b[^\n]{0,512}?\b(?:iex|Invoke-Expression)\b",
-    re.IGNORECASE)
-_SUBSTITUTED_FETCH = re.compile(
-    r"\b(?:sh|bash|zsh|dash|ksh)\s{1,8}-[a-zA-Z]{0,4}c\s{1,8}[\"']?\$\(\s{0,8}(?:curl|wget)\b",
-    re.IGNORECASE)
-_SPLIT_QUOTES = re.compile(r"''|\"\"|\\(?=\w)")
 _SCRIPT_SHEBANG = re.compile(r"^#!.{0,200}?\b(?:node|nodejs|bun|deno)\b")
 
 
@@ -233,12 +216,7 @@ class _Grader:
                              f"runs a file that matches {carriers[0][1]}", value, c,
                              payload_files=tuple(p for p, _ in carriers))
         joined = _SPLIT_QUOTES.sub("", text)
-        fetch_or_decode = bool(FETCH_OR_DECODE_THEN_RUN.search(joined)
-                               or _DECODE_THEN_EVAL.search(joined)
-                               or _FETCH_THEN_EVAL.search(joined)
-                               or (_POWERSHELL_EVAL.search(joined) and _FETCHED_RE.search(joined))
-                               or _SUBSTITUTED_FETCH.search(joined))
-        if fetch_or_decode or command_shape.feeds_a_download_to_a_runner(text):
+        if command_shape.runs_downloaded_or_decoded_code(text):
             return Judgement(CONFIRMED, where, key, "it downloads or decodes code and runs it",
                              value, c)
         reasons = []

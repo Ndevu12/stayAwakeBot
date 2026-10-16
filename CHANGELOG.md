@@ -133,6 +133,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **A Claude Code hook that runs downloaded code is found however it runs it.** One that downloads or
+  decodes code and runs it through `cmd`, PowerShell or a pipeline now reads infected, as such a git
+  hook already does. A hook that only downloads a file is still not reported.
 - **A git hook whose text only shares words with a decoy file is not a payload.** A hook that prints the
   name of a project, for example, is no longer reported as infected. A hook that carries a known payload
   still is.

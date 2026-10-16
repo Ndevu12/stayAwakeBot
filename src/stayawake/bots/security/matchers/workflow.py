@@ -8,7 +8,8 @@ import yaml
 
 from stayawake.lib import github_workflow
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher, REMOTE_FETCH_INTO_INTERPRETER
+from stayawake.bots.security.matchers.base import Matcher
+from stayawake.bots.security.matchers.command_shape import runs_downloaded_or_decoded_code
 
 DANGEROUS_TRIGGERS = frozenset({
     "pull_request_target", "issue_comment", "issues",
@@ -46,7 +47,6 @@ def untrusted_expr(text: str) -> str | None:
             return block
         i = end + 2
 
-REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 SELF_HOSTED = re.compile(r"\bself-hosted\b", re.IGNORECASE)
 DEPENDABOT = re.compile(r"dependabot", re.IGNORECASE)
 
@@ -110,8 +110,8 @@ class WorkflowYamlMatcher(Matcher):
             reason = None
             if any(SELF_HOSTED.search(l) for l in labels):
                 reason = "self-hosted runs-on"
-            elif any(REMOTE_FETCH.search(r) for r in runs):
-                reason = "remote-fetch|interpreter in run"
+            elif any(runs_downloaded_or_decoded_code(r) for r in runs):
+                reason = "a run step that downloads or decodes code and runs it"
             elif any(untrusted_expr(r) for r in runs):
                 reason = "untrusted github.event.* in run"
             if reason:
