@@ -1,5 +1,5 @@
-"""Read an editor task the way the editor reads it: the names of its settings, and the command lines it
-runs on each platform."""
+"""Read an editor task the way the editor reads it: the names of its settings, the command lines it runs on
+each platform, and whether it keeps itself out of sight."""
 from __future__ import annotations
 
 _PLATFORMS = (None, "osx", "linux", "windows")
@@ -86,3 +86,74 @@ def runs_when_the_folder_opens(task: dict) -> bool:
     run_options = task.get("runOptions")
     run_on = run_options.get("runOn") if isinstance(run_options, dict) else None
     return named(run_on) == "folderopen" if run_on else task.get("runOn") == "folderOpen"
+
+
+_EDITOR_PLATFORMS = ("osx", "linux", "windows")
+_OUT_OF_SIGHT = ("never", "silent")
+_TASKS_OF_THEIR_OWN = (None, "$customized", "shell", "process")
+
+
+def _truthy(value) -> bool:
+    """Tell whether a setting's value counts as set the way the editor's JavaScript reads it. Takes the
+    value. Returns False for false, 0, an empty string and null, True for anything else."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == value and value != 0
+    if isinstance(value, str):
+        return value != ""
+    return value is not None
+
+
+def hidden_from_the_task_list(task: dict) -> bool:
+    """Tell whether the editor leaves a task out of its list of tasks to run. Takes the task. Returns the
+    answer."""
+    return _truthy(task.get("hide"))
+
+
+def _presentation(scope) -> dict:
+    """Return how one part of a task file says its terminal shows: its older echoCommand and showOutput,
+    then presentation (or its older name terminal) over them, each only when it has the type the editor
+    reads. Takes the part. Returns the settings it gives, as echo and reveal."""
+    if not isinstance(scope, dict):
+        return {}
+    shown = {}
+    if isinstance(scope.get("echoCommand"), bool):
+        shown["echo"] = scope["echoCommand"]
+    if isinstance(scope.get("showOutput"), str):
+        shown["reveal"] = scope["showOutput"].lower()
+    presentation = scope.get("presentation")
+    if not _truthy(presentation):
+        presentation = scope.get("terminal")
+    if isinstance(presentation, dict):
+        if isinstance(presentation.get("echo"), bool):
+            shown["echo"] = presentation["echo"]
+        if isinstance(presentation.get("reveal"), str):
+            shown["reveal"] = presentation["reveal"].lower()
+    return shown
+
+
+def _out_of_sight(shown: dict) -> bool:
+    """Tell whether terminal settings keep a task's run from view. Takes the settings. Returns True when
+    the terminal does not come forward when the task starts, or the command it runs is not shown."""
+    return shown.get("reveal") in _OUT_OF_SIGHT or shown.get("echo") is False
+
+
+def keeps_its_terminal_out_of_sight(task: dict, task_file: dict) -> bool:
+    """Tell whether a task runs out of sight: its own presentation hides it, or on some platform its
+    terminal settings, read as the editor builds them, do — a task of its own takes its platform's block
+    over itself, then whatever the task file sets for every task fills in what it leaves unset; a task of
+    another kind reads only its own presentation. Takes the task and the task file it sits in. Returns the
+    answer."""
+    own_presentation = task.get("presentation")
+    if isinstance(own_presentation, dict) and _out_of_sight(_presentation({"presentation": own_presentation})):
+        return True
+    if "customize" in task or task.get("type") not in _TASKS_OF_THEIR_OWN:
+        return ("presentation" in task or "terminal" in task) and _out_of_sight(_presentation(task))
+    filled = task.get("command") is not None or "dependsOn" not in task
+    for platform in _EDITOR_PLATFORMS:
+        own = {**_presentation(task), **_presentation(task.get(platform))}
+        every_task = {**_presentation(task_file), **_presentation(task_file.get(platform))} if filled else {}
+        if _out_of_sight({**every_task, **own}):
+            return True
+    return False
