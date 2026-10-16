@@ -9,12 +9,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.lib.git.run import run, run_ok, stdout, stdout_bytes_fed
+from stayawake.lib.git.write.sign import committer_identity
 from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.utils import scratch
 
 BRANCH_PREFIX = "saw/uncommitted-"
 MAX_SAVED_BYTES = 2_000_000
 _BATCH = 200
+NO_IDENTITY = ("no name and email are set for your commits — set them with "
+               "`git config --global user.name \"Your Name\"` and "
+               "`git config --global user.email you@example.com`, then run this again")
 MESSAGE = ("saw: the uncommitted working tree, after the cleanup\n\n"
            "What the working tree held that was not committed, as it stands once the payload has "
            "been removed. This branch is local and is never pushed.\n")
@@ -182,7 +186,12 @@ def branch(snapshot: Snapshot, condemned: list[str] | None = None,
     files = len(theirs)
     if not files:
         return Preserved(withheld=dropped, unsaved=unsaved, unread=unread)
-    res = run(repo, ["commit-tree", tree, "-p", snapshot.head, "-m", MESSAGE])
+    identity = committer_identity(repo)
+    if identity is None:
+        return Preserved(reason=NO_IDENTITY, blocked=True, withheld=dropped, unsaved=unsaved, unread=unread)
+    name, email = identity
+    res = run(repo, ["-c", f"user.name={name}", "-c", f"user.email={email}",
+                     "commit-tree", tree, "-p", snapshot.head, "-m", MESSAGE])
     if res is None or res.returncode != 0:
         return Preserved(reason=f"the branch could not be committed ({_why(res)})", blocked=True,
                          withheld=dropped, unsaved=unsaved, unread=unread)

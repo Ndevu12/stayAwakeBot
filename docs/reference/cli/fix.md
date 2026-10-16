@@ -49,7 +49,8 @@ keeps that directory at the root, not every directory sharing the name. A genera
 whatever it holds.
 
 **Your uncommitted work is kept.** Once the cleanup is done, what your working tree holds and has
-not committed is recorded on a local branch named `saw/uncommitted-…`, as it then stands. It is
+not committed is recorded on a local branch named `saw/uncommitted-…`, as it then stands, under the
+`user.name` and `user.email` you set; with none set, it says how to set them and makes no branch. It is
 never pushed, and your branch is not touched. What the run removed is not
 on it, and neither is a file saw confirmed, nor one holding the same bytes as a file it confirmed;
 a file it cleaned in place is saved cleaned. A file your
