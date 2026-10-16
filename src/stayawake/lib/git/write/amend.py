@@ -96,7 +96,7 @@ def _author_env(headers: bytes) -> dict | None:
 
 def replacement_commit(repo: str | Path, commit: str, flagged_paths,
                        signing: SigningStatus | None = None,
-                       still_carries=None) -> Replacement:
+                       still_carries=None, *, committer: tuple[str, str] | None = None) -> Replacement:
     """`commit` with the payload removed: same parents, same message, same author, and a tree
     that is its own with only the flagged paths put back to what they should have been.
 
@@ -111,7 +111,7 @@ def replacement_commit(repo: str | Path, commit: str, flagged_paths,
     ps = parents(repo, commit)
     if ps is None:
         return Replacement(kind="unreadable", refusal=f"the parents of {commit[:12]} could not be read")
-    sha, kind, refusal = rewrite_commit(repo, commit, corrected.tree, ps, signing)
+    sha, kind, refusal = rewrite_commit(repo, commit, corrected.tree, ps, signing, committer=committer)
     if not sha:
         return Replacement(kind=kind, refusal=refusal)
     return Replacement(tree=corrected.tree, sha=sha, plan=corrected.plan,
@@ -120,8 +120,10 @@ def replacement_commit(repo: str | Path, commit: str, flagged_paths,
 
 
 def rewrite_commit(repo: str | Path, commit: str, tree: str, new_parents: list[str],
-                   signing: SigningStatus | None = None) -> tuple[str, str, str]:
-    """`commit` rebuilt on `new_parents` with `tree`, keeping its message, author and shape.
+                   signing: SigningStatus | None = None, *,
+                   committer: tuple[str, str] | None = None) -> tuple[str, str, str]:
+    """`commit` rebuilt on `new_parents` with `tree`, keeping its message, author and shape, committed
+    under `committer` when given, else the repository's configured identity.
 
     Returns `(sha, kind, refusal)`; `sha` is empty exactly when `kind` explains why. Used for the
     commit being replaced and for every commit after it, so a rebuilt suffix gets the same
@@ -158,7 +160,7 @@ def rewrite_commit(repo: str | Path, commit: str, tree: str, new_parents: list[s
             fh.write(body)
         res = run(repo, [*signing_args(signing), "commit-tree",
                          *sign_flags(signing, "commit-tree"), tree, *parent_args, "-F", msg_path],
-                  env=signing_env(repo, env), context=UNTRUSTED)
+                  env=signing_env(repo, env, committer), context=UNTRUSTED)
     finally:
         if msg_path:
             try:

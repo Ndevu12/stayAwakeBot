@@ -154,7 +154,7 @@ def submit_change_pr(wt: Path, slug: str, base: str, *, branch: str, title: str,
         #    get_authenticated_user returned None — but skipping is honest and cheaper.)
         # `occupied` joins these: a policy refusal follows the branch to a fork, so forking wastes
         # API calls and would report a taken branch as missing access.
-        if failure.reason not in ("workflow_scope", "signed_commits", "auth", "occupied"):
+        if failure.reason not in ("workflow_scope", "signed_commits", "auth", "occupied", "private_email"):
             forked = _fork_and_pr(wt, owner, name, base, branch, title, body, token)
             if forked is not None and forked.kind != "floor":
                 return forked

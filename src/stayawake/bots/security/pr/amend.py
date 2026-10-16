@@ -12,6 +12,8 @@ from typing import Callable, NamedTuple
 
 from stayawake.bots.security import version_scan
 from stayawake.bots.security.models import CONFIRMED, confirmed_for_removal
+from stayawake.core.identity.classify import classify_push_stderr, what_the_remote_said
+from stayawake.core.identity.publishing import publishing_identity
 from stayawake.utils import scratch
 from stayawake.bots.security.pr import arrival_questions, arrival_record
 from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
@@ -1236,6 +1238,16 @@ def _push_to(repo: Path, slug: str, branch: str, dest: str, token: str | None,
     return force_update_head(repo, slug, branch, token, lease=lease)
 
 
+def _refusal(branch: str, result) -> Reason:
+    """Name why the push of a branch was refused. Takes the branch and the push's result. Returns the
+    reason: a refusal over a private email address with its next step, else the refusal with what the
+    remote said."""
+    stderr = getattr(result, "stderr", "") or ""
+    if classify_push_stderr(stderr).reason == "private_email":
+        return Reason(Cause.PUSH_REFUSED_PRIVATE_EMAIL, branch)
+    return Reason(Cause.PUSH_REFUSED, branch, said=what_the_remote_said(stderr))
+
+
 def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, *,
                          pusher, lease: str | None = None,
                          sha12: str = "") -> BranchResult:
@@ -1243,10 +1255,9 @@ def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, 
     result = _push_to(repo, slug, branch, dest, token, lease, pusher,
                       force=aside is None)
     if aside is not None:
-        return BranchResult(branch, False,
-                            aside if result.ok else Reason(Cause.PUSH_REFUSED, branch))
+        return BranchResult(branch, False, aside if result.ok else _refusal(branch, result))
     if not result.ok:
-        return BranchResult(branch, False, Reason(Cause.PUSH_REFUSED, branch))
+        return BranchResult(branch, False, _refusal(branch, result))
     if pusher is not None:
         return BranchResult(branch, True)
     known, remote = _read_remote_head(repo, slug, branch, token)
@@ -1950,8 +1961,12 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         trust_local_programs=operator_context is None)
     if signing.must_refuse:
         return _refuse(Cause.SIGNING_UNAVAILABLE, signing.reason)
-    if sign.committer_identity(repo) is None:
+    configured = sign.committer_identity(repo)
+    if configured is None:
         return _refuse(Cause.NO_COMMITTER_IDENTITY)
+    committer = publishing_identity(configured, token)
+    if committer != configured:
+        signing = sign.signer_pinned(signing, configured)
 
     leases, unread = _collect_remote_heads(repo, slug, [n for n, _, _ in heads], token)
     if unread is not None:
@@ -1974,7 +1989,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     for sha, paths in infected.items():
         if sha in handled_blocked or all(p in purge for p in paths):
             continue
-        replacement = gitamend.replacement_commit(repo, sha, paths, signing, survives)
+        replacement = gitamend.replacement_commit(repo, sha, paths, signing, survives, committer=committer)
         if not replacement.ok:
             blocked_commits[sha] = (replacement.kind or "replacement",
                                     replacement.refusal or sha[:12])
@@ -1993,7 +2008,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     rebuilt = gitrebuild.rebuild_without_payload(
         repo, plan, replacements,
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
-                                                               signing),
+                                                               signing, committer=committer),
         survives, clean=clean, remove=remove, pre_blocked=blocked_commits,
         substitute=substitute, purge=purge, remove_in=remove_in)
     blocked = rebuilt.blocked
@@ -2187,6 +2202,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                                    str(len(unhandled)), ", ".join(sorted(unhandled))))
     if cleaned_here:
         survivors.append(Reason(Cause.SAVED_WORK_CLEANED_HERE, ", ".join(cleaned_here)))
+    if committer != configured:
+        survivors.append(Reason(Cause.COMMITTED_UNDER_NOREPLY, f"{committer[0]} <{committer[1]}>"))
     recovery = ""
     if failed:
         try:

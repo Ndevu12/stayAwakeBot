@@ -14,18 +14,23 @@ class NoRemoteTags:
 
 
 @contextmanager
-def github_answers(remote_head, *, permitted=True, protected=False, slug="acme/app"):
+def github_answers(remote_head, *, permitted=True, protected=False, slug="acme/app", account=None):
     """Answer every question the amend path asks the remote: who may rewrite, whether the refs
-    refreshed, what each remote branch is at, and which tags it holds.
+    refreshed, what each remote branch is at, which tags it holds, and whose account the token is.
 
     Takes `remote_head(branch) -> sha`, whether a rewrite is permitted, whether the branch is
-    protected, and the repository's slug. An answer a test has already put in place is kept.
+    protected, the repository's slug and the account (None: it cannot be read). An answer a test
+    has already put in place is kept.
     """
     import stayawake.bots.security.pr.amend as amendmod
     from stayawake.bots.security import remediator as remediatormod
+    from stayawake.core.identity import publishing as publishingmod
     at = "stayawake.bots.security.pr.amend."
     with ExitStack() as stack:
         stack.enter_context(mock.patch.object(remediatormod, "_preflight", return_value=None))
+        if not isinstance(publishingmod.get_authenticated_user, mock.Mock):
+            stack.enter_context(mock.patch.object(publishingmod, "get_authenticated_user",
+                                                  return_value=account))
         for target, patch in (
             ("gitutil.origin_slug", dict(return_value=slug)),
             ("authority.may_rewrite", dict(return_value=mock.Mock(
