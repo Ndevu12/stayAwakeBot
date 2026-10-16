@@ -14,6 +14,9 @@ sudo saw harden
 saw harden --take-back [--no-stream]
 ```
 
+When saw is installed where `sudo` does not look, such as a virtual environment or pipx, the
+command saw gives you names it by its full path.
+
 It also puts [`saw watch`](watch.md) in place, which ends code saw has identified from then on and
 after every login — the same arrangement that command makes. `--take-back` removes it with the
 rest.

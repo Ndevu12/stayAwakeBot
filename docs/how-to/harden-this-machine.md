@@ -20,6 +20,9 @@ sudo saw harden
 Run it again with `sudo` to act on the rest and to strengthen what is already in place. The result
 tells you which controls root holds and which you hold.
 
+When saw is installed in a virtual environment or with pipx, `sudo` does not find it by name. Run
+the command the result gives you: it names the saw you ran by its full path.
+
 A write counts as in place only after it is read back. An unverifiable write is unknown, never
 success. Anything already in use is left unchanged — clear it, then run again. If a running process
 still holds code that is not on disk, the command refuses until that process is captured.

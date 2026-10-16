@@ -133,6 +133,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **saw's `sudo` advice runs the saw you ran.** When saw is installed in a virtual environment or with
+  pipx, `saw harden` names it by its full path in the `sudo` command it gives you, which sudo would
+  otherwise not find.
 - **A fix saw publishes keeps your email address private, and a refused push says why.** `saw fix amend`
   commits its rewrite under your GitHub account's noreply address when the address you commit with
   differs, so your own address is not published; a push GitHub still refuses says why in GitHub's words.
