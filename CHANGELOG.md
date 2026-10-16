@@ -133,6 +133,7 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw audit --help` says the audit is read-only**, as its documentation does.
 - **A package that only builds a control character is no longer reported as a loader.** A terminal password
   prompt such as getpass, installed or in a project's own files, no longer makes the project infected or
   rotating credentials unsafe; every loader that runs what it builds is still confirmed.
