@@ -135,6 +135,8 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - **`saw discard --branch` says when the fix branch was never pushed,** or when it cannot check origin
   for a copy, instead of reporting that deleting the remote branch failed.
+- **A git command runs saw's check once.** A clone, checkout, pull, rebase or push now runs saw's check
+  once instead of twice, with the same verdict.
 - **An editor task that hides itself is found however its file says so.** A task that runs when the
   folder opens and hides itself now reads as one that hides, read the way the editor reads it. A task
   the editor shows is still for you to check.
