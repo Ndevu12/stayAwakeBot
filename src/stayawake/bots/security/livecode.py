@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+from stayawake.bots.security.erlang_port import runs_for_the_erlang_vm
 from stayawake.utils.invocation import resolve_invocation
 
 _IDENTIFIES = None
@@ -98,6 +99,7 @@ def live_code_processes(snap=None, grades: dict | None = None) -> list[LiveCode]
     found: list[LiveCode] = []
     if not snap.supported or not snap.processes:
         return found
+    processes_by_pid = {process.pid: process for process in snap.processes}
     for process in snap.processes:
         if process.argv_unreadable or not process.argv:
             continue
@@ -110,7 +112,7 @@ def live_code_processes(snap=None, grades: dict | None = None) -> list[LiveCode]
             if graded is not None:
                 break              # one per process; the rest of its argv is the same code
         if graded is None:
-            if invocation.reads_stdin:
+            if invocation.reads_stdin and not runs_for_the_erlang_vm(process, processes_by_pid):
                 graded = ("", "a program handed to it on standard input", False)
             elif program_is_gone(process.pid):
                 graded = ("", "a program that is no longer on this disk", False)
