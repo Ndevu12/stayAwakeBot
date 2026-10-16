@@ -49,6 +49,6 @@ pass `--require-db` when the job must not lose advisory coverage silently.
 
 ## Prove the gate is enforced
 
-A gate that branch protection does not **require** is decoration. `saw guard check` checks the
+A gate that neither branch protection nor a ruleset **requires** is decoration. `saw guard check` checks the
 requirement, not just the file; `saw audit --repo owner/name -f` reports it alongside the rest of a
 repository's posture.

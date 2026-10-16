@@ -133,6 +133,12 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **A branch a ruleset protects is no longer reported as unprotected.** `saw audit --repo` and `saw guard
+  check` read the rulesets that apply to the branch as well as its branch protection, say which protects it, and
+  still report a worm gate that neither requires.
+- **`saw audit` shows every result it has no answer for.** Each is listed with what stopped it, where the
+  report used to say no issues were found; `-f` fails when `--repo` could not check whether the branch requires the
+  worm gate.
 - **saw's `sudo` advice runs the saw you ran.** When saw is installed in a virtual environment or with
   pipx, `saw harden` names it by its full path in the `sudo` command it gives you, which sudo would
   otherwise not find.

@@ -15,7 +15,7 @@ saw guard check
 ```
 
 It reports whether a gate exists, whether it is pinned to a SHA, whether the pin is current, and — for
-a remote repository — whether branch protection actually requires the check.
+a remote repository — whether branch protection or a ruleset actually requires the check.
 
 ## 2. Preview, then install
 

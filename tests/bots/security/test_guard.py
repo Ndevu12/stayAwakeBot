@@ -15,7 +15,10 @@ from stayawake.bots.security import guard
 from stayawake.bots.security.guard import (Freshness, GuardStatus, StrixRef, classify_pin,
                              find_strix)
 from stayawake.bots.security.guard import detect as guard_detect
-from stayawake.bots.security.guard.detect import _context_required  # private: reached at its home
+from stayawake.lib.github_branch_protection import from_settings
+from stayawake.lib.adapters.github_api import ApiRead
+
+_NO_RULES = ApiRead(value=[])
 
 BLOG_WF = """name: Worm scan
 on: { push: { branches: [main] }, pull_request: {} }
@@ -125,6 +128,10 @@ class TestFindWormGate(unittest.TestCase):
         self.assertIsNone(guard.find_worm_gate({"w.yml": wf}))
 
 
+def _context_required(prot, context):
+    return context in from_settings(prot, None).required_checks
+
+
 class TestContextRequired(unittest.TestCase):
     def test_legacy_contexts(self):
         self.assertTrue(_context_required({"required_status_checks": {"contexts": ["strix"]}}, "strix"))
@@ -204,6 +211,7 @@ class TestCheck(unittest.TestCase):
 
     def test_remote_required_uses_derived_context(self):
         with mock.patch.object(guard.detect, "_remote_workflows", return_value=guard.RemoteRead({"w.yml": BLOG_WF})), \
+             mock.patch.object(guard.github_api, "get_branch_rules", return_value=_NO_RULES), \
              mock.patch.object(guard.github_api, "get_branch_protection",
                                return_value={"required_status_checks": {"contexts": ["strix"]}}), \
              mock.patch.object(guard.detect, "freshness", return_value=Freshness("fresh", "v0.1.4")):
@@ -214,6 +222,7 @@ class TestCheck(unittest.TestCase):
     def test_remote_fuzzy_worm_does_not_satisfy_strix_context(self):
         # The #1230 point: require the ACTUAL job context (strix), not a name containing "worm".
         with mock.patch.object(guard.detect, "_remote_workflows", return_value=guard.RemoteRead({"w.yml": BLOG_WF})), \
+             mock.patch.object(guard.github_api, "get_branch_rules", return_value=_NO_RULES), \
              mock.patch.object(guard.github_api, "get_branch_protection",
                                return_value={"required_status_checks": {"contexts": ["Worm Guard"]}}), \
              mock.patch.object(guard.detect, "freshness", return_value=Freshness("fresh", "v0.1.4")):

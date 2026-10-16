@@ -13,6 +13,7 @@ from typing import Callable
 from .models import (HygieneIssue, display_rank, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      BLOCKED_ID, BLOCKED_SURFACE_ID,
                      CREDENTIAL_EXPOSURE_IDS, UNVERIFIED_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
+                     UNCHECKED_GATE_IDS,
                      SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID,
                      ROTATION_SAFE, ROTATION_SAFE_PENDING_CHECK,
                      ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
@@ -43,7 +44,7 @@ from stayawake.utils import docs_site, textsafe
 from stayawake.utils.render import MARKER, SEVERITY, block, marked_list, paint
 
 __all__ = [
-    "HygieneIssue", "INCIDENT_TRIGGER_IDS", "ROTATION_UNSAFE_IDS", "rotation_safety",
+    "HygieneIssue", "INCIDENT_TRIGGER_IDS", "ROTATION_UNSAFE_IDS", "UNCHECKED_GATE_IDS", "rotation_safety",
     "incident_response_sequence",
     "check_credentials", "check_runner_persistence", "check_persistence",
     "check_persistence_coverage", "check_autorun", "check_host_artifacts",
@@ -278,10 +279,18 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
 _BLOCKED_IDS = {BLOCKED_ID, BLOCKED_SURFACE_ID}
 
 
+def _not_checked(issue: HygieneIssue) -> bool:
+    """Tell whether an issue says something was not checked and has no other place in the report.
+    Takes the issue. Returns True for a check that did not run, and for any other result not known,
+    except one about the start-up entries, which the rotation verdict above discloses."""
+    return issue.id in _BLOCKED_IDS or (issue.severity == "unknown"
+                                         and issue.id not in UNVERIFIED_PERSISTENCE_IDS)
+
+
 def _blocked_block(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
-    """The checks that did not run — neither a finding nor the absence of one, so printed on its own,
-    under every headline including the reassuring ones, where it is most easily missed."""
-    blocked = [i for i in issues if i.id in _BLOCKED_IDS]
+    """What this run did not check — neither a finding nor the absence of one, so printed on its
+    own, under every headline including the reassuring ones, where it is most easily missed."""
+    blocked = [i for i in issues if _not_checked(i)]
     if not blocked:
         return []
     out = [paint(f"{MARKER['warning']}  Not checked — this run did not cover these:",
@@ -326,10 +335,12 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
             head = "Local security hygiene: nothing was found because nothing was there to examine."
             if unrun:
                 head += " Some checks did not run either."
-        elif unrun:
+        elif ids & _BLOCKED_IDS:
             head = "Local security hygiene: nothing was found, and some checks did not run."
         elif ids & UNVERIFIED_PERSISTENCE_IDS:
             head = "Local security hygiene: no findings, but the persistence surface is UNVERIFIED."
+        elif unrun:
+            head = "Local security hygiene: nothing was found, and some checks did not run."
         else:
             head = f"{MARKER['ok']} Local security hygiene: no issues found."
         code = SEVERITY["ok"] if "no issues" in head else SEVERITY["warning"]

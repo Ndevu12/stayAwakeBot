@@ -14,8 +14,8 @@ subcommands sweep repositories exactly like [`saw scan`](scan.md) — local by d
 
 Read-only. For each repository: is a worm gate present, is the Strix pin a SHA rather than a tag, is
 it behind the latest release, is it configured so a finding reaches someone and so the scanning job
-holds no write access it does not need, and — for a remote repository — does branch protection
-actually **require** its check. A gate that is not required is decoration.
+holds no write access it does not need, and — for a remote repository — does branch protection or
+a ruleset actually **require** its check. A gate that is not required is decoration.
 
 A gate reports when it comments, raises an alert, or keeps the evidence. One that does none of those
 still reports through a red **required** check — so `check` condemns it only once it knows the check

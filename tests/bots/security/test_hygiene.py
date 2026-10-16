@@ -15,6 +15,9 @@ from unittest import mock
 from stayawake.bots.security.guard import GateProbe  # noqa: E402
 from stayawake.bots.security import hygiene
 from stayawake.utils import docs_site, hostdenial
+from stayawake.lib.adapters.github_api import ApiRead
+
+_NO_RULES = ApiRead(value=[])
 
 _state_dir = ""
 
@@ -1212,19 +1215,22 @@ class TestMechanismPersistenceComposition(unittest.TestCase):
 
 
 class TestBranchProtection(unittest.TestCase):
-    def test_noop_without_slug_or_token(self):
+    def test_without_a_repository_it_says_nothing_and_without_a_token_the_gate_is_unknown(self):
         self.assertEqual(hygiene.check_branch_protection(None, "t"), [])
-        self.assertEqual(hygiene.check_branch_protection("o/r", None), [])
+        self.assertEqual([i.id for i in hygiene.check_branch_protection("o/r", None)],
+                         ["worm-guard-requirement-unchecked"])
 
     def test_unprotected_branch_warns(self):
-        with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection",
+        with mock.patch("stayawake.lib.adapters.github_api.get_branch_rules", return_value=_NO_RULES), \
+             mock.patch("stayawake.lib.adapters.github_api.get_branch_protection",
                         return_value=None):
             issues = hygiene.check_branch_protection("o/r", "tok")
         self.assertEqual([i.id for i in issues], ["branch-unprotected"])
 
     def test_worm_guard_not_required_warns(self):
         prot = {"required_status_checks": {"contexts": ["build", "lint"]}}
-        with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
+        with mock.patch("stayawake.lib.adapters.github_api.get_branch_rules", return_value=_NO_RULES), \
+             mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
              mock.patch("stayawake.bots.security.guard.probe_remote_gate", return_value=GateProbe()):  # no strix wf
             issues = hygiene.check_branch_protection("o/r", "tok")
         self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
@@ -1232,7 +1238,8 @@ class TestBranchProtection(unittest.TestCase):
     def test_worm_guard_required_is_clean_via_heuristic(self):
         # No Strix workflow found → fall back to the fuzzy "worm" context match.
         prot = {"required_status_checks": {"contexts": ["Worm Guard — block infected merges"]}}
-        with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
+        with mock.patch("stayawake.lib.adapters.github_api.get_branch_rules", return_value=_NO_RULES), \
+             mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
              mock.patch("stayawake.bots.security.guard.probe_remote_gate", return_value=GateProbe()):
             self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
 
@@ -1241,7 +1248,8 @@ class TestBranchProtection(unittest.TestCase):
         # requires THAT context the gate IS enforced — the old fuzzy match wrongly warned here.
         from stayawake.bots.security.guard import StrixRef, GateProbe
         prot = {"required_status_checks": {"contexts": ["strix"]}}
-        with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
+        with mock.patch("stayawake.lib.adapters.github_api.get_branch_rules", return_value=_NO_RULES), \
+             mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
              mock.patch("stayawake.bots.security.guard.probe_remote_gate",
                         return_value=GateProbe(ref=StrixRef(".github/workflows/worm-scan.yml", "strix", "v0.1.4", "tag"))):
             self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
@@ -1249,7 +1257,8 @@ class TestBranchProtection(unittest.TestCase):
     def test_derived_strix_context_not_required_names_the_actual_context(self):
         from stayawake.bots.security.guard import StrixRef, GateProbe
         prot = {"required_status_checks": {"contexts": ["build"]}}
-        with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
+        with mock.patch("stayawake.lib.adapters.github_api.get_branch_rules", return_value=_NO_RULES), \
+             mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
              mock.patch("stayawake.bots.security.guard.probe_remote_gate",
                         return_value=GateProbe(ref=StrixRef(".github/workflows/w.yml", "strix", "v0.1.4", "tag"))):
             issues = hygiene.check_branch_protection("o/r", "tok")
@@ -1258,13 +1267,17 @@ class TestBranchProtection(unittest.TestCase):
 
     def test_read_failure_does_not_launder_into_a_false_not_required(self):
         # #1243: if the workflows can't be READ (auth/scope/rate/network), we can't determine the
-        # gate — stay silent, never warn "not required" (the old remote_gate `or {}` did exactly that).
+        # gate — never warn "not required" (the old remote_gate `or {}` did exactly that), and never
+        # read as clean either: the requirement is reported as not checked.
         from stayawake.bots.security.guard import GateProbe
         prot = {"required_status_checks": {"contexts": ["build"]}}
-        with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
+        with mock.patch("stayawake.lib.adapters.github_api.get_branch_rules", return_value=_NO_RULES), \
+             mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
              mock.patch("stayawake.bots.security.guard.probe_remote_gate",
                         return_value=GateProbe(cause="forbidden")):
-            self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
+            issues = hygiene.check_branch_protection("o/r", "tok")
+        self.assertEqual([i.id for i in issues], ["worm-guard-requirement-unchecked"])
+        self.assertEqual(issues[0].severity, "unknown")
 
 
 class TestAuditRender(unittest.TestCase):
