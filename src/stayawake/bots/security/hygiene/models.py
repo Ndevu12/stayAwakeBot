@@ -194,22 +194,25 @@ def incident_response_sequence() -> list[str]:
     ]
 
 
-def unconfirmed_staging_note() -> list[str]:
+def unconfirmed_staging_note(*, content_scanned: bool = False) -> list[str]:
     """One kind of staging artifact in more than one place: enough to gate rotation, not enough to
-    claim a live implant. Points at what to look at, and keeps rotation last."""
+    claim a live implant. Points at what to look at, and keeps rotation last. Takes whether this audit
+    already content-scanned what it found, which leaves out the step that does so. Returns the points."""
     return [
         "Inspect each location before trusting it — ordinary tooling puts one there, not several.",
-        "`saw audit --verify` content-scans them for payload code.",
+        *([] if content_scanned else ["`saw audit --verify` content-scans them for payload code."]),
         f"Do NOT rotate credentials yet: {_WIPER_NOTE}.",
         "Rebuild the host only if a scan or your own inspection finds payload code.",
     ]
 
 
-def left_outside_a_control_note() -> list[str]:
-    """What to do about one location a control did not cover. Keeps rotation last."""
+def left_outside_a_control_note(*, content_scanned: bool = False) -> list[str]:
+    """What to do about one location a control did not cover. Keeps rotation last. Takes whether this
+    audit already content-scanned what it found, which leaves out the step that does so. Returns the
+    points."""
     return [
         "Inspect it before trusting it.",
-        "`saw audit --verify` content-scans it for payload code.",
+        *([] if content_scanned else ["`saw audit --verify` content-scans it for payload code."]),
         f"Do NOT rotate credentials yet: {_WIPER_NOTE}.",
         "Rebuild the host only if a scan or your own inspection finds payload code.",
     ]

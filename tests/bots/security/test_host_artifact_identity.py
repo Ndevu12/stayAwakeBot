@@ -194,7 +194,7 @@ class VerifyEscalatesOnly(unittest.TestCase):
                 issues = self._run(boom)
                 ids = {i.id for i in issues}
                 self.assertEqual(ids, {"host-drop-artifacts-staging"})
-                self.assertIn("could not complete", issues[0].detail)
+                self.assertIn("could not finish reading every place", issues[0].detail)
 
 
 if __name__ == "__main__":

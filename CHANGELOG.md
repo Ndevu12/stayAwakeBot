@@ -139,6 +139,9 @@ reader, not the mechanism or the weakness it closed.
 - **`saw audit` shows every result it has no answer for.** Each is listed with what stopped it, where the
   report used to say no issues were found; `-f` fails when `--repo` could not check whether the branch requires the
   worm gate.
+- **`saw audit --verify` says what it found where a staging artifact sits in several places.** When the
+  scan reads every place in full and finds no worm markers, the finding says so, and the report no
+  longer asks you to run `saw audit --verify` again; it still says not to rotate any credential yet.
 - **saw's `sudo` advice runs the saw you ran.** When saw is installed in a virtual environment or with
   pipx, `saw harden` names it by its full path in the `sudo` command it gives you, which sudo would
   otherwise not find.
