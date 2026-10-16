@@ -18,13 +18,21 @@ def _fix_branches_on(remote: str, *, repo: str | Path | None = None,
     return None if found is None else sorted(set(found))
 
 
-def _outcome(slug: str, did: list[str], failed: list[str]) -> str:
+def _outcome(slug: str, did: list[str], failed: list[str], *, origin_unchecked: bool = False,
+             never_pushed: bool = False) -> str:
+    """Say what a discard did. Takes the repository's name, what it deleted, what it failed to delete,
+    whether origin could not be checked for a copy, and whether origin held none. Returns the line."""
+    unchecked = "; could not check origin for a copy" if origin_unchecked else ""
     if failed:
         done = f"; deleted {', '.join(did)}" if did else ""
-        return f"{slug}: FAILED to delete {', '.join(failed)}{done}"
+        return f"{slug}: FAILED to delete {', '.join(failed)}{done}{unchecked}"
     if did:
         note = " (PR auto-closed)" if any(d.startswith("remote") for d in did) else ""
-        return f"{slug}: discarded {', '.join(did)}{note}"
+        if never_pushed:
+            note += " (it was never pushed)" if len(did) == 1 else " (none was ever pushed)"
+        return f"{slug}: discarded {', '.join(did)}{note}{unchecked}"
+    if origin_unchecked:
+        return f"{slug}: no local '{FIX_BRANCH}' branch; could not check origin for one"
     return f"{slug}: no '{FIX_BRANCH}' branch — nothing to discard"
 
 
@@ -40,16 +48,13 @@ def discard_branch(repo: Path) -> str:
     remote = _fix_branches_on("origin", repo=repo)
     for b in local:
         (did if gitutil.delete_branch(repo, b) else failed).append(f"local {b}")
-    if remote is None:
-        if gitutil.stdout(repo, ["remote", "get-url", "origin"]).strip():
-            failed.append("remote branches")
-    else:
-        for b in remote:
-            (did if gitutil.delete_remote_branch("origin", b, repo=repo) else failed).append(f"remote {b}")
+    unchecked = remote is None and bool(gitutil.stdout(repo, ["remote", "get-url", "origin"]).strip())
+    for b in remote or []:
+        (did if gitutil.delete_remote_branch("origin", b, repo=repo) else failed).append(f"remote {b}")
     if failed and any(f.startswith("local ") for f in failed):
         done = f"; deleted {', '.join(did)}" if did else ""
         return (f"{slug}: FAILED to delete {', '.join(failed)} — is it checked out?{done}")
-    return _outcome(slug, did, failed)
+    return _outcome(slug, did, failed, origin_unchecked=unchecked, never_pushed=remote == [] and bool(did))
 
 
 def discard_pr(repo: Path, token: str) -> str:
