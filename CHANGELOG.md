@@ -136,6 +136,9 @@ reader, not the mechanism or the weakness it closed.
 - **A fix saw publishes keeps your email address private, and a refused push says why.** `saw fix amend`
   commits its rewrite under your GitHub account's noreply address when the address you commit with
   differs, so your own address is not published; a push GitHub still refuses says why in GitHub's words.
+- **Your saved work is committed as you.** The local branch `saw fix` saves your uncommitted work on is
+  committed under the name and email you set for all your repositories, where it could fail before; with
+  none set, saw says how to set them instead of guessing one.
 - **`saw audit --help` says the audit is read-only**, as its documentation does.
 - **A package that only builds a control character is no longer reported as a loader.** A terminal password
   prompt such as getpass, installed or in a project's own files, no longer makes the project infected or
