@@ -1379,16 +1379,27 @@ def _scan_within_budget(root: Path, include, config_path: str | None, display: s
     return box["result"]
 
 
-def _warn_infected(display: str, quoted_root: str, result) -> None:
+_MOST_FINDINGS_NAMED = 5
+
+
+def _named_in_a_warning(findings) -> list:
+    """Choose the findings an infected warning names, confirmed ones first. Takes the findings. Returns
+    them, at most `_MOST_FINDINGS_NAMED`."""
+    return sorted(findings, key=lambda f: f.confidence != CONFIRMED)[:_MOST_FINDINGS_NAMED]
+
+
+def _warn_infected(display: str, quoted_root: str, result, findings=None) -> None:
     """Warn that freshly landed code is infected. Takes the repository as shown, the repository
-    quoted for a shell command, and the scan result."""
+    quoted for a shell command, the scan result and the findings to name (all of its, when not
+    given)."""
     err = sys.stderr
+    findings = result.findings if findings is None else findings
     print("\n" + _paint(f"⚠  {_BRAND}: WORM DETECTED in freshly-landed code — {display}",
                         "warn", err), file=err)
-    for f in sorted(result.findings, key=lambda f: f.confidence != CONFIRMED)[:5]:
+    for f in _named_in_a_warning(findings):
         loc = textsafe.plain(where_it_is(f.path, f.line, f.commit_sha))
         print("     " + _paint("•", "warn", err) + f" {what_it_is(f.signature_id, f.category)}  —  {loc}", file=err)
-    extra = len(result.findings) - 5
+    extra = len(findings) - _MOST_FINDINGS_NAMED
     if extra > 0:
         print(_paint(f"     • …and {extra} more", "dim", err), file=err)
     print(_paint(f"   Until it is cleaned, do NOT {_AVOID}.", "warn", err), file=err)
@@ -1411,13 +1422,21 @@ def _operation_key(head: str, config_path: str | None, event: str, argv: list[st
     Returns the key, or None when no git process is found above this one."""
     called = hashlib.sha256("\0".join([event, *argv, "\1", given]).encode("utf-8", "replace"))
     called = called.hexdigest()[:16]
+    command = _git_command(started=started, me=me)
+    return f"{_clean_key(head, config_path)}:{called}:{command}" if command else None
+
+
+def _git_command(*, started=procsnap.started, me=os.getpid) -> str | None:
+    """Name the git process a hook runs under. Takes the readers of when a process started and of
+    this process. Returns its pid and start time, or None when no git process is found above this
+    one."""
     pid = me()
     for _ in range(_ANCESTORS_TO_GIT):
         start = started(pid)
         if start is None:
             return None
         if start.name in _GIT_PROGRAMS:
-            return f"{_clean_key(head, config_path)}:{called}:{pid}:{start.at_ns}"
+            return f"{pid}:{start.at_ns}"
         if start.ppid <= 1:
             return None
         pid = start.ppid
@@ -1504,19 +1523,43 @@ def _when(made: dict) -> float:
     return float(at) if not isinstance(at, bool) and isinstance(at, (int, float)) else 0.0
 
 
-def _warn_once(root: Path | None, operation: str | None, warn, *, now=time.time) -> None:
-    """Show an infected warning once per git operation. Takes the repository, the operation's key
-    (None when it cannot be told), what shows the warning and the clock."""
+_MOST_FINDINGS_HELD_SHOWN = 512
+
+
+def _finding_digest(finding) -> str:
+    """Name one finding by what it is and where. Takes the finding. Returns the digest."""
+    parts = [str(getattr(finding, name, "") or "") for name in ("signature_id", "path", "line", "commit_sha")]
+    return hashlib.sha256("\0".join(parts).encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _shown_for(last, command: str, at: float) -> set[str]:
+    """Read the findings already shown for this git command moments ago. Takes the repository's record,
+    the command's key and the time now. Returns their digests; none for a record it cannot read."""
+    if not _recorded_moments_ago(last, command, at):
+        return set()
+    shown = last.get("shown")
+    return {d for d in shown if isinstance(d, str)} if isinstance(shown, list) else set()
+
+
+def _warn_once(root: Path | None, command: str | None, findings, warn, *, now=time.time) -> None:
+    """Show an infected warning once per git command for each finding. Takes the repository, the git
+    command's key (None when it cannot be told), the findings, what shows the warning for the findings
+    it is given, and the clock. A finding already shown for the same git command moments ago is left
+    out, and nothing is shown when every finding was."""
     where = os.path.realpath(root) if root is not None else None
-    if where is not None and operation is not None and _recorded_moments_ago(
-            _warnings_shown().get(where), operation, now()):
+    findings = list(findings)
+    already = (_shown_for(_warnings_shown().get(where), command, now())
+               if where is not None and command is not None else set())
+    new = [f for f in findings if _finding_digest(f) not in already]
+    if findings and not new:
         return
-    warn()
-    if where is None or operation is None:
+    warn(new)
+    if where is None or command is None:
         return
     try:
         held = {r: k for r, k in _warnings_shown().items() if os.path.isdir(r)}
-        held[where] = {"operation": operation, "at": now()}
+        shown = sorted(already | {_finding_digest(f) for f in _named_in_a_warning(new)})
+        held[where] = {"operation": command, "at": now(), "shown": shown[:_MOST_FINDINGS_HELD_SHOWN]}
         atomicwrite.replace(hookscript.warnings_shown_path(), json.dumps(held),
                             mode=atomicwrite.AS_A_PLAIN_WRITE,
                             at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
@@ -1608,7 +1651,7 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         _remember_history(root, head, config_path)
     if clean_key and not from_settings:
         _remember(root, "")
-    found = _tell(result, shown, rescan, quoted_root, root=root, operation=operation)
+    found = _tell(result, shown, rescan, quoted_root, root=root, command=_git_command())
     if found is None:
         found = 0
         if clean_key and _holds_its_commit(root, head):
@@ -1634,14 +1677,15 @@ def _remember_clean_contents(root: Path, checked, config_path: str | None) -> No
 
 
 def _tell(result, shown: str, rescan: str, quoted_root: str, *, root: Path | None = None,
-          operation: str | None = None) -> int | None:
+          command: str | None = None) -> int | None:
     """Print what a hook scan found. Takes the result, the repository as shown, the command that
-    rescans it, the repository quoted for a shell, and the repository and git operation an infected
+    rescans it, the repository quoted for a shell, and the repository and git command an infected
     warning is shown once for. Returns 1 infected, 2 not verified, 0 for a finding to review, or
     None when it found nothing."""
     err = sys.stderr
     if result.infected:
-        _warn_once(root, operation, lambda: _warn_infected(shown, quoted_root, result))
+        _warn_once(root, command, result.findings,
+                   lambda findings: _warn_infected(shown, quoted_root, result, findings))
         return 1
     if result.error:
         print(_paint(f"⚠  {_BRAND}: {shown} could not be scanned, so it is not known to be clean.",
