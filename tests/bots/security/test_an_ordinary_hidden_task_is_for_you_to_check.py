@@ -49,6 +49,11 @@ class TestAnOrdinaryHiddenTaskIsForYouToCheck(unittest.TestCase):
                     self.assertNotIn(_INFECTED, found)
                     self.assertEqual(found[_CHECK].severity, Severity.HIGH)
 
+    def test_a_hidden_task_that_installs_a_marketplace_extension_is_for_you_to_check(self):
+        for extension in ("esbenp.prettier-vscode", "ms-python.python@2024.1.0"):
+            with self.subTest(extension=extension):
+                self.assertIn(_CHECK, _grade(_hidden(command=f"code --install-extension {extension}")))
+
     def test_an_editor_task_with_no_command_of_its_own_is_for_you_to_check(self):
         for fields in ({"type": "npm", "script": "watch"},
                        {"type": "typescript", "tsconfig": "tsconfig.json"},
@@ -77,6 +82,15 @@ class TestEveryOtherHiddenTaskStillReadsInfected(unittest.TestCase):
                         "./node_modules/.bin/tsc -w", "git clone https://example.invalid/r.git"):
             with self.subTest(command=command):
                 found = _grade(_hidden(command=command))
+                self.assertIn(_INFECTED, found)
+                self.assertNotIn(_CHECK, found)
+
+    def test_a_hidden_task_that_installs_an_extension_file_still_reads_infected(self):
+        for extension in ("./tools/helper.vsix", "helper.vsix", "../x/y.vsix", "https://example.invalid/x.vsix",
+                          ".\\tools\\helper.vsix", "HELPER.VSIX", "${workspaceFolder}/helper.vsix",
+                          "./tools/helper"):
+            with self.subTest(extension=extension):
+                found = _grade(_hidden(command=f"code --install-extension {extension}"))
                 self.assertIn(_INFECTED, found)
                 self.assertNotIn(_CHECK, found)
 

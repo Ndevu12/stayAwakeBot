@@ -8,6 +8,8 @@ fire on a lifecycle event (SessionStart is the folderOpen analogue — it runs o
 """
 from __future__ import annotations
 
+import re
+
 from stayawake.bots.security.models import CONFIRMED, Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, load_jsonc, build_confirmed_loader_check)
@@ -60,17 +62,27 @@ def _conceals_itself(task: dict) -> bool:
 
 
 _MOST_DEPENDENCY_HOPS = 4
+_EXTENSION_INSTALL = "--install-extension"
+_MARKETPLACE_EXTENSION = re.compile(r"\A[A-Za-z0-9][\w-]*\.[\w-]+(?:@[\w.+-]+)?\Z")
+
+
+def _names_a_marketplace_extension(word: str) -> bool:
+    """Tell whether a word names an editor extension by its marketplace id, with or without a version,
+    and not by a file. Takes the word. Returns the answer."""
+    return _MARKETPLACE_EXTENSION.fullmatch(word) is not None and not word.lower().endswith(".vsix")
 
 
 def _ordinary_command(line: str, ordinary: dict) -> bool:
     """Tell whether a command line is one plain call of an ordinary tool, with a subcommand the tool is
-    listed with. Takes the line and the ordinary tools, each with its subcommands (none listed: any).
-    Returns the answer."""
+    listed with, and an extension install names only marketplace extensions. Takes the line and the
+    ordinary tools, each with its subcommands (none listed: any). Returns the answer."""
     words = plain_call(line)
     if words is None or words[0] not in ordinary:
         return False
     subcommands = ordinary[words[0]]
-    return not subcommands or (len(words) > 1 and words[1] in subcommands)
+    if subcommands and (len(words) < 2 or words[1] not in subcommands):
+        return False
+    return words[1:2] != [_EXTENSION_INSTALL] or all(_names_a_marketplace_extension(w) for w in words[2:])
 
 
 def _runs_only_ordinary_commands(task: dict, task_file: dict, tasks: list[dict], ordinary: dict,
