@@ -12,6 +12,8 @@ from stayawake.bots.security.models import Finding, Severity
 
 _KIND = "vscode-task-runs-payload-script"
 _NPM_SCRIPT_COMMANDS = frozenset({"run", "run-script", "start", "test", "restart", "stop"})
+_INSTALL_COMMANDS = frozenset({"install", "i", "ci"})
+_INSTALL_SCRIPTS = ("install", "prepublish", "prepare")
 _SCRIPT_RUNNERS = frozenset({"npm", "pnpm", "yarn", "bun"})
 _SCRIPT_NAME_END = re.compile(r"[&|;()<>\"'`]")
 _MOST_HOPS = 4
@@ -20,6 +22,12 @@ _MOST_HOPS = 4
 def _script_name(word: str) -> str:
     """Return a script name as written in a command, cut where shell syntax starts. Takes the word."""
     return _SCRIPT_NAME_END.split(word, 1)[0]
+
+
+def _scripts_a_command_runs(command: str) -> list[str]:
+    """Return the package scripts a package manager command runs by name: the install scripts for an
+    install, else the script of that name. Takes the command. Returns the names."""
+    return list(_INSTALL_SCRIPTS) if command in _INSTALL_COMMANDS else [command]
 
 
 def scripts_a_line_runs(line: str) -> list[str]:
@@ -40,6 +48,8 @@ def scripts_a_line_runs(line: str) -> list[str]:
                 names.append(_script_name(following[1]))
         elif command == "restart":
             names += ["restart", "stop", "start"]
+        elif command in _INSTALL_COMMANDS:
+            names += _scripts_a_command_runs(command)
         elif command in _NPM_SCRIPT_COMMANDS or runner != "npm":
             names.append(command)
     return [name for name in names if name]
@@ -51,7 +61,7 @@ def _task_scripts(task: dict, task_file: dict, tasks: list[dict], hops: int = 0)
     dependencies deep it sits. Returns the script names."""
     names = []
     if task.get("type") == "npm" and isinstance(task.get("script"), str):
-        names.append(task["script"])
+        names += _scripts_a_command_runs(task["script"])
     for line in command_lines(task, task_file):
         names += scripts_a_line_runs(line)
     depends = task.get("dependsOn")
@@ -59,12 +69,12 @@ def _task_scripts(task: dict, task_file: dict, tasks: list[dict], hops: int = 0)
     for dependency in depends:
         if isinstance(dependency, dict):
             if dependency.get("type") == "npm" and isinstance(dependency.get("script"), str):
-                names.append(dependency["script"])
+                names += _scripts_a_command_runs(dependency["script"])
             continue
         if not isinstance(dependency, str):
             continue
         if dependency.startswith("npm: "):
-            names.append(dependency[len("npm: "):].strip())
+            names += _scripts_a_command_runs(dependency[len("npm: "):].strip())
         if hops < _MOST_HOPS:
             for other in tasks:
                 if other is not task and other.get("label") == dependency:

@@ -263,6 +263,30 @@ signatures:
     shown_as: "an editor task set to run when the folder opens; check it is yours"
     remediation: manual
 
+  - id: vscode-task-hidden-ordinary
+    category: vscode-autorun
+    severity: high
+    matcher: structural-json
+    confidence: heuristic
+    kind: vscode-task-hidden-ordinary
+    description: "VS Code task that hides itself and runs an ordinary build or package command on folder open (review it)"
+    shown_as: "an editor task that hides itself and runs a build command when the folder opens; check it is yours"
+    remediation: manual
+    ordinary_commands:
+      npm: [run, run-script, install, ci, start, test]
+      pnpm: [run, install, dev, build, start, test]
+      yarn: [run, install, dev, build, watch, start, test]
+      tsc: []
+      dotnet: [watch, build]
+      cargo: [watch, build, check]
+      go: [build, test]
+      make: []
+      bazel: [build, test]
+      git: [pull, fetch]
+      code: [--install-extension]
+      dart: [run]
+    editor_task_types: [npm, typescript, gulp, grunt, jake]
+
   - id: vscode-task-runs-font
     category: vscode-autorun
     severity: critical

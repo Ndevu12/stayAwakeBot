@@ -8,13 +8,15 @@ fire on a lifecycle event (SessionStart is the folderOpen analogue — it runs o
 """
 from __future__ import annotations
 
+import re
+
 from stayawake.bots.security.models import CONFIRMED, Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, load_jsonc, build_confirmed_loader_check)
 from stayawake.bots.security.matchers.command_shape import runs_downloaded_or_decoded_code
 from stayawake.bots.security.matchers.editor_task import (
     command_lines, command_text, named, runs_when_the_folder_opens)
-from stayawake.bots.security.matchers.payload_command import may_run_a_font
+from stayawake.bots.security.matchers.payload_command import may_run_a_font, plain_call
 
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
 
@@ -57,6 +59,64 @@ def _conceals_itself(task: dict) -> bool:
     if not isinstance(presentation, dict):
         return False
     return named(presentation.get("reveal")) in ("never", "silent") or presentation.get("echo") is False
+
+
+_MOST_DEPENDENCY_HOPS = 4
+_EXTENSION_INSTALL = "--install-extension"
+_MARKETPLACE_EXTENSION = re.compile(r"\A[A-Za-z0-9][\w-]*\.[\w-]+(?:@[\w.+-]+)?\Z")
+
+
+def _names_a_marketplace_extension(word: str) -> bool:
+    """Tell whether a word names an editor extension by its marketplace id, with or without a version,
+    and not by a file. Takes the word. Returns the answer."""
+    return _MARKETPLACE_EXTENSION.fullmatch(word) is not None and not word.lower().endswith(".vsix")
+
+
+def _ordinary_command(line: str, ordinary: dict) -> bool:
+    """Tell whether a command line is one plain call of an ordinary tool, with a subcommand the tool is
+    listed with, and an extension install names only marketplace extensions. Takes the line and the
+    ordinary tools, each with its subcommands (none listed: any). Returns the answer."""
+    words = plain_call(line)
+    if words is None or words[0] not in ordinary:
+        return False
+    subcommands = ordinary[words[0]]
+    if subcommands and (len(words) < 2 or words[1] not in subcommands):
+        return False
+    return words[1:2] != [_EXTENSION_INSTALL] or all(_names_a_marketplace_extension(w) for w in words[2:])
+
+
+def _runs_only_ordinary_commands(task: dict, task_file: dict, tasks: list[dict], ordinary: dict,
+                                 editor_types: frozenset[str], hops: int = 0) -> bool:
+    """Tell whether everything a task runs is ordinary: its own run is one plain call of an ordinary tool on
+    each command line, or an editor task type it names with no command of its own, and every task it
+    depends on runs only ordinary commands; a task with no run of its own needs at least one dependency.
+    Takes the task, its file, the file's tasks, the ordinary tools, the editor task types and how many
+    dependencies deep it sits. Returns the answer."""
+    written = task.get("command")
+    if _changes_what_a_name_runs(task, task_file) or (written is not None and command_text(written) is None):
+        return False
+    lines = command_lines(task, task_file)
+    editor_run = (task.get("type") in editor_types
+                  and any(key in task for key in ("script", "task", "tsconfig")))
+    if lines and not all(_ordinary_command(line, ordinary) for line in lines):
+        return False
+    depends = task.get("dependsOn")
+    depends = [depends] if isinstance(depends, (str, dict)) else depends if isinstance(depends, list) else []
+    if not (lines or editor_run or depends) or hops >= _MOST_DEPENDENCY_HOPS:
+        return False
+    for dependency in depends:
+        if isinstance(dependency, dict):
+            if not (dependency.get("type") in editor_types
+                    and any(key in dependency for key in ("script", "task", "tsconfig"))):
+                return False
+        elif isinstance(dependency, str) and dependency.startswith("npm: "):
+            continue
+        else:
+            other = next((t for t in tasks if t is not task and t.get("label") == dependency), None)
+            if other is None or not _runs_only_ordinary_commands(other, task_file, tasks, ordinary,
+                                                                 editor_types, hops + 1):
+                return False
+    return True
 
 
 def _hides_panels_or_holds_tasks(settings: dict) -> bool:
@@ -115,24 +175,37 @@ class StructuralJsonMatcher(Matcher):
         return out
 
     def _launcher_beside(self, target, rel, by_kind) -> bool:
-        """Tell whether the tasks.json beside a settings file holds a task this matcher confirms. Takes
-        the target, the settings file's path and the signatures by kind. Returns the answer."""
+        """Tell whether the tasks.json beside a settings file holds a task this matcher confirms, or one
+        that hides itself when the folder opens. Takes the target, the settings file's path and the
+        signatures by kind. Returns the answer."""
         confirmed = {s["id"] for s in by_kind.values() if s.get("confidence") == CONFIRMED}
         tasks_path = rel[:-len("settings.json")] + "tasks.json"
         tasks = load_jsonc(target.read_text(tasks_path) or "")
-        beside = self._task_findings(tasks_path, tasks, by_kind) if isinstance(tasks, dict) else []
-        return any(f.signature_id in confirmed for f in beside)
+        if not isinstance(tasks, dict):
+            return False
+        if any(runs_when_the_folder_opens(task) and _conceals_itself(task) for task in self._tasks(tasks)):
+            return True
+        return any(f.signature_id in confirmed for f in self._task_findings(tasks_path, tasks, by_kind))
 
     def _task_findings(self, rel, data, by_kind):
         out = []
         runs_font_signature = by_kind.get("vscode-task-runs-font", {})
         font_tools = frozenset(str(name).lower() for name in runs_font_signature.get("font_tools", ()))
-        for task in self._tasks(data):
+        ordinary_signature = by_kind.get("vscode-task-hidden-ordinary", {})
+        ordinary = {str(tool).lower(): frozenset(subcommands or ())
+                    for tool, subcommands in (ordinary_signature.get("ordinary_commands") or {}).items()}
+        editor_types = frozenset(ordinary_signature.get("editor_task_types") or ())
+        tasks = self._tasks(data)
+        for task in tasks:
             if runs_when_the_folder_opens(task):
                 # Auto-running is what the setting is FOR. Legitimate auto-run tasks are ordinary;
                 # legitimate auto-run tasks that hide themselves are not, so the pair is the signal.
-                kind = ("vscode-task-autorun" if _conceals_itself(task)
-                        else "vscode-task-autorun-visible")
+                kind = "vscode-task-autorun-visible"
+                if _conceals_itself(task):
+                    kind = ("vscode-task-hidden-ordinary"
+                            if ordinary and _runs_only_ordinary_commands(task, data, tasks, ordinary,
+                                                                         editor_types)
+                            else "vscode-task-autorun")
                 if kind in by_kind:
                     out.append(self._emit(by_kind[kind], rel,
                                           f"task '{task.get('label','?')}' runOn=folderOpen"))
