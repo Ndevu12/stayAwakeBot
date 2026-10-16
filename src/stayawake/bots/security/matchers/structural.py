@@ -175,13 +175,17 @@ class StructuralJsonMatcher(Matcher):
         return out
 
     def _launcher_beside(self, target, rel, by_kind) -> bool:
-        """Tell whether the tasks.json beside a settings file holds a task this matcher confirms. Takes
-        the target, the settings file's path and the signatures by kind. Returns the answer."""
+        """Tell whether the tasks.json beside a settings file holds a task this matcher confirms, or one
+        that hides itself when the folder opens. Takes the target, the settings file's path and the
+        signatures by kind. Returns the answer."""
         confirmed = {s["id"] for s in by_kind.values() if s.get("confidence") == CONFIRMED}
         tasks_path = rel[:-len("settings.json")] + "tasks.json"
         tasks = load_jsonc(target.read_text(tasks_path) or "")
-        beside = self._task_findings(tasks_path, tasks, by_kind) if isinstance(tasks, dict) else []
-        return any(f.signature_id in confirmed for f in beside)
+        if not isinstance(tasks, dict):
+            return False
+        if any(runs_when_the_folder_opens(task) and _conceals_itself(task) for task in self._tasks(tasks)):
+            return True
+        return any(f.signature_id in confirmed for f in self._task_findings(tasks_path, tasks, by_kind))
 
     def _task_findings(self, rel, data, by_kind):
         out = []

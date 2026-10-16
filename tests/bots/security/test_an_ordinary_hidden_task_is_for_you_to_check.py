@@ -9,7 +9,7 @@ import unittest
 from unittest import mock
 
 from stayawake.bots.security.matchers.structural import StructuralJsonMatcher
-from stayawake.bots.security.models import INFECTED, Severity
+from stayawake.bots.security.models import CONFIRMED, INFECTED, Severity
 from stayawake.bots.security.signatures import load_signatures
 from tests.bots.security.test_a_font_tool_is_not_a_disguised_payload import _PLACES, _STILL_RUN
 from tests.bots.security.test_a_package_script_an_editor_task_runs_is_read import _PAYLOADS, _scan
@@ -143,6 +143,18 @@ class TestEveryOtherHiddenTaskStillReadsInfected(unittest.TestCase):
         self.assertIn(_INFECTED, _grade(_hidden(command=_DOWNLOAD, presentation=campaign, problemMatcher=[])))
         implant = json.loads(INFECTED_PROJECT[".vscode/tasks.json"]())
         self.assertIn(_INFECTED, _grade(*implant["tasks"]))
+
+    def test_the_setting_that_runs_tasks_beside_an_ordinary_hidden_task_still_reads_infected(self):
+        settings = {"editor.formatOnSave": True, joined("task.allow", "AutomaticTasks"): "on"}
+        npm_watch = {"label": "watch", "type": "npm", "script": "watch", "runOptions": {"runOn": "folderOpen"},
+                     "presentation": {"reveal": "never", "echo": False}}
+        for task in (_hidden(command="tsc -w"), npm_watch):
+            with self.subTest(task=task):
+                result = _scan([task], {}, extra={".vscode/settings.json": json.dumps(settings)})
+                confirmed = {f.signature_id for f in result.findings if f.confidence == CONFIRMED}
+                self.assertIn("vscode-allow-automatic-tasks", confirmed)
+                self.assertIn(_CHECK, {f.signature_id for f in result.findings})
+                self.assertEqual(result.verdict, INFECTED)
 
     def test_a_payload_in_the_script_an_ordinary_hidden_task_runs_still_reads_infected(self):
         shapes = [({"command": command}, script) for command, script in (
