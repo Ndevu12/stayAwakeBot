@@ -13,6 +13,7 @@ from .live import end_live_code
 from . import settings as editorsettings
 from . import approvals as agentapprovals
 from stayawake.utils import elevate, hostdenial, textsafe
+from stayawake.utils.own_command import saw_through_sudo
 from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
                      NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
                      NOT_WHERE_IT_WAS_NAMED, OCCUPIED, REMOVED, SELF_ENFORCING, UNKNOWN,
@@ -38,9 +39,9 @@ _ENDED_LIVE = "Code was running here with no file behind it. It has been stopped
 _STILL_LIVE = "Code with no file behind it is still running on this machine."
 _GONE_LIVE = "Code was running here with no file behind it. It is no longer running."
 _RUN_AGAIN = "Run `saw harden` again to stop it."
-_NOT_OURS_LIVE = "Run `sudo saw harden` to stop it."
+_NOT_OURS_LIVE = "Run `{sudo_saw} harden` to stop it."
 _NOT_OURS_BY_ASKING = {
-    elevate.NOT_AN_ADMINISTRATOR: "An administrator can stop it with `sudo saw harden`.",
+    elevate.NOT_AN_ADMINISTRATOR: "An administrator can stop it with `{sudo_saw} harden`.",
     elevate.NOT_AVAILABLE: "An administrator can stop it by running `saw harden` as root.",
 }
 _UNIDENTIFIED_LEFT = "Suspicious code was left running. Run `saw audit` to see it."
@@ -57,8 +58,8 @@ _CAPTURE_EXCERPT = 300
 _NOT_HERE = "saw harden's controls are not available on this system."
 _CLAIM = "saw harden's controls are in place on this machine."
 _CLAIM_AS_YOU = ("saw harden's controls are in place on this machine, but your account can undo "
-                 "them. Run `sudo saw harden` so only an administrator can.")
-_NEEDS_ROOT_NOTE = "Run `sudo saw harden` to place the rest."
+                 "them. Run `{sudo_saw} harden` so only an administrator can.")
+_NEEDS_ROOT_NOTE = "Run `{sudo_saw} harden` to place the rest."
 _NOT_EVERYWHERE = "Some of saw harden's controls are not in place on this machine."
 _STUCK_ONE = ("A control could not be placed because something else is already there. "
               "Run `saw audit` to see what.")
@@ -101,7 +102,7 @@ _EDITORS_NOT_LOOKED_UP = ("The editor settings saw changed could not be looked u
 _AGENTS_NOT_LOOKED_UP = ("The AI agent settings saw changed could not be looked up, so they were "
                          "left as they are. Run `saw audit`.")
 _WHAT_TO_DO_WITH_WHAT_IS_LEFT = {
-    NEEDS_ROOT: "Some of it needs an administrator. Run `sudo saw harden --take-back` to take it "
+    NEEDS_ROOT: "Some of it needs an administrator. Run `{sudo_saw} harden --take-back` to take it "
                 "back.",
     HELD_BY_ANOTHER: ("Another account placed some of it, so it was left as it is. That account can "
                       "take it back with `saw harden --take-back`."),
@@ -169,7 +170,7 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     left = {o.state for o in outcomes} - _TAKEN_BACK_OR_ABSENT - {LEFT_OPEN_OVER_CONTENT}
     for state, line in _WHAT_TO_DO_WITH_WHAT_IS_LEFT.items():
         if state in left:
-            lines.extend([line, ""])
+            lines.extend([line.format(sudo_saw=saw_through_sudo()), ""])
     if left - set(_WHAT_TO_DO_WITH_WHAT_IS_LEFT):
         lines.extend([_COULD_NOT_TAKE_BACK, ""])
     return (0, "\n".join(lines).rstrip()) if done else (3, "\n".join(lines).rstrip())
@@ -195,7 +196,7 @@ def _headline(outcomes, unresolved: bool, hooks_ok: bool, editors_ok: bool = Tru
     if not hooks_ok or not editors_ok or not _every_reachable_one(outcomes):
         return _NOT_EVERYWHERE
     if any(o.state == SELF_ENFORCING for o in outcomes):
-        return _CLAIM_AS_YOU
+        return _CLAIM_AS_YOU.format(sudo_saw=saw_through_sudo())
     return _CLAIM
 
 
@@ -208,7 +209,7 @@ def _what_to_do(outcomes) -> list[str]:
     counted = Counter(o.state for o in outcomes)
     out: list[str] = []
     if counted[NEEDS_ROOT]:
-        out.append(_NEEDS_ROOT_NOTE)
+        out.append(_NEEDS_ROOT_NOTE.format(sudo_saw=saw_through_sudo()))
     if counted[LEFT_OPEN_OVER_CONTENT]:
         out.append(_LEFT_OPEN_NOTE)
     stuck = sum(counted[state] for state in
@@ -293,7 +294,7 @@ def run(*, live=check_live_processes, folders=_global_folders,
         if ending.survived or ending.frozen_left:
             lines.append(_RUN_AGAIN)
         if ending.refused and not ending.cannot_reach_the_machines_root:
-            lines.append(_NOT_OURS_BY_ASKING.get(ending.asking, _NOT_OURS_LIVE))
+            lines.append(_NOT_OURS_BY_ASKING.get(ending.asking, _NOT_OURS_LIVE).format(sudo_saw=saw_through_sudo()))
         if ending.left_unidentified:
             lines.append(_UNIDENTIFIED_LEFT)
         if ending.cannot_reach_the_machines_root and (ending.refused or ending.left_unidentified):

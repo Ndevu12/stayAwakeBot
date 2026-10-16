@@ -13,6 +13,7 @@ from stayawake.bots.security import harden
 from stayawake.bots.security.harden import approvals as agentapprovals
 from stayawake.bots.security.harden import denial
 from stayawake.bots.security.harden import settings as editorsettings
+from stayawake.utils.own_command import saw_through_sudo
 
 _NEEDS_POSIX_NONROOT = (os.name == "posix"
                         and not (hasattr(os, "geteuid") and os.geteuid() == 0))
@@ -186,7 +187,7 @@ class TestWhatTakeBackSays(unittest.TestCase):
         for state, line in harden._WHAT_TO_DO_WITH_WHAT_IS_LEFT.items():
             with self.subTest(state=state):
                 _code, text = _take_back([denial.PathOutcome(Path("/x"), state, "x")])
-                self.assertIn(line, text)
+                self.assertIn(line.format(sudo_saw=saw_through_sudo()), text)
 
     def test_a_leftover_of_any_other_kind_is_still_said(self):
         _code, text = _take_back([denial.PathOutcome(Path("/x"), denial.UNKNOWN, "x")])
