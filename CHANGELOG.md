@@ -136,6 +136,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw's `sudo` advice runs the saw you ran.** When saw is installed in a virtual environment or with
   pipx, `saw harden` names it by its full path in the `sudo` command it gives you, which sudo would
   otherwise not find.
+- **One git command shows the worm warning once.** When saw checks twice within one git command, as a
+  pull that rebases does, each finding is shown once; a finding not yet shown is still shown, and every
+  check still reports the repository infected.
 - **A fix saw publishes keeps your email address private, and a refused push says why.** `saw fix amend`
   commits its rewrite under your GitHub account's noreply address when the address you commit with
   differs, so your own address is not published; a push GitHub still refuses says why in GitHub's words.

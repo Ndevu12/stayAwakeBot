@@ -9,10 +9,15 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from stayawake.bots.security import hook
+from stayawake.bots.security.models import CONFIRMED
 from stayawake.utils.procsnap import Start
+
+_FOUND = [SimpleNamespace(signature_id="known-loader", path="app.js", line=3, commit_sha="",
+                          confidence=CONFIRMED)]
 
 
 class TestTheWarningIsShownOncePerOperation(unittest.TestCase):
@@ -28,7 +33,7 @@ class TestTheWarningIsShownOncePerOperation(unittest.TestCase):
         self.shown = []
 
     def _warn(self, operation, root=None, at=1000.0):
-        hook._warn_once(root or self.repo, operation, lambda: self.shown.append(operation),
+        hook._warn_once(root or self.repo, operation, _FOUND, lambda findings: self.shown.append(operation),
                         now=lambda: at)
 
     def test_the_second_hook_of_the_same_operation_does_not_show_it_again(self):
@@ -88,9 +93,9 @@ class TestTheWarningIsShownOncePerOperation(unittest.TestCase):
             infected, error, suspicious, residue, findings = True, "", False, False, []
         with mock.patch.object(hook, "_warn_infected"):
             first = hook._tell(_Infected(), "repo", "saw scan repo", "repo", root=self.repo,
-                               operation="head:policy:100:5")
+                               command="100:5")
             second = hook._tell(_Infected(), "repo", "saw scan repo", "repo", root=self.repo,
-                                operation="head:policy:100:5")
+                                command="100:5")
         self.assertEqual((first, second), (1, 1))
 
 
