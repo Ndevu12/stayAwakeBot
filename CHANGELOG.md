@@ -137,6 +137,8 @@ reader, not the mechanism or the weakness it closed.
   for a copy, instead of reporting that deleting the remote branch failed.
 - **A git command runs saw's check once.** A clone, checkout, pull, rebase or push now runs saw's check
   once instead of twice, with the same verdict.
+- **`saw fix amend` says how to make a signature it needs** when the repository signs its commits and
+  none can be made, and to run it again once one can.
 - **An editor task that hides itself is found however its file says so.** A task that runs when the
   folder opens and hides itself now reads as one that hides, read the way the editor reads it. A task
   the editor shows is still for you to check.
