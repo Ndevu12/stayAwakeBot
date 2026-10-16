@@ -21,8 +21,9 @@ def register(sub) -> None:
         help="hygiene + branch-protection audit",
         description=(
             "Audit this machine's security posture, and optionally a repository's branch "
-            "protection. Every run ends with a rotation-safety verdict: rotating a credential is "
-            "safe only once no persistence is found and the whole start-up surface was read."),
+            "protection. Read-only. Every run ends with a rotation-safety verdict: rotating a "
+            "credential is safe only once no persistence is found and the whole start-up "
+            "surface was read."),
         examples=[
             ("saw audit", "ends with the rotation-safety verdict"),
             ("saw audit --verify", "content-scan what a weak signal names"),
