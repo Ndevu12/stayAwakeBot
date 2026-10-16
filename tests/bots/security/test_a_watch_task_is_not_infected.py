@@ -62,9 +62,10 @@ class TestATaskThatHidesItselfIsStillCritical(unittest.TestCase):
         task = {"label": "t", "type": "shell", "command": "echo hi", "runOn": "FOLDEROPEN"}
         self.assertEqual(_ids(task), [])
 
-    def test_a_watch_task_kept_back_until_it_fails_is_still_critical(self):
+    def test_a_watch_task_kept_back_until_it_fails_is_for_you_to_check(self):
         found = _scan_tasks({**_WATCH, "presentation": {"panel": "dedicated", "reveal": "silent"}})
-        self.assertEqual([f.signature_id for f in found], ["vscode-task-folderopen-exec"])
+        self.assertEqual([f.signature_id for f in found], ["vscode-task-hidden-ordinary"])
+        self.assertEqual(found[0].severity, Severity.HIGH)
 
     def test_a_task_presented_as_the_published_campaigns_is_still_critical(self):
         campaign = {"reveal": "never", "echo": False, "focus": False, "close": True, "panel": "dedicated",

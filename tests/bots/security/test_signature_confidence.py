@@ -32,6 +32,7 @@ GRADED_BELOW_CONFIRMED = {
     "tampered-installed-package": "heuristic",
     "vscode-allow-automatic-tasks-alone": "heuristic",
     "vscode-task-autorun-visible": "heuristic",
+    "vscode-task-hidden-ordinary": "heuristic",
     "whitespace-concealment": "heuristic",
     "workflow-dependabot-impersonation": "heuristic",
     "workflow-injection-run": "heuristic",

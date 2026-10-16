@@ -20,14 +20,22 @@ _PLAIN_PATH = re.compile(r"[\w./@+-]{1,500}")
 _FONT_ENDING = re.compile(r"\.(?:woff2?|ttf|otf|eot)$", re.IGNORECASE)
 
 
-def _one_call_of_a_font_tool(line: str, font_tools: frozenset[str]) -> bool:
-    """Tell whether a command line is one plain call of a font tool named without a path. Takes the line
-    and the font tools' names. Returns the answer."""
+def plain_call(line: str) -> list[str] | None:
+    """Return the words of a command line that is one plain call of a program, its program named without
+    an executable suffix and in lower case, reading the editor's variables as plain words. Takes the line.
+    Returns the words, or None when the line is more than one plain call."""
     plain = _EDITOR_VARIABLE.sub("variable", line)
     words = plain.split()
     if not words or not_plain(plain):
-        return False
-    return _EXECUTABLE_SUFFIX.sub("", words[0]).lower() in font_tools
+        return None
+    return [_EXECUTABLE_SUFFIX.sub("", words[0]).lower(), *words[1:]]
+
+
+def _one_call_of_a_font_tool(line: str, font_tools: frozenset[str]) -> bool:
+    """Tell whether a command line is one plain call of a font tool named without a path. Takes the line
+    and the font tools' names. Returns the answer."""
+    words = plain_call(line)
+    return words is not None and words[0] in font_tools
 
 
 def _output_values(words: list[str]) -> list[str]:

@@ -133,6 +133,10 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **An editor task that hides itself to run an ordinary build is for you to check.** A task that keeps
+  itself out of sight and runs only an ordinary build, install or watch command when the folder opens
+  is now reported for you to check instead of read as infected. One that runs anything else still reads
+  infected, and a payload in a package script it runs, including one an install runs, still does.
 - **A git hook or git setting that runs a disguised payload is found.** A hook, an alias or another
   setting git runs that runs a font file as code now reads infected, and `saw fix` takes such a setting
   out as it does one carrying a known loader. A hook that only converts a font is not reported.
