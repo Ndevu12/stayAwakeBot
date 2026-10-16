@@ -40,6 +40,12 @@ def platform_supported() -> bool:
     return sys.platform in ("darwin", "linux")
 
 
+def lock_needs_privilege() -> bool:
+    """Tell whether only an administrator can set the immutable flag here. Returns True on Linux,
+    where setting it needs CAP_LINUX_IMMUTABLE, and False on macOS, where a folder's owner can."""
+    return sys.platform == "linux"
+
+
 def empty_dir(path: Path) -> bool:
     try:
         next(path.iterdir())

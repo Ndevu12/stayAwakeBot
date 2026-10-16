@@ -142,6 +142,9 @@ reader, not the mechanism or the weakness it closed.
 - **`saw audit --verify` says what it found where a staging artifact sits in several places.** When the
   scan reads every place in full and finds no worm markers, the finding says so, and the report no
   longer asks you to run `saw audit --verify` again; it still says not to rotate any credential yet.
+- **`saw harden` leaves no empty folder it could not lock.** On Linux without sudo it removes a folder it
+  created when it cannot lock it and says to run it again with sudo, so `saw audit` no longer reads saw's own
+  leftover as staging; a folder that was there before, or holds anything, is never removed.
 - **saw's `sudo` advice runs the saw you ran.** When saw is installed in a virtual environment or with
   pipx, `saw harden` names it by its full path in the `sudo` command it gives you, which sudo would
   otherwise not find.

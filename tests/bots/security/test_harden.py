@@ -561,6 +561,7 @@ class TestApplyOne(unittest.TestCase):
              mock.patch.object(hostdenial, "empty_dir", return_value=True), \
              mock.patch("stayawake.bots.security.harden.denial.os.chmod"), \
              mock.patch("stayawake.bots.security.harden.denial.os.chown"), \
+             mock.patch.object(hostdenial, "lock_needs_privilege", return_value=False), \
              mock.patch.object(hostdenial, "set_immutable", return_value=False):
             out = denial.apply_one(target)
         self.assertEqual(out.state, denial.UNKNOWN)
@@ -621,11 +622,11 @@ class TestApplyOne(unittest.TestCase):
     def test_a_location_it_could_not_finish_is_left_usable(self):
         target = self.d / "fresh"
         with locked(), mock.patch.object(hostdenial, "holds", return_value=False), \
+             mock.patch.object(hostdenial, "lock_needs_privilege", return_value=False), \
              mock.patch.object(hostdenial, "set_immutable", return_value=False):
             out = denial.apply_one(target)
         self.assertEqual(out.state, denial.UNKNOWN)
-        self.assertTrue(os.access(target, os.W_OK | os.X_OK),
-                        "the operator can still open and clear what this run created")
+        self.assertFalse(os.path.lexists(target), "what this run created is not left for the operator to clear")
 
     def test_a_linked_parent_is_not_created_through(self):
         victim = self.d / "victim"
@@ -668,24 +669,30 @@ class TestApplyOne(unittest.TestCase):
             if self_path == parent:
                 return root_owned
             return real_lstat(self_path)
+        created = []
         with mock.patch.object(hostdenial, "held_by", return_value=None), \
              mock.patch.object(Path, "lstat", lstat), \
              mock.patch("stayawake.bots.security.harden.denial.os.chown"), \
-             mock.patch.object(hostdenial, "set_immutable", return_value=False):
+             mock.patch.object(hostdenial, "lock_needs_privilege", return_value=False), \
+             mock.patch.object(hostdenial, "set_immutable",
+                               side_effect=lambda p: created.append((victim / "denial").is_dir()) and False):
             out = denial.apply_one(target)
         self.assertEqual(out.state, denial.UNKNOWN)
-        self.assertTrue((victim / "denial").is_dir())
+        self.assertEqual(created, [True], "the folder was created under the link")
 
     def test_a_missing_leaf_under_a_real_directory_is_created(self):
         (self.d / "lib").mkdir()
         target = self.d / "lib" / "node_modules"
+        created = []
         with mock.patch.object(hostdenial, "holds", return_value=False), \
              mock.patch("stayawake.bots.security.harden.denial.os.chown"), \
-             mock.patch.object(hostdenial, "set_immutable", return_value=False):
+             mock.patch.object(hostdenial, "lock_needs_privilege", return_value=False), \
+             mock.patch.object(hostdenial, "set_immutable",
+                               side_effect=lambda p: created.append(target.is_dir() and not target.is_symlink())
+                               and False):
             out = denial.apply_one(target)
         self.assertEqual(out.state, denial.UNKNOWN)
-        self.assertTrue(target.is_dir())
-        self.assertFalse(target.is_symlink())
+        self.assertEqual(created, [True], "a real directory was created at the leaf")
 
     def test_mode_writes_pass_follow_symlinks_false(self):
         """With privilege, because taking ownership is the step that reaches `chown` — the write
