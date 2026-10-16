@@ -13,7 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-16
+
 ### Added
+
 - **The commands that remove a compromised dependency end with a link to read before you run
   them**, on the terminal, in the written report and in a fix pull request. The page says what
   each command changes, what it may break, and what to do first when a known-malicious package
@@ -91,6 +94,7 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
+
 - **A repository's git settings are graded by where they really point.** Re-run `saw scan` on
   repositories you scanned before this release.
 - **saw's own git commands run no git hooks, including hooks defined in git settings.**
@@ -133,6 +137,7 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+
 - **`saw harden` places its controls where something is already there.** It moves what is there aside,
   and `saw harden --take-back` puts it back; a known worm's staging kit there is deleted instead, keeping only
   the facts about it. Where only an administrator can do this, it says to run it again with sudo.
@@ -414,8 +419,25 @@ reader, not the mechanism or the weakness it closed.
 - **A `saw fix amend` refusal now names the commit it could not change**, instead of an object
   you cannot find.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
+- **`saw fix amend` no longer reports a file removed while another copy of it is still in your
+  history.** A file that had been committed more than once could keep an earlier copy, and a branch
+  could be force-updated that should have been held back for review — so an earlier run that reported
+  itself done may not have been, and is worth running again. Removing a file now removes every version
+  of it that still carries the payload, and a run that would leave one behind refuses instead.
+- **`saw fix amend` now reads the history of every branch it may update, not only your local ones.**
+  It updates fetched `origin/*` branches as well as local ones, but looked for the payload only in
+  local history — so a copy held on a branch that exists only on the remote, or on one your local
+  branch has fallen behind, could be left in place while the run reported the repository clean. It
+  now searches both sides of every branch name before deciding anything is gone.
+- **`saw fix amend` lists the files it removed accurately.** The removed-files line now names only
+  paths a delivered branch actually dropped, not paths on a branch the run had to isolate.
+- **When `saw fix amend` hands something back for you to do, it says exactly what and where.**
+  Files that need manual recovery are named rather than counted, a confirmed commit it cannot
+  resolve reports what the scan saw, and a run that moved branches and could not put them back
+  tells you where your original history was saved so you can restore it.
 
 ### Changed
+
 - **Three signatures for a known worm have new ids that name no worm:** `known-worm-branding`,
   `known-worm-runner` and `known-worm-name`. An allowlist entry for one of them needs its new id, and code scanning shows
   their findings under the new ids.
@@ -509,26 +531,23 @@ reader, not the mechanism or the weakness it closed.
 - **A custom signature database states each signature's confidence.** A signature without one is
   refused, and the error names it.
 
-### Fixed
-- **`saw fix amend` no longer reports a file removed while another copy of it is still in your
-  history.** A file that had been committed more than once could keep an earlier copy, and a branch
-  could be force-updated that should have been held back for review — so an earlier run that reported
-  itself done may not have been, and is worth running again. Removing a file now removes every version
-  of it that still carries the payload, and a run that would leave one behind refuses instead.
-- **`saw fix amend` now reads the history of every branch it may update, not only your local ones.**
-  It updates fetched `origin/*` branches as well as local ones, but looked for the payload only in
-  local history — so a copy held on a branch that exists only on the remote, or on one your local
-  branch has fallen behind, could be left in place while the run reported the repository clean. It
-  now searches both sides of every branch name before deciding anything is gone.
-- **`saw fix amend` lists the files it removed accurately.** The removed-files line now names only
-  paths a delivered branch actually dropped, not paths on a branch the run had to isolate.
-- **When `saw fix amend` hands something back for you to do, it says exactly what and where.**
-  Files that need manual recovery are named rather than counted, a confirmed commit it cannot
-  resolve reports what the scan saw, and a run that moved branches and could not put them back
-  tells you where your original history was saved so you can restore it.
-
 ### Removed
+
 - **`prevent/install-hooks.sh` is gone.** `saw hook install` gives every repository saw's hooks.
+
+## [0.11.5] - 2026-10-13
+
+### Fixed
+- **`saw harden` no longer stops ordinary programs, and `saw audit` no longer reports them.** On
+  Linux it could take programs you rely on, your desktop among them, for code with no file behind it
+  and stop them, freezing the machine. When stopping code needs root, your system asks for
+  permission with its own prompt, and only from an account that administers the machine; saw never
+  asks for a password.
+
+### Changed
+- **`saw harden`'s result says where this machine stands and what to run.** Its first line says
+  whether code is still running, which controls are not in place, or that every control is in
+  place; each line after it names the command that acts on it.
 
 ## [0.11.4] - 2026-09-16
 
@@ -1638,7 +1657,9 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.4...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.4...v0.12.0
+[0.11.5]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.4...v0.11.5
 [0.11.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.1...v0.11.2
