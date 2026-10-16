@@ -30,8 +30,9 @@ report, remediate (PR-only), prevent, plus dependency-CVE auditing and local hyg
    by `test_layering`.
 7. **Offline & trust model:** accurate with zero flags; only `-x/--external` leaves the sandbox; the
    allowlist is operator-owned and never taken from a scanned repo; fail closed. → `saw-overview`.
-8. **Value before coverage; measure/profile before optimizing; reuse before building; right depth, no
-   bandaids; self-documenting names.** → `engineering-standard`.
+8. **Value before coverage — triage before building, don't sweat the small stuff; measure/profile
+   before optimizing; reuse before building; right depth, no bandaids; self-documenting names.** →
+   `engineering-standard`.
 9. **Operator documentation never mentions exit codes.** No exit-codes page, no Exit tables, no
    process-status numbers. Operators read the verdict. → `saw-overview`, `shipping-changes`.
 10. **Tell the user what they deserve to know.** User-facing text states the verdict, what it covers,

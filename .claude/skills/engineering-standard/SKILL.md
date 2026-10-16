@@ -42,6 +42,11 @@ patch ("the accurate and quality one, not because it's easy or low-risk"). And w
 - **Value/viability BEFORE coverage.** Implement only what adds value; a **cheap approach covering the
   real/common case beats an expensive one covering rare/hypothetical cases.** "Continue" ≠ "build the
   next thing" — it means "build the next thing that clears the value bar; if none do, say so and stop."
+- **Triage before you build — don't sweat the small stuff.** Weigh every candidate fix by how likely the
+  case is (the known implant, a plausible variant, or contrived), how bad a miss would be (silent, or still
+  reported or refused fail-closed), and what it costs to build and verify. Build what is likely, or silent
+  and serious. Park the rest with its reason and what would bring it back (for example, a real user
+  hitting that refusal). Decide small items yourself; never hand them to the maintainer as a question.
 - **Check what already exists first** — grep the code AND read the open issues before writing new code;
   much may already be implemented or already filed.
 - **MEASURE before optimizing, and profile — the bottleneck is rarely where you assume.** Don't ship a
