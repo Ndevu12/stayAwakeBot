@@ -144,7 +144,8 @@ class TestAFindingAtTheCheckoutIsCheckedAgain(_Rebasing):
         self._commit(self.down, {"d.txt": "local\n"})
         scans = self._scans_during("pull", "-q", "--rebase")
         self.assertEqual([(s["event"], s["files"]) for s in scans],
-                         [("post-checkout", [".gitignore", "c.txt"]), ("post-rewrite", [".gitignore", "c.txt"])])
+                         [("post-checkout", [".gitignore", "c.txt"]),
+                          ("post-rewrite", [".gitignore", "c.txt"])])
         self.assertTrue(all(s["found"] for s in scans))
 
 

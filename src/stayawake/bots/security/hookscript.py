@@ -49,6 +49,12 @@ def warnings_shown_path() -> Path:
     return Path(env.xdg_cache_home()) / "saw" / "hook-warnings-shown.json"
 
 
+def checks_made_path() -> Path:
+    """Return the file of the checks saw's hooks completed, by repository and git operation, with their
+    outcomes."""
+    return Path(env.xdg_cache_home()) / "saw" / "hook-checks-made.json"
+
+
 def cache_path() -> Path:
     """Return the per-repository last-scanned-SHA cache file."""
     return Path(env.xdg_cache_home()) / "saw" / "hook-scan-cache.json"

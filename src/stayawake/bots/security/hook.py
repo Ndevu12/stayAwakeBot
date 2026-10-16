@@ -1403,13 +1403,14 @@ _ANCESTORS_TO_GIT = 8
 _SAME_OPERATION_WITHIN_SECONDS = 120
 
 
-def _operation_key(head: str, config_path: str | None, event: str, argv: list[str], *,
+def _operation_key(head: str, config_path: str | None, event: str, argv: list[str], *, given: str = "",
                    started=procsnap.started, me=os.getpid) -> str | None:
-    """Name the git process a hook runs under, for one repository commit, policy, hook event and
-    its arguments. Takes the commit, the operator config, the event, its arguments, and the readers
-    of when a process started and of this process. Returns the key, or None when no git process is
-    found above this one."""
-    called = hashlib.sha256("\0".join([event, *argv]).encode("utf-8", "replace")).hexdigest()[:16]
+    """Name the git process a hook runs under, for one repository commit, policy, hook event, its
+    arguments and what git gave it to read. Takes the commit, the operator config, the event, its
+    arguments, what git gave it, and the readers of when a process started and of this process.
+    Returns the key, or None when no git process is found above this one."""
+    called = hashlib.sha256("\0".join([event, *argv, "\1", given]).encode("utf-8", "replace"))
+    called = called.hexdigest()[:16]
     pid = me()
     for _ in range(_ANCESTORS_TO_GIT):
         start = started(pid)
@@ -1433,25 +1434,81 @@ def _warnings_shown() -> dict:
     return shown if isinstance(shown, dict) else {}
 
 
-def _shown_moments_ago(last, operation: str, at: float) -> bool:
-    """Tell whether a warning for this operation was shown moments ago. Takes the repository's
-    record, the operation's key and the time now. Returns False for any record it cannot read."""
+def _recorded_moments_ago(last, operation: str, at: float,
+                          within: float = _SAME_OPERATION_WITHIN_SECONDS) -> bool:
+    """Tell whether a record for this operation was made moments ago. Takes the repository's record,
+    the operation's key, the time now and how long a record holds. Returns False for any record it
+    cannot read."""
     if not isinstance(last, dict) or last.get("operation") != operation:
         return False
-    shown = last.get("at")
-    if isinstance(shown, bool) or not isinstance(shown, (int, float)):
+    made = last.get("at")
+    if isinstance(made, bool) or not isinstance(made, (int, float)):
         return False
     try:
-        return 0 <= at - shown < _SAME_OPERATION_WITHIN_SECONDS
+        return 0 <= at - made < within
     except (OverflowError, TypeError, ValueError):
         return False
+
+
+_SAME_CHECK_WITHIN_SECONDS = 60
+_MOST_REPOSITORIES_HELD = 256
+_LARGEST_CHECKS_RECORD = 1024 * 1024
+_COMPLETE_OUTCOMES = (0, 1)
+
+
+def _checks_made() -> dict:
+    """Read the checks saw's hooks completed. Returns them by repository, or none when the record
+    cannot be read."""
+    raw = atomicwrite.read_back(hookscript.checks_made_path(), _LARGEST_CHECKS_RECORD,
+                                at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    try:
+        made = json.loads(raw) if raw is not None else {}
+    except (ValueError, RecursionError):
+        return {}
+    return made if isinstance(made, dict) else {}
+
+
+def _outcome_already_found(root: Path, operation: str | None, *, now=time.time) -> int | None:
+    """Read the outcome saw's other hook for the same git operation found moments ago. Takes the
+    repository, the operation's key (None when it cannot be told) and the clock. Returns the outcome,
+    or None when no complete check of this operation is recorded."""
+    if operation is None:
+        return None
+    last = _checks_made().get(os.path.realpath(root))
+    if not _recorded_moments_ago(last, operation, now(), _SAME_CHECK_WITHIN_SECONDS):
+        return None
+    outcome = last.get("outcome")
+    return outcome if not isinstance(outcome, bool) and outcome in _COMPLETE_OUTCOMES else None
+
+
+def _record_outcome(root: Path, operation: str | None, outcome: int, *, now=time.time) -> None:
+    """Record the outcome of a complete check of a git operation, for saw's other hook for the same
+    operation. Takes the repository, the operation's key (None when it cannot be told), the outcome and
+    the clock. Nothing is recorded for a check that did not complete, nor when the record cannot be
+    written."""
+    if operation is None or isinstance(outcome, bool) or outcome not in _COMPLETE_OUTCOMES:
+        return
+    try:
+        held = {r: made for r, made in _checks_made().items() if isinstance(made, dict) and os.path.isdir(r)}
+        held[os.path.realpath(root)] = {"operation": operation, "at": now(), "outcome": outcome}
+        newest = sorted(held.items(), key=lambda item: _when(item[1]))[-_MOST_REPOSITORIES_HELD:]
+        atomicwrite.replace(hookscript.checks_made_path(), json.dumps(dict(newest)),
+                            mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    except OSError:
+        pass
+
+
+def _when(made: dict) -> float:
+    """Read when a record was made. Takes the record. Returns the time, 0 when it cannot be read."""
+    at = made.get("at")
+    return float(at) if not isinstance(at, bool) and isinstance(at, (int, float)) else 0.0
 
 
 def _warn_once(root: Path | None, operation: str | None, warn, *, now=time.time) -> None:
     """Show an infected warning once per git operation. Takes the repository, the operation's key
     (None when it cannot be told), what shows the warning and the clock."""
     where = os.path.realpath(root) if root is not None else None
-    if where is not None and operation is not None and _shown_moments_ago(
+    if where is not None and operation is not None and _recorded_moments_ago(
             _warnings_shown().get(where), operation, now()):
         return
     warn()
@@ -1478,14 +1535,30 @@ def run_event(event: str, argv: list[str], config_path: str | None = None,
             refs_text = "" if sys.stdin.isatty() else sys.stdin.read()
             if not from_settings:
                 _bring_up_to_date()
-            return outbound.check_push(argv, refs_text, config_path, no_stream=no_stream)
-        rewritten = ("" if sys.stdin.isatty() else sys.stdin.read()) if event == "post-rewrite" else ""
+            return _check_push_once(argv, refs_text, config_path, no_stream)
+        rewritten =("" if sys.stdin.isatty() else sys.stdin.read()) if event == "post-rewrite" else ""
         return _run_event(event, argv, config_path, no_stream=no_stream, from_settings=from_settings,
                           rewritten=rewritten)
     except BaseException:                   # noqa: BLE001 — last-resort: never break/confuse git
         print(_paint(f"⚠  {_BRAND}: the scan did not finish, so this repository is not known to be clean. "
                      "Run `saw scan` in this repository.", "warn", sys.stderr), file=sys.stderr)
         return 2
+
+
+def _check_push_once(argv: list[str], refs_text: str, config_path: str | None, no_stream: bool) -> int:
+    """Judge a push once per git operation: return the outcome saw's other hook for the same push
+    found moments ago, else check it and record the outcome. Takes the hook's arguments, git's ref
+    lines, the operator config and whether to stream. Returns 1 blocked, 2 not verified, 0 otherwise."""
+    root = _repo_root()
+    head = gitutil.stdout(root, ["rev-parse", "HEAD"]).strip() if root is not None else ""
+    operation = _operation_key(head, config_path, outbound.EVENT, argv, given=refs_text) if head else None
+    already = _outcome_already_found(root, operation) if root is not None else None
+    if already is not None:
+        return already
+    outcome = outbound.check_push(argv, refs_text, config_path, no_stream=no_stream)
+    if root is not None:
+        _record_outcome(root, operation, outcome)
+    return outcome
 
 
 def _run_event(event: str, argv: list[str], config_path: str | None,
@@ -1497,6 +1570,11 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         return 0
     if not from_settings:
         _bring_up_to_date()
+    head = gitutil.stdout(root, ["rev-parse", "HEAD"]).strip()
+    operation = _operation_key(head, config_path, event, argv, given=rewritten) if head else None
+    already = _outcome_already_found(root, operation)
+    if already is not None:
+        return already
     if _is_a_file_checkout(event, argv):
         include, label, checked = _file_checkout_scope(root, config_path)
     else:
@@ -1509,7 +1587,6 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     shown = textsafe.plain(display, limit=4096)
     quoted_root = shlex.quote(textsafe.plain(str(root), limit=4096))
     rescan = "saw scan " + quoted_root
-    head = gitutil.stdout(root, ["rev-parse", "HEAD"]).strip()
     whole_tree = include is None and label != _FILES_WRITTEN
     clean_key = _clean_key(head, config_path) if head and whole_tree else None
     if clean_key and _scanned_clean(root, clean_key):
@@ -1531,7 +1608,6 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         _remember_history(root, head, config_path)
     if clean_key and not from_settings:
         _remember(root, "")
-    operation = _operation_key(head, config_path, event, argv) if head else None
     found = _tell(result, shown, rescan, quoted_root, root=root, operation=operation)
     if found is None:
         found = 0
@@ -1544,6 +1620,7 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
                 print(_paint(f"✓ {_BRAND}: {shown} scanned clean.", "ok", err), file=err)
         if checked is not None:
             _remember_clean_contents(root, checked, config_path)
+    _record_outcome(root, operation, found)
     return found
 
 
