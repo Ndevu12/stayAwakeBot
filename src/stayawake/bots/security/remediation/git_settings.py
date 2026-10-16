@@ -74,11 +74,11 @@ def take_out_payload_settings(root: Path, findings, signatures, opts) -> Setting
         removal.unread += sorted({path for path, _ in reported})
         return removal
     every = every_signature(signatures)
-    known_payload = grading.payload_check_for(every, holding_anywhere=True)
+    known_payload = grading.removable_payload_check(every)
     read_by_git = _read_by_git(root, surface)
     matched, hooks_handled = set(), set()
     for judgement in grading.judge(surface, grading.payload_check_for(every),
-                                   getattr(opts, "max_file_bytes", 2_000_000)):
+                                   getattr(opts, "max_file_bytes", 2_000_000), grading.font_tools_of(every)):
         finding_key = (grading.shown_path(judgement.where, root), grading.evidence_of(judgement))
         if judgement.tier != CONFIRMED or finding_key not in reported or finding_key in matched:
             continue
