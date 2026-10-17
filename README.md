@@ -42,10 +42,16 @@ pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"
 
 Then hunt. Each of these stands alone:
 
-**Scan the repository you are in:**
+**Scan every repository under your home folder:**
 
 ```bash
 saw scan
+```
+
+**Or only the folder you are in:**
+
+```bash
+saw scan .
 ```
 
 **Or sweep every repository under a path:**

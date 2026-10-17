@@ -2,7 +2,7 @@
 """`saw scan` — hunt supply-chain worms (READ-ONLY). Routes to security.service.scan.
 
 Renders the report to the terminal; its last line is the verdict, and `saw fix` removes what it
-finds. Scope is LOCAL by default (given paths / configured globs / the current repo);
+finds. Scope is LOCAL by default (given paths / configured globs / every repository under your home folder);
 `--remote` (or naming `--user`/`--org`) scans GitHub repos instead. Persisting/alerting is
 opt-in: --json, --sarif FILE, -d DIR (redacted), --alert.
 """
@@ -34,8 +34,8 @@ def register(sub) -> None:
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local paths — a repository, a directory or a single file; or, with "
-                        "--remote, owner/repo slugs. Omit to scan configured targets or the "
-                        "current repo.")
+                        "--remote, owner/repo slugs. Omit to scan configured targets, else every "
+                        "repository under your home folder; `.` is the folder you are in.")
     p.add_argument("-p", "--path", action="append", default=[], dest="extra_paths",
                    metavar="PATH", help="additional target (repeatable)")
     p.add_argument("-c", "--config", default=None,

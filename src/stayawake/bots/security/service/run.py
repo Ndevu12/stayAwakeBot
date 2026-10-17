@@ -32,7 +32,7 @@ from stayawake.bots.security.sinks import (
 # body already uses (the `_`-prefixed ones stay for compat).
 from stayawake.bots.security.resolution import (
     REMOTE_EMPTY_HINT, resolve_local_targets, invalid_slugs,
-    enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
+    bare_run_targets, remote_scope as _remote_scope,
     resolve_remote as _resolve_remote)
 from stayawake.bots.security.service import workers as scan_workers
 from stayawake.bots.security.service.config import (
@@ -40,7 +40,6 @@ from stayawake.bots.security.service.config import (
 from stayawake.bots.security.service.report import (
     _status_tag, _print_dependency_actions, _print_report_pointer)
 from stayawake.lib.git.run import one_pass
-from stayawake.utils import exitcodes
 
 
 REPORTS_DIR = Path("reports/security")
@@ -274,22 +273,16 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
         if paths:
             local_patterns = list(paths)
-        elif cfg_local:
-            local_patterns = list(cfg_local)
         else:
-            here = _enclosing_repo_root()
-            if not (here / ".git").exists():
-                print(f"error: {here} is not a repository and none is above it, so a bare run has "
-                      "nothing to scan. Name what to scan — `saw scan <path>` takes a directory or "
-                      "a file.", file=sys.stderr)
-                return exitcodes.INCOMPLETE
-            local_patterns = [str(here)]
-            print(f"No targets configured; scanning current repository: {here}", file=sys.stderr)
+            local_patterns = bare_run_targets(cfg_local)
+            if not cfg_local:
+                print("No target named: scanning your home folder. "
+                      "`saw scan .` scans only the folder you are in.", file=sys.stderr)
         unsearched: list[Path] = []
         with status("Discovering targets…", enabled=progress_on):
             found = resolve_local_targets(local_patterns, opts, unsearched=unsearched)
         repos = [t.root for t in found]
-        if (paths or cfg_local) and not repos:
+        if not repos:
             for pattern in local_patterns:
                 print(f"error: {_why_nothing_at(pattern)}.", file=sys.stderr)
             print("Nothing was scanned.", file=sys.stderr)

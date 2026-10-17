@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A scan that finds, in a folder on this machine, a code loader or other code that runs when the
-folder is installed or built, says it may already have run and to run `saw audit` now."""
+folder is installed or built, says it may have run and to run `saw audit` now."""
 from __future__ import annotations
 
 import unittest
@@ -9,7 +9,7 @@ from stayawake.bots.security.models import Finding, ScanReport, ScanResult, Seve
 from stayawake.bots.security.signatures import every_signature, load_signatures
 from stayawake.bots.security.sinks.render import render_terminal
 
-_MAY_HAVE_RUN = "and it may already have run. Run `saw audit` now"
+_MAY_HAVE_RUN = "that code may have run. Run `saw audit` now"
 _REPOSITORIES_ONLY = "this scan checked repositories, not this machine"
 _RUNS_HERE = ("npm-lifecycle-dropper", "npm-lifecycle-agent-approval-disabled", "malicious-dependency",
               "malicious-installed-package", "installed-entry-loader")

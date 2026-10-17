@@ -48,7 +48,8 @@ def register(sub) -> None:
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "
-                        "Omit to fix configured targets or the current repo.")
+                        "Omit to fix configured targets, else every repository under your "
+                        "home folder; `.` is the folder you are in.")
     p.add_argument("-p", "--path", action="append", default=[], dest="extra_paths",
                    metavar="PATH", help="additional target (repeatable)")
     p.add_argument("-c", "--config", default=None,

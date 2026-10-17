@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from stayawake.bots.security import resolution
 from stayawake.bots.security import service as svc
 
 
@@ -51,9 +52,9 @@ class TestTargetResolution(unittest.TestCase):
         cap = self._capture(config_path=self._cfg('settings: {}\ntargets: { local: ["~/dev/**"] }\n'))
         self.assertEqual(cap["patterns"], ["~/dev/**"])
 
-    def test_cwd_default_when_nothing_configured(self):
+    def test_the_home_folder_is_the_default_when_nothing_is_configured(self):
         cap = self._capture(config_path=self._cfg("settings: {}\ntargets: { local: [] }\n"))
-        self.assertEqual(cap["patterns"], [str(svc.run._enclosing_repo_root())])
+        self.assertEqual(cap["patterns"], [str(Path.home())])
 
     def test_default_scope_is_local_even_with_github_configured(self):
         # #1069: scope is LOCAL by default — a configured GitHub target is NOT scanned
@@ -61,7 +62,7 @@ class TestTargetResolution(unittest.TestCase):
         cfg = self._cfg("settings: {}\ntargets:\n  local: []\n  github: { users: [octocat] }\n")
         cap = self._capture(config_path=cfg)                      # no remote=True
         self.assertNotIn("remote_called", cap)                   # GitHub NOT enumerated
-        self.assertEqual(cap["patterns"], [str(svc.run._enclosing_repo_root())])  # cwd fallback
+        self.assertEqual(cap["patterns"], [str(Path.home())])  # the home folder
 
     def test_remote_scope_scans_github_not_local(self):
         cfg = self._cfg("settings: {}\ntargets:\n  github: { users: [octocat] }\n")
@@ -76,11 +77,11 @@ class TestHelpers(unittest.TestCase):
         (repo / ".git").mkdir()
         sub = repo / "src" / "deep"
         sub.mkdir(parents=True)
-        self.assertEqual(svc.run._enclosing_repo_root(sub), repo.resolve())
+        self.assertEqual(resolution.enclosing_repo_root(sub), repo.resolve())
 
     def test_enclosing_repo_root_falls_back_to_start(self):
         plain = Path(tempfile.mkdtemp())  # no .git anywhere under tmp
-        self.assertEqual(svc.run._enclosing_repo_root(plain), plain.resolve())
+        self.assertEqual(resolution.enclosing_repo_root(plain), plain.resolve())
 
     def test_read_config_default_missing_is_empty_but_explicit_missing_is_an_error(self):
         # Still a hard error — don't silently scan nothing — but a stated one: it used to reach the

@@ -206,9 +206,9 @@ def _host_note(payload: dict[str, Any], escape) -> str:
     """Build the run's note on what its verdict covers on this machine. Takes the report payload
     and the escaping the sink applies to a path. Returns the note."""
     infected = bool(payload["summary"].get("infected"))
-    may_have_run = ([escape(p) for p in _paths_of_code_that_runs_here(payload)]
-                    if infected else [])
-    return scan_host_note(infected=infected, local_loaders=may_have_run, clean=_fully_clean(payload))
+    found = _code_that_runs_here(payload) if infected else []
+    return scan_host_note(infected=infected, local_loaders=[escape(f"{t}/{p}") for t, p in found],
+                          folders=len({t for t, _ in found}) or 1, clean=_fully_clean(payload))
 
 
 def _fully_clean(payload: dict[str, Any]) -> bool:
@@ -219,11 +219,11 @@ def _fully_clean(payload: dict[str, Any]) -> bool:
                                      or r.get("residue") for r in results)
 
 
-def _paths_of_code_that_runs_here(payload: dict[str, Any]) -> list[str]:
+def _code_that_runs_here(payload: dict[str, Any]) -> list[tuple[str, str]]:
     """Name the confirmed findings, in folders on this machine, of a code loader or of other code that
-    runs when the folder is opened, installed or built. Takes the report payload. Returns their
-    paths."""
-    paths: dict[str, None] = {}
+    runs when the folder is opened, installed or built. Takes the report payload. Returns each one's
+    folder and path."""
+    paths: dict[tuple[str, str], None] = {}
     marked = runs_on_this_machine()
     for r in payload.get("results", []):
         if r.get("source") != "local":
@@ -231,7 +231,8 @@ def _paths_of_code_that_runs_here(payload: dict[str, Any]) -> list[str]:
         for f in r.get("findings", []):
             runs_here = f.get("category") == "code-loader" or f.get("signature_id") in marked
             if runs_here and f.get("confidence") == "confirmed":
-                paths.setdefault(f.get("path") or "an unnamed file", None)
+                paths.setdefault((str(r.get("target") or "a folder"), f.get("path") or "an unnamed file"),
+                                 None)
     return list(paths)
 
 

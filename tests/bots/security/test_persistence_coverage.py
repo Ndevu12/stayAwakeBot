@@ -705,7 +705,7 @@ class TestScanHostNote(unittest.TestCase):
                                               "path": "a\x1b[2Jb.js", "signature_id": "x",
                                               "severity": "critical", "description": "d"}]
         out = sink_render._host_note(payload, sink_render.textsafe.plain)
-        self.assertIn("malicious code is in a folder on this machine", out)
+        self.assertIn("on this machine holds malicious code", out)
         self.assertNotIn("\x1b", out)
 
 
