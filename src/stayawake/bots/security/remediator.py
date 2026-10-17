@@ -21,7 +21,7 @@ from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.service.config import _options
 from stayawake.bots.security.resolution import (
     discover_local_repos, invalid_slugs, no_repository_in, REMOTE_EMPTY_HINT, DEFAULT_CONFIG,
-    enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
+    bare_run_targets, enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
     resolve_remote as _resolve_remote)
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security import pr as pr_submit
@@ -122,9 +122,9 @@ def named_but_absent(paths) -> list[str]:
 
 def _local_patterns(cfg: dict, paths) -> list[str]:
     """Name the folders a local fix looks in. Takes the configuration and the folders named on the
-    command line. Returns those folders, the configured ones, or the repository standing here."""
+    command line. Returns those folders, else the configured ones, else the home folder."""
     cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
-    return list(paths) if paths else (list(cfg_local) or [str(_enclosing_repo_root())])
+    return list(paths) if paths else bare_run_targets(cfg_local)
 
 
 def _local_repos(cfg: dict, opts: ScanOptions, paths) -> list[Path]:

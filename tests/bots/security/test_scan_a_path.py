@@ -212,49 +212,52 @@ class TestWhatARefusalSays(unittest.TestCase):
         self.assertNotIn("not a repository", err)
 
 
-class TestABareRunAimsAtRepositories(unittest.TestCase):
-    """`saw scan` with no path is about the repository being stood in — not the folder."""
+class TestABareRunSweepsTheHomeFolder(unittest.TestCase):
+    """`saw scan` with no path scans the home folder, as `saw scan ~` does, wherever it is run;
+    `saw scan .` is the folder being stood in."""
 
-    def _bare(self, setup):
+    def _run(self, *, repos=("one", "two"), stand_in=None, paths=None):
         import subprocess
+        from unittest import mock
         from stayawake.bots.security import service
-        here = os.getcwd()          # BEFORE setup: a setup that chdirs would otherwise make this
-        self.addCleanup(os.chdir, here)   # restore a temp dir that is about to be deleted
-        d = Path(tempfile.mkdtemp())
-        setup(d, subprocess)
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        home = Path(tempfile.mkdtemp())
+        (home / "notes.js").write_text("export const note = 1;\n", encoding="utf-8")
+        for name in repos:
+            subprocess.run(["git", "init", "-q", str(home / "code" / name)], check=True)
+            (home / "code" / name / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
+        elsewhere = Path(tempfile.mkdtemp())
         cfgd = Path(tempfile.mkdtemp())
         (cfgd / "c.yml").write_text("allowlist: []\n", encoding="utf-8")
-        os.chdir(d)
-        try:
-            err = io.StringIO()
-            with redirect_stdout(io.StringIO()), redirect_stderr(err):
-                rc = service.scan(str(cfgd / "c.yml"), no_stream=True)
-            return rc, err.getvalue()
-        finally:
-            os.chdir(here)
+        os.chdir(home / "code" / stand_in if stand_in else elsewhere)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                redirect_stdout(out), redirect_stderr(err):
+            rc = service.scan(str(cfgd / "c.yml"), no_stream=True, paths=paths)
+        return rc, out.getvalue(), err.getvalue()
 
-    def test_it_still_finds_the_repository_it_is_standing_in(self):
-        def setup(d, sp):
-            sp.run(["git", "init", "-q", str(d)], check=True)
-            (d / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
-        rc, err = self._bare(setup)
-        self.assertEqual(rc, 0)
-        self.assertIn("scanning current repository", err)
+    def test_outside_a_repository_it_scans_every_repository_under_the_home_folder(self):
+        rc, out, err = self._run()
+        self.assertEqual(rc, 0, err)
+        self.assertIn("scanning your home folder", err)
+        self.assertIn("2 targets", out)
 
-    def test_it_finds_the_repository_from_a_subdirectory(self):
-        def setup(d, sp):
-            sp.run(["git", "init", "-q", str(d)], check=True)
-            (d / "sub").mkdir()
-            (d / "sub" / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
-        rc, err = self._bare(lambda d, sp: (setup(d, sp), os.chdir(d / "sub"))[0])
-        self.assertEqual(rc, 0)
-        self.assertIn("scanning current repository", err)
+    def test_inside_a_repository_it_still_scans_every_repository_under_the_home_folder(self):
+        rc, out, err = self._run(stand_in="one")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("2 targets", out)
 
-    def test_outside_a_repository_it_says_so_rather_than_scanning_the_folder(self):
-        rc, err = self._bare(lambda d, sp: (d / "a.js").write_text("x\n", encoding="utf-8"))
-        self.assertEqual(rc, 2)
-        self.assertIn("not a repository", err)
-        self.assertIn("saw scan <path>", err)
+    def test_a_dot_scans_only_the_folder_it_is_run_in(self):
+        rc, out, err = self._run(stand_in="one", paths=["."])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("1 targets", out)
+        self.assertNotIn("scanning your home folder", err)
+
+    def test_a_home_folder_with_no_repository_is_scanned_as_a_folder(self):
+        rc, out, err = self._run(repos=())
+        self.assertEqual(rc, 0, err)
+        self.assertIn("1 targets", out)
 
 
 class TestNamingAFileLosesNoDetection(unittest.TestCase):

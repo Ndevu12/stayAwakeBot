@@ -18,7 +18,7 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
 
 | Option | Description |
 | --- | --- |
-| `TARGETS...` | Local paths — a repository, a directory, or a single file — or `owner/repo` slugs under `--remote`. Omit to scan configured targets, else the current repository. |
+| `TARGETS...` | Local paths — a repository, a directory, or a single file — or `owner/repo` slugs under `--remote`. Omit to scan configured targets, else every repository under your home folder. `saw scan .` scans the folder you are in. |
 | `-p`, `--path PATH` | Another target (repeatable). |
 | `-c`, `--config FILE` | Config file (default: the one saw's hooks were installed with). |
 | `-r`, `--remote` | Scan GitHub repositories instead of local paths. See [Remote targeting](remote.md). |

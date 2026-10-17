@@ -13,6 +13,17 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **A bare `saw scan` scans your home folder**, as `saw scan ~` does, wherever you run it, and a
+  bare `saw fix` fixes what it finds there. Outside a repository it stopped with an error.
+  `saw scan .` and `saw fix .` act on only the folder you are in.
+- **A package that carries a link to a git folder it did not ship is scanned in full.** saw reads
+  it as a plain folder instead of reporting it as unreadable, so it no longer leaves a sweep of
+  your home folder incomplete.
+- **The note after a scan names every folder holding code that runs when it is opened, installed
+  or built**, with how many there are. It says that code may have run if you opened, installed or
+  built one of them, and still says to run `saw audit` before you change any password or token.
+
 ## [0.12.0] - 2026-10-16
 
 ### Added

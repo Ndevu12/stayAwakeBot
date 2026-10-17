@@ -198,6 +198,28 @@ def _git_dir_of(work_tree: Path) -> Path | None:
     return _pointer(dot_git) if os.path.lexists(dot_git) else None
 
 
+def links_to_no_git_directory(work_tree: Path) -> bool:
+    """Whether a tree's `.git` is a link file naming a git directory that is not there, so that git
+    takes the tree as no repository. Takes the tree. Returns False for a `.git` directory or link,
+    and when it cannot be told."""
+    dot_git = Path(work_tree) / ".git"
+    try:
+        if dot_git.is_symlink() or not dot_git.is_file():
+            return False
+    except OSError:
+        return False
+    git_dir = _pointer(dot_git)
+    if git_dir is None:
+        return False
+    try:
+        os.lstat(git_dir)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _common_dir_of(git_dir: Path) -> Path:
     """Find where a git directory keeps what its worktrees share. Takes it. Returns that path."""
     text = pathsafe.read_regular_text(git_dir / "commondir")
@@ -676,7 +698,7 @@ def _read_by_parsing(work_tree: Path, files_read: dict) -> ExecSurface | None:
     other worktrees' settings and its submodules' settings. Takes the tree and the settings files
     already read in this pass. Returns the surface, or None when it is not a git working tree."""
     git_dir = _git_dir_of(work_tree)
-    if git_dir is None:
+    if git_dir is None or links_to_no_git_directory(work_tree):
         return None
     common_dir = _common_dir_of(git_dir)
     surface = ExecSurface(work_tree, git_dir, common_dir)

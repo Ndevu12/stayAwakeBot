@@ -52,20 +52,23 @@ def _commit_repo(files: dict[str, str]) -> Path:
 
 
 class TestConfigOptional(unittest.TestCase):
-    def test_no_config_falls_back_to_current_repo_no_crash(self):
-        # #1054: `saw fix` with no config must not raise; it falls back to the enclosing repo.
-        d = _git_repo(INFECTED_FILES)
+    def test_no_config_falls_back_to_the_home_folder_no_crash(self):
+        # #1054: `saw fix` with no config must not raise. It falls back to every repository under
+        # the home folder, wherever it is run from; `saw fix .` is the folder being stood in.
+        home = Path(tempfile.mkdtemp())
+        os.rename(_git_repo(INFECTED_FILES), home / "project")
         cwd = os.getcwd()
         try:
-            os.chdir(d)
-            with mock.patch.object(remediator.pr_submit, "prepare_fix",
-                                   return_value=_verdict(BaseState.PREPARED,
-                                                        "repo: prepared 1 change(s)")) as m_prep:
+            os.chdir(tempfile.mkdtemp())
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                    mock.patch.object(remediator.pr_submit, "prepare_fix",
+                                      return_value=_verdict(BaseState.PREPARED,
+                                                           "repo: prepared 1 change(s)")) as m_prep:
                 rc = remediator.fix(None, no_stream=True)
         finally:
             os.chdir(cwd)
         self.assertEqual(rc, 0)
-        m_prep.assert_called()                 # the current repo was processed (prepare, no push)
+        m_prep.assert_called()                 # the home folder's infected repo was processed
 
     def test_missing_explicit_config_is_clean_exit_2(self):
         self.assertEqual(remediator.fix("definitely-not-here.yml"), 2)

@@ -83,8 +83,8 @@ class TestTheHostNoteSaysWhereYouStand(unittest.TestCase):
     def test_code_in_a_folder_here_names_the_folder_and_what_not_to_do(self):
         note = self._notes()[0]
         self.assertIn("~/work/app", note)
-        self.assertIn("it may already have run", note)
-        self.assertIn("Do not open, install or build that folder until it is cleaned",
+        self.assertIn("that code may have run", note)
+        self.assertIn("Do not open, install or build that folder until `saw fix` has cleaned it",
                       note)
 
 

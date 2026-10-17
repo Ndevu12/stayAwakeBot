@@ -4,7 +4,7 @@ import re
 import unittest
 
 from stayawake.bots.security.signatures import load_signatures
-from stayawake.bots.security.sinks.render import _paths_of_code_that_runs_here
+from stayawake.bots.security.sinks.render import _code_that_runs_here
 from tests.support import samples
 
 SIG_ID = "loader-require-escapes-esm"
@@ -98,20 +98,20 @@ class HostEscalation(unittest.TestCase):
 
     @staticmethod
     def _payload(source, category="code-loader", confidence="confirmed"):
-        return {"results": [{"source": source, "findings": [
+        return {"results": [{"source": source, "target": "~/app", "findings": [
             {"category": category, "confidence": confidence, "path": "postcss.config.mjs"}]}]}
 
     def test_a_local_confirmed_loader_escalates(self):
-        self.assertEqual(_paths_of_code_that_runs_here(self._payload("local")), ["postcss.config.mjs"])
+        self.assertEqual(_code_that_runs_here(self._payload("local")), [("~/app", "postcss.config.mjs")])
 
     def test_a_remote_finding_says_nothing_about_this_host(self):
-        self.assertEqual(_paths_of_code_that_runs_here(self._payload("remote")), [])
+        self.assertEqual(_code_that_runs_here(self._payload("remote")), [])
 
     def test_a_heuristic_finding_does_not_escalate(self):
-        self.assertEqual(_paths_of_code_that_runs_here(self._payload("local", confidence="heuristic")), [])
+        self.assertEqual(_code_that_runs_here(self._payload("local", confidence="heuristic")), [])
 
     def test_a_non_loader_finding_does_not_escalate(self):
-        self.assertEqual(_paths_of_code_that_runs_here(self._payload("local", category="camouflage")), [])
+        self.assertEqual(_code_that_runs_here(self._payload("local", category="camouflage")), [])
 
 
 if __name__ == "__main__":
