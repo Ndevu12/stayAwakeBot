@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-17
+
 ### Fixed
 - **A bare `saw scan` scans your home folder**, as `saw scan ~` does, wherever you run it, and a
   bare `saw fix` fixes what it finds there. Outside a repository it stopped with an error.
@@ -1668,7 +1670,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.4...v0.12.0
 [0.11.5]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.4...v0.11.5
 [0.11.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.3...v0.11.4
