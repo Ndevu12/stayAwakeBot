@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Worm-guard PROTECTION backstop: file ONE self-closing issue per repo when its worm-guard gate is
-missing or its pinned Strix release has fallen behind — so a repo stays gated and current over time.
+missing or its pinned SAW Guard release has fallen behind — so a repo stays gated and current over time.
 """
 from __future__ import annotations
 
@@ -13,12 +13,13 @@ from stayawake.utils import env
 from stayawake.utils.render import SEVERITY, paint
 from stayawake.utils.textsafe import code as _code
 from stayawake.bots.security.guard import detect
+from stayawake.bots.security.guard.constants import SAW_GUARD_ACTION, SAW_GUARD_NAME
 
 DRIFT_LABEL = "worm-guard-drift"
 DRIFT_TITLE = "Worm-guard protection needs attention"
 
 _DEFICIENT = {"no-gate", "no-ci", "behind"}
-_PROTECTED = {"fresh", "floating", "not-strix"}
+_PROTECTED = {"fresh", "floating", "not-saw-guard"}
 
 
 @dataclass
@@ -45,7 +46,7 @@ def _resolve_slug(repo: Path) -> tuple[str, str] | None:
 
 def _classify(st: "detect.GuardStatus") -> tuple[str, str]:
     """Map a `GuardStatus` to `(state, reason)`. `reason` is the issue's lead sentence for a
-    deficiency (`state in _DEFICIENT`), else empty. A non-Strix gate is PROTECTED (no reason)."""
+    deficiency (`state in _DEFICIENT`), else empty. A non-SAW Guard gate is PROTECTED (no reason)."""
     if st.error:
         return "error", st.error
     if not st.present:
@@ -55,12 +56,12 @@ def _classify(st: "detect.GuardStatus") -> tuple[str, str]:
         return "no-gate", ("This repository has no worm-guard gate, so infected merges are not "
                            "blocked — it is **unprotected**.")
     if st.ref is None:
-        return "not-strix", ""
+        return "not-saw-guard", ""
     if st.fresh is None or st.fresh.state == "unknown":
         return "unknown", ""
     if st.fresh.state == "behind":
         return "behind", (f"The worm-guard gate ({_code(st.ref.workflow)}) pins "
-                          f"`Ndevu12/strix@{st.ref.ref[:12]}…`, but the latest Strix release is "
+                          f"`{SAW_GUARD_ACTION}@{st.ref.ref[:12]}…`, but the latest {SAW_GUARD_NAME} release is "
                           f"**{_code(st.fresh.latest_tag or 'unknown')}** — it is running an "
                           f"out-of-date detection engine.")
     return st.fresh.state, ""
@@ -87,10 +88,10 @@ def _find_issue(owner: str, name: str, token: str | None) -> int | None:
 
 
 def drift_one(*, repo: str | Path | None = None, slug: str | None = None,
-              token: str | None = None, latest: "detect.LatestStrix | None" = None) -> DriftOutcome:
+              token: str | None = None, latest: "detect.LatestSawGuard | None" = None) -> DriftOutcome:
     """Ensure ONE repo is gated and current (reusing `detect.check`), maintaining ONE dedup tracking
-    issue. Deficient (no gate / no CI / Strix pin behind) → open the issue (or silently refresh the
-    open one). Protected (Strix pin fresh/floating, or a non-Strix gate) → close any open issue. A
+    issue. Deficient (no gate / no CI / SAW Guard pin behind) → open the issue (or silently refresh the
+    open one). Protected (SAW Guard pin fresh/floating, or a non-SAW Guard gate) → close any open issue. A
     transient `unknown` (releases API down) or a remote read `error` touches no issue (no churn).
     LOCAL (`repo` path) or REMOTE (`slug`)."""
     token = token or env.github_token()
@@ -149,10 +150,10 @@ def render_drift(o: DriftOutcome, *, color: bool = False) -> str:
     if o.state in ("fresh", "floating"):
         closed = paint("  (closed the issue)", dim, on=color) if o.action == "closed" else ""
         return paint(f"✓ gated · pin {o.state}", ok, on=color) + closed
-    if o.state == "not-strix":
+    if o.state == "not-saw-guard":
         closed = paint("  (closed the issue)", dim, on=color) if o.action == "closed" else ""
         return (paint("✓ gated", ok, on=color)
-                + paint(" — not the pinned Strix action; release freshness not tracked", dim, on=color)
+                + paint(f" — not the pinned {SAW_GUARD_NAME} action; release freshness not tracked", dim, on=color)
                 + closed)
     if o.state == "unknown":
         return paint("• freshness unknown", dim, on=color) + (f" — {o.detail}" if o.detail else "")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""`saw guard` detection + grading — find the Strix CI gate by its ACTION REFERENCE
-(`uses: Ndevu12/strix@<ref>`, not filename/job), derive its status-check context, grade the pin, and
-best-effort check freshness against the latest Strix release. READ-ONLY (`saw guard check`)."""
+"""`saw guard` detection + grading — find the SAW Guard CI gate by its ACTION REFERENCE
+(`uses: Ndevu12/SAW_GUARD@<ref>`, or a name it had before; not filename/job), derive its status-check context, grade the pin, and
+best-effort check freshness against the latest SAW Guard release. READ-ONLY (`saw guard check`)."""
 from __future__ import annotations
 
 import re
@@ -17,16 +17,17 @@ from stayawake.lib import auth
 from stayawake.lib import git as gitutil
 from stayawake.utils.render import SEVERITY, paint
 from stayawake.bots.security.guard.constants import (
-    STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE)
+    SAW_GUARD_ACTION, SAW_GUARD_NAME, SAW_GUARD_OWNER, SAW_GUARD_REPO, SAW_GUARD_USES, WORKFLOW_DIR,
+    WORM_GUARD_FILE)
 
-_STRIX_USES = re.compile(r"^Ndevu12/strix@(?P<ref>\S+?)\s*(?:#.*)?$", re.IGNORECASE)
+_SAW_GUARD_USES = re.compile(rf"^{SAW_GUARD_USES}@(?P<ref>\S+?)\s*(?:#.*)?$", re.IGNORECASE)
 _SHA = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 _EXACT_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 
 
 @dataclass
-class StrixRef:
-    """One `uses: Ndevu12/strix@<ref>` occurrence and what it tells us. `inputs` is the step's
+class SawGuardRef:
+    """One `uses: Ndevu12/SAW_GUARD@<ref>` occurrence and what it tells us. `inputs` is the step's
     `with:` block and `job_permissions` the permissions in force for the job it sits in — both are
     how the gate is CONFIGURED. `guards_changes` is true when this occurrence runs on every change
     to the code."""
@@ -39,7 +40,7 @@ class StrixRef:
     guards_changes: bool = True
 
 
-STRIX_DECLARED_INPUTS = frozenset({
+SAW_GUARD_DECLARED_INPUTS = frozenset({
     "version", "config-file", "fail-on", "require-db", "remediate",
     "github-token", "upload-sarif", "upload-artifact", "pr-comment"})
 
@@ -60,7 +61,7 @@ def _set_at_run_time(value) -> bool:
 
 @dataclass
 class GateConfig:
-    """How a found Strix gate is configured: which inputs the action never receives, whether a
+    """How a found SAW Guard gate is configured: which inputs the action never receives, whether a
     finding leaves the run, how much write access the scanning job holds, and what the workflow
     leaves undecided until it runs."""
     ignored_inputs: tuple[str, ...] = ()
@@ -83,13 +84,13 @@ class GateConfig:
         return self.reports_nothing or self.standing_write
 
 
-def grade_config(ref: StrixRef) -> GateConfig:
+def grade_config(ref: SawGuardRef) -> GateConfig:
     """Grade a gate's own configuration. Reads only what the workflow states, so it works the same
     on a local checkout and a remote read. Takes one occurrence. Returns the grade, with a value the
     workflow resolves at run time named in `unresolved` rather than guessed either way."""
     raw = ref.inputs if isinstance(ref.inputs, dict) else {}
     given = {str(k).strip().lower(): v for k, v in raw.items()}
-    ignored = tuple(sorted(k for k in given if k not in STRIX_DECLARED_INPUTS))
+    ignored = tuple(sorted(k for k in given if k not in SAW_GUARD_DECLARED_INPUTS))
     unresolved = tuple(sorted(k for k in INPUTS_THAT_DECIDE_REPORTING
                               if k in given and _set_at_run_time(given[k])))
     delivers = any(_truthy(given[k]) or _set_at_run_time(given[k])
@@ -151,11 +152,11 @@ def _runs_on_every_run(job_id: str, jobs: dict, waiting: tuple = ()) -> bool:
     return all(_runs_on_every_run(str(n), jobs, waiting + (job_id,)) for n in needs)
 
 
-def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
-    """Collect every `uses: Ndevu12/strix@<ref>` in a repository's workflows. Takes
+def find_saw_guard_refs(workflows: dict[str, str]) -> list[SawGuardRef]:
+    """Collect every `uses: Ndevu12/SAW_GUARD@<ref>` in a repository's workflows. Takes
     `{path: yaml_text}`. Returns the occurrences in path then document order, an empty list when the
     repository references the action nowhere."""
-    found: list[StrixRef] = []
+    found: list[SawGuardRef] = []
     for path in sorted(workflows):
         try:
             doc = yaml.safe_load(workflows[path])
@@ -174,10 +175,10 @@ def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
             for step in steps:
                 if not isinstance(step, dict):
                     continue
-                m = _STRIX_USES.match(str(step.get("uses", "")).strip())
+                m = _SAW_GUARD_USES.match(str(step.get("uses", "")).strip())
                 if m:
                     ctx = job.get("name") or job_id
-                    found.append(StrixRef(workflow=path, job=str(ctx), ref=m.group("ref"),
+                    found.append(SawGuardRef(workflow=path, job=str(ctx), ref=m.group("ref"),
                                           pin=classify_pin(m.group("ref")),
                                           inputs=step.get("with"),
                                           job_permissions=granted,
@@ -185,10 +186,10 @@ def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
     return found
 
 
-def find_strix(workflows: dict[str, str]) -> StrixRef | None:
+def find_saw_guard(workflows: dict[str, str]) -> SawGuardRef | None:
     """Pick the occurrence that answers whether this repository is gated. Takes `{path: yaml_text}`.
     Returns that occurrence, or None when the repository references the action nowhere."""
-    refs = find_strix_refs(workflows)
+    refs = find_saw_guard_refs(workflows)
     if not refs:
         return None
 
@@ -215,22 +216,22 @@ def _runs_saw(text: str) -> bool:
 @dataclass
 class WormGate:
     """A worm gate found by ANY mechanism — so `check`/`setup` reason about "is this repo guarded?",
-    not just "does it use Ndevu12/strix?". `mechanism` is "strix" (the packaged action — gradeable:
-    `strix` carries the StrixRef), "local-action" (a `uses: ./…` composite action that runs saw), or
-    "saw-run" (a `run:` step that invokes the scanner). Only "strix" can be pin/freshness-graded."""
+    not just "does it use Ndevu12/SAW_GUARD?". `mechanism` is "saw-guard" (the packaged action — gradeable:
+    `saw-guard` carries the SawGuardRef), "local-action" (a `uses: ./…` composite action that runs saw), or
+    "saw-run" (a `run:` step that invokes the scanner). Only "saw-guard" can be pin/freshness-graded."""
     mechanism: str
     workflow: str
     detail: str
-    strix: StrixRef | None = None
+    saw_guard: SawGuardRef | None = None
 
 
 def find_worm_gate(workflows: dict[str, str], *, read_action=None) -> WormGate | None:
     """Find the step that gates this repository on the scanner. Takes `{path: yaml_text}` and an
     optional `read_action(uses) -> text|None` that reads a local action. Returns the gate, or None
     when there is none."""
-    ref = find_strix(workflows)
+    ref = find_saw_guard(workflows)
     if ref is not None:
-        return WormGate("strix", ref.workflow, f"Ndevu12/strix@{ref.ref}", strix=ref)
+        return WormGate("saw-guard", ref.workflow, f"{SAW_GUARD_ACTION}@{ref.ref}", saw_guard=ref)
     for path in sorted(workflows):
         try:
             doc = yaml.safe_load(workflows[path])
@@ -326,32 +327,32 @@ class Freshness:
 
 
 @dataclass
-class LatestStrix:
-    """The latest published Strix release, resolved ONCE. A sweep precomputes this and passes it to
+class LatestSawGuard:
+    """The latest published SAW Guard release, resolved ONCE. A sweep precomputes this and passes it to
     each repo's `freshness` so the releases API isn't re-hit per repo."""
     tag: str | None = None
     sha: str | None = None
 
 
-def latest_strix(token: str | None = None) -> LatestStrix:
-    """Resolve the latest Strix release (tag + its commit SHA) once — for a `check` sweep."""
-    rel = github_api.latest_release(STRIX_OWNER, STRIX_REPO, token)
+def latest_saw_guard(token: str | None = None) -> LatestSawGuard:
+    """Resolve the latest SAW Guard release (tag + its commit SHA) once — for a `check` sweep."""
+    rel = github_api.latest_release(SAW_GUARD_OWNER, SAW_GUARD_REPO, token)
     tag = rel.get("tag_name") if isinstance(rel, dict) else None
     if not tag:
-        return LatestStrix()
-    return LatestStrix(tag, github_api.ref_commit_sha(STRIX_OWNER, STRIX_REPO, f"tags/{tag}", token))
+        return LatestSawGuard()
+    return LatestSawGuard(tag, github_api.ref_commit_sha(SAW_GUARD_OWNER, SAW_GUARD_REPO, f"tags/{tag}", token))
 
 
-def freshness(ref: StrixRef, token: str | None = None, *, latest: LatestStrix | None = None) -> Freshness:
-    """Best-effort: is `ref` behind the latest published Strix release? Network; degrades to
+def freshness(ref: SawGuardRef, token: str | None = None, *, latest: LatestSawGuard | None = None) -> Freshness:
+    """Best-effort: is `ref` behind the latest published SAW Guard release? Network; degrades to
     'unknown' (never raises, never guesses) when the releases API can't be reached. Pass a
-    precomputed `latest` (from `latest_strix`) to grade without a network call — used by the sweep."""
+    precomputed `latest` (from `latest_saw_guard`) to grade without a network call — used by the sweep."""
     if latest is None:
-        rel = github_api.latest_release(STRIX_OWNER, STRIX_REPO, token)
+        rel = github_api.latest_release(SAW_GUARD_OWNER, SAW_GUARD_REPO, token)
         tag = rel.get("tag_name") if isinstance(rel, dict) else None
-        latest = LatestStrix(tag)
+        latest = LatestSawGuard(tag)
     if not latest.tag:
-        return Freshness("unknown", detail="couldn't reach the Strix releases API")
+        return Freshness("unknown", detail=f"couldn't reach the {SAW_GUARD_NAME} releases API")
     if ref.pin == "floating":
         return Freshness("floating", latest.tag,
                          "a moving alias — tracks its line automatically; pin a SHA for reproducibility")
@@ -360,7 +361,7 @@ def freshness(ref: StrixRef, token: str | None = None, *, latest: LatestStrix | 
         return Freshness("fresh" if ok else "behind", latest.tag,
                          "" if ok else f"pinned {ref.ref}, latest release is {latest.tag}")
     latest_sha = latest.sha if latest.sha is not None else github_api.ref_commit_sha(
-        STRIX_OWNER, STRIX_REPO, f"tags/{latest.tag}", token)
+        SAW_GUARD_OWNER, SAW_GUARD_REPO, f"tags/{latest.tag}", token)
     if not latest_sha:
         return Freshness("unknown", latest.tag, "couldn't resolve the latest release commit")
     ok = ref.ref.lower() == latest_sha.lower()
@@ -371,7 +372,7 @@ def freshness(ref: StrixRef, token: str | None = None, *, latest: LatestStrix | 
 @dataclass
 class GuardStatus:
     present: bool
-    ref: StrixRef | None = None
+    ref: SawGuardRef | None = None
     fresh: Freshness | None = None
     required: bool | None = None
     protected_by: str = ""
@@ -385,8 +386,8 @@ class GuardStatus:
     @property
     def healthy(self) -> bool:
         """The gate passes verification: present, SHA-pinned, not stale, configured so a finding
-        reaches someone, and (where we could check) required. Only a Strix gate is *verifiable* — a
-        non-Strix worm gate is protective but its pin/freshness/required-status can't be tracked, so
+        reaches someone, and (where we could check) required. Only a SAW Guard gate is *verifiable* — a
+        non-SAW Guard worm gate is protective but its pin/freshness/required-status can't be tracked, so
         it is not 'healthy' for `-f/--fail` (the render says so plainly)."""
         if not self.present or self.ref is None or self.ref.pin != "sha":
             return False
@@ -460,16 +461,16 @@ def read_error(slug: str, cause: str, retry_after: int | None = None) -> str:
 
 @dataclass
 class GateProbe:
-    """`probe_remote_gate` result: the Strix gate (or None if genuinely absent) AND whether the
+    """`probe_remote_gate` result: the SAW Guard gate (or None if genuinely absent) AND whether the
     workflows could be read. `cause` is set ONLY on a real read failure (auth/scope/rate/network) —
     so a caller (e.g. `saw audit`) can tell 'this repo has no gate' apart from 'I couldn't read it',
     instead of the old `or {}` that laundered a read failure into a false 'no gate'."""
-    ref: StrixRef | None = None
+    ref: SawGuardRef | None = None
     cause: str | None = None
 
 
 def probe_remote_gate(slug: str, token: str | None) -> GateProbe:
-    """Read-only public seam: does a remote repo run the Strix gate, under what status-check context,
+    """Read-only public seam: does a remote repo run the SAW Guard gate, under what status-check context,
     and could we even read it? `saw audit` uses this so a read failure doesn't masquerade as 'no gate'."""
     if not slug or "/" not in slug:
         return GateProbe()
@@ -477,19 +478,19 @@ def probe_remote_gate(slug: str, token: str | None) -> GateProbe:
     rr = _remote_workflows(owner, name, token)
     if rr.cause is not None and rr.cause != "not_found":
         return GateProbe(cause=rr.cause)
-    return GateProbe(ref=find_strix(rr.workflows))
+    return GateProbe(ref=find_saw_guard(rr.workflows))
 
 
-def remote_gate(slug: str, token: str | None) -> StrixRef | None:
-    """The Strix gate in a remote repo's workflows, or None. Thin value wrapper over
+def remote_gate(slug: str, token: str | None) -> SawGuardRef | None:
+    """The SAW Guard gate in a remote repo's workflows, or None. Thin value wrapper over
     `probe_remote_gate` (a read failure → None, same as before) for callers that don't need the cause."""
     return probe_remote_gate(slug, token).ref
 
 
 def check(*, repo: str | Path | None = None, slug: str | None = None, branch: str = "main",
           token: str | None = None, offline: bool = False,
-          latest: "LatestStrix | None" = None) -> GuardStatus:
-    """Inspect one repo's Strix gate. Local (a working-tree `repo` path) or remote (`slug`,
+          latest: "LatestSawGuard | None" = None) -> GuardStatus:
+    """Inspect one repo's SAW Guard gate. Local (a working-tree `repo` path) or remote (`slug`,
     `owner/name`, via the API). `offline` skips the freshness network call; a sweep passes a
     precomputed `latest` so freshness is graded without a per-repo release lookup."""
     if slug:
@@ -509,11 +510,11 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
     gate = find_worm_gate(workflows, read_action=reader)
     if gate is None:
         return GuardStatus(present=False)
-    if gate.mechanism != "strix":
+    if gate.mechanism != "saw-guard":
         return GuardStatus(present=True, mechanism=gate.mechanism, gate_file=gate.workflow,
                            branch=branch if slug else None)
 
-    ref = gate.strix
+    ref = gate.saw_guard
     fresh = None if offline else freshness(ref, token, latest=latest)
     required: bool | None = None
     protected_by = ""
@@ -538,7 +539,7 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
         if status.no_ci:
             return paint("• no CI workflows", dim, on=color) + " — nothing to gate here."
         lines.append(paint("✗ No worm gate found", warn, on=color) +
-                     " — no workflow runs a worm scan (`Ndevu12/strix`, a local scan action, or `saw`).")
+                     f" — no workflow runs a worm scan (`{SAW_GUARD_ACTION}`, a local scan action, or `saw`).")
         lines.append(paint("     Run `saw guard setup` to add one.", dim, on=color))
         return "\n".join(lines)
 
@@ -547,13 +548,13 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
             status.mechanism, status.mechanism or "another mechanism")
         lines.append(paint("✓ Worm gate found", ok, on=color) +
                      f" — {status.gate_file} runs a worm scan via {how}.")
-        lines.append("  " + paint("• not the pinned Strix action", dim, on=color) +
+        lines.append("  " + paint(f"• not the pinned {SAW_GUARD_NAME} action", dim, on=color) +
                      " — its pin, freshness, and required-status can't be tracked. `saw guard setup` "
-                     "can adopt the SHA-pinned `Ndevu12/strix` gate.")
+                     f"can adopt the SHA-pinned `{SAW_GUARD_ACTION}` gate.")
         return "\n".join(lines)
 
     r = status.ref
-    lines.append(paint("✓ Strix gate found", ok, on=color) + f" — {r.workflow} (job “{r.job}”)")
+    lines.append(paint(f"✓ {SAW_GUARD_NAME} gate found", ok, on=color) + f" — {r.workflow} (job “{r.job}”)")
 
     if r.pin == "sha":
         lines.append("  " + paint("✓ pinned to a commit SHA", ok, on=color) + f"  (@{r.ref[:12]}…)")

@@ -25,7 +25,7 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | [`audit`](audit.md) | Machine hygiene, start-up surface, branch protection | read-only |
 | [`harden`](harden.md) | Put saw's controls in place on this machine | this machine |
 | [`watch`](watch.md) | One unattended pass: end identified code, remember the rest | this machine |
-| [`guard`](guard.md) | Install and verify the Strix CI gate | `check`/`drift` read-only; `setup` writes a workflow or a PR |
+| [`guard`](guard.md) | Install and verify the SAW Guard CI gate | `check`/`drift` read-only; `setup` writes a workflow or a PR |
 | [`hook`](hook.md) | Scan what a clone or pull just brought in | your global git config |
 | [`auth`](auth.md) | Credential and capability status; register a GitHub App | local config |
 | [`db`](db.md) | Manage the offline advisory database | its cache only |

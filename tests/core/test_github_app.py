@@ -128,7 +128,7 @@ class TestMultiAccountMinting(unittest.TestCase):
 
         def fake_request(path, method="GET", token=None, data=None, quiet=False):
             calls.append(path)
-            if path == "/repos/UB-TechDEV/backend/installation":
+            if path == "/repos/your-org/backend/installation":
                 return {"id": 555}
             if path == "/app/installations/555/access_tokens":
                 return {"token": "ghs_org", "expires_at": _FUTURE}
@@ -138,8 +138,8 @@ class TestMultiAccountMinting(unittest.TestCase):
                              clear=True), \
              mock.patch.object(github_app, "_build_jwt", return_value="JWT"), \
              mock.patch.object(github_app.github_api, "request", side_effect=fake_request):
-            self.assertEqual(github_app.installation_token("UB-TechDEV/backend"), "ghs_org")
-        self.assertIn("/repos/UB-TechDEV/backend/installation", calls)
+            self.assertEqual(github_app.installation_token("your-org/backend"), "ghs_org")
+        self.assertIn("/repos/your-org/backend/installation", calls)
 
     def test_all_repos_install_reuses_without_relookup(self):
         # An "all repositories" install → every repo of the owner is reachable, so the per-owner memo

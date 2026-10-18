@@ -27,7 +27,7 @@ def register(sub) -> None:
         examples=[
             ("saw audit", "ends with the rotation-safety verdict"),
             ("saw audit --verify", "content-scan what a weak signal names"),
-            ("saw audit --repo Ndevu12/strix -f", "also gate on branch protection"),
+            ("saw audit --repo your-org/repo -f", "also gate on branch protection"),
         ])
     p.add_argument("--repo", metavar="OWNER/NAME", default=None,
                    help="also audit this repo's branch protection (needs a token)")

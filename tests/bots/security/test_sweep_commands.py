@@ -144,7 +144,7 @@ class TestGuardCheckDeterminism(unittest.TestCase):
 
         buf = io.StringIO()
         with mock.patch.object(guard_sweep, "check", side_effect=fake_check), \
-             mock.patch.object(guard_sweep, "latest_strix", return_value=None), \
+             mock.patch.object(guard_sweep, "latest_saw_guard", return_value=None), \
              mock.patch.object(guard_sweep.auth, "resolve_token", return_value=(None, None)), \
              contextlib.redirect_stdout(buf):
             rc = guard_sweep.check_targets(paths=self.paths, config_path=None,

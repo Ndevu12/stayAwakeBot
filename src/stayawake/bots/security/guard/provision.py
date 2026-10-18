@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw guard setup` — install or update the Strix gate, always PROPOSED (working tree or PR via the
+"""`saw guard setup` — install or update the SAW Guard gate, always PROPOSED (working tree or PR via the
 shared `proposal` ladder). Never commits to the default branch, never runs the repo's code."""
 from __future__ import annotations
 
@@ -16,15 +16,16 @@ from stayawake.core import proposal
 from stayawake.utils import scratch
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.guard.constants import (
-    STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE, SETUP_BRANCH,
+    SAW_GUARD_ACTION, SAW_GUARD_NAME, SAW_GUARD_OWNER, SAW_GUARD_REPO, SAW_GUARD_USES, WORKFLOW_DIR,
+    WORM_GUARD_FILE, SETUP_BRANCH,
     CHECKOUT_ACTION, SETUP_PYTHON_ACTION)
 from stayawake.bots.security.guard.detect import (
-    check, classify_pin, find_strix, find_worm_gate, grade_config, render,
+    check, classify_pin, find_saw_guard, find_worm_gate, grade_config, render,
     _local_workflows, _ref_workflows, _local_action_reader, _ref_action_reader)
 
 
-_STRIX_USES_LINE = re.compile(
-    r"^(?P<pre>[ \t]*(?:-[ \t]+)?uses:[ \t]*)['\"]?Ndevu12/strix@\S+.*$",
+_SAW_GUARD_USES_LINE = re.compile(
+    rf"^(?P<pre>[ \t]*(?:-[ \t]+)?uses:[ \t]*)['\"]?{SAW_GUARD_USES}@\S+.*$",
     re.IGNORECASE | re.MULTILINE)
 
 
@@ -40,7 +41,7 @@ class Pin:
 class SetupPlan:
     """The minimal change setup will make. `content` is the full new file text (create/repin),
     None for a no-op/present/conflict. `old_ref`/`new_ref` drive the human summary; `detail`
-    describes an existing non-Strix gate for the `present` action."""
+    describes an existing non-SAW Guard gate for the `present` action."""
     action: str
     path: str
     content: str | None = None
@@ -61,20 +62,20 @@ class SetupResult:
 
 
 def resolve_pin(token: str | None = None, ref: str | None = None) -> Pin | None:
-    """The Strix ref to pin. An explicit `ref` (SHA used verbatim; a tag resolved to its immutable
+    """The SAW Guard ref to pin. An explicit `ref` (SHA used verbatim; a tag resolved to its immutable
     SHA) supports offline/deterministic pinning; otherwise resolve the LATEST release to its commit
     SHA. Returns None when it can't resolve — setup then fails closed rather than emit a floating
     pin (trust-on-first-use: the SHA is reviewed in the diff/PR)."""
     if ref:
         if classify_pin(ref) == "sha":
             return Pin(ref)
-        sha = github_api.ref_commit_sha(STRIX_OWNER, STRIX_REPO, f"tags/{ref}", token)
+        sha = github_api.ref_commit_sha(SAW_GUARD_OWNER, SAW_GUARD_REPO, f"tags/{ref}", token)
         return Pin(sha, ref) if sha else None
-    rel = github_api.latest_release(STRIX_OWNER, STRIX_REPO, token)
+    rel = github_api.latest_release(SAW_GUARD_OWNER, SAW_GUARD_REPO, token)
     tag = rel.get("tag_name") if isinstance(rel, dict) else None
     if not tag:
         return None
-    sha = github_api.ref_commit_sha(STRIX_OWNER, STRIX_REPO, f"tags/{tag}", token)
+    sha = github_api.ref_commit_sha(SAW_GUARD_OWNER, SAW_GUARD_REPO, f"tags/{tag}", token)
     return Pin(sha, tag) if sha else None
 
 
@@ -129,7 +130,7 @@ def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None 
         "        with:\n"
         "          fetch-depth: 0\n"
         "      - id: scan\n"
-        f"        uses: Ndevu12/strix@{pin.sha}\n"
+        f"        uses: {SAW_GUARD_ACTION}@{pin.sha}\n"
         "        with:\n"
         f"{version_line}"
         "          remediate: 'off'\n"
@@ -151,7 +152,7 @@ def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None 
         f"      - uses: {CHECKOUT_ACTION.uses()}\n"
         "        with:\n"
         "          fetch-depth: 0\n"
-        f"      - uses: Ndevu12/strix@{pin.sha}\n"
+        f"      - uses: {SAW_GUARD_ACTION}@{pin.sha}\n"
         "        with:\n"
         f"{version_line}"
         "          remediate: pr\n"
@@ -179,10 +180,10 @@ def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None 
 
 
 def _repin(text: str, pin: Pin) -> str:
-    """Surgically rewrite ONLY the strix `uses:` ref, preserving the rest of the file byte-for-byte."""
+    """Surgically rewrite ONLY the saw-guard `uses:` ref, preserving the rest of the file byte-for-byte."""
     comment = f"  # {pin.tag}" if pin.tag else ""
-    return _STRIX_USES_LINE.sub(
-        lambda m: f"{m.group('pre')}Ndevu12/strix@{pin.sha}{comment}", text)
+    return _SAW_GUARD_USES_LINE.sub(
+        lambda m: f"{m.group('pre')}{SAW_GUARD_ACTION}@{pin.sha}{comment}", text)
 
 
 _GATE_HOW = {"local-action": "a local scan action", "saw-run": "a direct `saw` step"}
@@ -190,7 +191,7 @@ _GATE_HOW = {"local-action": "a local scan action", "saw-run": "a direct `saw` s
 
 def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
                read_action=None, scanner: str | None = None) -> SetupPlan:
-    """Decide the minimal change: bump an existing Strix pin, no-op when already at the resolved SHA,
+    """Decide the minimal change: bump an existing SAW Guard pin, no-op when already at the resolved SHA,
     leave an existing worm gate installed by ANOTHER mechanism alone ('present'), or create the gate
     when the repo is genuinely unguarded — never clobbering a file already at the create path."""
     gate = find_worm_gate(workflows, read_action=read_action)
@@ -199,10 +200,10 @@ def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
             return SetupPlan("conflict", WORM_GUARD_FILE)
         return SetupPlan("create", WORM_GUARD_FILE, render_workflow(pin, default_branch, scanner),
                          new_ref=pin.sha)
-    if gate.mechanism != "strix":
+    if gate.mechanism != "saw-guard":
         return SetupPlan("present", gate.workflow,
                          detail=_GATE_HOW.get(gate.mechanism, gate.mechanism))
-    ref = gate.strix
+    ref = gate.saw_guard
     config = grade_config(ref)
     if config.needs_rewriting and ref.workflow == WORM_GUARD_FILE:
         return SetupPlan("repair", ref.workflow, render_workflow(pin, default_branch, scanner),
@@ -235,13 +236,13 @@ def _setup_pr_body(plan: SetupPlan, base: str) -> str:
             else "Updates the pin of")
     tag = f" (`{plan.new_ref}`)" if plan.new_ref and len(plan.new_ref) == 40 else ""
     return "\n".join([
-        f"{verb} the **Strix worm-guard** CI gate — opened by `saw guard setup`.",
+        f"{verb} the **{SAW_GUARD_NAME}** CI gate — opened by `saw guard setup`.",
         "",
         f"- **File:** {textsafe.code(plan.path)}",
         *([f"- **Replaced because** the gate {plan.detail}. Jobs and settings this file carried "
            "beyond the gate itself are not preserved — review the diff."]
           if plan.action == "repair" and plan.detail else []),
-        f"- **Pin:** `Ndevu12/strix@{plan.new_ref[:12]}…`{tag}",
+        f"- **Pin:** `{SAW_GUARD_ACTION}@{plan.new_ref[:12]}…`{tag}",
         "- **Gate job** (`worm-guard`): scans PRs/pushes and reports what it finds — a PR comment, a "
         "code-scanning alert and a run artifact. It **cannot push to this repository** "
         "(`contents: read`).",
@@ -250,7 +251,7 @@ def _setup_pr_body(plan: SetupPlan, base: str) -> str:
         "infected verdict — so on a clean run nothing here holds write access. The gate stays **red "
         "until that fix PR is merged**: remediation opens the fix, it does not make the check pass.",
         "- **Pin-drift job** (`pin-drift`): weekly (+ manual) it files ONE self-closing issue if the "
-        "pinned Strix release falls behind (`issues: write` only).",
+        f"pinned {SAW_GUARD_NAME} release falls behind (`issues: write` only).",
         "",
         "### Please finish the hardening (a PR can't set these):",
         "- [ ] Mark the **worm-guard** check **required** in branch protection.",
@@ -301,14 +302,14 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
         verb = ("install" if plan.action == "create"
                 else "repair" if plan.action == "repair" else "update")
         commit = gitutil.commit_fix(
-            wt, f"ci(security): {verb} the Strix worm-guard gate\n\n"
-                f"Pin Ndevu12/strix@{plan.new_ref[:12]}. Opened by `saw guard setup`.")
+            wt, f"ci(security): {verb} the {SAW_GUARD_NAME} gate\n\n"
+                f"Pin {SAW_GUARD_ACTION}@{plan.new_ref[:12]}. Opened by `saw guard setup`.")
         if not commit.committed:
             return SetupResult(plan=plan, slug=slug, error="could not commit the workflow change")
-        title = ("ci(security): install the Strix worm-guard gate" if plan.action == "create"
+        title = (f"ci(security): install the {SAW_GUARD_NAME} gate" if plan.action == "create"
                  else "ci(security): the worm gate reports its findings and holds no standing write"
                  if plan.action == "repair"
-                 else "ci(security): update the Strix worm-guard pin")
+                 else f"ci(security): update the {SAW_GUARD_NAME} pin")
         with spin_status(f"opening guard PR for {slug}…", enabled=spin):
             res = proposal.submit_change_pr(wt, slug, base, branch=SETUP_BRANCH, title=title,
                                             body=_setup_pr_body(plan, base), token=token)
@@ -321,7 +322,7 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
           dry_run: bool = False, pr: bool = False, branch: str | None = None,
           spin: bool = False, pin: "Pin | None" = None,
           scanner: str | None = None) -> SetupResult:
-    """Install or update the Strix gate on a LOCAL repo. Default: write the change into the working
+    """Install or update the SAW Guard gate on a LOCAL repo. Default: write the change into the working
     tree for the operator to review + commit + PR. `--pr`: open a rolling PR via the ladder. Either
     way the default branch is only ever proposed to, never pushed. A sweep passes a precomputed `pin`
     (resolved once); otherwise it resolves the latest release here (fails closed offline → pass `ref`)."""
@@ -329,7 +330,7 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
     if pin is None:
         pin = resolve_pin(token, ref)
     if pin is None:
-        return SetupResult(error="couldn't resolve the latest Strix release "
+        return SetupResult(error=f"couldn't resolve the latest {SAW_GUARD_NAME} release "
                                  "(offline? pass --ref <sha|tag> to pin explicitly)")
     if scanner is None:
         scanner = resolve_scanner_version(token)
@@ -357,9 +358,9 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
         return SetupResult(plan=plan, error=f"a workflow already exists at {plan.path} but isn't a "
                            "recognizable worm gate — not overwriting it. Remove or rename it, then "
                            "re-run `saw guard setup`.")
-    if plan.action == "repin" and f"strix@{pin.sha}" not in (plan.content or ""):
-        return SetupResult(plan=plan, error=f"found a Strix gate in {plan.path} but couldn't "
-                           f"surgically rewrite its pin — set `uses: Ndevu12/strix@{pin.sha}` there manually")
+    if plan.action == "repin" and f"{SAW_GUARD_ACTION}@{pin.sha}" not in (plan.content or ""):
+        return SetupResult(plan=plan, error=f"found a {SAW_GUARD_NAME} gate in {plan.path} but couldn't "
+                           f"surgically rewrite its pin — set `uses: {SAW_GUARD_ACTION}@{pin.sha}` there manually")
     if plan.action == "noop" or dry_run:
         return SetupResult(plan=plan, dry_run=dry_run)
     if pr:
@@ -389,10 +390,10 @@ def render_setup(result: SetupResult, *, color: bool = False) -> str:
     if plan.action == "present":
         return (paint("✓ already guarded", ok, on=color) +
                 f" — {plan.path} already runs a worm scan via {plan.detail}. Not installing a "
-                "duplicate. To adopt the SHA-pinned `Ndevu12/strix` gate instead, remove it first.")
+                f"duplicate. To adopt the SHA-pinned `{SAW_GUARD_ACTION}` gate instead, remove it first.")
     if plan.action == "noop":
         head = (paint("✓ already up to date", ok, on=color) +
-                f" — {plan.path} pins Ndevu12/strix@{_short(plan.new_ref)} (latest).")
+                f" — {plan.path} pins {SAW_GUARD_ACTION}@{_short(plan.new_ref)} (latest).")
         if plan.detail:
             return head + f"\n  Still worth your attention: the gate {plan.detail}."
         return head + " Nothing to do."
@@ -401,7 +402,7 @@ def render_setup(result: SetupResult, *, color: bool = False) -> str:
             else "repair" if plan.action == "repair" else "update the pin in")
     if result.dry_run:
         head = paint(f"— dry run: would {verb} {plan.path}", dim, on=color) + \
-            f"  (→ Ndevu12/strix@{_short(plan.new_ref)})"
+            f"  (→ {SAW_GUARD_ACTION}@{_short(plan.new_ref)})"
         preview = (plan.content if plan.action in ("create", "repair")
                    else _repin_preview(plan))
         return head + "\n\n" + preview
@@ -421,7 +422,7 @@ def render_setup(result: SetupResult, *, color: bool = False) -> str:
 def _repin_preview(plan: SetupPlan) -> str:
     """Show just the rewritten `uses:` line for a repin dry-run (the rest of the file is untouched)."""
     for line in (plan.content or "").splitlines():
-        if _STRIX_USES_LINE.match(line):
+        if _SAW_GUARD_USES_LINE.match(line):
             return f"  {line.strip()}"
     return ""
 

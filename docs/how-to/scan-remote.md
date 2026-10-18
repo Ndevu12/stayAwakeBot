@@ -9,9 +9,9 @@ GitHub repositories instead. One scope per run.
 
 ```bash
 saw scan --remote                 # configured targets, else your own repositories
-saw scan --org UB-TechDEV         # a whole organisation
-saw scan --remote Ndevu12/strix   # one repository
-saw scan --org UB-TechDEV -j 8    # eight at a time
+saw scan --org your-org           # a whole organisation
+saw scan --remote your-org/your-repo   # one repository
+saw scan --org your-org -j 8      # eight at a time
 ```
 
 ## Authenticate first

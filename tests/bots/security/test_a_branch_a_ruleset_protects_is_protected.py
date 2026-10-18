@@ -7,18 +7,18 @@ import unittest
 from unittest import mock
 
 from stayawake.bots.security import guard, hygiene
-from stayawake.bots.security.guard import Freshness, GateProbe, StrixRef
+from stayawake.bots.security.guard import Freshness, GateProbe, SawGuardRef
 from stayawake.lib.adapters import github_api
 from stayawake.lib.adapters.github_api import ApiRead
 
-_STRIX = StrixRef(".github/workflows/worm-scan.yml", "strix", "v0.1.4", "tag")
+_SAW_GUARD = SawGuardRef(".github/workflows/worm-scan.yml", "saw-guard", "v0.1.4", "tag")
 _BLOG_WF = """name: Worm scan
 on: { push: { branches: [main] }, pull_request: {} }
 jobs:
-  strix:
+  saw-guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: Ndevu12/strix@v0.1.4
+      - uses: Ndevu12/SAW_GUARD@v0.1.4
 """
 
 
@@ -33,7 +33,7 @@ def _rules(*checks):
     return ApiRead(value=rules)
 
 
-def _audit(classic, rules, probe=GateProbe(ref=_STRIX)):
+def _audit(classic, rules, probe=GateProbe(ref=_SAW_GUARD)):
     with mock.patch.object(github_api, "get_branch_protection", return_value=classic), \
             mock.patch.object(github_api, "get_branch_rules", return_value=rules), \
             mock.patch("stayawake.bots.security.guard.probe_remote_gate", return_value=probe):
@@ -42,7 +42,7 @@ def _audit(classic, rules, probe=GateProbe(ref=_STRIX)):
 
 class TestARulesetProtectsTheBranch(unittest.TestCase):
     def test_a_ruleset_that_requires_the_gate_is_clean(self):
-        self.assertEqual(_audit(None, _rules("strix")), [])
+        self.assertEqual(_audit(None, _rules("saw-guard")), [])
 
     def test_a_ruleset_that_does_not_require_the_gate_names_that_gap_and_where_to_add_it(self):
         issues = _audit(None, _rules())
@@ -50,20 +50,20 @@ class TestARulesetProtectsTheBranch(unittest.TestCase):
         self.assertIn("is protected by a ruleset", issues[0].detail)
         self.assertIn("the ruleset that protects it", issues[0].remediation)
 
-    def test_a_ruleset_without_a_strix_workflow_is_held_to_a_worm_check(self):
+    def test_a_ruleset_without_a_saw_guard_workflow_is_held_to_a_worm_check(self):
         self.assertEqual([i.id for i in _audit(None, _rules(), GateProbe())], ["worm-guard-not-required"])
         self.assertEqual(_audit(None, _rules("Worm Guard — block infected merges"), GateProbe()), [])
 
     def test_branch_protection_and_a_ruleset_together_require_what_either_requires(self):
         classic = {"required_status_checks": {"contexts": ["build"]}}
-        self.assertEqual(_audit(classic, _rules("strix")), [])
+        self.assertEqual(_audit(classic, _rules("saw-guard")), [])
         issues = _audit(classic, _rules())
         self.assertIn("protected by branch protection and a ruleset", issues[0].detail)
 
 
 class TestWhatWasTrueBeforeStillIs(unittest.TestCase):
     def test_branch_protection_alone_is_read_as_before(self):
-        self.assertEqual(_audit({"required_status_checks": {"contexts": ["strix"]}}, ApiRead(value=[])), [])
+        self.assertEqual(_audit({"required_status_checks": {"contexts": ["saw-guard"]}}, ApiRead(value=[])), [])
         issues = _audit({"required_status_checks": {"contexts": ["build"]}}, ApiRead(value=[]))
         self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
         self.assertIn("protected by branch protection", issues[0].detail)
@@ -75,12 +75,12 @@ class TestWhatWasTrueBeforeStillIs(unittest.TestCase):
         for cause in ("forbidden", "network", "not_found", "rate_limited"):
             with self.subTest(cause=cause):
                 self.assertEqual([i.id for i in _audit(None, ApiRead(cause=cause))], ["branch-unprotected"])
-                self.assertEqual(_audit({"required_status_checks": {"contexts": ["strix"]}}, ApiRead(cause=cause)), [])
+                self.assertEqual(_audit({"required_status_checks": {"contexts": ["saw-guard"]}}, ApiRead(cause=cause)), [])
 
     def test_a_rule_without_its_checks_requires_none(self):
         for rules in ([{"type": "required_status_checks"}], [{"type": "required_status_checks", "parameters": None}],
-                      [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"name": "strix"}]}}],
-                      ["strix", {"context": "strix"}, {"type": 7}]):
+                      [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"name": "saw-guard"}]}}],
+                      ["saw-guard", {"context": "saw-guard"}, {"type": 7}]):
             with self.subTest(rules=rules):
                 self.assertNotEqual(_audit(None, ApiRead(value=rules)), [])
 
@@ -94,9 +94,9 @@ class TestTheGuardReadsTheSameAnswer(unittest.TestCase):
             return guard.check(slug="o/r", token="t")
 
     def test_a_ruleset_that_requires_the_gate_reads_required_and_says_so(self):
-        status = self._check(None, _rules("strix"))
+        status = self._check(None, _rules("saw-guard"))
         self.assertTrue(status.required)
-        self.assertIn("main is protected by a ruleset, which requires “strix”", guard.render(status))
+        self.assertIn("main is protected by a ruleset, which requires “saw-guard”", guard.render(status))
 
     def test_a_ruleset_that_does_not_require_the_gate_reads_not_required(self):
         self.assertFalse(self._check(None, _rules()).required)
@@ -269,18 +269,18 @@ class TestEveryResultNotKnownIsShown(unittest.TestCase):
 
 class TestAnAnswerInAShapeGitHubDoesNotDescribeCountsAsUnread(unittest.TestCase):
     def test_a_ruleset_whose_checks_are_not_a_list_counts_as_no_ruleset(self):
-        for checks in (5, "strix", {"context": "strix"}):
+        for checks in (5, "saw-guard", {"context": "saw-guard"}):
             rules = ApiRead(value=[{"type": "required_status_checks", "parameters": {"required_status_checks": checks}}])
             with self.subTest(checks=checks):
                 self.assertEqual([i.id for i in _audit(None, rules)], ["branch-unprotected"])
                 self.assertFalse(TestTheGuardReadsTheSameAnswer()._check(None, rules).required)
 
     def test_branch_protection_whose_checks_are_not_a_list_counts_as_none(self):
-        for classic in ({"required_status_checks": {"contexts": 5}}, {"required_status_checks": {"checks": "strix"}},
-                        {"required_status_checks": "strix"}):
+        for classic in ({"required_status_checks": {"contexts": 5}}, {"required_status_checks": {"checks": "saw-guard"}},
+                        {"required_status_checks": "saw-guard"}):
             with self.subTest(classic=classic):
                 self.assertEqual([i.id for i in _audit(classic, ApiRead(value=[]))], ["branch-unprotected"])
-                self.assertEqual([i.id for i in _audit(classic, _rules("strix"))], [])
+                self.assertEqual([i.id for i in _audit(classic, _rules("saw-guard"))], [])
 
 
 class TestBranchProtectionIsReadForTheBranchNamed(unittest.TestCase):

@@ -24,7 +24,7 @@ def register(sub) -> None:
         examples=[
             ("saw guard check", "is this repo gated, pinned and current?"),
             ("saw guard setup --pr", "install/bump the gate via a rolling PR"),
-            ("saw guard drift --org UB-TechDEV", "file a drift issue per behind repo"),
+            ("saw guard drift --org your-org", "file a drift issue per behind repo"),
         ])
     p.set_defaults(func=lambda a: (p.print_help() or 0))
     gsub = p.add_subparsers(dest="guard_command", metavar="<subcommand>")
@@ -32,7 +32,7 @@ def register(sub) -> None:
     ck = add_command(
         gsub, "check",
         help="check the worm gate across repos: present, SHA-pinned, fresh, and required",
-        description="Detect the worm gate (the `Ndevu12/strix` action, a local scan action, or a "
+        description="Detect the worm gate (the `Ndevu12/SAW_GUARD` action, a local scan action, or a "
                     "direct `saw` step), grade its pin (a commit SHA is best), report whether it "
                     "is behind the latest release, and — for a remote repo — whether branch protection "
                     "requires it. LOCAL by default (discovers git repos under the given paths / the "
@@ -40,8 +40,8 @@ def register(sub) -> None:
         examples=[
             ("saw guard check", "the current repo"),
             ("saw guard check .", "every git repo below the cwd"),
-            ("saw guard check --repo Ndevu12/strix -f", "gate CI on a remote repo"),
-            ("saw guard check --user Ndevu12 -f", "gate CI on all of a user's repos"),
+            ("saw guard check --repo your-org/repo -f", "gate CI on a remote repo"),
+            ("saw guard check --user your-user -f", "gate CI on all of a user's repos"),
         ])
     ck.add_argument("targets", nargs="*", metavar="TARGETS",
                     help="local repo/dir paths — or, with --remote, owner/repo slugs. "
@@ -81,7 +81,7 @@ def register(sub) -> None:
             ("saw guard setup", "write it into the working tree to review"),
             ("saw guard setup --pr", "open a rolling install/bump PR"),
             ("saw guard setup --dry-run", "preview the change, write nothing"),
-            ("saw guard setup --user Ndevu12", "clone a user's repos, open a gate PR"),
+            ("saw guard setup --user your-user", "clone a user's repos, open a gate PR"),
         ])
     st.add_argument("targets", nargs="*", metavar="TARGETS",
                     help="local repo/dir paths — or, with --remote, owner/repo slugs. "
@@ -115,7 +115,7 @@ def register(sub) -> None:
         gsub, "drift",
         help="report worm-guard pin drift across repos (files/closes a tracking issue each)",
         description="Out-of-band pin-drift backstop for the worm-guard gate: read each repo's pinned "
-                    "`Ndevu12/strix@<sha>`, compare it to the latest worm-guard release, and open ONE "
+                    "`Ndevu12/SAW_GUARD@<sha>`, compare it to the latest worm-guard release, and open ONE "
                     "de-duplicated tracking issue when it has fallen behind — closing it again "
                     "automatically once the pin catches up. Same target model as `saw guard check`: "
                     "LOCAL by default (discovers git repos; omit targets for the current repo), "
@@ -123,7 +123,7 @@ def register(sub) -> None:
                     "a build failure. `saw guard setup`'s scheduled pin-drift job runs this.",
         examples=[
             ("saw guard drift", "file or close the tracking issue"),
-            ("saw guard drift --org UB-TechDEV", "sweep an org (implies --remote)"),
+            ("saw guard drift --org your-org", "sweep an org (implies --remote)"),
         ])
     dr.add_argument("targets", nargs="*", metavar="TARGETS",
                     help="local repo/dir paths — or, with --remote, owner/repo slugs. "

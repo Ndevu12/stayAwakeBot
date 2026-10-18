@@ -4,7 +4,7 @@ description: saw guard — install, verify and keep current the worm-guard CI ga
 
 # `saw guard`
 
-Install and verify the **Strix worm-guard CI gate**: `scan` finds worms, `fix` cleans them, `guard`
+Install and verify the **SAW Guard CI gate**: `scan` finds worms, `fix` cleans them, `guard`
 stops an infected change from merging in the first place. A gate is recognised by its action
 reference, not by the workflow's filename or job name, so renaming the file is safe. All three
 subcommands sweep repositories exactly like [`saw scan`](scan.md) — local by default,
@@ -12,7 +12,7 @@ subcommands sweep repositories exactly like [`saw scan`](scan.md) — local by d
 
 ## `saw guard check`
 
-Read-only. For each repository: is a worm gate present, is the Strix pin a SHA rather than a tag, is
+Read-only. For each repository: is a worm gate present, is the SAW Guard pin a SHA rather than a tag, is
 it behind the latest release, is it configured so a finding reaches someone and so the scanning job
 holds no write access it does not need, and — for a remote repository — does branch protection or
 a ruleset actually **require** its check. A gate that is not required is decoration.
@@ -59,7 +59,7 @@ each holding only what it needs:
 | --- | --- | --- | --- |
 | `worm-guard` | every pull request and push to the default branch | `contents: read`, `pull-requests: write`, `security-events: write` | Scans, and reports what it finds: a comment on the pull request, an alert in the Security tab, and the evidence as a run artifact. It **cannot push code to your repository** — it comments and raises alerts, nothing more. |
 | `remediate` | only once `worm-guard` has reported an infected verdict | `contents: write`, `pull-requests: write` | Opens one rolling `security/auto-clean` pull request with the payload removed. This is the only job that can push, and on a clean run it never starts. |
-| `pin-drift` | weekly, and on demand | `contents: read`, `issues: write` | Files one self-closing issue when the pinned Strix release falls behind. |
+| `pin-drift` | weekly, and on demand | `contents: read`, `issues: write` | Files one self-closing issue when the pinned SAW Guard release falls behind. |
 
 The gate stays **red until the fix pull request is merged**: remediation opens the fix, it does not
 make the check pass.

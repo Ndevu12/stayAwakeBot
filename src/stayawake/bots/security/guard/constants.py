@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Shared constants for `saw guard` — the canonical Strix action, its third-party action pins,
-workflow paths, setup branch."""
+"""Shared constants for `saw guard` — the SAW Guard action (its name, its repository, and the `uses:`
+pattern that finds it in a workflow), its third-party action pins, workflow paths, setup branch."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
-STRIX_OWNER, STRIX_REPO = "Ndevu12", "strix"
+SAW_GUARD_NAME = "SAW Guard"
+SAW_GUARD_OWNER, SAW_GUARD_REPO = "Ndevu12", "SAW_GUARD"
+SAW_GUARD_ACTION = f"{SAW_GUARD_OWNER}/{SAW_GUARD_REPO}"
+SAW_GUARD_USES = re.escape(SAW_GUARD_ACTION)
 WORKFLOW_DIR = ".github/workflows"
 WORM_GUARD_FILE = f"{WORKFLOW_DIR}/worm-guard.yml"
 SETUP_BRANCH = "security/guard-setup"

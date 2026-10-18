@@ -37,9 +37,9 @@ def check_branch_protection(slug: str | None, token: str | None,
         )]
     contexts = prot.required_checks
 
-    # its ACTUAL job context — a job named `strix` (or anything) produces a context the fuzzy "worm"
+    # its ACTUAL job context — a job named `saw-guard` (or anything) produces a context the fuzzy "worm"
     # match below would miss, wrongly flagging a correctly-protected repo. Fall back to the heuristic
-    # only when no Strix workflow is found.
+    # only when no SAW Guard workflow is found.
     probe = guard.probe_remote_gate(slug, token)
     if probe.cause is not None:
         return [_requirement_unchecked(
@@ -54,8 +54,8 @@ def check_branch_protection(slug: str | None, token: str | None,
         return [HygieneIssue(
             id="worm-guard-not-required",
             severity="warning",
-            title=f"The Strix gate (“{ref.job}”) is not a required status check on {slug}@{branch}",
-            detail=f"The repo runs Strix ({ref.workflow}) and {slug}@{branch} is protected {prot.held_by}, "
+            title=f"The {guard.SAW_GUARD_NAME} gate (“{ref.job}”) is not a required status check on {slug}@{branch}",
+            detail=f"The repo runs {guard.SAW_GUARD_NAME} ({ref.workflow}) and {slug}@{branch} is protected {prot.held_by}, "
                    f"but that does not require its “{ref.job}” check — an infected PR can still merge.",
             remediation=f"Add “{ref.job}” to the required status checks of {prot.settings_named}.",
         )]

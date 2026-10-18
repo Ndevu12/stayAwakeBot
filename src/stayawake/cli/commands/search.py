@@ -25,7 +25,7 @@ _INDEX = [
     ("saw harden", "put saw's controls in place on this machine",
      "harden host deny control"),
     ("saw guard", "put saw's worm-guard CI gate in a repository, and check it",
-     "guard gate worm-guard strix ci workflow setup check pin"),
+     "guard gate worm-guard saw-guard ci workflow setup check pin"),
     ("saw auth", "credential/capability status; register a self-owned Saw GitHub App",
      "auth login credential token scope workflow github app register doctor"),
     ("saw doctor", "self-check the install and credentials (incl. guard workflow capability)",
