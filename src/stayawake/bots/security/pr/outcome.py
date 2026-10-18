@@ -59,7 +59,7 @@ class Cause(Enum):
     COMMITTED_UNDER_NOREPLY = "committed-under-noreply"
     NOT_PERMITTED_TO_REWRITE = "not-permitted-to-rewrite"
     REMOTE_REFS_UNREADABLE = "remote-refs-unreadable"
-    SIGNING_UNAVAILABLE = "signing-unavailable"
+    REPLACEMENTS_UNSIGNED = "replacements-unsigned"
     NO_COMMITTER_IDENTITY = "no-committer-identity"
     REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD = "replacement-loses-more-than-the-payload"
     CAPTURE_FAILED = "capture-failed"
@@ -107,7 +107,7 @@ class Cause(Enum):
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
                                 Cause.SAVED_WORK_CLEANED_HERE, Cause.ARRIVALS_KEPT,
                                 Cause.LARGE_FILES_NOT_READ_IN_FULL, Cause.SUBMODULES_NOT_READ,
-                                Cause.COMMITTED_UNDER_NOREPLY})
+                                Cause.COMMITTED_UNDER_NOREPLY, Cause.REPLACEMENTS_UNSIGNED})
 
 
 @dataclass(frozen=True)
@@ -226,11 +226,8 @@ _PHRASE = {
     Cause.NO_CREDENTIAL: "no credential",
     Cause.NOT_PERMITTED_TO_REWRITE: "this identity may not rewrite here",
     Cause.REMOTE_REFS_UNREADABLE: "the remote branches could not be refreshed",
-    Cause.SIGNING_UNAVAILABLE:
-        "this repository signs commits and a signature could not be made ({detail}) — make a signature "
-        "possible, then run `saw fix amend` again: `echo test | gpg --clearsign` shows why gpg cannot "
-        "sign (often `export GPG_TTY=$(tty)` fixes it), or sign with an SSH key: "
-        "`git config --global gpg.format ssh` and `git config --global user.signingkey <your key>.pub`",
+    Cause.REPLACEMENTS_UNSIGNED:
+        "the new commits are not signed: no key on this machine signs for your GitHub account",
     Cause.NO_COMMITTER_IDENTITY:
         "this repository resolves no user.name and user.email, so the rewrite would be recorded "
         "against an identity git invented",

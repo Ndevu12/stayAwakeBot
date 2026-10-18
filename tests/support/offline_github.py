@@ -16,7 +16,7 @@ class NoRemoteTags:
 @contextmanager
 def github_answers(remote_head, *, permitted=True, protected=False, slug="acme/app", account=None):
     """Answer every question the amend path asks the remote: who may rewrite, whether the refs
-    refreshed, what each remote branch is at, which tags it holds, and whose account the token is.
+    refreshed, what each remote branch is at, which tags it holds, whose account the token is, and which signing keys it lists.
 
     Takes `remote_head(branch) -> sha`, whether a rewrite is permitted, whether the branch is
     protected, the repository's slug and the account (None: it cannot be read). An answer a test
@@ -42,6 +42,7 @@ def github_answers(remote_head, *, permitted=True, protected=False, slug="acme/a
             ("gitutil.fetch_refs", dict(return_value=mock.Mock(ok=True, reason=""))),
             ("_read_remote_head", dict(side_effect=lambda r, s, b, tk: (True, remote_head(b)))),
             ("gitremote.ls_remote", dict(return_value=NoRemoteTags())),
+            ("_signing_keys_on_github", dict(return_value=[])),
         ):
             held = amendmod
             for part in target.split("."):

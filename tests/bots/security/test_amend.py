@@ -21,6 +21,7 @@ from stayawake.bots.security.pr import amend as amendmod
 from stayawake.bots.security.remediation import delivery, oracle
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
 from stayawake.bots.security.pr.resolve import KEEP, REMOVE, RESTORE, SUPPLY, Resolution
+from stayawake.lib.signing.commits import SigningStatus
 from stayawake.bots.security.pr.outcome import (BranchResult, Cause, Reason, amended,
                                                       render_amend_line)
 from stayawake.bots.security.targets import ScanOptions
@@ -257,11 +258,13 @@ class TestFixAmendRepo(_AmendFixture):
         real_status = amendmod.commit_signing.signing_status
         real_signed = amendmod.commit_signing.any_signed
 
-        def status_spy(repo_arg, *, history_is_signed=False, trust_local_programs=True):
+        def status_spy(repo_arg, *, history_is_signed=False, trust_local_programs=True,
+                       registered_signing_keys=None):
             seen["signer"] = Path(repo_arg)
             seen["trust_local_programs"] = trust_local_programs
             return real_status(repo_arg, history_is_signed=history_is_signed,
-                               trust_local_programs=trust_local_programs)
+                               trust_local_programs=trust_local_programs,
+                               registered_signing_keys=registered_signing_keys)
 
         def signed_spy(repo_arg, shas):
             seen["history"] = Path(repo_arg)
@@ -643,16 +646,17 @@ class TestAmendGates(_AmendFixture):
         self.assertIn(Cause.REMOTE_REFS_UNREADABLE, self._causes(outcome))
         self.assertEqual(before, self._rev())
 
-    def test_a_repository_that_signs_and_cannot_is_refused_before_anything_moves(self):
+    def test_a_repository_that_signs_and_cannot_is_amended_unsigned_and_says_so(self):
         self._loader_merge()
         before = self._rev()
-        unavailable = mock.Mock(must_refuse=True, available=False, required=True,
-                                reason="no secret key", config=())
+        unavailable = SigningStatus(required=True, available=False, reason="no secret key",
+                                    signature_format="openpgp")
         with mock.patch(self.AT + "commit_signing.signing_status", return_value=unavailable):
             outcome = self._act()
-        self.assertIn(Cause.SIGNING_UNAVAILABLE, self._causes(outcome))
-        self.assertEqual(before, self._rev())
-        self.assertIn("fromCharCode", self._worktree("x.js"))
+        self.assertTrue(outcome.completed)
+        self.assertIn(Cause.REPLACEMENTS_UNSIGNED, self._causes(outcome))
+        self.assertNotEqual(before, self._rev())
+        self.assertNotIn("fromCharCode", self._show("HEAD:x.js"))
 
     def test_a_protected_branch_is_published_beside_never_over(self):
         self._loader_merge()

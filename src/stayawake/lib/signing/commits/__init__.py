@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sign the commits saw writes, with the operator's own key.
 
-Split per concern: requirement · config · probe · decision · git_command · identity."""
+Split per concern: requirement · config · probe · keys · decision · git_command · identity."""
 from stayawake.lib.signing.commits.decision import SigningStatus, signing_available, signing_status
 from stayawake.lib.signing.commits.git_command import (fix_commit_signing, sign_flags, signing_args,
                                                        signing_env)

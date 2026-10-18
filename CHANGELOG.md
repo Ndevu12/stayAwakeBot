@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw fix amend` no longer stops because it cannot sign.** When the commits it replaces are signed
+  and this machine has no signing set up, it signs with a key you already have that GitHub lists as
+  your signing key, or makes the new commits unsigned and says so. It no longer asks you to set up
+  signing.
 - **`saw fix amend` rewrites only the repository you are in, or the ones you name.** A bare run had
   started rewriting every repository under your home folder, and `--remote` with no repository
   named rewrote your configured or own GitHub repositories. With nothing named it amends only the

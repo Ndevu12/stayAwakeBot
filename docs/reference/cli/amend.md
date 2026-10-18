@@ -14,7 +14,9 @@ description: saw fix amend — amend the infected commits and force-update the b
 Replace a past commit that still carries the payload and force-update each branch it sat on. That
 force-update is the fix: an amend that never reaches the remote is not one. The replaced
 commit keeps its original message and its original author, and the commits after it are replayed
-onto the replacement. Malware in any commit it rewrites is repaired in place where that leaves the
+onto the replacement. The new commits are signed with your own signing setup, or with a key on this
+machine that GitHub lists as your signing key; when there is neither, they are not signed and the run
+says so. Malware in any commit it rewrites is repaired in place where that leaves the
 file clean, and otherwise taken out; the version you were shown when asked, and what your allowlist
 covers, is left as you decided. When the checkout holds no malware, the repository's past
 commits are read the same way. A confirmed copy still in the rewritten history stops the push and is
@@ -43,7 +45,6 @@ repository.
 - `user.name` and `user.email` set, so the amend records who made it. When your `user.email` is not a
   GitHub noreply address, the amend is committed under your name with your GitHub account's noreply
   address, so your own address is not published; the authors of your commits are kept.
-- A signing key, if the repository signs commits or the commits being replaced are signed.
 
 ## It stops before moving anything
 

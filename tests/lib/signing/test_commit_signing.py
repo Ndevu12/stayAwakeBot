@@ -8,7 +8,7 @@ pin the three states a caller must tell apart, each built as an actual repositor
 
     signing off              -> not configured, not a refusal
     signing on and working   -> available, proven by a real signature
-    signing on but broken    -> `must_refuse`, BEFORE any ref moves
+    signing on but broken    -> `signature_owed_but_unavailable`
 
 The config flag is never taken as proof: a repository whose `commit.gpgsign` is true but whose key
 cannot sign must come back unavailable.
@@ -122,21 +122,21 @@ class TestThreeStates(SigningFixture):
         status = signing_status(self.signing_off())
         self.assertFalse(status.required)
         self.assertFalse(status.available)
-        self.assertFalse(status.must_refuse, "an unsigned repo must not block remediation")
+        self.assertFalse(status.signature_owed_but_unavailable, "an unsigned repo must not block remediation")
         self.assertIn("commit.gpgsign", status.reason)
 
     def test_working_signing_is_available_only_once_a_signature_was_made(self):
         status = signing_status(self.signing_works())
         self.assertTrue(status.required)
         self.assertTrue(status.available, status.reason)
-        self.assertFalse(status.must_refuse)
+        self.assertFalse(status.signature_owed_but_unavailable)
         self.assertEqual(status.signature_format, "ssh")
 
     def test_broken_key_is_a_refusal_not_a_silent_downgrade(self):
         status = signing_status(self.signing_broken())
         self.assertTrue(status.required, "commit.gpgsign=true is still configured")
         self.assertFalse(status.available, "an unloadable key cannot produce a signature")
-        self.assertTrue(status.must_refuse, "the caller must refuse before any ref moves")
+        self.assertTrue(status.signature_owed_but_unavailable, "a signature is owed and none can be made")
         self.assertIn("no ssh signature could be produced", status.reason)
 
     def test_the_three_states_are_distinguishable_from_each_other(self):
@@ -144,7 +144,7 @@ class TestThreeStates(SigningFixture):
         works = signing_status(self.signing_works())
         broken = signing_status(self.signing_broken())
         self.assertEqual(
-            [(s.required, s.available, s.must_refuse) for s in (off, works, broken)],
+            [(s.required, s.available, s.signature_owed_but_unavailable) for s in (off, works, broken)],
             [(False, False, False), (True, True, False), (True, False, True)])
 
     def test_available_tuple_agrees_with_the_status(self):
@@ -173,7 +173,7 @@ class TestSignatureFormats(SigningFixture):
                      user__signingkey="DEADBEEF")
         self.operator_sets("gpg.program", str(_script(_GPG_THAT_FAILS)))
         status = signing_status(repo)
-        self.assertTrue(status.must_refuse)
+        self.assertTrue(status.signature_owed_but_unavailable)
         self.assertIn("gpg", status.reason.lower())
 
     def test_a_rewrite_in_the_repository_runs_the_operators_signer_not_the_repositorys(self):
@@ -207,7 +207,7 @@ class TestSignatureFormats(SigningFixture):
                      user__signingkey="DEADBEEF")
         self.operator_sets("gpg.program", str(_script(_GPG_THAT_CLAIMS_SUCCESS_AND_SIGNS_NOTHING)))
         status = signing_status(repo)
-        self.assertTrue(status.must_refuse,
+        self.assertTrue(status.signature_owed_but_unavailable,
                         "git exits 0 here and writes an unsigned commit; only inspecting the "
                         "object catches it")
         self.assertIn("no signature", status.reason)
@@ -272,7 +272,7 @@ class TestProbeSafety(SigningFixture):
             started = time.monotonic()
             status = signing_status(repo)
             elapsed = time.monotonic() - started
-        self.assertTrue(status.must_refuse, "a hung signer is a refusal, never an unsigned rewrite")
+        self.assertTrue(status.signature_owed_but_unavailable, "a hung signer makes no signature")
         self.assertLess(elapsed, 15, "the probe must be bounded, not wait on the signer")
 
     def test_no_signing_attempt_may_ask_a_human_anything(self):
@@ -429,7 +429,7 @@ class TestTheHistoryDecidesWhatIsOwed(SigningFixture):
         status = signing_status(repo, history_is_signed=True)
         self.assertTrue(status.required, "the commits being replaced are signed")
         self.assertTrue(status.available)
-        self.assertFalse(status.must_refuse)
+        self.assertFalse(status.signature_owed_but_unavailable)
         self.assertEqual(sign_flags(status, "rebase"), ("--gpg-sign",))
         self.assertEqual(sign_flags(status, "commit-tree"), ("-S",))
 
@@ -439,12 +439,12 @@ class TestTheHistoryDecidesWhatIsOwed(SigningFixture):
         status = signing_status(repo, history_is_signed=True)
         self.assertTrue(status.required)
         self.assertFalse(status.available)
-        self.assertTrue(status.must_refuse)
+        self.assertTrue(status.signature_owed_but_unavailable)
 
     def test_unsigned_history_and_no_config_owes_nothing(self):
         status = signing_status(self.signing_off(), history_is_signed=False)
         self.assertFalse(status.required)
-        self.assertFalse(status.must_refuse)
+        self.assertFalse(status.signature_owed_but_unavailable)
 
 
 class TestSignaturePresenceIsReadFromTheObject(SigningFixture):
