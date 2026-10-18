@@ -1986,8 +1986,8 @@ Flags: <a href="../../reference/cli/fix/">CLI reference</a>.</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>diff<span class="w"> </span>main...security/auto-clean
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>fix<span class="w"> </span>--pr<span class="w">               </span><span class="c1"># also push and open (or update) one rolling PR per repository</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw<span class="w"> </span>fix<span class="w"> </span>--remote<span class="w">           </span><span class="c1"># sweep GitHub targets: clone, fix, PR</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>saw<span class="w"> </span>fix<span class="w"> </span>amend<span class="w">              </span><span class="c1"># replace past commits and force-update those branches</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>saw<span class="w"> </span>fix<span class="w"> </span>amend<span class="w"> </span>--remote<span class="w">     </span><span class="c1"># clone GitHub targets, replace, force-update</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>saw<span class="w"> </span>fix<span class="w"> </span>amend<span class="w">              </span><span class="c1"># replace past commits in this repository and force-update its branches</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>saw<span class="w"> </span>fix<span class="w"> </span>amend<span class="w"> </span>--remote<span class="w"> </span>your-org/repo<span class="w">   </span><span class="c1"># clone that repository, replace, force-update</span>
 </code></pre></div>
 <p>Re-running updates the same PR rather than opening another.</p>
 <h2 id="what-gets-fixed-and-what-does-not">What gets fixed, and what does not<a class="headerlink" href="#what-gets-fixed-and-what-does-not" title="Permanent link">&para;</a></h2>

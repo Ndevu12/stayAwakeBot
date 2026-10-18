@@ -2009,11 +2009,11 @@ copy of the remote branches is refreshed to match it; if it cannot be, the run s
 <tbody>
 <tr>
 <td><code>TARGETS...</code></td>
-<td>Repositories to amend. A named path that does not exist is an error, not a wider sweep.</td>
+<td>Repositories to amend: each one you name, or the repository you are in when none is named. A folder that holds repositories is not amended, and neither are configured targets. A named path that does not exist is an error, not a wider sweep.</td>
 </tr>
 <tr>
 <td><code>--remote</code></td>
-<td>Clone the named GitHub repositories and amend them. Slugs only.</td>
+<td>Clone the named GitHub repositories and amend them. Slugs only; with none named, nothing is changed.</td>
 </tr>
 <tr>
 <td><code>-c FILE</code> / <code>-j N</code> / <code>--no-stream</code></td>
