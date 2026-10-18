@@ -1969,13 +1969,13 @@
 
 
 <h1 id="saw-guard"><code>saw guard</code><a class="headerlink" href="#saw-guard" title="Permanent link">&para;</a></h1>
-<p>Install and verify the <strong>Strix worm-guard CI gate</strong>: <code>scan</code> finds worms, <code>fix</code> cleans them, <code>guard</code>
+<p>Install and verify the <strong>SAW Guard CI gate</strong>: <code>scan</code> finds worms, <code>fix</code> cleans them, <code>guard</code>
 stops an infected change from merging in the first place. A gate is recognised by its action
 reference, not by the workflow's filename or job name, so renaming the file is safe. All three
 subcommands sweep repositories exactly like <a href="../scan/"><code>saw scan</code></a> — local by default,
 <code>--remote</code>/<code>--user</code>/<code>--org</code> for GitHub.</p>
 <h2 id="saw-guard-check"><code>saw guard check</code><a class="headerlink" href="#saw-guard-check" title="Permanent link">&para;</a></h2>
-<p>Read-only. For each repository: is a worm gate present, is the Strix pin a SHA rather than a tag, is
+<p>Read-only. For each repository: is a worm gate present, is the SAW Guard pin a SHA rather than a tag, is
 it behind the latest release, is it configured so a finding reaches someone and so the scanning job
 holds no write access it does not need, and — for a remote repository — does branch protection or
 a ruleset actually <strong>require</strong> its check. A gate that is not required is decoration.</p>
@@ -2054,7 +2054,7 @@ each holding only what it needs:</p>
 <td><code>pin-drift</code></td>
 <td>weekly, and on demand</td>
 <td><code>contents: read</code>, <code>issues: write</code></td>
-<td>Files one self-closing issue when the pinned Strix release falls behind.</td>
+<td>Files one self-closing issue when the pinned SAW Guard release falls behind.</td>
 </tr>
 </tbody>
 </table>

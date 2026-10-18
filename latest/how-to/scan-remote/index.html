@@ -1914,9 +1914,9 @@
 <p>Scanning is local unless you say otherwise. <code>--remote</code> (and <code>--user</code>/<code>--org</code>, which imply it) clones
 GitHub repositories instead. One scope per run.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>scan<span class="w"> </span>--remote<span class="w">                 </span><span class="c1"># configured targets, else your own repositories</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>scan<span class="w"> </span>--org<span class="w"> </span>UB-TechDEV<span class="w">         </span><span class="c1"># a whole organisation</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>scan<span class="w"> </span>--remote<span class="w"> </span>Ndevu12/strix<span class="w">   </span><span class="c1"># one repository</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw<span class="w"> </span>scan<span class="w"> </span>--org<span class="w"> </span>UB-TechDEV<span class="w"> </span>-j<span class="w"> </span><span class="m">8</span><span class="w">    </span><span class="c1"># eight at a time</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>scan<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w">           </span><span class="c1"># a whole organisation</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>scan<span class="w"> </span>--remote<span class="w"> </span>your-org/your-repo<span class="w">   </span><span class="c1"># one repository</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw<span class="w"> </span>scan<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w"> </span>-j<span class="w"> </span><span class="m">8</span><span class="w">      </span><span class="c1"># eight at a time</span>
 </code></pre></div>
 <h2 id="authenticate-first">Authenticate first<a class="headerlink" href="#authenticate-first" title="Permanent link">&para;</a></h2>
 <p>Public repositories need nothing. For private ones, and for anything that writes, set up a
