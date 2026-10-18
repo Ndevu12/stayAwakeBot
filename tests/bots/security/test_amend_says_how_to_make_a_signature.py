@@ -21,7 +21,7 @@ class TestASignatureThatCannotBeMadeNamesTheNextSteps(_AmendFixture):
         before = self._rev()
         unavailable = mock.Mock(must_refuse=True, available=False, required=True, signature_format="openpgp",
                                 reason=_SIGNER_SAID, config=())
-        with mock.patch(self.AT + "sign.signing_status", return_value=unavailable):
+        with mock.patch(self.AT + "commit_signing.signing_status", return_value=unavailable):
             outcome = self._act()
         return before, outcome
 

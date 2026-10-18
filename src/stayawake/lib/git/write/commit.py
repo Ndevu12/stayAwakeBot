@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git.run import SAW_OWNED, run
-from stayawake.lib.git.write.sign import fix_commit_signing
 from stayawake.lib.git.write.worktree import held_checkout, land
 
 BOT_AUTHOR = ("-c", "user.name=StayAwakeBot Security",
@@ -26,13 +25,15 @@ class CommitResult:
 def commit_fix(repo: str | Path, message: str) -> CommitResult:
     """Commit the staged fix in the fix checkout at `repo` as the security bot, then land it on the
     branch in the operator's repository. Signs when the operator's repository asks for
-    signatures, with the signer the operator configured globally (`sign.fix_commit_signing`); a
-    signed attempt that fails is retried once unsigned and reported unsigned. Returns what
+    signatures, with the signer the operator configured globally
+    (`signing.commits.fix_commit_signing`); a signed attempt that fails is retried once unsigned
+    and reported unsigned. Returns what
     happened: `committed=False` when the commit fails or cannot be landed. No hook of the
     operator's repository runs."""
     checkout = held_checkout(repo)
     if checkout is None:
         return CommitResult(committed=False, signed=False)
+    from stayawake.lib.signing.commits import fix_commit_signing
     signing = fix_commit_signing(checkout.operator_repo)
     signed = True
     res = run(repo, [*BOT_AUTHOR, *signing, "commit", "-q", "-m", message], context=SAW_OWNED)

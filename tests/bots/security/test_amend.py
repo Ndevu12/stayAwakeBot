@@ -254,7 +254,8 @@ class TestFixAmendRepo(_AmendFixture):
         self._loader_merge()
         elsewhere = self.d.parent / "operator-elsewhere"
         seen: dict[str, Path] = {}
-        real_status, real_signed = amendmod.sign.signing_status, amendmod.sign.any_signed
+        real_status = amendmod.commit_signing.signing_status
+        real_signed = amendmod.commit_signing.any_signed
 
         def status_spy(repo_arg, *, history_is_signed=False, trust_local_programs=True):
             seen["signer"] = Path(repo_arg)
@@ -266,8 +267,8 @@ class TestFixAmendRepo(_AmendFixture):
             seen["history"] = Path(repo_arg)
             return real_signed(repo_arg, shas)
 
-        with mock.patch.object(amendmod.sign, "signing_status", side_effect=status_spy), \
-                mock.patch.object(amendmod.sign, "any_signed", side_effect=signed_spy):
+        with mock.patch.object(amendmod.commit_signing, "signing_status", side_effect=status_spy), \
+                mock.patch.object(amendmod.commit_signing, "any_signed", side_effect=signed_spy):
             line = self._amend(operator_context=elsewhere)
         self.assertIn("force-updated", line)
         self.assertEqual(seen["signer"], elsewhere)   # signer probed in the operator's context
@@ -647,7 +648,7 @@ class TestAmendGates(_AmendFixture):
         before = self._rev()
         unavailable = mock.Mock(must_refuse=True, available=False, required=True,
                                 reason="no secret key", config=())
-        with mock.patch(self.AT + "sign.signing_status", return_value=unavailable):
+        with mock.patch(self.AT + "commit_signing.signing_status", return_value=unavailable):
             outcome = self._act()
         self.assertIn(Cause.SIGNING_UNAVAILABLE, self._causes(outcome))
         self.assertEqual(before, self._rev())

@@ -140,7 +140,7 @@ def is_configured() -> bool:
 
 
 def jwt_available() -> bool:
-    """App JWT signing is BUILT IN (stdlib RS256 signer, `lib/jwtsign`) — no optional crypto extra —
+    """App JWT signing is BUILT IN (stdlib RS256 signer, `lib/signing/jwt`) — no optional crypto extra —
     so signing capability is ALWAYS present. Kept as a stable predicate for status output; a genuinely
     unusable key (bad / encrypted / non-RSA) surfaces as a `GithubAppError` at mint time, not here."""
     return True
@@ -182,15 +182,15 @@ def cached_permissions_for_token(token: str) -> dict[str, str] | None:
 
 
 def _build_jwt(app_id: str, private_key: str) -> str:
-    """Sign the App JWT (RS256) with the built-in, dependency-free stdlib signer (`lib/jwtsign`) — no
+    """Sign the App JWT (RS256) with the built-in, dependency-free stdlib signer (`lib/signing/jwt`) — no
     external crypto dependency, works on every install method. A bad / encrypted / non-RSA private key
     surfaces as a friendly `GithubAppError` (never a raw crash)."""
-    from stayawake.lib import jwtsign
+    from stayawake.lib.signing import jwt
     now = int(time.time())
     payload = {"iat": now - _SKEW, "exp": now + _JWT_TTL, "iss": app_id}
     try:
-        return jwtsign.encode_rs256(payload, private_key)
-    except jwtsign.JwtSignError as e:
+        return jwt.encode_rs256(payload, private_key)
+    except jwt.JwtSignError as e:
         raise GithubAppError(f"GitHub App auth: {e}.") from e
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GitHub App auth: installation-token minting, caching, graceful degradation.
 
-JWT signing is BUILT IN (stdlib RS256 signer, `lib/jwtsign`) — no optional crypto extra — so these
+JWT signing is BUILT IN (stdlib RS256 signer, `lib/signing/jwt`) — no optional crypto extra — so these
 tests mock the signing seam for minting/caching, and exercise the real signer's fail-loud path with a
 malformed key.
 """

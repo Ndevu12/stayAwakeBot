@@ -41,7 +41,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = []   # the test suite uses the stdlib `unittest`
-# NOTE: no `app` extra — GitHub App JWT signing is BUILT IN (stdlib RS256 signer, `lib/jwtsign`), so
+# NOTE: no `app` extra — GitHub App JWT signing is BUILT IN (stdlib RS256 signer, `lib/signing/jwt`), so
 # App auth works with the base install on every package manager (no pipx/pip/uv install-method dance).
 
 [project.urls]

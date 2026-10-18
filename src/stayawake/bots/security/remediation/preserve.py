@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.lib.git.run import run, run_ok, stdout, stdout_bytes_fed
-from stayawake.lib.git.write.sign import committer_identity
 from stayawake.lib.git.write.working_tree import uncommitted_paths
+from stayawake.lib.signing.commits import committer_identity
 from stayawake.utils import scratch
 
 BRANCH_PREFIX = "saw/uncommitted-"

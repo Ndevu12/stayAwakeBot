@@ -11,8 +11,6 @@ from stayawake.lib.git.write.patch import format_patch
 from stayawake.lib.git.write.fetch import fetch
 from stayawake.lib.git.write.branch import delete_branch
 from stayawake.lib.git.write.capture import capture_bundle, BundleResult
-from stayawake.lib.git.write.sign import (SigningStatus, signing_status, signing_available,
-                                          signing_env, signing_args, sign_flags)
 
 __all__ = [
     "add_worktree", "remove_worktree", "release_worktree", "land",
@@ -23,6 +21,4 @@ __all__ = [
     "fetch",
     "delete_branch",
     "capture_bundle", "BundleResult",
-    "SigningStatus", "signing_status", "signing_available", "signing_env", "signing_args",
-    "sign_flags",
 ]
