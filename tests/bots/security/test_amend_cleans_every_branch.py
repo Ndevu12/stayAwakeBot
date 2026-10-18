@@ -27,11 +27,11 @@ class TestAmendCleansEveryBranch(_AmendFixture):
              "commit", "-qm", f"merge {label} (smuggled loader)")
         return self._rev()
 
-    def _two_branches(self) -> str:
+    def _two_branches(self, side_path: str = "z.js") -> str:
         root = self._rev(self.base)
         _git(self.d, "branch", "side", root)
         self.merges = [(self._forged_merge(self.base, "y.js", _MAINLINE_LOADER, "mainline", root), ("y.js",)),
-                       (self._forged_merge("side", "z.js", _SIDE_LOADER, "sideline", root), ("z.js",))]
+                       (self._forged_merge("side", side_path, _SIDE_LOADER, "sideline", root), (side_path,))]
         self.write(self.d, "y.js", _MAINLINE_LOADER)
         self.write(self.d, "extra.txt", "came in beside it\n")
         self.commit(self.d, "brings in the other line's loader")
@@ -69,6 +69,17 @@ class TestAmendCleansEveryBranch(_AmendFixture):
         self.assertTrue(undecided, self._causes(outcome))
         self.assertIn("extra.txt", undecided[0].subjects)
 
+
+    def test_it_is_put_to_the_operator_when_both_branches_carry_that_file(self):
+        self._two_branches(side_path="y.js")
+
+        outcome = self._amend_both()
+
+        self.assertTrue(self._holds("side", "extra.txt"))
+        undecided = [r for r in outcome.reasons if r.cause is Cause.ARRIVALS_UNDECIDED]
+        self.assertTrue(undecided, self._causes(outcome))
+        self.assertIn("extra.txt", undecided[0].subjects)
+        self.assertTrue(outcome.needs_review)
 
 if __name__ == "__main__":
     unittest.main()

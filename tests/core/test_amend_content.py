@@ -771,6 +771,17 @@ class TestAMovedBlobIsNotARemovedPayload(unittest.TestCase):
                          "export const clean = 1;\ncleaned up\n")
 
 
+def _proven(repo: Path, infected: dict, still_carries) -> dict[str, set[str]]:
+    """Name the infected commits' versions the check confirms. Returns each path mapped to their blob
+    ids."""
+    proven: dict[str, set[str]] = {}
+    for sha, paths in infected.items():
+        for path in paths:
+            if still_carries and still_carries(sha, path):
+                proven.setdefault(path, set()).add(_git(repo, "rev-parse", f"{sha}:{path}").strip())
+    return proven
+
+
 def _rebuild_with(repo: Path, infected: dict, tips: list[str], last: str, still_carries=None):
     """Rebuild, reading `last` after every commit that does not descend from it."""
     graph = rebuild.ordered_graph(repo, tips)
@@ -780,7 +791,8 @@ def _rebuild_with(repo: Path, infected: dict, tips: list[str], last: str, still_
     plan = rebuild.commits_to_rebuild(graph, set(infected))
     return rebuild.rebuild_without_payload(
         repo, plan, replacements,
-        lambda sha, tree, parents: amend.rewrite_commit(repo, sha, tree, parents), still_carries)
+        lambda sha, tree, parents: amend.rewrite_commit(repo, sha, tree, parents), still_carries,
+        proven=_proven(repo, infected, still_carries))
 
 
 def _rebuild_in(repo: Path, infected: dict, tips: list[str], order: list[str], still_carries=None):
@@ -791,7 +803,8 @@ def _rebuild_in(repo: Path, infected: dict, tips: list[str], order: list[str], s
                     for sha, paths in infected.items()}
     return rebuild.rebuild_without_payload(
         repo, rebuild.commits_to_rebuild(graph, set(infected)), replacements,
-        lambda sha, tree, parents: amend.rewrite_commit(repo, sha, tree, parents), still_carries)
+        lambda sha, tree, parents: amend.rewrite_commit(repo, sha, tree, parents), still_carries,
+        proven=_proven(repo, infected, still_carries))
 
 
 class TestAProvenPayloadGoesFromEveryBranchThatBringsItIn(unittest.TestCase):
@@ -874,6 +887,26 @@ class TestAProvenPayloadGoesFromEveryBranchThatBringsItIn(unittest.TestCase):
         self.assertIn(merge, out.blocked)
         self.assertEqual(out.blocked[merge][0], "conflicted")
         self.assertNotIn(merge, out.mapping)
+
+    def test_a_file_that_only_came_in_beside_the_payload_is_left_on_other_branches(self):
+        repo = _new_repo()
+        _write(repo, "app.js", "base\n")
+        base = _commit(repo, "C0")
+        _write(repo, "x.js", "PAYLOAD TWO\n")
+        _write(repo, "launch.json", "standard\n")
+        d2 = _commit(repo, "D2 delivers two beside a standard file")
+        _git(repo, "checkout", "-q", "-b", "side", base)
+        _write(repo, "y.js", "PAYLOAD ONE\n")
+        d1 = _commit(repo, "D1 delivers one")
+        _write(repo, "launch.json", "standard\n")
+        own = _commit(repo, "E adds the same standard file")
+
+        out = _rebuild_with(repo, {d1: ("y.js",), d2: ("x.js", "launch.json")}, [d2, own], d2,
+                            _carries(repo))
+
+        self.assertFalse(out.blocked, out.blocked)
+        self.assertEqual(_git(repo, "show", f"{out.tip(own)}:launch.json"), "standard\n")
+        self.assertFalse(_git(repo, "ls-tree", "--name-only", out.tip(d2), "--", "launch.json").strip())
 
     def test_another_branchs_clean_version_is_never_written_in(self):
         repo = _new_repo()

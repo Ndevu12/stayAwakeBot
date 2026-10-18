@@ -108,22 +108,6 @@ def _removals_at(repo: str | Path, sha: str, remove, remove_in) -> dict[str, str
     return out
 
 
-def _proven_payloads(repo: str | Path, graph: list[tuple[str, list[str]]],
-                     replacements: dict[str, Replacement]) -> dict[str, set[str]]:
-    """Name the payload versions the replacements in a rebuild prove. Takes the repo, the graph and
-    the replacements. Returns each path mapped to the blobs a replacement corrects there."""
-    proven: dict[str, set[str]] = {}
-    for sha, _parents in graph:
-        replacement = replacements.get(sha)
-        if replacement is None or not replacement.ok:
-            continue
-        for path, _entry in replacement.plan:
-            answered, current = entry_at(repo, sha, path)
-            if answered and current is not None:
-                proven.setdefault(path, set()).add(current[1])
-    return proven
-
-
 def _inherited(corrections_of: dict, parents: list[str]) -> dict[str, dict]:
     """Merge the corrections a commit's parents carry. Takes every rebuilt commit's corrections and
     the commit's parents. Returns them by path and payload blob."""
@@ -178,16 +162,18 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
                             replacements: dict[str, Replacement],
                             write_commit, still_carries=None, clean=None, remove=None,
                             pre_blocked: dict[str, tuple[str, str]] | None = None,
-                            substitute=None, purge=None, remove_in=None) -> Rebuild:
+                            substitute=None, purge=None, remove_in=None,
+                            proven: dict[str, set[str]] | None = None) -> Rebuild:
     """Rebuild the commits in `graph` with the payload taken out of each infected commit and every
     commit after it. Takes the repo, the commits parents-first, each infected commit's replacement,
     `write_commit(commit, tree, new_parents) -> (sha, kind, refusal)`, the check `still_carries`, the
     removal steps `clean` (path to `(carries, corrector)`), `remove` (path to blob), `remove_in`
     (`(path, blob)` to commits), `substitute` (path to `(payload_blob, entry)`) and `purge` (paths),
-    and `pre_blocked`, the commits already known unrepairable. Returns the rebuild, with each commit
-    that could not be rebuilt in `blocked`."""
+    `pre_blocked`, the commits already known unrepairable, and `proven`, each path mapped to the
+    payload blobs saw confirmed. Returns the rebuild, with each commit that could not be rebuilt in
+    `blocked`."""
     mapping: dict[str, str] = {}
-    proven = _proven_payloads(repo, graph, replacements)
+    proven = proven or {}
     corrections_of: dict[str, dict[str, dict]] = {}
     blocked: dict[str, tuple[str, str]] = dict(pre_blocked or {})
     replaced: list[str] = []

@@ -981,10 +981,11 @@ def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
     return delivery.commits_carrying(repo, path, lambda sha, at: carries(_stored_text(repo, sha, at)))
 
 
-def _delivered_holders(repo: Path, infected: dict, unread: list[str]) -> dict[str, set[str]]:
-    """Find every commit that holds a version an infected commit delivered. Takes the repo, each
-    infected commit mapped to the paths it delivered, and where to name a path whose history is too
-    long to walk or that git could not read. Returns each path mapped to those commits."""
+def _confirmed_deliveries(repo: Path, infected: dict, survives,
+                          unread: list[str]) -> dict[str, set[str]]:
+    """Name the versions the infected commits delivered that carry a confirmed payload. Takes the
+    repo, each infected commit mapped to the paths it delivered, the payload check, and where to
+    name a version git could not read or judge. Returns each path mapped to those blob ids."""
     out: dict[str, set[str]] = {}
     for sha, paths in infected.items():
         for path in paths:
@@ -992,21 +993,26 @@ def _delivered_holders(repo: Path, infected: dict, unread: list[str]) -> dict[st
                 entry = _stored_entry(repo, sha, path)
                 if entry is None:
                     continue
-                hist = _foreign_history(repo, path, entry[1])
+                verdict = survives(sha, path)
+                if oracle.could_not_judge(verdict):
+                    raise _unread(path)
+                if verdict:
+                    out.setdefault(path, set()).add(entry[1])
+    return out
+
+
+def _add_version_carriers(repo: Path, proven: dict[str, set[str]], deliveries: dict,
+                          unread: list[str]) -> None:
+    """Add the commits that first bring in each confirmed version to the deliveries. Takes the repo,
+    each path mapped to its confirmed blob ids, the deliveries to add to, and where to name a path
+    whose history is too long to walk or that git could not read."""
+    for path in sorted(proven):
+        for oid in sorted(proven[path]):
+            with _naming_unread(unread):
+                hist = _foreign_history(repo, path, oid)
                 if hist is None:
                     raise _unread(path)
-                out.setdefault(path, set()).update(hist[1])
-    return out
-
-
-def _union_holders(*maps: dict) -> dict[str, set[str]]:
-    """Join path-to-commits maps. Takes the maps. Returns each path mapped to every commit any of them
-    names for it."""
-    out: dict[str, set[str]] = {}
-    for holders in maps:
-        for path, commits in holders.items():
-            out.setdefault(path, set()).update(commits)
-    return out
+                delivery.add_first_carriers(repo, {path: hist[1]}, deliveries, unread)
 
 
 def _foreign_history(repo: Path, path: str, oid: str) -> tuple[list[str], list[str]] | None:
@@ -1737,10 +1743,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
 
     deliveries: dict[str, tuple[str, ...]] = dict(infected)
     unread_deliveries: list[str] = []
-    delivered_holders = _delivered_holders(repo, infected, unread_deliveries)
-    delivery.add_first_carriers(
-        repo, _union_holders(clean_holders, remove_holders, purge_holders, delivered_holders),
-        deliveries, unread_deliveries)
+    delivery.add_first_carriers(repo, {**clean_holders, **remove_holders, **purge_holders}, deliveries,
+                    unread_deliveries)
+    proven = _confirmed_deliveries(repo, infected, survives, unread_deliveries)
+    _add_version_carriers(repo, proven, deliveries, unread_deliveries)
     brought = delivery.brought_by_each(repo, deliveries)
     asked: set[str] = set()
     answered_holders: dict[str, set[str]] = {}
@@ -2051,7 +2057,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
                                                                signing, committer=committer),
         survives, clean=clean, remove=remove, pre_blocked=blocked_commits,
-        substitute=substitute, purge=purge, remove_in=remove_in)
+        substitute=substitute, purge=purge, remove_in=remove_in, proven=proven)
     blocked = rebuilt.blocked
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
