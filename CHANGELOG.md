@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw fix amend` cleans a payload under every name its file had.** A file renamed after the payload
+  arrived no longer stops the run, and when something is still reachable the run names the file and
+  the commit that added it.
 - **`saw fix amend` cleans every branch that carries a payload it has proven.** A branch that brings in
   the same files a forged commit delivered on another branch is no longer left behind, and the other
   files that came in with them are put to you. It also no longer writes a file from another branch

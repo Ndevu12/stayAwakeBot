@@ -733,6 +733,37 @@ def _commits_after(repo: Path, plan, forms) -> set[str] | None:
     return out
 
 
+def _former_paths(repo: Path, path: str, holders) -> list[str] | None:
+    """Find the other paths a file's first carried versions were also held at. Takes the repo, the
+    path and the commits whose version of it carries a payload. Returns those paths, or None when
+    the history is too long to walk. Raises `Unread` when git could not tell."""
+    found: list[str] = []
+    for sha in delivery.first_carriers(repo, {path: holders}):
+        entry = _stored_entry(repo, sha, path)
+        if entry is None:
+            continue
+        paths = gitutil.blob_paths(repo, entry[1])
+        if paths is None:
+            return None
+        found += [other for other in paths if other != path and other not in found]
+    return found
+
+
+def _where_held(repo: Path, tips: list[str], oids) -> list[str]:
+    """Name a file and a commit that hold each version. Takes the repo, the branch tips and the blob
+    ids. Returns `path in commit` for each version git can place."""
+    out: list[str] = []
+    for oid in oids:
+        sha = gitutil.stdout(repo, ["log", "-n1", "--format=%H", "--diff-filter=A",
+                                    f"--find-object={oid}", *tips]).strip()
+        listing = gitutil.stdout(repo, ["ls-tree", "-r", "-z", sha]) if sha else ""
+        held = [entry.split("\t", 1)[1] for entry in listing.split("\0")
+                if "\t" in entry and entry.split("\t", 1)[0].split()[-1:] == [oid]]
+        if held:
+            out.append(f"{held[0]} in {sha[:12]}")
+    return out
+
+
 def _purge_carriers(repo: Path, path: str, survives) -> set[str] | None:
     """Walk `path`'s history and collect the commits whose version of it carries a payload. Takes the
     repo, the path, and the `survives` oracle that judges each version. Returns those commits, or None
@@ -1683,6 +1714,27 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             clean_shas.update(carrying)
             clean_holders[path] = set(carrying)
 
+    following = list(clean)
+    while following:
+        path = following.pop()
+        carries, corrector = clean[path]
+        with _naming_unread(unread):
+            formers = _former_paths(repo, path, clean_holders[path])
+            if formers is None:
+                return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
+            for former in formers:
+                if former in clean:
+                    continue
+                carrying = _carrying_commits(repo, former, carries)
+                if carrying is None:
+                    return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, former)
+                if not carrying:
+                    continue
+                clean[former] = (carries, corrector)
+                clean_shas.update(carrying)
+                clean_holders[former] = set(carrying)
+                following.append(former)
+
     remove: dict[str, str] = {}
     remove_shas: set[str] = set()
     remove_holders: dict[str, set[str]] = {}
@@ -2131,7 +2183,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 unread.append(name)
             elif malicious_oids & one:
                 holding.append(name)
-        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, names_that_fit(sorted(holding or unread)))
+        where = _where_held(repo, [tip for _n, tip in post_view], sorted(malicious_oids & reached)[:3])
+        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, names_that_fit(where or sorted(holding or unread)))
     taken_out = {oid for _path, oid in history.take_out}
     rewritten = _HistoryPayloads()
     still_held = [f"{entry.path} in {entry.commit[:12]}" for _finding, entry in _confirmed_versions(

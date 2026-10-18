@@ -1132,6 +1132,43 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertNotIn("branch_structure.json", head)
         self.assertTrue(calls)
 
+    def test_markers_in_a_file_that_was_later_renamed_go_from_both_names(self):
+        self.write(self.d, "conf/.gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.commit(self.d, "markers added")
+        _git(self.d, "mv", "conf", "config")
+        self.commit(self.d, "rename conf to config")
+        self.write(self.d, "later.txt", "later work\n")
+        self.commit(self.d, "later work")
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          "config/.gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+
+        outcome = self._act_full(scan)
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        for commit in self.git(self.d, "rev-list", "HEAD").split():
+            with self.subTest(commit=commit[:8]):
+                held = self.git_may_fail(self.d, "grep", "-l", "temp_auto_push.bat", commit)
+                self.assertFalse(held.stdout.strip())
+        self.assertEqual(self._show("HEAD:config/.gitignore"), "node_modules\n")
+
+    def test_a_copy_left_under_another_name_is_named_by_its_file_and_commit(self):
+        self.write(self.d, "conf/.gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        markers = self.commit(self.d, "markers added")
+        _git(self.d, "mv", "conf", "config")
+        self.commit(self.d, "rename conf to config")
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          "config/.gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+
+        with mock.patch("stayawake.bots.security.pr.amend._former_paths", return_value=[]):
+            outcome = self._act_full(scan)
+
+        (reason,) = [r for r in outcome.reasons if r.cause is Cause.PAYLOAD_STILL_REACHABLE]
+        self.assertIn(f"conf/.gitignore in {markers[:12]}", reason.detail)
+
     def test_a_confirmed_finding_it_cannot_excise_leaves_review_work(self):
         self.write(self.d, "postcss.config.mjs", "const config = {};\nexport default config;\n")
         self.commit(self.d, "add config")
