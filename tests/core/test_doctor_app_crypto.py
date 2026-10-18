@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw doctor` App readiness — signing is built in (`lib/jwtsign`), so a configured App reports
+"""`saw doctor` App readiness — signing is built in (`lib/signing/jwt`), so a configured App reports
 present with no crypto-extra caveat and no `app_jwt_available` field."""
 from __future__ import annotations
 

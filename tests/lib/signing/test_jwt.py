@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The built-in RS256 signer (`lib/jwtsign`) — proven byte-for-byte equal to `openssl` (the reference)
+"""The built-in RS256 signer (`lib/signing/jwt`) — proven byte-for-byte equal to `openssl` (the reference)
 and, when present, PyJWT; RSA blinding never changes the deterministic output; bad keys fail loud."""
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from stayawake.lib import jwtsign
+from stayawake.lib.signing.jwt import JwtSignError, encode_rs256
 
 _HAVE_OPENSSL = shutil.which("openssl") is not None
 
@@ -44,7 +44,7 @@ class TestRs256AgainstOpenssl(unittest.TestCase):
     def test_byte_equal_to_openssl_across_key_forms_and_sizes(self):
         payload = {"iat": 1, "exp": 541, "iss": "42"}
         for name, path in self.keys.items():
-            jwt = jwtsign.encode_rs256(payload, path.read_text())
+            jwt = encode_rs256(payload, path.read_text())
             signing_input, sig = jwt.rsplit(".", 1)
             ref = subprocess.run(["openssl", "dgst", "-sha256", "-sign", str(path)],
                                  input=signing_input.encode(), capture_output=True, check=True)
@@ -55,21 +55,21 @@ class TestRs256AgainstOpenssl(unittest.TestCase):
         # blinding uses a random factor, but the RS256 output is identical every time.
         pem = self.keys["pkcs1-2048"].read_text()
         payload = {"iss": "x", "iat": 1, "exp": 2}
-        self.assertEqual(jwtsign.encode_rs256(payload, pem), jwtsign.encode_rs256(payload, pem))
+        self.assertEqual(encode_rs256(payload, pem), encode_rs256(payload, pem))
 
 
 class TestErrorsFailLoud(unittest.TestCase):
     def test_encrypted_key_rejected(self):
-        with self.assertRaises(jwtsign.JwtSignError):
-            jwtsign.encode_rs256({}, "-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----")
+        with self.assertRaises(JwtSignError):
+            encode_rs256({}, "-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----")
 
     def test_non_pem_rejected(self):
-        with self.assertRaises(jwtsign.JwtSignError):
-            jwtsign.encode_rs256({}, "not a pem at all")
+        with self.assertRaises(JwtSignError):
+            encode_rs256({}, "not a pem at all")
 
     def test_empty_rejected(self):
-        with self.assertRaises(jwtsign.JwtSignError):
-            jwtsign.encode_rs256({}, "")
+        with self.assertRaises(JwtSignError):
+            encode_rs256({}, "")
 
 
 try:
@@ -89,7 +89,7 @@ class TestAgainstPyJWT(unittest.TestCase):
         import jwt as pyjwt
         pem, payload = k.read_text(), {"iat": 1, "exp": 541, "iss": "9"}
         self.assertEqual(pyjwt.encode(payload, pem, algorithm="RS256"),
-                         jwtsign.encode_rs256(payload, pem))
+                         encode_rs256(payload, pem))
 
 
 if __name__ == "__main__":

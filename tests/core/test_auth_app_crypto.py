@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw auth app register` — no crypto gate (signing is built in, `lib/jwtsign`), and it is IDEMPOTENT:
+"""`saw auth app register` — no crypto gate (signing is built in, `lib/signing/jwt`), and it is IDEMPOTENT:
 when an App is already configured it does NOT mint a duplicate (GitHub App names are globally unique,
 so a fresh manifest run would create a new suffixed App each time). It points the operator at
 installing the SAME App on more accounts/orgs, unless `--replace` (or the old App is gone from GitHub)."""
