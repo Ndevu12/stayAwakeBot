@@ -60,6 +60,7 @@ class Cause(Enum):
     NOT_PERMITTED_TO_REWRITE = "not-permitted-to-rewrite"
     REMOTE_REFS_UNREADABLE = "remote-refs-unreadable"
     REPLACEMENTS_UNSIGNED = "replacements-unsigned"
+    PUSH_REFUSED_AUTHOR_ADDRESS_PRIVATE = "push-refused-author-address-private"
     NO_COMMITTER_IDENTITY = "no-committer-identity"
     REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD = "replacement-loses-more-than-the-payload"
     CAPTURE_FAILED = "capture-failed"
@@ -276,6 +277,9 @@ _PHRASE = {
     Cause.PUSH_REFUSED_PRIVATE_EMAIL:
         "the push of {detail} was refused because GitHub keeps your email address private — "
         + NOREPLY_NEXT_STEP,
+    Cause.PUSH_REFUSED_AUTHOR_ADDRESS_PRIVATE:
+        "the push of {detail} was refused because GitHub keeps your email address private, and a "
+        "commit amend republishes there keeps its original author address",
     Cause.TAGS_AT_REPLACED_COMMIT: "tags still point at it",
     Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS:
         "still reachable from {detail} — a tag, stash, or another ref can put it back; clear it there too",

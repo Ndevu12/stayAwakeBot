@@ -13,7 +13,7 @@ from typing import Callable, NamedTuple
 from stayawake.bots.security import version_scan
 from stayawake.bots.security.models import CONFIRMED, confirmed_for_removal
 from stayawake.core.identity.classify import classify_push_stderr, what_the_remote_said
-from stayawake.core.identity.publishing import publishing_identity
+from stayawake.core.identity.publishing import keeps_the_address_private, publishing_identity
 from stayawake.utils import scratch
 from stayawake.bots.security.pr import arrival_questions, arrival_record
 from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
@@ -1247,26 +1247,29 @@ def _push_to(repo: Path, slug: str, branch: str, dest: str, token: str | None,
     return force_update_head(repo, slug, branch, token, lease=lease)
 
 
-def _refusal(branch: str, result) -> Reason:
-    """Name why the push of a branch was refused. Takes the branch and the push's result. Returns the
-    reason: a refusal over a private email address with its next step, else the refusal with what the
-    remote said."""
+def _refusal(branch: str, result, *, committed_under_noreply: bool = False) -> Reason:
+    """Name why the push of a branch was refused. Takes the branch, the push's result and whether the
+    commits were made under a noreply address. Returns the reason, with what the remote said when it
+    is not about a private email address."""
     stderr = getattr(result, "stderr", "") or ""
     if classify_push_stderr(stderr).reason == "private_email":
-        return Reason(Cause.PUSH_REFUSED_PRIVATE_EMAIL, branch)
+        cause = (Cause.PUSH_REFUSED_AUTHOR_ADDRESS_PRIVATE if committed_under_noreply
+                 else Cause.PUSH_REFUSED_PRIVATE_EMAIL)
+        return Reason(cause, branch)
     return Reason(Cause.PUSH_REFUSED, branch, said=what_the_remote_said(stderr))
 
 
 def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, *,
                          pusher, lease: str | None = None,
-                         sha12: str = "") -> BranchResult:
+                         sha12: str = "", committed_under_noreply: bool = False) -> BranchResult:
     dest, aside = _destination(slug, branch, token, sha12)
     result = _push_to(repo, slug, branch, dest, token, lease, pusher,
                       force=aside is None)
-    if aside is not None:
-        return BranchResult(branch, False, aside if result.ok else _refusal(branch, result))
     if not result.ok:
-        return BranchResult(branch, False, _refusal(branch, result))
+        return BranchResult(branch, False,
+                            _refusal(branch, result, committed_under_noreply=committed_under_noreply))
+    if aside is not None:
+        return BranchResult(branch, False, aside)
     if pusher is not None:
         return BranchResult(branch, True)
     known, remote = _read_remote_head(repo, slug, branch, token)
@@ -2156,7 +2159,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             continue
         result = _force_update_branch(repo, slug, branch, token, pusher=pusher,
                                       lease=(leases or {}).get(branch),
-                                      sha12=oldest[:12])
+                                      sha12=oldest[:12],
+                                      committed_under_noreply=keeps_the_address_private(committer[1]))
         results.append(result)
         cause = result.reason.cause if result.reason is not None else None
         if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:

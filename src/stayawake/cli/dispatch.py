@@ -63,6 +63,23 @@ def _clear_scratch() -> None:
         print(f"saw: left behind {textsafe.plain(reason, limit=300)}", file=sys.stderr)
 
 
+_TARGET_LISTS = ("paths", "targets")
+
+
+def _parsed(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.Namespace:
+    """Parse the command line, taking a target named after an option as one more target. Takes the
+    parser and the arguments. Returns the parsed arguments; anything else left over is refused as
+    `parse_args` refuses it."""
+    args, extra = parser.parse_known_args(argv)
+    if not extra:
+        return args
+    field = next((name for name in _TARGET_LISTS if isinstance(getattr(args, name, None), list)), None)
+    if field is None or any(word.startswith("-") for word in extra):
+        parser.error(f"unrecognized arguments: {' '.join(extra)}")
+    setattr(args, field, [*getattr(args, field), *extra])
+    return args
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # Hidden, reserved `saw sec <verb>` namespace: a leading `sec` token is a no-op
@@ -70,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "sec":
         argv = argv[1:]
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = _parsed(parser, argv)
     if not getattr(args, "command", None):
         # is dropped entirely when piped / CI / NO_COLOR, so scripted output stays clean text.
         # The full help still lives at `saw -h`, which argparse handled before we reach here.
