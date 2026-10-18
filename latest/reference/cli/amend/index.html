@@ -1989,7 +1989,9 @@ cleanly. Tell your collaborators before you run it. If you are not sure you want
 <p>Replace a past commit that still carries the payload and force-update each branch it sat on. That
 force-update is the fix: an amend that never reaches the remote is not one. The replaced
 commit keeps its original message and its original author, and the commits after it are replayed
-onto the replacement. Malware in any commit it rewrites is repaired in place where that leaves the
+onto the replacement. The new commits are signed with your own signing setup, or with a key on this
+machine that GitHub lists as your signing key; when there is neither, they are not signed and the run
+says so. Malware in any commit it rewrites is repaired in place where that leaves the
 file clean, and otherwise taken out; the version you were shown when asked, and what your allowlist
 covers, is left as you decided. When the checkout holds no malware, the repository's past
 commits are read the same way. A confirmed copy still in the rewritten history stops the push and is
@@ -2030,7 +2032,6 @@ repository.</p>
 <li><code>user.name</code> and <code>user.email</code> set, so the amend records who made it. When your <code>user.email</code> is not a
   GitHub noreply address, the amend is committed under your name with your GitHub account's noreply
   address, so your own address is not published; the authors of your commits are kept.</li>
-<li>A signing key, if the repository signs commits or the commits being replaced are signed.</li>
 </ul>
 <h2 id="it-stops-before-moving-anything">It stops before moving anything<a class="headerlink" href="#it-stops-before-moving-anything" title="Permanent link">&para;</a></h2>
 <p>It tells you and changes nothing when any of the above is missing, when the remote branches cannot
