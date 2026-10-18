@@ -1153,6 +1153,29 @@ class TestAmendActsOnContentPayload(_AmendFixture):
                 self.assertFalse(held.stdout.strip())
         self.assertEqual(self._show("HEAD:config/.gitignore"), "node_modules\n")
 
+    def test_an_earlier_name_is_repaired_as_a_file_of_that_name(self):
+        self.write(self.d, "conf/.gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.commit(self.d, "markers added")
+        _git(self.d, "mv", "conf", "config")
+        self.commit(self.d, "rename conf to config")
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          "config/.gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        from stayawake.bots.security.pr import amend as amend_module
+        repaired_as = []
+
+        def recording(found, flat):
+            repaired_as.append(found.path)
+            return real(found, flat)
+
+        real = amend_module._repair_checks
+        with mock.patch.object(amend_module, "_repair_checks", side_effect=recording):
+            outcome = self._act_full(scan)
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn("conf/.gitignore", repaired_as)
+
     def test_markers_left_under_the_old_name_of_a_file_renamed_with_an_edit_go_too(self):
         self.write(self.d, "conf/.gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
         self.commit(self.d, "markers added")

@@ -1691,6 +1691,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     clean_shas: set[str] = set()
     clean_holders: dict[str, set[str]] = {}
     cleaned_head: dict[str, str] = {}
+    flat = every_signature(signatures)
+    repair_under: dict[str, Callable[[str], Repair]] = {}
     for finding, carries, corrector, head_clean in _content_targets(repo, scan, signatures, unread):
         with _naming_unread(unread):
             carrying = _carrying_commits(repo, finding.path, carries)
@@ -1702,6 +1704,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             clean_shas.update(carrying)
             clean_holders[finding.path] = set(carrying)
             cleaned_head[finding.path] = head_clean
+            repair_under[finding.path] = (
+                lambda name, f=finding: _repair_checks(replace(f, path=name), flat))
 
     for path, carries, corrector in _predates_content_targets(
             repo, scan, signatures, allowlist, opts, set(clean), unread):
@@ -1714,6 +1718,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             clean[path] = (carries, corrector)
             clean_shas.update(carrying)
             clean_holders[path] = set(carrying)
+            repair_under[path] = lambda name: Repair(footprint.carries_code_loader(flat),
+                                                     footprint.code_loader_corrector(name, flat))
 
     remove: dict[str, str] = {}
     remove_shas: set[str] = set()
@@ -1766,7 +1772,6 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     following = list(clean)
     while following:
         path = following.pop()
-        carries, corrector = clean[path]
         with _naming_unread(unread):
             formers = _former_paths(repo, path, clean_holders[path])
             if formers is None:
@@ -1779,6 +1784,9 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                     raise gitutil.Unread(f"every copy of {former}")
                 if not oracle.content_confirms(content, former, payload, allowlist, opts):
                     continue
+                carries, corrector = repair_under[path](former)
+                if carries is None or corrector is None:
+                    continue
                 carrying = _carrying_commits(repo, former, carries)
                 if carrying is None:
                     return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, former)
@@ -1787,6 +1795,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 clean[former] = (carries, corrector)
                 clean_shas.update(carrying)
                 clean_holders[former] = set(carrying)
+                repair_under[former] = repair_under[path]
                 following.append(former)
 
     substitute: dict[str, tuple[str, tuple[str, str]]] = {}
