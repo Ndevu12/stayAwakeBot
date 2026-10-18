@@ -771,6 +771,84 @@ class TestAMovedBlobIsNotARemovedPayload(unittest.TestCase):
                          "export const clean = 1;\ncleaned up\n")
 
 
+def _rebuild_with(repo: Path, infected: dict, tips: list[str], last: str, still_carries=None):
+    """Rebuild, reading `last` after every commit that does not descend from it."""
+    graph = rebuild.ordered_graph(repo, tips)
+    graph = [n for n in graph if n[0] != last] + [n for n in graph if n[0] == last]
+    replacements = {sha: amend.replacement_commit(repo, sha, paths, None, still_carries)
+                    for sha, paths in infected.items()}
+    plan = rebuild.commits_to_rebuild(graph, set(infected))
+    return rebuild.rebuild_without_payload(
+        repo, plan, replacements,
+        lambda sha, tree, parents: amend.rewrite_commit(repo, sha, tree, parents), still_carries)
+
+
+class TestAProvenPayloadGoesFromEveryBranchThatBringsItIn(unittest.TestCase):
+    """A payload proven on one branch is removed from every branch that brings in the same bytes."""
+
+    def _two_branches(self, clean: str = "") -> tuple[Path, dict, str, str]:
+        repo = _new_repo()
+        _write(repo, "app.js", "base\n")
+        if clean:
+            _write(repo, "x.js", clean)
+        base = _commit(repo, "C0")
+        _write(repo, "x.js", clean + "PAYLOAD TWO\n")
+        d2 = _commit(repo, "D2 delivers two")
+        _git(repo, "checkout", "-q", "-b", "side", base)
+        _write(repo, "x.js", clean + "PAYLOAD ONE\n")
+        d1 = _commit(repo, "D1 delivers one")
+        _write(repo, "x.js", clean + "PAYLOAD TWO\n")
+        _write(repo, "notes.txt", "kept\n")
+        e = _commit(repo, "E brings in two")
+        return repo, {d1: ("x.js",), d2: ("x.js",)}, d2, e
+
+    def test_a_payload_proven_on_another_branch_is_removed_in_any_order(self):
+        for read_last in ("the proving branch", "the bringing branch"):
+            with self.subTest(read_last=read_last):
+                repo, infected, d2, e = self._two_branches()
+                last = d2 if read_last == "the proving branch" else e
+                out = _rebuild_with(repo, infected, [d2, e], last, _carries(repo))
+                self.assertFalse(out.blocked, out.blocked)
+                for tip in (d2, e):
+                    self.assertFalse(_git(repo, "ls-tree", "--name-only", out.tip(tip), "--", "x.js").strip())
+                self.assertEqual(_git(repo, "show", f"{out.tip(e)}:notes.txt"), "kept\n")
+
+    def test_a_branch_that_brings_it_in_over_a_clean_version_gets_that_version_back(self):
+        repo, infected, d2, e = self._two_branches(clean="clean\n")
+
+        out = _rebuild_with(repo, infected, [d2, e], d2, _carries(repo))
+
+        self.assertFalse(out.blocked, out.blocked)
+        for tip in (d2, e):
+            self.assertEqual(_git(repo, "show", f"{out.tip(tip)}:x.js"), "clean\n")
+
+    def test_a_merge_whose_parents_hold_different_versions_is_held_back(self):
+        repo = _new_repo()
+        _write(repo, "app.js", "base\n")
+        base = _commit(repo, "C0")
+        _git(repo, "checkout", "-q", "-b", "other", base)
+        _write(repo, "x.js", "PAYLOAD TWO\n")
+        d2 = _commit(repo, "D2 delivers two")
+        _git(repo, "checkout", "-q", "-b", "a", base)
+        _write(repo, "y.js", "PAYLOAD ONE\n")
+        d1 = _commit(repo, "D1 delivers one")
+        _write(repo, "x.js", "legit\n")
+        _commit(repo, "A1 adds a legitimate x.js")
+        _git(repo, "checkout", "-q", "-b", "b", base)
+        _write(repo, "z.js", "z\n")
+        _commit(repo, "B1")
+        _git(repo, "merge", "--no-ff", "--no-commit", "-q", "a")
+        _write(repo, "x.js", "PAYLOAD TWO\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "M brings in two while its parents disagree")
+        merge = _rev(repo, "HEAD")
+
+        out = _rebuild_with(repo, {d1: ("y.js",), d2: ("x.js",)}, [d2, merge], d2, _carries(repo))
+
+        self.assertIn(merge, out.blocked)
+        self.assertEqual(out.blocked[merge][0], "changed-downstream")
+
+
 class TestPartialDeliveryIsolatesTheBlockedCone(unittest.TestCase):
     """A commit that cannot be remediated no longer sinks the whole run: it and its descendants are
     blocked and skipped, and a branch that reaches none of them is still rebuilt clean."""

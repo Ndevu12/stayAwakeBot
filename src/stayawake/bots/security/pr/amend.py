@@ -981,6 +981,34 @@ def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
     return delivery.commits_carrying(repo, path, lambda sha, at: carries(_stored_text(repo, sha, at)))
 
 
+def _delivered_holders(repo: Path, infected: dict, unread: list[str]) -> dict[str, set[str]]:
+    """Find every commit that holds a version an infected commit delivered. Takes the repo, each
+    infected commit mapped to the paths it delivered, and where to name a path whose history is too
+    long to walk or that git could not read. Returns each path mapped to those commits."""
+    out: dict[str, set[str]] = {}
+    for sha, paths in infected.items():
+        for path in paths:
+            with _naming_unread(unread):
+                entry = _stored_entry(repo, sha, path)
+                if entry is None:
+                    continue
+                hist = _foreign_history(repo, path, entry[1])
+                if hist is None:
+                    raise _unread(path)
+                out.setdefault(path, set()).update(hist[1])
+    return out
+
+
+def _union_holders(*maps: dict) -> dict[str, set[str]]:
+    """Join path-to-commits maps. Takes the maps. Returns each path mapped to every commit any of them
+    names for it."""
+    out: dict[str, set[str]] = {}
+    for holders in maps:
+        for path, commits in holders.items():
+            out.setdefault(path, set()).update(commits)
+    return out
+
+
 def _foreign_history(repo: Path, path: str, oid: str) -> tuple[list[str], list[str]] | None:
     """Walk `path`'s history and separate the commits that hold it from those holding exactly `oid`.
     Takes the repo, the path, and that blob id. Returns `(holders, holders at oid)`, or None when the
@@ -1709,8 +1737,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
 
     deliveries: dict[str, tuple[str, ...]] = dict(infected)
     unread_deliveries: list[str] = []
-    delivery.add_first_carriers(repo, {**clean_holders, **remove_holders, **purge_holders}, deliveries,
-                    unread_deliveries)
+    delivered_holders = _delivered_holders(repo, infected, unread_deliveries)
+    delivery.add_first_carriers(
+        repo, _union_holders(clean_holders, remove_holders, purge_holders, delivered_holders),
+        deliveries, unread_deliveries)
     brought = delivery.brought_by_each(repo, deliveries)
     asked: set[str] = set()
     answered_holders: dict[str, set[str]] = {}

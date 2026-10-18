@@ -105,26 +105,83 @@ def _removals_at(repo: str | Path, sha: str, remove, remove_in) -> dict[str, str
     return out
 
 
+def _proven_payloads(repo: str | Path, graph: list[tuple[str, list[str]]],
+                     replacements: dict[str, Replacement]) -> dict[str, set[str]]:
+    """Name the payload versions the replacements in a rebuild prove. Takes the repo, the graph and
+    the replacements. Returns each path mapped to the blobs a replacement corrects there."""
+    proven: dict[str, set[str]] = {}
+    for sha, _parents in graph:
+        replacement = replacements.get(sha)
+        if replacement is None or not replacement.ok:
+            continue
+        for path, _entry in replacement.plan:
+            answered, current = entry_at(repo, sha, path)
+            if answered and current is not None:
+                proven.setdefault(path, set()).add(current[1])
+    return proven
+
+
+def _inherited(corrections_of: dict, parents: list[str]) -> dict[str, dict]:
+    """Merge the corrections a commit's parents carry. Takes every rebuilt commit's corrections and
+    the commit's parents. Returns them by path and payload blob."""
+    merged: dict[str, dict] = {}
+    conflicted: set[tuple[str, str]] = set()
+    for parent in parents:
+        for path, versions in corrections_of.get(parent, {}).items():
+            into = merged.setdefault(path, {})
+            for blob, entry in versions.items():
+                if (path, blob) in conflicted:
+                    continue
+                if blob in into and into[blob] != entry:
+                    conflicted.add((path, blob))
+                    del into[blob]
+                    continue
+                into[blob] = entry
+    return merged
+
+
+def _introduced(repo: str | Path, sha: str, parents: list[str], proven: dict[str, set[str]],
+                corrections: dict[str, dict],
+                mapping: dict[str, str]) -> tuple[list, tuple[str, str] | None]:
+    """Find the proven payload versions a commit brings in on its own line, each with the version its
+    rewritten parents hold. Takes the repo, the commit, its parents, the proven versions, the
+    corrections it inherits and the rewrite so far. Returns `(path, blob, entry)` for each, and the
+    `(kind, path)` that blocks the commit, or None."""
+    found = []
+    for path in sorted(proven):
+        answered, current = entry_at(repo, sha, path)
+        if not answered:
+            return [], ("unreadable", path)
+        if current is None or current[1] not in proven[path] or current[1] in corrections.get(path, {}):
+            continue
+        held = set()
+        for parent in parents:
+            answered, entry = entry_at(repo, mapping.get(parent, parent), path)
+            if not answered:
+                return [], ("unreadable", path)
+            held.add(entry)
+        entry = next(iter(held)) if len(held) == 1 else None
+        if len(held) != 1 or (entry is not None and entry[1] in proven[path]):
+            return [], ("changed-downstream", path)
+        found.append((path, current[1], entry))
+    return found, None
+
+
 def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]],
                             replacements: dict[str, Replacement],
                             write_commit, still_carries=None, clean=None, remove=None,
                             pre_blocked: dict[str, tuple[str, str]] | None = None,
                             substitute=None, purge=None, remove_in=None) -> Rebuild:
-    """Rebuild each infected commit parents-first and carry its correction into every commit after
-    it. A commit that cannot be remediated, and its descendants, are recorded in `blocked` and
-    skipped.
-
-    `write_commit(commit, tree, new_parents) -> (sha, kind, refusal)`, `still_carries`, `clean`,
-    `remove`, and `substitute` are injected. `clean` maps a path to `(carries, corrector)`, excised
-    in place at each commit whose blob at that path carries the footprint; `remove` maps a path to a
-    blob id, dropped from every commit that holds exactly that blob; `remove_in` maps a
-    `(path, blob)` to the commits it is dropped from, and from no other; `substitute` maps a path to
-    `(payload_blob, entry)`, put back to `entry` at every commit holding exactly that blob; `purge`
-    is a set of paths dropped from every commit whose blob at that path still carries a payload.
-    `pre_blocked` seeds commits already known un-remediable.
-    """
+    """Rebuild the commits in `graph` with the payload taken out of each infected commit and every
+    commit after it. Takes the repo, the commits parents-first, each infected commit's replacement,
+    `write_commit(commit, tree, new_parents) -> (sha, kind, refusal)`, the check `still_carries`, the
+    removal steps `clean` (path to `(carries, corrector)`), `remove` (path to blob), `remove_in`
+    (`(path, blob)` to commits), `substitute` (path to `(payload_blob, entry)`) and `purge` (paths),
+    and `pre_blocked`, the commits already known unrepairable. Returns the rebuild, with each commit
+    that could not be rebuilt in `blocked`."""
     mapping: dict[str, str] = {}
-    corrections: dict[str, tuple[str, tuple[str, str] | None]] = {}
+    proven = _proven_payloads(repo, graph, replacements)
+    corrections_of: dict[str, dict[str, dict]] = {}
     blocked: dict[str, tuple[str, str]] = dict(pre_blocked or {})
     replaced: list[str] = []
     carried: list[str] = []
@@ -135,6 +192,7 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
             blocked.setdefault(sha, inherited or blocked[sha])
             continue
 
+        corrections = _inherited(corrections_of, ps)
         replacement = replacements.get(sha)
         if replacement is not None:
             if not replacement.ok:
@@ -147,10 +205,19 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
                     unread = path
                     break
                 if current is not None:
-                    corrections[path] = (current[1], entry)
+                    corrections.setdefault(path, {})[current[1]] = entry
             if unread is not None:
                 blocked[sha] = ("unreadable", _BLOCKED["unreadable"].format(sha=sha[:12], path=unread))
                 continue
+        else:
+            introduced, stuck = _introduced(repo, sha, ps, proven, corrections, mapping)
+            if stuck is not None:
+                kind, path = stuck
+                blocked[sha] = (kind, _BLOCKED[kind].format(sha=sha[:12], path=path))
+                continue
+            for path, blob, entry in introduced:
+                corrections.setdefault(path, {})[blob] = entry
+        corrections_of[sha] = corrections
 
         tree = None
         removing = _removals_at(repo, sha, remove, remove_in)

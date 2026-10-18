@@ -232,22 +232,13 @@ def write_blob_bytes(repo: str | Path, data: bytes) -> str | None:
 
 
 def carried_forward(repo: str | Path, commit: str,
-                    corrections: dict[str, tuple[str, tuple[str, str] | None]],
+                    corrections: dict[str, dict[str, tuple[str, str] | None]],
                     still_carries=None, clean=None, remove=None,
                     substitute=None, purge=None) -> tuple[str | None, tuple[str, str] | None]:
-    """`commit`'s recorded tree with each correction carried into it, as `(tree, blocked)`.
-
-    `corrections` maps a path to `(payload_blob, entry)`: where the commit's blob still equals
-    `payload_blob` it is set to `entry`. `clean` maps a path to `(carries, corrector)`: where the
-    commit's blob carries the footprint it is rewritten by `corrector` and re-checked with
-    `carries`. `substitute` maps a path to `(payload_blob, entry)`: where the commit holds exactly
-    `payload_blob` the path is set to `entry`. `remove` maps a path to a blob id, dropped wherever
-    the commit holds exactly that blob. `purge` is a set of paths dropped at every commit whose blob
-    at that path `still_carries` a payload. `blocked` is `(kind, path)` for a path that could not be
-    made clean (then `tree` is None): kind `"unreadable"` when git could not read it, else
-    `"changed-downstream"`, including a rewrite whose bytes are not a subsequence of the original
-    blob and that its corrector does not prove. Bytes that are not UTF-8 are carried through
-    unchanged."""
+    """Carry the corrections into `commit`'s recorded tree. Takes the repo, the commit, `corrections`
+    (path to `{payload_blob: entry}`), the check `still_carries` and the removal steps `clean`,
+    `remove`, `substitute` and `purge`. Returns `(tree, blocked)`: the corrected tree, or None with
+    `blocked` as the `(kind, path)` that could not be made clean."""
     try:
         return _carried_forward(repo, commit, corrections, still_carries, clean, remove, substitute,
                                 purge)
@@ -269,15 +260,21 @@ def _carried_forward(repo, commit, corrections, still_carries, clean, remove, su
         if _entry(repo, commit, path) is not None and still_carries and still_carries(commit, path):
             plan.append((path, None))
             dropped.add(path)
-    for path, (payload_blob, entry) in list(corrections.items()) + list((substitute or {}).items()):
+    substituted = [(path, {payload_blob: entry})
+                   for path, (payload_blob, entry) in (substitute or {}).items()]
+    for path, versions in [*corrections.items(), *substituted]:
+        if path in dropped:
+            continue
         current = _entry(repo, commit, path)
         if current is None:
             continue
-        if current[1] == payload_blob:
-            plan.append((path, entry))
+        if current[1] in versions:
+            plan.append((path, versions[current[1]]))
         elif still_carries and still_carries(commit, path):
             return None, ("changed-downstream", path)
     for path, (carries, corrector) in (clean or {}).items():
+        if path in dropped:
+            continue
         current = _entry(repo, commit, path)
         if current is None:
             continue
