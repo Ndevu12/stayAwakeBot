@@ -123,8 +123,7 @@ def named_but_absent(paths) -> list[str]:
 
 def _local_patterns(cfg: dict, paths, *, sweep: bool = True) -> list[str]:
     """Name the folders a local fix looks in. Takes the configuration, the folders named on the
-    command line, and whether the run may sweep. Returns those folders; else, for a sweep, the
-    configured ones or the home folder, and otherwise the repository standing here."""
+    command line, and whether the run may sweep. Returns the folders and patterns to look in."""
     if paths:
         return list(paths)
     if not sweep:
@@ -135,8 +134,8 @@ def _local_patterns(cfg: dict, paths, *, sweep: bool = True) -> list[str]:
 
 def _local_repos(cfg: dict, opts: ScanOptions, paths, *, sweep: bool = True) -> list[Path]:
     """Find the repositories a local fix acts on. Takes the configuration, the scan options, the
-    folders named on the command line, and whether the run may sweep. Returns every repository
-    under those folders for a sweep; otherwise each folder's own repository, never one under it."""
+    folders named on the command line, and whether the run may sweep. Returns the repositories, or
+    an empty list when there are none."""
     patterns = _local_patterns(cfg, paths, sweep=sweep)
     if sweep:
         return discover_local_repos(patterns, opts)
@@ -407,8 +406,8 @@ def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
         prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
         return []
     if not slugs:
-        prog.line("error: saw fix amend rewrites history, so with --remote it acts only on the "
-                  "repositories you name: `saw fix amend --remote owner/repo`. Nothing was changed.")
+        prog.line("error: name the GitHub repository to amend: `saw fix amend --remote owner/repo`. "
+                  "Nothing was changed.")
         return []
     resolved, token, source = _resolve_remote(cfg, opts, slugs=slugs)
     from stayawake.core.identity import Intent
