@@ -14,6 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw fix amend` rewrites only the repository you are in, or the ones you name.** A bare run had
+  started rewriting every repository under your home folder, and `--remote` with no repository
+  named rewrote your configured or own GitHub repositories. With nothing named it amends only the
+  repository you are in; a folder that holds repositories, configured targets and `--remote`
+  without a repository are refused, and nothing is changed.
 - **The worm gate is SAW Guard, `Ndevu12/SAW_GUARD`, everywhere.** `saw guard` and `saw audit` find a
   workflow that uses it, a gate `saw guard setup` writes pins it, and every message and page calls it
   SAW Guard.

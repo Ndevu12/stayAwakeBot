@@ -15,8 +15,8 @@ saw fix .                  # prepare security/auto-clean for this repository —
 git diff main...security/auto-clean
 saw fix --pr               # also push and open (or update) one rolling PR per repository
 saw fix --remote           # sweep GitHub targets: clone, fix, PR
-saw fix amend              # replace past commits and force-update those branches
-saw fix amend --remote     # clone GitHub targets, replace, force-update
+saw fix amend              # replace past commits in this repository and force-update its branches
+saw fix amend --remote your-org/repo   # clone that repository, replace, force-update
 ```
 
 Re-running updates the same PR rather than opening another.

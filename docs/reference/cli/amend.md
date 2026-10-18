@@ -29,8 +29,8 @@ saw fix amend --remote OWNER/REPO [OWNER/REPO...]
 
 | Option | Description |
 | --- | --- |
-| `TARGETS...` | Repositories to amend. A named path that does not exist is an error, not a wider sweep. |
-| `--remote` | Clone the named GitHub repositories and amend them. Slugs only. |
+| `TARGETS...` | Repositories to amend: each one you name, or the repository you are in when none is named. A folder that holds repositories is not amended, and neither are configured targets. A named path that does not exist is an error, not a wider sweep. |
+| `--remote` | Clone the named GitHub repositories and amend them. Slugs only; with none named, nothing is changed. |
 | `-c FILE` / `-j N` / `--no-stream` | As for [`saw scan`](scan.md). |
 
 `--pr`, `--branch`, `--user` and `--org` are not accepted. There is no account-wide form: name each

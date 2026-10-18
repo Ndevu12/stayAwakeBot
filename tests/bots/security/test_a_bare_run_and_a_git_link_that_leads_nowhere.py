@@ -58,18 +58,18 @@ class TestAGitLinkThatLeadsNowhereIsScannedAsAPlainFolder(unittest.TestCase):
         real = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q", "--bare", str(real)], check=True)
         (self.folder / ".git").write_text(f"gitdir: {real}\n", encoding="utf-8")
-        self.assertTrue(resolution._is_a_repository(self.folder))
+        self.assertTrue(resolution.is_a_repository(self.folder))
 
     @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads any file")
     def test_a_link_that_cannot_be_read_is_still_taken_as_a_repository(self):
         (self.folder / ".git").chmod(0)
         self.addCleanup((self.folder / ".git").chmod, 0o644)
-        self.assertTrue(resolution._is_a_repository(self.folder))
+        self.assertTrue(resolution.is_a_repository(self.folder))
 
     def test_a_git_directory_is_a_repository(self):
         (self.folder / ".git").unlink()
         (self.folder / ".git").mkdir()
-        self.assertTrue(resolution._is_a_repository(self.folder))
+        self.assertTrue(resolution.is_a_repository(self.folder))
 
 
 class TestABareFixLooksUnderTheHomeFolder(unittest.TestCase):
