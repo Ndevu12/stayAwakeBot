@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""`saw fix amend` rewrites history, so it acts only on the repository you are in or the ones you
-name. It never sweeps a folder's repositories, the home folder or the configured targets."""
+"""`saw fix amend` acts only on the repository you are in or the ones you name."""
 from __future__ import annotations
 
 import os
