@@ -772,6 +772,24 @@ def blob_paths(repo: str | Path, oid: str, limit: int = 100_000) -> list[str] | 
     return paths
 
 
+def blob_holder(repo: str | Path, oid: str, tips: list[str]) -> tuple[str, str] | None:
+    """Find a commit and a path that hold the blob `oid`. Takes the repo, the blob id and the commits
+    to walk from. Returns `(commit, path)` from the latest commit that brings it in or takes it out,
+    or None when no commit reached from the tips holds it."""
+    out = own_view_fed(repo, ["-c", "log.showRoot=true", "log", "-n1", "--format=%H",
+                              "--diff-merges=separate", f"--find-object={oid}", *tips, "--"], b"")
+    latest = (out or b"").split()
+    if not latest:
+        return None
+    sha = latest[0].decode("ascii")
+    for commit in [sha, *(parents(repo, sha) or [])]:
+        held = sorted(path for path, (_mode, blob) in (_entries(repo, ["-r", commit]) or {}).items()
+                      if blob == oid)
+        if held:
+            return commit, held[0]
+    return None
+
+
 def introduced_added_text(repo: str | Path, base_tree: str, target: str, path: str) -> str:
     """The text the diff `base_tree..target` ADDS to `path` — i.e. the merge-introduced
     hunk's `+` lines, with the leading `+` stripped and diff `+++` headers excluded.

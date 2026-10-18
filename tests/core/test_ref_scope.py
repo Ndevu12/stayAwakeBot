@@ -132,8 +132,8 @@ class TestRefScope(GitSandbox):
         self.assertEqual(carrying["feature"][1], "0" * 40)
 
 
-class TestBlobPaths(GitSandbox):
-    """`blob_paths` answers where a blob ever sat."""
+class _OneCommitRepo(GitSandbox):
+    """A repository with one commit, for asking where a blob sits."""
 
     CONTENT = "wOF2\x00camouflage\n"
 
@@ -146,6 +146,10 @@ class TestBlobPaths(GitSandbox):
 
     def _oid(self, spec):
         return self.git(self.d, "rev-parse", spec).strip()
+
+
+class TestBlobPaths(_OneCommitRepo):
+    """`blob_paths` answers where a blob ever sat."""
 
     def test_a_renamed_blob_is_found_at_both_paths(self):
         self.write(self.d, "src/evil.woff2", self.CONTENT)
@@ -203,6 +207,40 @@ class TestBlobPaths(GitSandbox):
         self.commit(self.d, "add")
         oid = self._oid("HEAD:src/evil.woff2")
         self.assertIsNone(gitutil.blob_paths(self.d, oid, limit=1))
+
+
+
+class TestWhereABlobIsHeld(_OneCommitRepo):
+    """`blob_holder` names a commit and a path that hold a blob."""
+
+    def test_a_version_an_edit_brings_in_is_placed(self):
+        self.write(self.d, "a.txt", self.CONTENT)
+        sha = self.commit(self.d, "edit")
+        self.assertEqual(gitutil.blob_holder(self.d, self._oid("HEAD:a.txt"), ["HEAD"]), (sha, "a.txt"))
+
+    def test_a_version_only_a_merge_brings_in_is_placed(self):
+        self.git(self.d, "checkout", "-qb", "feature")
+        self.write(self.d, "b.txt", "two\n")
+        self.commit(self.d, "feature work")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git(self.d, "merge", "--no-ff", "--no-commit", "-q", "feature")
+        self.write(self.d, "smuggled.woff2", self.CONTENT)
+        self.git(self.d, "add", "-A")
+        self.git(self.d, "commit", "-qm", "merge")
+        merge = self._oid("HEAD")
+        self.assertEqual(gitutil.blob_holder(self.d, self._oid("HEAD:smuggled.woff2"), ["HEAD"]),
+                         (merge, "smuggled.woff2"))
+
+    def test_a_version_taken_out_since_is_placed_where_it_was(self):
+        self.write(self.d, "gone.woff2", self.CONTENT)
+        sha = self.commit(self.d, "add")
+        oid = self._oid("HEAD:gone.woff2")
+        (self.d / "gone.woff2").unlink()
+        self.commit(self.d, "remove")
+        self.assertEqual(gitutil.blob_holder(self.d, oid, ["HEAD"]), (sha, "gone.woff2"))
+
+    def test_a_version_the_tips_never_reach_is_not_placed(self):
+        self.assertIsNone(gitutil.blob_holder(self.d, "0" * 40, ["HEAD"]))
 
 
 if __name__ == "__main__":
