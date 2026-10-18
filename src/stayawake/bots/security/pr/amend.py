@@ -38,9 +38,9 @@ from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write import rebuild as gitrebuild
 from stayawake.lib.git.write.capture import capture_bundle
 from stayawake.lib.git.write.push import PushResult, force_update_head, publish_head
-from stayawake.lib.git.write import sign
 from stayawake.lib.git.write.replace import replacement_tree, write_blob_bytes
 from stayawake.lib import git as gitutil
+from stayawake.lib.signing import commits as commit_signing
 
 
 def _payload_left(repo: Path, olds, rebuilt, rewritten: list[tuple[str, str]],
@@ -1955,18 +1955,18 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     for key in history.take_out:
         remove_in[key] = in_the_rewrite
 
-    signing = sign.signing_status(
+    signing = commit_signing.signing_status(
         operator_context or repo,
-        history_is_signed=sign.any_signed(repo, [sha for sha, _ps in plan]),
+        history_is_signed=commit_signing.any_signed(repo, [sha for sha, _ps in plan]),
         trust_local_programs=operator_context is None)
     if signing.must_refuse:
         return _refuse(Cause.SIGNING_UNAVAILABLE, signing.reason)
-    configured = sign.committer_identity(repo)
+    configured = commit_signing.committer_identity(repo)
     if configured is None:
         return _refuse(Cause.NO_COMMITTER_IDENTITY)
     committer = publishing_identity(configured, token)
     if committer != configured:
-        signing = sign.signer_pinned(signing, configured)
+        signing = commit_signing.signer_pinned(signing, configured)
 
     leases, unread = _collect_remote_heads(repo, slug, [n for n, _, _ in heads], token)
     if unread is not None:

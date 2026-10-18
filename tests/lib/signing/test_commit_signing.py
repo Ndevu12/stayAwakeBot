@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""lib.git.write.sign — signing a history rewrite, exercised against REAL local git repos.
+"""lib.signing.commits — signing a history rewrite, exercised against REAL local git repos.
 
 `saw fix amend` keeps each rewritten commit's ORIGINAL author, so an unsigned rewrite attributes
 commits to people who never made them and destroys the signature that attested that authorship.
@@ -24,9 +24,9 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.lib.git.run import run
-from stayawake.lib.git.write import sign
-from stayawake.lib.git.write.sign import (
-    SigningStatus, any_signed, carries_signature, committer_identity, sign_flags,
+from stayawake.lib.signing.commits import (
+    SigningStatus, any_signed, carries_signature, committer_identity, fix_commit_signing, probe,
+    sign_flags,
     signing_args,
     signing_available, signing_env, signing_status,
 )
@@ -251,7 +251,7 @@ class TestAConditionalIncludeInTheOperatorsConfigApplies(SigningFixture):
         subprocess.run(["git", "config", "--file", str(included), "gpg.format", "ssh"],
                        check=True, capture_output=True)
         self.operator_sets(f"includeIf.gitdir:{repo.resolve()}/.path", str(included))
-        self.assertIn("gpg.ssh.program=/opt/op-ssh-sign", " ".join(sign.fix_commit_signing(repo)))
+        self.assertIn("gpg.ssh.program=/opt/op-ssh-sign", " ".join(fix_commit_signing(repo)))
 
 
 class TestProbeSafety(SigningFixture):
@@ -268,7 +268,7 @@ class TestProbeSafety(SigningFixture):
         repo = _repo(commit__gpgsign="true", gpg__format="ssh",
                      user__signingkey=str(_ssh_signing_key()))
         self.operator_sets("gpg.ssh.program", str(_script(_SIGNER_THAT_BLOCKS)))
-        with mock.patch.object(sign, "PROBE_TIMEOUT", 2):
+        with mock.patch.object(probe, "PROBE_TIMEOUT", 2):
             started = time.monotonic()
             status = signing_status(repo)
             elapsed = time.monotonic() - started

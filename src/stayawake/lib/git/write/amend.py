@@ -13,8 +13,8 @@ from stayawake.lib.git.run import UNTRUSTED, run, run_ok, stdout_bytes
 from stayawake.lib.git.write import working_tree
 from stayawake.lib.git.write.checkouts import checked_out_at
 from stayawake.lib.git.write.replace import Replacement, replacement_tree
-from stayawake.lib.git.write.sign import (SigningStatus, sign_flags, signing_args, signing_env,
-                                          signing_status)
+from stayawake.lib.signing.commits import (SigningStatus, sign_flags, signing_args, signing_env,
+                                           signing_status)
 
 
 _ZERO = "0" * 40

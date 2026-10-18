@@ -17,9 +17,9 @@ from stayawake.bots.security.pr.outcome import Cause, render_amend_line
 from stayawake.bots.security.targets.base import ScanOptions
 from stayawake.core.identity.publishing import keeps_the_address_private, noreply_address, publishing_identity
 from stayawake.lib.git.write import amend as gitamend
-from stayawake.lib.git.write.sign import signer_pinned, signing_env, signing_status
+from stayawake.lib.signing.commits import signer_pinned, signing_env, signing_status
 from tests.bots.security.test_amend import _AmendFixture, _ok_push, _sigs
-from tests.core.test_git_sign import _GPG_THAT_SIGNS, _repo, _script, SigningFixture
+from tests.lib.signing.test_commit_signing import _GPG_THAT_SIGNS, _repo, _script, SigningFixture
 from tests.support.offline_github import github_answers
 
 _ACCOUNT = {"id": 140616733, "login": "octo-cat"}
