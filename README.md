@@ -141,14 +141,14 @@ permissions:
   security-events: write
 
 jobs:
-  strix:
+  saw-guard:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0        # full history is required
 
-      - uses: Ndevu12/strix@93fe465d7b0266c6010778999b73b591ae082f3e      # v0.1.4
+      - uses: Ndevu12/SAW_GUARD@93fe465d7b0266c6010778999b73b591ae082f3e  # v0.1.4
         with:
           version: '0.6.0'      # pin the scanner too; blank tracks latest
           pr-comment: true      # say what was found, on the PR
@@ -157,7 +157,7 @@ jobs:
 
 ### About the pins
 
-`Ndevu12/strix` ("StayAwakeBot Strix") is the public Action — a thin wrapper that installs the
+`Ndevu12/SAW_GUARD` ("SAW Guard") is the public Action — a thin wrapper that installs the
 published `stayawakebot` scanner from PyPI.
 
 **Pin every action by commit SHA**, including this one: a tag can be moved to point at different code

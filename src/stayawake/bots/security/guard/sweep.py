@@ -17,7 +17,8 @@ from stayawake.utils.terminal import supports_color
 from stayawake.bots.security import resolution
 from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.targets import ScanOptions
-from stayawake.bots.security.guard.detect import check, render, GuardStatus, latest_strix
+from stayawake.bots.security.guard.constants import SAW_GUARD_NAME
+from stayawake.bots.security.guard.detect import check, render, GuardStatus, latest_saw_guard
 from stayawake.bots.security.guard.provision import (setup, render_setup, resolve_pin,
                                                      resolve_scanner_version, SetupResult)
 from stayawake.bots.security.guard.pindrift import drift_one, render_drift, DriftOutcome
@@ -141,10 +142,10 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                   fail: bool = False, no_stream: bool = False, jobs: int | None = None) -> int:
     """`saw guard check` across many repos. LOCAL by default (discover git repos under the given
     paths / configured `targets.local` / the enclosing repo); `remote=True` (or naming users/orgs)
-    resolves GitHub repos via the ladder and checks each over the API. The latest Strix release
+    resolves GitHub repos via the ladder and checks each over the API. The latest SAW Guard release
     is resolved ONCE and reused for every repo's freshness. A multi-repo sweep checks up to `jobs`
     repos at once (AUTO by default; `-j 1` forces sequential); results render in target order.
-    Returns 2 on a missing --config, 1 when `fail` and any gate isn't a healthy pinned Strix gate,
+    Returns 2 on a missing --config, 1 when `fail` and any gate isn't a healthy pinned SAW Guard gate,
     else 0."""
     cfg = _guard_config(config_path)
     if cfg is None:
@@ -163,7 +164,7 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if not resolved:
             prog.line(resolution.REMOTE_EMPTY_HINT)
             return 0
-        latest = latest_strix(token)
+        latest = latest_saw_guard(token)
         prog.line(f"Checking {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
         items, labels = resolved, list(resolved)
 
@@ -179,7 +180,7 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                                                   name_one="saw guard check"))
             return 0
         token, _ = auth.resolve_token()
-        latest = latest_strix(token)
+        latest = latest_saw_guard(token)
         prog.line(f"Checking {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
         items, labels = repos, [_disp(r) for r in repos]
 
@@ -198,7 +199,7 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
     unhealthy = [s for s in statuses if not s.healthy]
     n = len(statuses)
     tail = "".join([
-        f", {verified} a verified SHA-pinned Strix gate" if guarded else "",
+        f", {verified} a verified SHA-pinned {SAW_GUARD_NAME} gate" if guarded else "",
         f", {no_ci} with no CI" if no_ci else "",
         f", {unreadable} unreadable" if unreadable else "",
     ])
@@ -221,8 +222,8 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
     """`saw guard drift` across many repos — same target model as `saw guard check`. LOCAL by default
     (discover git repos under the given paths / configured `targets.local` / the enclosing repo);
     `remote=True` (or naming users/orgs) resolves GitHub repos via the ladder. For each repo it
-    grades the pinned Strix gate and files/refreshes/closes ONE de-duplicated drift issue. The latest
-    Strix release is resolved ONCE and reused. A multi-repo sweep runs up to `jobs` repos at once
+    grades the pinned SAW Guard gate and files/refreshes/closes ONE de-duplicated drift issue. The latest
+    SAW Guard release is resolved ONCE and reused. A multi-repo sweep runs up to `jobs` repos at once
     (AUTO by default; `-j 1` forces sequential); each repo files only its OWN issue. Returns 2 on a
     missing --config / a remote sweep with no credential, else 0 (drift is reported as an issue, never
     a build failure)."""
@@ -246,7 +247,7 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if not token:
             prog.line(auth.no_credential_hint("filing pin-drift issues") + "\n")
             return 2
-        latest = latest_strix(token)
+        latest = latest_saw_guard(token)
         prog.line(f"Checking pin drift on {len(resolved)} GitHub "
                   f"repositor{'y' if len(resolved) == 1 else 'ies'}…")
         items, labels = resolved, list(resolved)
@@ -263,7 +264,7 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                                                   name_one="saw guard drift"))
             return 0
         token, source = auth.resolve_token()
-        latest = latest_strix(token)
+        latest = latest_saw_guard(token)
         prog.line(f"Checking pin drift on {len(repos)} local "
                   f"repositor{'y' if len(repos) == 1 else 'ies'}…")
         items, labels = repos, [_disp(r) for r in repos]
@@ -341,7 +342,7 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
             return 0
         pin = resolve_pin(token, ref)
         if pin is None:
-            prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
+            prog.line(f"couldn't resolve the latest {SAW_GUARD_NAME} release (offline? pass --ref <sha|tag>)")
             return 2
         scanner = resolve_scanner_version(token)
         if scanner is None:
@@ -372,7 +373,7 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         token, source = auth.resolve_token() if (pr or not ref) else (None, None)
         pin = resolve_pin(token, ref)
         if pin is None:
-            prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
+            prog.line(f"couldn't resolve the latest {SAW_GUARD_NAME} release (offline? pass --ref <sha|tag>)")
             return 2
         scanner = resolve_scanner_version(token)
         if scanner is None:

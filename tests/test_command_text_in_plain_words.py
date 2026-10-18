@@ -9,7 +9,7 @@ import unittest
 from stayawake.cli._meta import __version__
 from stayawake.cli import main
 
-_INTERNAL_TERMS = ("capabilities:", "host denials", "Strix", "Read-only", "read-back",
+_INTERNAL_TERMS = ("capabilities:", "host denials", "SAW Guard", "Read-only", "read-back",
                    "intent/capability", "entry points")
 
 

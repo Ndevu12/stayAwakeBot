@@ -31,7 +31,7 @@ targets:
   # Requires a read-only token in env GITHUB_TOKEN (or GH_SECURITY_TOKEN).
   github:
     users: []          # e.g. [Ndevu12]
-    orgs: []           # e.g. [UB-TechDEV]
+    orgs: []           # e.g. [your-org]
     include_forks: false
     include_archived: false
 

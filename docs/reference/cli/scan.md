@@ -39,7 +39,7 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
 ```bash
 saw scan                                  # the repository you are standing in
 saw scan ./service-a ./service-b          # specific paths
-saw scan --org UB-TechDEV -j 8            # a whole org, 8 repositories at a time
+saw scan --org your-org -j 8              # a whole org, 8 repositories at a time
 saw scan --json > report.json             # machine-readable, full evidence
 saw scan -d /tmp/saw-reports              # opt-in redacted latest.json + latest.md
 ```

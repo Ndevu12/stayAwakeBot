@@ -29,7 +29,7 @@ def register(sub) -> None:
             ("saw scan", "the last line of the report is the verdict"),
             ("saw scan ./svc-a ./svc-b", "specific local paths"),
             ("saw scan src/app/loader.js", "one directory, or one file"),
-            ("saw scan --org UB-TechDEV -j 8", "a whole org, 8 repos at once"),
+            ("saw scan --org your-org -j 8", "a whole org, 8 repos at once"),
             ("saw scan --deep", "content-scan installed dependency code"),
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",

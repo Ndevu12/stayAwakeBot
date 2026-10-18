@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **The worm gate is SAW Guard, `Ndevu12/SAW_GUARD`, everywhere.** `saw guard` and `saw audit` find a
+  workflow that uses it, a gate `saw guard setup` writes pins it, and every message and page calls it
+  SAW Guard.
+- **The documentation and help examples use placeholder names** — `your-org`, `your-user` and
+  `your-org/your-repo` — instead of real organisations, accounts and repositories.
+
 ## [0.12.1] - 2026-10-17
 
 ### Fixed
@@ -1658,7 +1665,7 @@ _No user-facing changes were recorded for this release._
 ### Added
 - A container image on GHCR.
 - The public GitHub Action moved to its own repository,
-  [`Ndevu12/strix`](https://github.com/Ndevu12/strix).
+  [`Ndevu12/SAW_GUARD`](https://github.com/Ndevu12/SAW_GUARD).
 
 ### Changed
 - Distribution renamed to `stayawakebot` on PyPI. The import package and console scripts are
