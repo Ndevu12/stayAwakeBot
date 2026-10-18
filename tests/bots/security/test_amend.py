@@ -1061,6 +1061,32 @@ class TestAmendActsOnContentPayload(_AmendFixture):
                 return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(),
                                      [], "t", pusher=pusher, resolver=resolver)
 
+    def test_a_loader_a_forged_merge_also_delivered_is_cut_out_and_later_edits_kept(self):
+        clean = "const config = {};\nexport default config;\n"
+        self.write(self.d, "postcss.config.mjs", clean)
+        self.commit(self.d, "add config")
+        _git(self.d, "merge", "--no-ff", "--no-commit", "-q", "feature")
+        self.write(self.d, "postcss.config.mjs", _seam_line("// note added in the merge\n" + clean))
+        _git(self.d, "add", "-A")
+        _git(self.d, "-c", "user.name=Injected", "-c", "user.email=inj@t.test", "commit", "-qm",
+             "merge (smuggled loader)")
+        merge = self._rev()
+        self.write(self.d, "postcss.config.mjs",
+                   "// build config\n" + _seam_line("// note added in the merge\n" + clean))
+        self.commit(self.d, "edit the config with the loader still in it")
+        content = Finding("loader-seed-var", "code-loader", Severity.CRITICAL, "postcss.config.mjs",
+                          "loader", remediation="recover", confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[content, self._confirmed_finding(merge, ("postcss.config.mjs",))])
+
+        outcome = self._act_full(scan)
+
+        self.assertTrue(outcome.completed, [r.cause for r in outcome.reasons])
+        head = self._show("HEAD:postcss.config.mjs")
+        self.assertNotIn(_LOADER, head)
+        self.assertIn("// build config", head)
+        self.assertIn("// note added in the merge", head)
+
     def test_a_loader_in_an_evolving_file_is_excised_at_every_commit(self):
         clean = "const config = {};\nexport default config;\n"
         self.write(self.d, "postcss.config.mjs", clean)
