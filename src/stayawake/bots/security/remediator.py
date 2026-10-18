@@ -21,7 +21,8 @@ from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.service.config import _options
 from stayawake.bots.security.resolution import (
     discover_local_repos, invalid_slugs, no_repository_in, REMOTE_EMPTY_HINT, DEFAULT_CONFIG,
-    bare_run_targets, enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
+    bare_run_targets, enclosing_repo_root as _enclosing_repo_root, is_a_repository,
+    remote_scope as _remote_scope,
     resolve_remote as _resolve_remote)
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security import pr as pr_submit
@@ -120,15 +121,27 @@ def named_but_absent(paths) -> list[str]:
                   and not Path(p).expanduser().exists())
 
 
-def _local_patterns(cfg: dict, paths) -> list[str]:
-    """Name the folders a local fix looks in. Takes the configuration and the folders named on the
-    command line. Returns those folders, else the configured ones, else the home folder."""
+def _local_patterns(cfg: dict, paths, *, sweep: bool = True) -> list[str]:
+    """Name the folders a local fix looks in. Takes the configuration, the folders named on the
+    command line, and whether the run may sweep. Returns those folders; else, for a sweep, the
+    configured ones or the home folder, and otherwise the repository standing here."""
+    if paths:
+        return list(paths)
+    if not sweep:
+        return [str(_enclosing_repo_root())]
     cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
-    return list(paths) if paths else bare_run_targets(cfg_local)
+    return bare_run_targets(cfg_local)
 
 
-def _local_repos(cfg: dict, opts: ScanOptions, paths) -> list[Path]:
-    return discover_local_repos(_local_patterns(cfg, paths), opts)
+def _local_repos(cfg: dict, opts: ScanOptions, paths, *, sweep: bool = True) -> list[Path]:
+    """Find the repositories a local fix acts on. Takes the configuration, the scan options, the
+    folders named on the command line, and whether the run may sweep. Returns every repository
+    under those folders for a sweep; otherwise each folder's own repository, never one under it."""
+    patterns = _local_patterns(cfg, paths, sweep=sweep)
+    if sweep:
+        return discover_local_repos(patterns, opts)
+    roots = (_enclosing_repo_root(Path(p).expanduser().resolve()) for p in patterns)
+    return list(dict.fromkeys(r for r in roots if is_a_repository(r)))
 
 
 def _disp(repo: Path) -> str:
@@ -353,9 +366,11 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
     if missing:
         prog.line(f"error: no such path: {', '.join(missing)}")
         return []
-    repos = _local_repos(cfg, opts, paths)
-    if not repos:
-        prog.line(no_repository_in(_local_patterns(cfg, paths), so_nothing_was="changed",
+    patterns = _local_patterns(cfg, paths, sweep=False)
+    outside = [p for p in patterns if not _local_repos(cfg, opts, [p], sweep=False)]
+    repos = _local_repos(cfg, opts, patterns, sweep=False)
+    if outside or not repos:
+        prog.line(no_repository_in(outside or patterns, so_nothing_was="changed",
                                    name_one="saw fix amend"))
         return []
     token, source = auth.resolve_token()
@@ -390,6 +405,10 @@ def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
     bad = invalid_slugs(slugs)
     if bad:
         prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
+        return []
+    if not slugs:
+        prog.line("error: saw fix amend rewrites history, so with --remote it acts only on the "
+                  "repositories you name: `saw fix amend --remote owner/repo`. Nothing was changed.")
         return []
     resolved, token, source = _resolve_remote(cfg, opts, slugs=slugs)
     from stayawake.core.identity import Intent

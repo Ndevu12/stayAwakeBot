@@ -42,7 +42,7 @@ def _holds_git(p: Path) -> bool:
         return False
 
 
-def _is_a_repository(p: Path) -> bool:
+def is_a_repository(p: Path) -> bool:
     """Whether git would take `p` as a repository. Takes the folder. Returns True when it holds a
     `.git`, unless that `.git` is a link file naming a git directory that is not there."""
     return _holds_git(p) and not links_to_no_git_directory(p)
@@ -68,7 +68,7 @@ def enclosing_repo_root(start: Path | None = None) -> Path:
     subdirectory."""
     start = (start or Path.cwd()).resolve()
     for d in (start, *start.parents):
-        if _is_a_repository(d):
+        if is_a_repository(d):
             return d
     return start
 
@@ -263,10 +263,10 @@ def _a_directory(named: Path) -> "LocalTarget":
     signature (`.github/workflows/…`) and points a SARIF uri at a path the repository has not got.
     """
     here = named.resolve()
-    if _is_a_repository(here):
+    if is_a_repository(here):
         return LocalTarget(here, None, REPOSITORY)
     root = enclosing_repo_root(here)
-    if not _is_a_repository(root) or root == here:
+    if not is_a_repository(root) or root == here:
         return LocalTarget(here, None, DIRECTORY)
     return LocalTarget(root, None, DIRECTORY, str(here.relative_to(root)))
 
@@ -326,7 +326,7 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions,
             elif unsearched is not None:
                 unsearched.append(b)
         if found:
-            candidates += [LocalTarget(r, None, REPOSITORY if _is_a_repository(r) else DIRECTORY)
+            candidates += [LocalTarget(r, None, REPOSITORY if is_a_repository(r) else DIRECTORY)
                            for r in found]
         elif named_is_blocked:
             pass
