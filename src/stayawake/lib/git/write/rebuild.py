@@ -11,12 +11,15 @@ from pathlib import Path
 
 from stayawake.lib.git.objects import own_view
 from stayawake.lib.git.query import entry_at
-from stayawake.lib.git.write.replace import Replacement, carried_forward
+from stayawake.lib.git.write.replace import Replacement, carried_forward, merge_baseline
 
 _BLOCKED = {
     "changed-downstream": "{sha} changed {path} and it still carries the payload — that commit needs "
                           "its own finding",
     "unreadable": "{sha}: {path} could not be read",
+    "conflicted": "{sha} merges versions of {path} that git cannot combine on its own",
+    "baseline-carries-payload": "{path} already carries the payload before {sha}",
+    "shape": "{sha} has no earlier version of {path} to put back",
 }
 
 
@@ -144,25 +147,29 @@ def _introduced(repo: str | Path, sha: str, parents: list[str], proven: dict[str
                 corrections: dict[str, dict],
                 mapping: dict[str, str]) -> tuple[list, tuple[str, str] | None]:
     """Find the proven payload versions a commit brings in on its own line, each with the version its
-    rewritten parents hold. Takes the repo, the commit, its parents, the proven versions, the
+    rewritten parents give it. Takes the repo, the commit, its parents, the proven versions, the
     corrections it inherits and the rewrite so far. Returns `(path, blob, entry)` for each, and the
     `(kind, path)` that blocks the commit, or None."""
     found = []
+    baseline = None
     for path in sorted(proven):
         answered, current = entry_at(repo, sha, path)
         if not answered:
             return [], ("unreadable", path)
         if current is None or current[1] not in proven[path] or current[1] in corrections.get(path, {}):
             continue
-        held = set()
-        for parent in parents:
-            answered, entry = entry_at(repo, mapping.get(parent, parent), path)
-            if not answered:
-                return [], ("unreadable", path)
-            held.add(entry)
-        entry = next(iter(held)) if len(held) == 1 else None
-        if len(held) != 1 or (entry is not None and entry[1] in proven[path]):
-            return [], ("changed-downstream", path)
+        if baseline is None:
+            baseline = merge_baseline(repo, [mapping.get(parent, parent) for parent in parents])
+        tree, conflicted = baseline
+        if tree is None:
+            return [], ("shape", path)
+        if path in conflicted:
+            return [], ("conflicted", path)
+        answered, entry = entry_at(repo, tree, path)
+        if not answered:
+            return [], ("unreadable", path)
+        if entry is not None and entry[1] in proven[path]:
+            return [], ("baseline-carries-payload", path)
         found.append((path, current[1], entry))
     return found, None
 

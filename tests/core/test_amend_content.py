@@ -783,6 +783,17 @@ def _rebuild_with(repo: Path, infected: dict, tips: list[str], last: str, still_
         lambda sha, tree, parents: amend.rewrite_commit(repo, sha, tree, parents), still_carries)
 
 
+def _rebuild_in(repo: Path, infected: dict, tips: list[str], order: list[str], still_carries=None):
+    """Rebuild, reading the commits in `order` in that order, after every commit it does not name."""
+    rank = {sha: i for i, sha in enumerate(order)}
+    graph = sorted(rebuild.ordered_graph(repo, tips), key=lambda node: rank.get(node[0], -1))
+    replacements = {sha: amend.replacement_commit(repo, sha, paths, None, still_carries)
+                    for sha, paths in infected.items()}
+    return rebuild.rebuild_without_payload(
+        repo, rebuild.commits_to_rebuild(graph, set(infected)), replacements,
+        lambda sha, tree, parents: amend.rewrite_commit(repo, sha, tree, parents), still_carries)
+
+
 class TestAProvenPayloadGoesFromEveryBranchThatBringsItIn(unittest.TestCase):
     """A payload proven on one branch is removed from every branch that brings in the same bytes."""
 
@@ -822,7 +833,7 @@ class TestAProvenPayloadGoesFromEveryBranchThatBringsItIn(unittest.TestCase):
         for tip in (d2, e):
             self.assertEqual(_git(repo, "show", f"{out.tip(tip)}:x.js"), "clean\n")
 
-    def test_a_merge_whose_parents_hold_different_versions_is_held_back(self):
+    def _merge_bringing_in_two(self, left: str, right: str) -> tuple[Path, dict, str, str]:
         repo = _new_repo()
         _write(repo, "app.js", "base\n")
         base = _commit(repo, "C0")
@@ -832,21 +843,58 @@ class TestAProvenPayloadGoesFromEveryBranchThatBringsItIn(unittest.TestCase):
         _git(repo, "checkout", "-q", "-b", "a", base)
         _write(repo, "y.js", "PAYLOAD ONE\n")
         d1 = _commit(repo, "D1 delivers one")
-        _write(repo, "x.js", "legit\n")
-        _commit(repo, "A1 adds a legitimate x.js")
+        if left:
+            _write(repo, "x.js", left)
+        _commit(repo, "A1")
         _git(repo, "checkout", "-q", "-b", "b", base)
         _write(repo, "z.js", "z\n")
+        if right:
+            _write(repo, "x.js", right)
         _commit(repo, "B1")
-        _git(repo, "merge", "--no-ff", "--no-commit", "-q", "a")
+        subprocess.run(["git", "-C", str(repo), "merge", "--no-ff", "--no-commit", "-q", "a"],
+                       capture_output=True)
         _write(repo, "x.js", "PAYLOAD TWO\n")
         _git(repo, "add", "-A")
-        _git(repo, "commit", "-qm", "M brings in two while its parents disagree")
-        merge = _rev(repo, "HEAD")
+        _git(repo, "commit", "-qm", "M brings in two")
+        return repo, {d1: ("y.js",), d2: ("x.js",)}, d2, _rev(repo, "HEAD")
 
-        out = _rebuild_with(repo, {d1: ("y.js",), d2: ("x.js",)}, [d2, merge], d2, _carries(repo))
+    def test_a_merge_brought_in_over_one_sides_clean_version_gets_that_version(self):
+        repo, infected, d2, merge = self._merge_bringing_in_two("legit\n", "")
+
+        out = _rebuild_with(repo, infected, [d2, merge], d2, _carries(repo))
+
+        self.assertFalse(out.blocked, out.blocked)
+        self.assertEqual(_git(repo, "show", f"{out.tip(merge)}:x.js"), "legit\n")
+
+    def test_a_merge_whose_sides_cannot_be_combined_is_held_back(self):
+        repo, infected, d2, merge = self._merge_bringing_in_two("left\n", "right\n")
+
+        out = _rebuild_with(repo, infected, [d2, merge], d2, _carries(repo))
 
         self.assertIn(merge, out.blocked)
-        self.assertEqual(out.blocked[merge][0], "changed-downstream")
+        self.assertEqual(out.blocked[merge][0], "conflicted")
+        self.assertNotIn(merge, out.mapping)
+
+    def test_another_branchs_clean_version_is_never_written_in(self):
+        repo = _new_repo()
+        _write(repo, "app.js", "base\n")
+        base = _commit(repo, "C0")
+        _write(repo, "x.js", "PAYLOAD\n")
+        d_main = _commit(repo, "Dmain adds it")
+        _write(repo, "later.txt", "later\n")
+        follow = _commit(repo, "F follows")
+        _git(repo, "checkout", "-q", "-b", "dev", base)
+        _write(repo, "x.js", "legit on dev\n")
+        legit = _commit(repo, "L1")
+        _write(repo, "x.js", "PAYLOAD\n")
+        d_dev = _commit(repo, "Ddev changes it")
+
+        out = _rebuild_in(repo, {d_main: ("x.js",), d_dev: ("x.js",)}, [follow, d_dev],
+                          [d_main, legit, d_dev, follow], _carries(repo))
+
+        self.assertFalse(out.blocked, out.blocked)
+        self.assertFalse(_git(repo, "ls-tree", "--name-only", out.tip(follow), "--", "x.js").strip())
+        self.assertEqual(_git(repo, "show", f"{out.tip(d_dev)}:x.js"), "legit on dev\n")
 
 
 class TestPartialDeliveryIsolatesTheBlockedCone(unittest.TestCase):

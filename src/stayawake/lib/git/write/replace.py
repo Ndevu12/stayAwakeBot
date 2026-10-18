@@ -93,13 +93,9 @@ def _replayed_merge(repo: str | Path, a: str, b: str) -> AutoMerge | None:
         return None
 
 
-def _baseline(repo: str | Path, ps: list[str]) -> tuple[str | None, frozenset[str]]:
-    """The tree this commit should have had, and the paths git could not decide on its own.
-
-    Two parents: the clean 3-way auto-merge. One parent: that parent. Anything else — a root
-    commit, an octopus merge — has no baseline git can produce, and None says so rather than
-    nominating one parent as the truth.
-    """
+def merge_baseline(repo: str | Path, ps: list[str]) -> tuple[str | None, frozenset[str]]:
+    """Find the tree a commit with these parents should hold. Takes the repo and the parents. Returns
+    the tree, or None for a root or octopus commit, and the paths git could not combine on its own."""
     if len(ps) == 2:
         merged = _replayed_merge(repo, ps[0], ps[1])
         return (merged.tree, merged.conflicted) if merged else (None, frozenset())
@@ -129,7 +125,7 @@ def _replacement_tree(repo: str | Path, commit: str, flagged: list[str], still_c
     ps = parents(repo, commit)
     if ps is None:
         raise Unread("its parents")
-    baseline, conflicted = _baseline(repo, ps)
+    baseline, conflicted = merge_baseline(repo, ps)
     plan: list[tuple[str, tuple[str, str] | None]] = []
     recovered: list[str] = []
     for path in flagged:
