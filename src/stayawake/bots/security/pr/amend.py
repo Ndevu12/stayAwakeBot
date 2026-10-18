@@ -40,6 +40,7 @@ from stayawake.lib.git.write.capture import capture_bundle
 from stayawake.lib.git.write.push import PushResult, force_update_head, publish_head
 from stayawake.lib.git.write.replace import replacement_tree, write_blob_bytes
 from stayawake.lib import git as gitutil
+from stayawake.lib.adapters.github_api import get_authenticated_user, list_ssh_signing_keys
 from stayawake.lib.signing import commits as commit_signing
 
 
@@ -1223,6 +1224,14 @@ def _destination(slug: str, branch: str, token: str | None,
     return aside, Reason(cause, aside)
 
 
+def _signing_keys_on_github(token: str | None) -> list[str]:
+    """List the SSH signing keys GitHub holds for the account `token` belongs to. Returns them, or an
+    empty list when the account or its keys cannot be read."""
+    account = get_authenticated_user(token, quiet=True) if token else None
+    login = account.get("login") if isinstance(account, dict) else None
+    return (list_ssh_signing_keys(login, token) or []) if login else []
+
+
 def _push_to(repo: Path, slug: str, branch: str, dest: str, token: str | None,
              lease: str | None, pusher, *, force: bool) -> PushResult:
     """The transport, and the only part a caller may substitute.
@@ -1958,9 +1967,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     signing = commit_signing.signing_status(
         operator_context or repo,
         history_is_signed=commit_signing.any_signed(repo, [sha for sha, _ps in plan]),
-        trust_local_programs=operator_context is None)
-    if signing.must_refuse:
-        return _refuse(Cause.SIGNING_UNAVAILABLE, signing.reason)
+        trust_local_programs=operator_context is None,
+        registered_signing_keys=lambda: _signing_keys_on_github(token))
     configured = commit_signing.committer_identity(repo)
     if configured is None:
         return _refuse(Cause.NO_COMMITTER_IDENTITY)
@@ -2204,6 +2212,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         survivors.append(Reason(Cause.SAVED_WORK_CLEANED_HERE, ", ".join(cleaned_here)))
     if committer != configured:
         survivors.append(Reason(Cause.COMMITTED_UNDER_NOREPLY, f"{committer[0]} <{committer[1]}>"))
+    if signing.signature_owed_but_unavailable:
+        survivors.append(Reason(Cause.REPLACEMENTS_UNSIGNED))
     recovery = ""
     if failed:
         try:

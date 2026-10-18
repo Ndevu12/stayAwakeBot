@@ -196,6 +196,16 @@ def get_authenticated_user(token: str | None, quiet: bool = False) -> dict | Non
     return res if isinstance(res, dict) else None
 
 
+def list_ssh_signing_keys(login: str, token: str | None) -> list[str] | None:
+    """List the SSH signing keys GitHub holds for the account `login`. Takes the account and the
+    token. Returns each public key, or None when GitHub cannot be asked."""
+    res = request(f"/users/{urllib.parse.quote(login, safe='')}/ssh_signing_keys?per_page=100",
+                  token=token, quiet=True)
+    if not isinstance(res, list):
+        return None
+    return [entry["key"] for entry in res if isinstance(entry, dict) and isinstance(entry.get("key"), str)]
+
+
 def token_is_valid(token: str | None, repo_slug: str | None = None) -> bool:
     """Is `token` live and accepted by GitHub — WITHOUT requiring user-to-server scope?
 

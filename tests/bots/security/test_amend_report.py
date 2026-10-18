@@ -188,7 +188,8 @@ class TestTheVerdictIsStructural(unittest.TestCase):
                          frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
                                     Cause.SAVED_WORK_CLEANED_HERE, Cause.ARRIVALS_KEPT,
                                     Cause.LARGE_FILES_NOT_READ_IN_FULL,
-                                    Cause.SUBMODULES_NOT_READ, Cause.COMMITTED_UNDER_NOREPLY}))
+                                    Cause.SUBMODULES_NOT_READ, Cause.COMMITTED_UNDER_NOREPLY,
+                                    Cause.REPLACEMENTS_UNSIGNED}))
 
     def test_a_branch_that_did_not_move_needs_review_whatever_the_reasons_say(self):
         outcome = AmendOutcome("o/r", completed=False, commit="abc123456789",
