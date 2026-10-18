@@ -31,11 +31,13 @@ _RULES = (
 _UNREACHABLE = f"fatal: unable to access 'https://{_PAT}@github.com/o/r.git/': Could not resolve host"
 
 
-def _line(stderr: str, dest: tuple[str, Reason | None] = ("main", None)) -> str:
+def _line(stderr: str, dest: tuple[str, Reason | None] = ("main", None), *,
+          committed_under_noreply: bool = False) -> str:
     refused = lambda branch, to, lease: PushResult(False, stderr)  # noqa: E731
     with mock.patch.object(amend, "_destination", return_value=dest):
         result = amend._force_update_branch(Path("."), "o/r", "main", None, pusher=refused, lease="abc",
-                                            sha12="c6057e4f6d1a")
+                                            sha12="c6057e4f6d1a",
+                                            committed_under_noreply=committed_under_noreply)
     return render_amend_line(amended("o/r", "c6057e4f6d1a", [result]))
 
 
@@ -56,6 +58,13 @@ class TestARefusedPushSaysWhy(unittest.TestCase):
         self.assertIn("the push of main was refused because GitHub keeps your email address private", line)
         self.assertIn("@users.noreply.github.com", line)
         self.assertIn(NOREPLY_NEXT_STEP, line)
+
+    def test_a_refusal_after_committing_under_your_noreply_address_names_the_original_author(self):
+        line = _line(_PRIVATE_EMAIL, committed_under_noreply=True)
+        self.assertIn("the push of main was refused because GitHub keeps your email address private, and "
+                      "a commit amend republishes there keeps its original author address", line)
+        self.assertNotIn(NOREPLY_NEXT_STEP, line)
+        self.assertNotIn("git config", line)
 
     def test_nothing_refused_is_reported_as_moved(self):
         for stderr in (_RULES, _PRIVATE_EMAIL, _UNREACHABLE, ""):

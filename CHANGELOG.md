@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **A target named after an option is accepted.** `saw fix amend -c config/security.yml .` amends the
+  repository you are in, as `saw fix amend . -c config/security.yml` does; any command takes its
+  targets on either side of its options.
+- **A push GitHub refuses over your private address says which address.** When amend already commits
+  under your noreply address, the refusal names the commit it republishes with its original author
+  address, instead of asking you to change `user.email`.
+
 ## [0.12.2] - 2026-10-18
 
 ### Fixed
