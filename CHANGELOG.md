@@ -17,7 +17,8 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` cleans every branch that carries a payload it has proven.** A branch that brings in
   the same files a forged commit delivered on another branch is no longer left behind, and the other
   files that came in with them are put to you. It also no longer writes a file from another branch
-  into a branch it cleans.
+  into a branch it cleans, and taking out a file you were asked about no longer removes another
+  branch's own copy of it.
 - **A target named after an option is accepted.** `saw fix amend -c config/security.yml .` amends the
   repository you are in, as `saw fix amend . -c config/security.yml` does; any command takes its
   targets on either side of its options.

@@ -733,6 +733,35 @@ def _commits_after(repo: Path, plan, forms) -> set[str] | None:
     return out
 
 
+def _carried_from(repo: Path, plan, after: set[str], forms, path: str, blob: str) -> set[str] | None:
+    """Find the commits of a plan whose copy of a file version comes only through a delivery. Takes
+    the repo, the `(commit, parents)` plan in parents-first order, the commits at or after the
+    delivery, every id of the delivery commit, the path and the blob id. Returns those commits, or
+    None when git could not tell."""
+    def holds(sha: str) -> bool | None:
+        answered, entry = gitutil.entry_at(repo, sha, path)
+        return None if not answered else entry is not None and entry[1] == blob
+
+    kept: set[str] = set()
+    for sha, parents in plan:
+        if sha not in after:
+            continue
+        here = holds(sha)
+        if here is None:
+            return None
+        if not here:
+            continue
+        if sha in forms:
+            kept.add(sha)
+            continue
+        held = [holds(parent) for parent in parents]
+        if None in held:
+            return None
+        if all(parent in kept for parent, has in zip(parents, held) if has):
+            kept.add(sha)
+    return kept
+
+
 def _purge_carriers(repo: Path, path: str, survives) -> set[str] | None:
     """Walk `path`'s history and collect the commits whose version of it carries a payload. Takes the
     repo, the path, and the `survives` oracle that judges each version. Returns those commits, or None
@@ -1994,6 +2023,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     unplaced: set[tuple[str, str]] = set()
     for (path, blob), forms in taken_forms.items():
         allowed = _commits_after(repo, plan, forms)
+        if allowed is not None:
+            allowed = _carried_from(repo, plan, allowed, forms, path, blob)
         if allowed is None:
             unconfirmed.append(f"which copies of {path} came with the malware")
             unplaced.add((path, blob))
@@ -2052,12 +2083,15 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         recovered_paths |= set(replacement.recovered)
         replacements[sha] = replacement
 
+    delivered_paths = {path for paths in infected.values() for path in paths}
     rebuilt = gitrebuild.rebuild_without_payload(
         repo, plan, replacements,
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
                                                                signing, committer=committer),
         survives, clean=clean, remove=remove, pre_blocked=blocked_commits,
-        substitute=substitute, purge=purge, remove_in=remove_in, proven=proven)
+        substitute=substitute, purge=purge, remove_in=remove_in,
+        proven={path: versions for path, versions in proven.items()
+                if path in delivered_paths and path not in substitute})
     blocked = rebuilt.blocked
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}

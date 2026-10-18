@@ -8,6 +8,7 @@ from unittest import mock
 
 from stayawake.bots.security.models import ScanResult
 from stayawake.bots.security.pr.outcome import Cause
+from stayawake.bots.security.pr.resolve import KEEP, TAKE_OUT, DeliveryAnswer, DeliveryQuestion, Resolution
 from tests.bots.security.test_amend import _AmendFixture, _git
 
 _MAINLINE_LOADER = "eval(String.fromCharCode(1, 2, 3));\n"
@@ -80,6 +81,42 @@ class TestAmendCleansEveryBranch(_AmendFixture):
         self.assertTrue(undecided, self._causes(outcome))
         self.assertIn("extra.txt", undecided[0].subjects)
         self.assertTrue(outcome.needs_review)
+
+    def test_an_answer_about_one_branch_leaves_the_other_branchs_own_copy(self):
+        self.write(self.d, "y.js", "var a = 0;\nvar b = 0;\nvar c = 0;\n")
+        root = self.commit(self.d, "add y.js")
+        _git(self.d, "checkout", "-q", "-b", "side", root)
+        self.write(self.d, "y.js", "var a = 1;\nvar b = 0;\nvar c = 0;\n")
+        side_edit = self.commit(self.d, "side edits y.js")
+        _git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "docs/guide.md", "written on main long ago\n")
+        self.commit(self.d, "main docs")
+        self.write(self.d, "y.js", "var a = 0;\nvar b = 0;\nvar c = 1;\n")
+        main_edit = self.commit(self.d, "main edits y.js")
+        self.merges = [(self._forged_merge(self.base, "y.js", _MAINLINE_LOADER, "mainline", main_edit), ("y.js",)),
+                       (self._forged_merge("side", "z.js", _SIDE_LOADER, "sideline", side_edit), ("z.js",))]
+        self.write(self.d, "y.js", _MAINLINE_LOADER)
+        self.write(self.d, "docs/guide.md", "written on main long ago\n")
+        self.commit(self.d, "copies y.js and the docs from main")
+        _git(self.d, "checkout", "-q", self.base)
+        _git(self.d, "merge", "--no-ff", "-q", "-m", "merge side", "side")
+        _git(self.d, "update-ref", "-d", "ORIG_HEAD")
+        asked = []
+
+        def take_out_everything(question):
+            if not isinstance(question, DeliveryQuestion):
+                return Resolution(KEEP)
+            asked.append([f.path for f in question.files])
+            return DeliveryAnswer(TAKE_OUT, tuple(f.path for f in question.files))
+
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._confirmed_finding(sha, paths) for sha, paths in self.merges])
+        with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+            outcome = self._act(resolver=take_out_everything)
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn(["docs/guide.md"], asked)
+        self.assertEqual(self._show(f"{self.base}:docs/guide.md"), "written on main long ago\n")
 
 if __name__ == "__main__":
     unittest.main()
