@@ -773,11 +773,10 @@ def _where_held(repo: Path, tips: list[str], oids, original_of: dict[str, str]) 
     return out
 
 
-def _versions_it_may_repair(repo: Path, path: str, carries, confirmed, rewrite_region: set[str]):
-    """Narrow a footprint check to the versions of a file a repair may change: those saw confirmed,
-    and those the commits being rewritten hold. Takes the repo, the path, the check, the confirmed
-    `(path, blob)` versions and the commits being rewritten. Returns a check that holds only for
-    those versions' text, or None when git could not read one of them."""
+def _only_the_confirmed(repo: Path, path: str, carries, confirmed):
+    """Narrow a footprint check to the versions of a file saw confirmed. Takes the repo, the path,
+    the check and the confirmed `(path, blob)` versions. Returns a check that holds only for their
+    text, or None when git could not read one of them."""
     texts = set()
     for found, blob in confirmed:
         if found == path:
@@ -785,15 +784,15 @@ def _versions_it_may_repair(repo: Path, path: str, carries, confirmed, rewrite_r
             if text is None:
                 return None
             texts.add(text)
-    if rewrite_region:
-        carrying = _carrying_commits(repo, path, carries)
-        if carrying is None:
-            return None
-        try:
-            texts |= {_stored_text(repo, sha, path) for sha in carrying if sha in rewrite_region}
-        except gitutil.Unread:
-            return None
     return lambda text: text in texts and carries(text)
+
+
+def _holding_a_confirmed_version(repo: Path, path: str, commits: list[str], confirmed) -> list[str]:
+    """Keep the commits whose version of a file saw confirmed. Takes the repo, the path, the commits
+    and the confirmed `(path, blob)` versions. Returns those commits. Raises `Unread` when git could
+    not read a version."""
+    versions = {blob for found, blob in confirmed if found == path}
+    return [sha for sha in commits if (_stored_entry(repo, sha, path) or ("", ""))[1] in versions]
 
 
 def _checkout_in_the_way(repo: Path, name: str) -> dict[str, Reason]:
@@ -2032,11 +2031,11 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     for key, commits in (adding or {}).items():
         history.take_out[key] |= commits
     cleaned_at_head = set(clean)
+    clean_in: dict[str, set[str]] = {}
     for path, (carries, corrector) in history.excise.items():
-        if repaired_in_the_rewrite is not None and path not in cleaned_at_head:
-            carries = _versions_it_may_repair(
-                repo, path, carries, history.confirmed,
-                rewrite_region if path in repaired_in_the_rewrite else set())
+        limited = repaired_in_the_rewrite is not None and path not in cleaned_at_head
+        if limited and path not in repaired_in_the_rewrite:
+            carries = _only_the_confirmed(repo, path, carries, history.confirmed)
             if carries is None:
                 unread.append(f"every copy of {path}")
                 continue
@@ -2044,6 +2043,14 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         if carrying is None:
             return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
         within = [sha for sha in carrying if sha in history.region]
+        if limited and path in repaired_in_the_rewrite:
+            try:
+                confirmed_here = set(_holding_a_confirmed_version(repo, path, within, history.confirmed))
+            except gitutil.Unread as missed:
+                unread.append(missed.subject)
+                continue
+            within = [sha for sha in within if sha in rewrite_region or sha in confirmed_here]
+            clean_in[path] = set(within)
         clean[path] = (carries, corrector)
         clean_shas.update(within)
         clean_holders[path] = set(within)
@@ -2204,6 +2211,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                                                                signing, committer=committer),
         survives, clean=clean, remove=remove, pre_blocked=blocked_commits,
         substitute=substitute, purge=purge, remove_in=remove_in,
+        clean_in=clean_in,
         proven={path: versions for path, versions in proven.items()
                 if path in delivered_paths and path not in substitute and path not in purge})
     blocked = rebuilt.blocked
@@ -2251,6 +2259,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     path_checks = {p: (lambda tr, pth: _judged(survives(tr, pth))) for p in payload_paths}
     path_checks.update({p: (lambda tr, pth, c=carries: _carries_in(repo, tr, pth, c))
                         for p, (carries, _c) in clean.items()})
+    for p, allowed in clean_in.items():
+        rebuilt_allowed = {rebuilt.mapping.get(sha, sha) for sha in allowed}
+        path_checks[p] = (lambda tr, pth, c=clean[p][0], ok=rebuilt_allowed:
+                          tr in ok and _carries_in(repo, tr, pth, c))
     left, unread_rewrite = _payload_left(
         repo, all_infected, rebuilt, [(name, delivered_tips[tip]) for name, tip, _c in deliverable],
         path_checks, remove)

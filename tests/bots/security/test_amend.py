@@ -1186,6 +1186,24 @@ class TestAmendActsOnContentPayload(_AmendFixture):
                 self.assertIn(yours, self.git(self.d, "rev-list", "HEAD").split())
                 self.assertFalse(self._held_on_branches("allowAutomaticTasks\":\"on"))
 
+    def test_your_own_settings_restored_from_an_older_commit_are_left_there(self):
+        from tests.bots.security.test_remediation_acceptance import SETTINGS_INJECTED
+        own = '{"editor.tabSize":4,"task.allowAutomaticTasks":"off"}\n'
+        self.write(self.d, ".vscode/settings.json", own)
+        yours = self.commit(self.d, "your own settings")
+        self.write(self.d, "notes.txt", "notes\n")
+        self.commit(self.d, "notes")
+        self.write(self.d, ".vscode/settings.json", SETTINGS_INJECTED)
+        self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+        self.commit(self.d, "infection")
+        _git(self.d, "checkout", yours, "--", ".vscode/settings.json")
+        self.commit(self.d, "settings restored")
+
+        self._amend_for(self._loader_at("vite.config.ts"))
+
+        self.assertIn(yours, self.git(self.d, "rev-list", "HEAD").split())
+        self.assertEqual(self._show(f"{yours}:.vscode/settings.json"), own)
+
     def test_a_loader_a_forged_merge_also_delivered_is_cut_out_and_later_edits_kept(self):
         clean = "const config = {};\nexport default config;\n"
         self.write(self.d, "postcss.config.mjs", clean)
