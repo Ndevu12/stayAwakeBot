@@ -147,7 +147,7 @@ jobs:
 
       - uses: Ndevu12/SAW_GUARD@93fe465d7b0266c6010778999b73b591ae082f3e
         with:
-          version: '0.12.3'
+          version: '0.13.0'
           pr-comment: true
           upload-sarif: true
 ```
