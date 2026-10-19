@@ -773,6 +773,20 @@ def _where_held(repo: Path, tips: list[str], oids, original_of: dict[str, str]) 
     return out
 
 
+def _only_the_confirmed(repo: Path, path: str, carries, confirmed):
+    """Narrow a footprint check to the versions of a file saw confirmed. Takes the repo, the path,
+    the check and the confirmed `(path, blob)` versions. Returns a check that holds only for their
+    text, or None when git could not read one of them."""
+    texts = set()
+    for found, blob in confirmed:
+        if found == path:
+            text = gitutil.blob_text(repo, blob)
+            if text is None:
+                return None
+            texts.add(text)
+    return lambda text: text in texts and carries(text)
+
+
 def _checkout_in_the_way(repo: Path, name: str) -> dict[str, Reason]:
     """Tell whether a checkout holding a branch has changes. Takes the repo and the branch name.
     Returns the branch with its reason when one does, or nothing."""
@@ -1980,6 +1994,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     heads_now = _branches_carrying_any(repo, infected_now) if infected_now else []
     graph_now = (gitrebuild.ordered_graph(repo, [tip for _n, tip, _c in heads_now])
                  if heads_now else None)
+    repaired_in_the_rewrite: set[str] | None = None
     if not infected_now:
         _read_past_commits(repo, display, signatures, allowlist, opts, left_to_another_step,
                            owned_paths, history)
@@ -1992,6 +2007,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 signatures, allowlist, opts, left_to_another_step, history):
             _place_history_finding(repo, finding, entry, signatures, allowlist, opts, owned_paths,
                                    history)
+        repaired_in_the_rewrite = set(history.excise)
         for finding, entry in _past_versions(
                 repo, display, signatures, allowlist, opts,
                 lambda path, oid: (path, oid) in history.judged or left_to_another_step(path, oid),
@@ -2006,6 +2022,12 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         history.take_out[key] |= commits
     cleaned_at_head = set(clean)
     for path, (carries, corrector) in history.excise.items():
+        if (repaired_in_the_rewrite is not None and path not in repaired_in_the_rewrite
+                and path not in cleaned_at_head):
+            carries = _only_the_confirmed(repo, path, carries, history.confirmed)
+            if carries is None:
+                unread.append(f"every copy of {path}")
+                continue
         carrying = _carrying_commits(repo, path, carries)
         if carrying is None:
             return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)

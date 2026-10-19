@@ -787,6 +787,25 @@ class TestAnOlderPayloadAtTheSamePath(_Delivery):
         self.assertIn(Cause.ARRIVALS_UNDECIDED, self._causes(outcome))
         self.assertIn(".gitignore", render_amend_line(outcome))
 
+    def test_a_settings_file_that_arrives_is_left_as_delivered_and_the_older_one_repaired(self):
+        from tests.bots.security.test_remediation_acceptance import SETTINGS_INJECTED
+        self.write(self.d, ".vscode/settings.json", SETTINGS_INJECTED)
+        self.commit(self.d, "older settings")
+        older = self._blob(".vscode/settings.json")
+        self.git(self.d, "rm", "-q", ".vscode/settings.json")
+        self.commit(self.d, "removed by hand")
+        self.write(self.d, PAYLOAD, "wOF2\x00payload " + PAYLOAD + "\n")
+        self.write(self.d, ".vscode/settings.json", '{"editor.tabSize":4,"task.allowAutomaticTasks":"on"}')
+        self.commit(self.d, "add build tooling")
+        delivered = self._blob(".vscode/settings.json")
+        self._later()
+
+        outcome = self._run()
+
+        self.assertIn(".vscode/settings.json", render_amend_line(outcome))
+        self.assertTrue(self._in_history(".vscode/settings.json", delivered))
+        self.assertFalse(self._in_history(".vscode/settings.json", older))
+
     def test_the_operator_is_asked_and_a_take_out_answer_removes_it(self):
         arrived = self._delivered_over_an_old_sample()
         resolver, asked = _answering(TAKE_OUT)
