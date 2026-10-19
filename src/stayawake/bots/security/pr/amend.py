@@ -2031,7 +2031,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     for key, commits in (adding or {}).items():
         history.take_out[key] |= commits
     cleaned_at_head = set(clean)
-    clean_in: dict[str, set[str]] = {}
+    clean_in: dict[str, tuple[set[str], Callable[[str], bool]]] = {}
     for path, (carries, corrector) in history.excise.items():
         limited = repaired_in_the_rewrite is not None and path not in cleaned_at_head
         if limited and path not in repaired_in_the_rewrite:
@@ -2044,13 +2044,17 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
         within = [sha for sha in carrying if sha in history.region]
         if limited and path in repaired_in_the_rewrite:
+            exact = _only_the_confirmed(repo, path, carries, history.confirmed)
             try:
                 confirmed_here = set(_holding_a_confirmed_version(repo, path, within, history.confirmed))
             except gitutil.Unread as missed:
                 unread.append(missed.subject)
                 continue
+            if exact is None:
+                unread.append(f"every copy of {path}")
+                continue
             within = [sha for sha in within if sha in rewrite_region or sha in confirmed_here]
-            clean_in[path] = set(within)
+            clean_in[path] = (rewrite_region, exact)
         clean[path] = (carries, corrector)
         clean_shas.update(within)
         clean_holders[path] = set(within)
@@ -2259,10 +2263,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     path_checks = {p: (lambda tr, pth: _judged(survives(tr, pth))) for p in payload_paths}
     path_checks.update({p: (lambda tr, pth, c=carries: _carries_in(repo, tr, pth, c))
                         for p, (carries, _c) in clean.items()})
-    for p, allowed in clean_in.items():
-        rebuilt_allowed = {rebuilt.mapping.get(sha, sha) for sha in allowed}
-        path_checks[p] = (lambda tr, pth, c=clean[p][0], ok=rebuilt_allowed:
-                          tr in ok and _carries_in(repo, tr, pth, c))
+    original_of = {new: old for old, new in rebuilt.mapping.items()}
+    for p, (region, exact) in clean_in.items():
+        path_checks[p] = (lambda tr, pth, c=clean[p][0], e=exact, r=region:
+                          _carries_in(repo, tr, pth, c if original_of.get(tr, tr) in r else e))
     left, unread_rewrite = _payload_left(
         repo, all_infected, rebuilt, [(name, delivered_tips[tip]) for name, tip, _c in deliverable],
         path_checks, remove)
@@ -2293,7 +2297,6 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 unread.append(name)
             elif malicious_oids & one:
                 holding.append(name)
-        original_of = {new: old for old, new in rebuilt.mapping.items()}
         where = names_that_fit(_where_held(repo, [tip for _n, tip in post_view],
                                            sorted(malicious_oids & reached)[:3], original_of))
         branches = names_that_fit(sorted(holding or unread))

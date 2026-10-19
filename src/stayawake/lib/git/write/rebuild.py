@@ -91,10 +91,14 @@ def commits_to_rebuild(graph: list[tuple[str, list[str]]],
 
 
 def _repairs_at(sha: str, clean, clean_in) -> dict:
-    """Collect the in-place repairs one commit takes. Takes the commit, the repairs and the commits
-    each may be made in. Returns each path mapped to its `(carries, corrector)`."""
-    return {path: repair for path, repair in (clean or {}).items()
-            if clean_in is None or path not in clean_in or sha in clean_in[path]}
+    """Collect the in-place repairs one commit takes. Takes the commit, the repairs and, for a
+    path, the commits its own check applies in with the narrower check it takes elsewhere. Returns
+    each path mapped to its `(carries, corrector)`."""
+    out = {}
+    for path, (carries, corrector) in (clean or {}).items():
+        limit = (clean_in or {}).get(path)
+        out[path] = (carries if limit is None or sha in limit[0] else limit[1], corrector)
+    return out
 
 
 def _removals_at(repo: str | Path, sha: str, remove, remove_in) -> dict[str, str]:
@@ -178,8 +182,9 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
     removal steps `clean` (path to `(carries, corrector)`), `remove` (path to blob), `remove_in`
     (`(path, blob)` to commits), `substitute` (path to `(payload_blob, entry)`) and `purge` (paths),
     `pre_blocked`, the commits already known unrepairable, `proven`, each path mapped to the
-    payload blobs saw confirmed, and `clean_in`, the commits each `clean` path may be repaired in.
-    Returns the rebuild, with each commit that could not be rebuilt in `blocked`."""
+    payload blobs saw confirmed, and `clean_in`, for a `clean` path, the commits its own check
+    repairs it in and the narrower check it takes in every other commit. Returns the rebuild, with
+    each commit that could not be rebuilt in `blocked`."""
     mapping: dict[str, str] = {}
     proven = proven or {}
     corrections_of: dict[str, dict[str, dict]] = {}

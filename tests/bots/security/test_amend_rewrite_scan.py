@@ -383,6 +383,21 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertIn(older, self.git(self.d, "rev-list", self.base).split())
         self.assertNotIn(old_version, self.git(self.d, "rev-list", "--objects", self.base))
 
+    def test_injected_lines_are_cut_out_of_the_commits_that_kept_them_unchanged(self):
+        self.evil_merge()
+        self.write(self.d, ".gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.commit(self.d, "markers added")
+        self.write(self.d, "notes.txt", "unrelated work\n")
+        self.commit(self.d, "unrelated work")
+        self.write(self.d, ".gitignore", "node_modules\n")
+        self.commit(self.d, "markers removed by hand")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        for commit in self.git(self.d, "rev-list", self.base).split():
+            with self.subTest(commit=commit[:8]):
+                held = self.git_may_fail(self.d, "grep", "-l", "temp_auto_push.bat", commit)
+                self.assertFalse(held.stdout.strip())
+
     def test_injected_lines_in_an_older_version_are_cut_out_and_the_rest_stays(self):
         self.evil_merge()
         self.write(self.d, ".gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
