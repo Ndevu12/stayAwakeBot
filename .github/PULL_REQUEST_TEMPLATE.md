@@ -6,7 +6,7 @@ Closes #
 
 - [ ] Branched off a freshly fetched `origin/main`, and rebased on it — not merged.
 - [ ] A bare `Closes #NNNN` above, on its own line. Partial work uses `Refs #NNNN` instead.
-- [ ] `python -m unittest discover -s tests` passes, and the **Worm Guard** gate is green.
+- [ ] `python -m unittest discover -s tests` passes, and the **SAW Guard** gate is green.
 - [ ] User-visible change → a `CHANGELOG.md` `[Unreleased]` entry in this PR. No user-visible
       effect (a refactor, a pin bump) → no entry.
 - [ ] That entry, and this description, describe **what a user observes** — not detector or rule

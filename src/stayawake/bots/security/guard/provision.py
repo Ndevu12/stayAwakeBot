@@ -17,7 +17,7 @@ from stayawake.utils import scratch
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.guard.constants import (
     SAW_GUARD_ACTION, SAW_GUARD_NAME, SAW_GUARD_OWNER, SAW_GUARD_REPO, SAW_GUARD_USES, WORKFLOW_DIR,
-    WORM_GUARD_FILE, SETUP_BRANCH,
+    SAW_GUARD_FILE, SETUP_BRANCH,
     CHECKOUT_ACTION, SETUP_PYTHON_ACTION)
 from stayawake.bots.security.guard.detect import (
     check, classify_pin, find_saw_guard, find_worm_gate, grade_config, render,
@@ -93,16 +93,16 @@ def resolve_scanner_version(token: str | None = None) -> str | None:
 
 
 def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None = None) -> str:
-    """The worm-guard workflow `saw guard setup` installs.
+    """The SAW Guard workflow `saw guard setup` installs.
 
     Takes the action pin, the default branch to gate, and the scanner version to pin. Returns the
-    full workflow text: a `worm-guard` job that scans and reports, a `remediate` job reachable only
+    full workflow text: a `saw-guard` job that scans and reports, a `remediate` job reachable only
     on an infected verdict, and a weekly `pin-drift` job. Described in `docs/reference/cli/guard.md`.
     """
     version_line = f"          version: '{scanner}'\n" if scanner else ""
     scanner_spec = f"stayawakebot=={scanner}" if scanner else "stayawakebot"
     return (
-        "name: Worm guard — block infected merges\n"
+        "name: SAW Guard — block infected merges\n"
         "\n"
         "on:\n"
         "  pull_request:\n"
@@ -115,7 +115,7 @@ def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None 
         "permissions: {}\n"
         "\n"
         "jobs:\n"
-        "  worm-guard:\n"
+        "  saw-guard:\n"
         "    if: github.event_name != 'schedule'\n"
         "    runs-on: ubuntu-latest\n"
         "    permissions:\n"
@@ -140,10 +140,10 @@ def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None 
         "          upload-artifact: true\n"
         "\n"
         "  remediate:\n"
-        "    needs: worm-guard\n"
-        "    if: ${{ !cancelled() && (needs.worm-guard.outputs.verdict == 'infected'"
-        " || (needs.worm-guard.outputs.infected != ''"
-        " && needs.worm-guard.outputs.infected != '0')) }}\n"
+        "    needs: saw-guard\n"
+        "    if: ${{ !cancelled() && (needs.saw-guard.outputs.verdict == 'infected'"
+        " || (needs.saw-guard.outputs.infected != ''"
+        " && needs.saw-guard.outputs.infected != '0')) }}\n"
         "    runs-on: ubuntu-latest\n"
         "    permissions:\n"
         "      contents: write\n"
@@ -196,16 +196,16 @@ def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
     when the repo is genuinely unguarded — never clobbering a file already at the create path."""
     gate = find_worm_gate(workflows, read_action=read_action)
     if gate is None:
-        if WORM_GUARD_FILE in workflows:
-            return SetupPlan("conflict", WORM_GUARD_FILE)
-        return SetupPlan("create", WORM_GUARD_FILE, render_workflow(pin, default_branch, scanner),
+        if SAW_GUARD_FILE in workflows:
+            return SetupPlan("conflict", SAW_GUARD_FILE)
+        return SetupPlan("create", SAW_GUARD_FILE, render_workflow(pin, default_branch, scanner),
                          new_ref=pin.sha)
     if gate.mechanism != "saw-guard":
         return SetupPlan("present", gate.workflow,
                          detail=_GATE_HOW.get(gate.mechanism, gate.mechanism))
     ref = gate.saw_guard
     config = grade_config(ref)
-    if config.needs_rewriting and ref.workflow == WORM_GUARD_FILE:
+    if config.needs_rewriting and ref.workflow == SAW_GUARD_FILE:
         return SetupPlan("repair", ref.workflow, render_workflow(pin, default_branch, scanner),
                          old_ref=ref.ref, new_ref=pin.sha, detail=_degraded_detail(config))
     if ref.pin == "sha" and ref.ref.lower() == pin.sha.lower():
@@ -243,7 +243,7 @@ def _setup_pr_body(plan: SetupPlan, base: str) -> str:
            "beyond the gate itself are not preserved — review the diff."]
           if plan.action == "repair" and plan.detail else []),
         f"- **Pin:** `{SAW_GUARD_ACTION}@{plan.new_ref[:12]}…`{tag}",
-        "- **Gate job** (`worm-guard`): scans PRs/pushes and reports what it finds — a PR comment, a "
+        "- **Gate job** (`saw-guard`): scans PRs/pushes and reports what it finds — a PR comment, a "
         "code-scanning alert and a run artifact. It **cannot push to this repository** "
         "(`contents: read`).",
         "- **Remediation job** (`remediate`): opens ONE rolling `security/auto-clean` fix PR. It is the "
@@ -254,7 +254,7 @@ def _setup_pr_body(plan: SetupPlan, base: str) -> str:
         f"pinned {SAW_GUARD_NAME} release falls behind (`issues: write` only).",
         "",
         "### Please finish the hardening (a PR can't set these):",
-        "- [ ] Mark the **worm-guard** check **required** in branch protection.",
+        "- [ ] Mark the **saw-guard** check **required** in branch protection.",
         "- [ ] Add **CODEOWNERS** on `.github/**` (and `config/security.yml`, if used).",
         "- [ ] Enable **Settings → Actions → General → “Allow GitHub Actions to create and approve pull "
         "requests”** so the gate can open the fix PR.",

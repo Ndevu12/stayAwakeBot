@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw guard` — install & verify saw's worm-guard CI gate across repos.
+"""`saw guard` — install & verify saw's SAW Guard CI gate across repos.
 
 Thin CLI: parse args and delegate to `guard.check_targets` / `guard.setup_targets`, which resolve
 targets (local discovery / remote ladder), sweep, and stream — like `saw scan`/`saw fix`.
@@ -15,9 +15,9 @@ from stayawake.cli.helptext import add_command
 def register(sub) -> None:
     p = add_command(
         sub, "guard", aliases=["gd"], stream=False,
-        help="put saw's worm-guard CI gate in a repository, and check it",
+        help="put saw's SAW Guard CI gate in a repository, and check it",
         description=(
-            "Install and verify saw's worm-guard CI gate across repos: `check` grades a "
+            "Install and verify saw's SAW Guard CI gate across repos: `check` grades a "
             "repo's gate (present / SHA-pinned / current / required), `setup` installs it or "
             "bumps an existing pin, and `drift` files a tracking issue when a pin falls behind. "
             "`setup` never pushes to a default branch."),
@@ -70,8 +70,8 @@ def register(sub) -> None:
 
     st = add_command(
         gsub, "setup",
-        help="install or update the worm-guard gate across repos: write locally, or --pr / --remote",
-        description="Resolve the latest worm-guard release to a commit SHA, then install the worm-guard "
+        help="install or update the SAW Guard gate across repos: write locally, or --pr / --remote",
+        description="Resolve the latest SAW Guard release to a commit SHA, then install the SAW Guard "
                     "workflow (or surgically bump an existing pin — found by its action reference, "
                     "not filename) across the resolved repos. LOCAL by default (discovers git repos; "
                     "writes into each working tree for you to review + commit + PR, or --pr to open "
@@ -100,7 +100,7 @@ def register(sub) -> None:
     st.add_argument("--org", action="append", default=[], metavar="ORG",
                     help="set up this GitHub org's repos (repeatable; implies --remote)")
     st.add_argument("--ref", default=None, metavar="SHA|TAG",
-                    help="pin this worm-guard ref explicitly (offline/deterministic); default: latest release")
+                    help="pin this SAW Guard ref explicitly (offline/deterministic); default: latest release")
     st.add_argument("-b", "--branch", default=None,
                     help="default branch to target (default: auto-detect)")
     st.add_argument("--dry-run", action="store_true", dest="dry_run",
@@ -113,9 +113,9 @@ def register(sub) -> None:
 
     dr = add_command(
         gsub, "drift",
-        help="report worm-guard pin drift across repos (files/closes a tracking issue each)",
-        description="Out-of-band pin-drift backstop for the worm-guard gate: read each repo's pinned "
-                    "`Ndevu12/SAW_GUARD@<sha>`, compare it to the latest worm-guard release, and open ONE "
+        help="report SAW Guard pin drift across repos (files/closes a tracking issue each)",
+        description="Out-of-band pin-drift backstop for the SAW Guard gate: read each repo's pinned "
+                    "`Ndevu12/SAW_GUARD@<sha>`, compare it to the latest SAW Guard release, and open ONE "
                     "de-duplicated tracking issue when it has fallen behind — closing it again "
                     "automatically once the pin catches up. Same target model as `saw guard check`: "
                     "LOCAL by default (discovers git repos; omit targets for the current repo), "

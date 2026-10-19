@@ -3,7 +3,7 @@
 
 /src/stayawake/bots/security/data/signatures.yml  @Ndevu12
 
-/.github/workflows/worm-guard.yml                 @Ndevu12
+/.github/workflows/saw-guard.yml                 @Ndevu12
 /.github/workflows/release.yml                    @Ndevu12
 /.github/workflows/security-sentinel.yml          @Ndevu12
 /.github/actions/worm-scan/                       @Ndevu12

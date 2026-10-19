@@ -114,15 +114,15 @@ jobs:
         with:
           # Pin the scanner to a known-good SHA, NEVER the commit under test: a compromised
           # release commit must not be able to certify itself. Bump after an intentional
-          # scanner/signature update (kept in sync with worm-guard.yml).
-          sentinel-ref: e75a35f2086e22964093c904def84f7bf95b6db2   # current main — kept identical to worm-guard.yml
+          # scanner/signature update (kept in sync with saw-guard.yml).
+          sentinel-ref: e75a35f2086e22964093c904def84f7bf95b6db2   # current main — kept identical to saw-guard.yml
           fail-on-findings: 'true'
           # Pure exit-code gate: the job conclusion is the scan verdict, nothing else. This
-          # commit is also scanned (and, when enabled, uploaded) by worm-guard + security-sentinel,
+          # commit is also scanned (and, when enabled, uploaded) by SAW Guard + security-sentinel,
           # so a redundant code-scanning copy here is dropped.
           upload-sarif: 'false'
           # SINGLE SOURCE OF TRUTH: same committed, CODEOWNERS-guarded config/security.yml as
-          # worm-guard.yml — no hand-copied allowlist to drift out of sync between the two gates.
+          # saw-guard.yml — no hand-copied allowlist to drift out of sync between the two gates.
           config-file: config/security.yml
 
   publish-testpypi:

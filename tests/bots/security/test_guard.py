@@ -346,7 +346,7 @@ class TestPlanSetup(unittest.TestCase):
 
     def test_create_when_absent(self):
         p = guard.plan_setup({}, "main", self.PIN)
-        self.assertEqual((p.action, p.path), ("create", guard.WORM_GUARD_FILE))
+        self.assertEqual((p.action, p.path), ("create", guard.SAW_GUARD_FILE))
         self.assertEqual(guard.find_saw_guard({p.path: p.content}).pin, "sha")   # emitted file is detectable
 
     def test_noop_when_already_latest_sha(self):
@@ -382,7 +382,7 @@ class TestRenderWorkflow(unittest.TestCase):
         self.doc = yaml.safe_load(self.wf)          # must be valid YAML
 
     def test_the_job_that_scans_cannot_write_to_the_repository(self):
-        gate = self.doc["jobs"]["worm-guard"]
+        gate = self.doc["jobs"]["saw-guard"]
         self.assertEqual(gate["permissions"]["contents"], "read")
         saw_guard = gate["steps"][-1]
         self.assertEqual(saw_guard["uses"], f"Ndevu12/SAW_GUARD@{SHA}")
@@ -391,17 +391,17 @@ class TestRenderWorkflow(unittest.TestCase):
     def test_no_job_reachable_on_a_clean_run_can_write_contents(self):
         """The property the split exists for: on a run that finds nothing, write exists nowhere."""
         for name, job in self.doc["jobs"].items():
-            if str(job.get("if", "")).find("needs.worm-guard.outputs.infected") >= 0:
+            if str(job.get("if", "")).find("needs.saw-guard.outputs.infected") >= 0:
                 continue
             self.assertNotEqual(job.get("permissions", {}).get("contents"), "write", name)
 
     def test_write_lives_only_behind_the_infected_verdict(self):
         fix = self.doc["jobs"]["remediate"]
         self.assertEqual(fix["permissions"]["contents"], "write")
-        self.assertEqual(fix["needs"], "worm-guard")
-        self.assertIn("needs.worm-guard.outputs.infected != '0'", fix["if"])
+        self.assertEqual(fix["needs"], "saw-guard")
+        self.assertIn("needs.saw-guard.outputs.infected != '0'", fix["if"])
         self.assertNotIn("failure()", fix["if"])
-        self.assertEqual(self.doc["jobs"]["worm-guard"]["outputs"]["infected"],
+        self.assertEqual(self.doc["jobs"]["saw-guard"]["outputs"]["infected"],
                          "${{ steps.scan.outputs.infected }}")
         self.assertEqual(fix["steps"][-1]["with"]["remediate"], "pr")
 
@@ -411,17 +411,17 @@ class TestRenderWorkflow(unittest.TestCase):
 
     def test_an_infected_verdict_the_count_did_not_carry_still_opens_the_fix(self):
         fix = self.doc["jobs"]["remediate"]
-        self.assertEqual(self.doc["jobs"]["worm-guard"]["outputs"]["verdict"],
+        self.assertEqual(self.doc["jobs"]["saw-guard"]["outputs"]["verdict"],
                          "${{ steps.scan.outputs.verdict }}")
-        self.assertIn("needs.worm-guard.outputs.verdict == 'infected'", fix["if"])
+        self.assertIn("needs.saw-guard.outputs.verdict == 'infected'", fix["if"])
 
     def test_the_remediation_jobs_colour_tracks_remediation_not_the_verdict(self):
         """Red on that job means the fix was not produced — the gate job already carries the verdict."""
         self.assertEqual(self.doc["jobs"]["remediate"]["steps"][-1]["with"]["fail-on"], "never")
-        self.assertNotIn("fail-on", self.doc["jobs"]["worm-guard"]["steps"][-1]["with"])
+        self.assertNotIn("fail-on", self.doc["jobs"]["saw-guard"]["steps"][-1]["with"])
 
     def test_an_absent_count_does_not_reach_the_job_that_can_push(self):
-        self.assertIn("needs.worm-guard.outputs.infected != ''", self.doc["jobs"]["remediate"]["if"])
+        self.assertIn("needs.saw-guard.outputs.infected != ''", self.doc["jobs"]["remediate"]["if"])
 
     def test_the_credential_is_passed_under_the_name_the_action_declares(self):
         fix = self.doc["jobs"]["remediate"]["steps"][-1]
@@ -430,10 +430,10 @@ class TestRenderWorkflow(unittest.TestCase):
         self.assertNotIn("token", fix["with"])
 
     def test_a_finding_leaves_the_run(self):
-        with_ = self.doc["jobs"]["worm-guard"]["steps"][-1]["with"]
+        with_ = self.doc["jobs"]["saw-guard"]["steps"][-1]["with"]
         for key in ("pr-comment", "upload-sarif", "upload-artifact"):
             self.assertTrue(with_[key], key)
-        self.assertEqual(self.doc["jobs"]["worm-guard"]["permissions"]["security-events"], "write")
+        self.assertEqual(self.doc["jobs"]["saw-guard"]["permissions"]["security-events"], "write")
 
     def test_what_setup_writes_grades_clean(self):
         """The generator and the grader agree — otherwise setup installs what check condemns."""
@@ -447,7 +447,7 @@ class TestRenderWorkflow(unittest.TestCase):
         self.assertIn("schedule", self.doc[True])   # PyYAML parses `on:` as the bool key True
 
     def test_jobs_are_event_gated_so_they_do_not_overlap(self):
-        self.assertEqual(self.doc["jobs"]["worm-guard"]["if"], "github.event_name != 'schedule'")
+        self.assertEqual(self.doc["jobs"]["saw-guard"]["if"], "github.event_name != 'schedule'")
         self.assertIn("schedule", self.doc["jobs"]["pin-drift"]["if"])
 
     def test_every_action_is_pinned_by_commit_sha(self):
@@ -474,7 +474,7 @@ class TestRenderWorkflow(unittest.TestCase):
 
     def test_the_scanner_release_is_pinned_in_every_job_that_installs_it(self):
         """A SHA-pinned action whose first act is an unpinned install is not pinned at all."""
-        for job in ("worm-guard", "remediate"):
+        for job in ("saw-guard", "remediate"):
             self.assertEqual(self.doc["jobs"][job]["steps"][-1]["with"]["version"], "0.11.2")
         drift = self.doc["jobs"]["pin-drift"]["steps"][-1]["run"]
         self.assertIn("pip install stayawakebot==0.11.2", drift)
@@ -490,7 +490,7 @@ class TestRenderWorkflow(unittest.TestCase):
     def test_repin_preserves_the_two_job_structure(self):
         # A surgical repin must touch ONLY the saw-guard @ref, leaving the remediate/token/drift intact.
         newpin = guard.Pin("b" * 40, "v0.1.5")
-        p = guard.plan_setup({guard.WORM_GUARD_FILE: self.wf}, "main", newpin)
+        p = guard.plan_setup({guard.SAW_GUARD_FILE: self.wf}, "main", newpin)
         self.assertEqual(p.action, "repin")
         self.assertIn(f"Ndevu12/SAW_GUARD@{'b' * 40}", p.content)
         self.assertIn("remediate: pr", p.content)
@@ -635,8 +635,8 @@ class TestSetupLocal(unittest.TestCase):
         with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
             res = guard.setup(repo)
         self.assertEqual(res.plan.action, "create")
-        self.assertTrue((repo / guard.WORM_GUARD_FILE).is_file())
-        self.assertEqual(res.wrote, repo / guard.WORM_GUARD_FILE)
+        self.assertTrue((repo / guard.SAW_GUARD_FILE).is_file())
+        self.assertEqual(res.wrote, repo / guard.SAW_GUARD_FILE)
 
     def test_refuses_gate_write_through_a_symlinked_ancestor_dir(self):
         # #1218: if `.github/workflows` is a planted symlink escaping the repo, `setup` must NOT write
@@ -649,7 +649,7 @@ class TestSetupLocal(unittest.TestCase):
         with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
             res = guard.setup(repo)
         self.assertIn("refusing to write", res.error or "")
-        self.assertFalse((outside / "worm-guard.yml").exists())   # never written through the link
+        self.assertFalse((outside / "saw-guard.yml").exists())   # never written through the link
 
     def test_never_clobbers_an_unrecognized_file_at_the_path(self):
         # Regression (#1239 data-loss): a file at the conventional worm-guard.yml path that ISN'T a
@@ -660,13 +660,13 @@ class TestSetupLocal(unittest.TestCase):
         wf.mkdir(parents=True)
         original = ("name: Worm Guard\non: [pull_request]\njobs:\n  worm-guard:\n"
                     "    steps:\n      - uses: ./.github/actions/worm-scan\n")
-        (wf / "worm-guard.yml").write_text(original)   # no action.yml on disk → can't confirm a gate
+        (wf / "saw-guard.yml").write_text(original)   # no action.yml on disk → can't confirm a gate
         with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
             res = guard.setup(repo)
         self.assertEqual(res.plan.action, "conflict")
         self.assertIsNotNone(res.error)
         self.assertIn("not overwriting", res.error)
-        self.assertEqual((wf / "worm-guard.yml").read_text(), original)   # untouched
+        self.assertEqual((wf / "saw-guard.yml").read_text(), original)   # untouched
 
     def test_already_guarded_by_another_mechanism_is_present_not_install(self):
         # #1239: a repo genuinely guarded by a local scan action (resolvable — its action.yml runs
@@ -682,7 +682,7 @@ class TestSetupLocal(unittest.TestCase):
             res = guard.setup(repo)
         self.assertEqual(res.plan.action, "present")
         self.assertIsNone(res.wrote)                              # nothing installed
-        self.assertFalse((repo / guard.WORM_GUARD_FILE).exists())
+        self.assertFalse((repo / guard.SAW_GUARD_FILE).exists())
         self.assertIn("already guarded", guard.render_setup(res))
 
     def test_dry_run_writes_nothing(self):
@@ -690,7 +690,7 @@ class TestSetupLocal(unittest.TestCase):
         with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
             res = guard.setup(repo, dry_run=True)
         self.assertTrue(res.dry_run)
-        self.assertFalse((repo / guard.WORM_GUARD_FILE).exists())
+        self.assertFalse((repo / guard.SAW_GUARD_FILE).exists())
 
     def test_noop_when_already_pinned(self):
         repo = _tmp_repo()
@@ -768,7 +768,7 @@ class TestSetupPr(unittest.TestCase):
         # no-op — so it "reported" success while opening no PR. `--pr` must plan against origin's tree.
         from stayawake.core.proposal import SubmitResult
         repo = _tmp_repo()
-        wf = Path(repo) / guard.WORM_GUARD_FILE                 # an UNTRACKED gate in the working tree…
+        wf = Path(repo) / guard.SAW_GUARD_FILE                 # an UNTRACKED gate in the working tree…
         wf.parent.mkdir(parents=True, exist_ok=True)
         wf.write_text("name: Worm Guard\non: pull_request\njobs: {}\n", encoding="utf-8")
         with _released(), \
@@ -779,7 +779,7 @@ class TestSetupPr(unittest.TestCase):
              mock.patch.object(guard.gitutil, "list_tree", return_value=[]), \
              mock.patch.object(guard.provision, "_setup_pr",
                                return_value=guard.SetupResult(
-                                   plan=guard.SetupPlan("create", guard.WORM_GUARD_FILE, new_ref=SHA),
+                                   plan=guard.SetupPlan("create", guard.SAW_GUARD_FILE, new_ref=SHA),
                                    submit=SubmitResult("pr", action="opened", number=9, url="u"))) as sp:
             res = guard.setup(repo, token="tok", pr=True)
         sp.assert_called_once()                                 # origin has no gate → PR opened, not no-op
@@ -795,12 +795,12 @@ class TestRenderSetup(unittest.TestCase):
         self.assertIn("already up to date", guard.render_setup(guard.SetupResult(plan=p)))
 
     def test_local_wrote_warns_against_pushing_main(self):
-        p = guard.SetupPlan("create", guard.WORM_GUARD_FILE, content="x", new_ref=SHA)
+        p = guard.SetupPlan("create", guard.SAW_GUARD_FILE, content="x", new_ref=SHA)
         out = guard.render_setup(guard.SetupResult(plan=p, wrote=Path("/x")))
         self.assertIn("do NOT push to the default branch", out)
 
     def test_dry_run_previews_content(self):
-        p = guard.SetupPlan("create", guard.WORM_GUARD_FILE, content="THE-FILE", new_ref=SHA)
+        p = guard.SetupPlan("create", guard.SAW_GUARD_FILE, content="THE-FILE", new_ref=SHA)
         out = guard.render_setup(guard.SetupResult(plan=p, dry_run=True))
         self.assertIn("dry run", out)
         self.assertIn("THE-FILE", out)
@@ -922,7 +922,7 @@ class TestGradeConfig(unittest.TestCase):
     nowhere — the shape every repository provisioned before this change is running."""
 
     def _graded(self, wf):
-        return guard_detect.grade_config(find_saw_guard({guard.WORM_GUARD_FILE: wf}))
+        return guard_detect.grade_config(find_saw_guard({guard.SAW_GUARD_FILE: wf}))
 
     def test_an_input_the_action_does_not_declare_is_reported(self):
         self.assertEqual(self._graded(DEGRADED_WF).ignored_inputs, ("token",))
@@ -931,19 +931,19 @@ class TestGradeConfig(unittest.TestCase):
         self.assertTrue(self._graded(SILENT_WF).reports_nothing)
 
     def test_a_gate_whose_required_check_is_the_delivery_is_healthy(self):
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: DEGRADED_WF})
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: DEGRADED_WF})
         cfg = guard_detect.grade_config(ref)
         self.assertTrue(cfg.reports_nothing)
         clean = guard_detect.GateConfig(reports_nothing=True)
         self.assertTrue(GuardStatus(present=True, ref=ref, config=clean, required=True).healthy)
 
     def test_a_gate_that_delivers_nothing_and_is_not_required_is_not_healthy(self):
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: DEGRADED_WF})
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: DEGRADED_WF})
         clean = guard_detect.GateConfig(reports_nothing=True)
         self.assertFalse(GuardStatus(present=True, ref=ref, config=clean, required=False).healthy)
 
     def test_a_gate_that_delivers_nothing_and_fails_no_merge_is_not_healthy(self):
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: REPORT_ONLY_WF})
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: REPORT_ONLY_WF})
         cfg = guard_detect.grade_config(ref)
         self.assertEqual((cfg.ignored_inputs, cfg.standing_write), ((), False))
         self.assertTrue(cfg.report_only and cfg.reports_nothing)
@@ -951,7 +951,7 @@ class TestGradeConfig(unittest.TestCase):
 
     def test_the_same_gate_is_healthy_once_something_carries_the_finding(self):
         wf = REPORT_ONLY_WF.replace("          fail-on: never\n", "          pr-comment: true\n")
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: wf})
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: wf})
         cfg = guard_detect.grade_config(ref)
         self.assertTrue(GuardStatus(present=True, ref=ref, config=cfg, required=True).healthy)
 
@@ -973,7 +973,7 @@ class TestGradeConfig(unittest.TestCase):
     def test_a_configuration_decided_at_run_time_is_reported_as_unknown(self):
         wf = SILENT_WF.replace("          fail-on: never\n",
                                "          pr-comment: ${{ vars.X }}\n")
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: wf})
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: wf})
         cfg = guard_detect.grade_config(ref)
         self.assertEqual(cfg.unresolved, ("pr-comment",))
         out = guard.render(GuardStatus(present=True, ref=ref, config=cfg))
@@ -1019,19 +1019,19 @@ class TestGradeConfig(unittest.TestCase):
         self.assertFalse(self._graded(wf).standing_write)
 
     def test_a_degraded_gate_is_not_healthy(self):
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: DEGRADED_WF})
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: DEGRADED_WF})
         st = GuardStatus(present=True, ref=ref, config=guard_detect.grade_config(ref))
         self.assertFalse(st.healthy)
 
     def test_the_report_names_each_defect_and_what_fixes_it(self):
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: DEGRADED_WF})
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: DEGRADED_WF})
         out = guard.render(GuardStatus(present=True, ref=ref,
                                        config=guard_detect.grade_config(ref)))
         for phrase in ("token", "write access on every run", "saw guard setup"):
             self.assertIn(phrase, out)
 
     def test_the_report_names_a_gate_that_tells_nobody(self):
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: SILENT_WF})
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: SILENT_WF})
         out = guard.render(GuardStatus(present=True, ref=ref,
                                        config=guard_detect.grade_config(ref)))
         self.assertIn("reports nowhere", out)
@@ -1077,41 +1077,41 @@ class TestWhichOccurrenceAnswersForTheRepository(unittest.TestCase):
 
     def test_a_needs_gated_live_gate_answers_over_a_decorative_one(self):
         ref = find_saw_guard({".github/workflows/ci.yml": BUILD_THEN_SCAN_WF,
-                          guard.WORM_GUARD_FILE: self._rendered()})
+                          guard.SAW_GUARD_FILE: self._rendered()})
         self.assertEqual((ref.workflow, ref.job), (".github/workflows/ci.yml", "scan"))
         self.assertTrue(guard_detect.grade_config(ref).degraded)
 
     def test_the_needs_gated_gate_answers_regardless_of_file_order(self):
         tidy = self._rendered()
         early = find_saw_guard({".github/workflows/a-ci.yml": BUILD_THEN_SCAN_WF,
-                            guard.WORM_GUARD_FILE: tidy})
+                            guard.SAW_GUARD_FILE: tidy})
         late = find_saw_guard({".github/workflows/zz-ci.yml": BUILD_THEN_SCAN_WF,
-                           guard.WORM_GUARD_FILE: tidy})
+                           guard.SAW_GUARD_FILE: tidy})
         self.assertEqual((early.job, late.job), ("scan", "scan"))
         self.assertTrue(guard_detect.grade_config(early).degraded)
         self.assertTrue(guard_detect.grade_config(late).degraded)
 
     def test_the_remediation_job_does_not_answer_though_it_needs_and_can_write(self):
-        refs = guard_detect.find_saw_guard_refs({guard.WORM_GUARD_FILE: self._rendered()})
+        refs = guard_detect.find_saw_guard_refs({guard.SAW_GUARD_FILE: self._rendered()})
         by_job = {r.job: r for r in refs}
         self.assertTrue(guard_detect.grade_config(by_job["remediate"]).standing_write)
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: self._rendered()})
-        self.assertEqual(ref.job, "worm-guard")
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: self._rendered()})
+        self.assertEqual(ref.job, "saw-guard")
         self.assertFalse(guard_detect.grade_config(ref).degraded)
 
     def _with_remediation(self, condition):
         return self._rendered().rstrip("\n") + (
-            "\n  fix-after:\n    needs: worm-guard\n    if: %s\n    runs-on: ubuntu-latest\n"
+            "\n  fix-after:\n    needs: saw-guard\n    if: %s\n    runs-on: ubuntu-latest\n"
             "    permissions:\n      contents: write\n    steps:\n      - uses: Ndevu12/SAW_GUARD@%s\n"
             "        with:\n          fail-on: never\n" % (condition, "b" * 40))
 
     def test_a_job_that_runs_only_after_another_fails_or_on_its_outputs_does_not_answer(self):
-        for condition in ("failure()", "${{ needs.worm-guard.result == 'failure' }}",
-                          "${{ needs['worm-guard'].outputs.verdict == 'infected' }}",
+        for condition in ("failure()", "${{ needs.saw-guard.result == 'failure' }}",
+                          "${{ needs['saw-guard'].outputs.verdict == 'infected' }}",
                           "${{ contains(needs.*.outputs.verdict, 'infected') }}"):
             with self.subTest(condition=condition):
-                ref = find_saw_guard({guard.WORM_GUARD_FILE: self._with_remediation(condition)})
-                self.assertEqual(ref.job, "worm-guard")
+                ref = find_saw_guard({guard.SAW_GUARD_FILE: self._with_remediation(condition)})
+                self.assertEqual(ref.job, "saw-guard")
                 self.assertFalse(guard_detect.grade_config(ref).degraded)
 
     def test_a_clean_job_that_may_not_run_does_not_hide_a_worse_one_that_runs(self):
@@ -1132,21 +1132,21 @@ jobs:
         self.assertFalse(refs[0].guards_changes)
 
     def test_the_generated_gate_answers_with_its_scanning_job(self):
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: self._rendered()})
-        self.assertEqual(ref.job, "worm-guard")
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: self._rendered()})
+        self.assertEqual(ref.job, "saw-guard")
         self.assertFalse(guard_detect.grade_config(ref).degraded)
 
     def test_reordering_the_jobs_does_not_change_the_answer(self):
         import yaml
         doc = yaml.safe_load(self._rendered())
-        doc["jobs"] = {k: doc["jobs"][k] for k in ("remediate", "pin-drift", "worm-guard")}
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: yaml.safe_dump(doc)})
-        self.assertEqual(ref.job, "worm-guard")
+        doc["jobs"] = {k: doc["jobs"][k] for k in ("remediate", "pin-drift", "saw-guard")}
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: yaml.safe_dump(doc)})
+        self.assertEqual(ref.job, "saw-guard")
         self.assertFalse(guard_detect.grade_config(ref).degraded)
 
     def test_a_degraded_gate_elsewhere_answers_over_a_tidy_one(self):
         ref = find_saw_guard({".github/workflows/ci.yml": DEGRADED_WF,
-                          guard.WORM_GUARD_FILE: self._rendered()})
+                          guard.SAW_GUARD_FILE: self._rendered()})
         self.assertEqual(ref.workflow, ".github/workflows/ci.yml")
         self.assertTrue(guard_detect.grade_config(ref).degraded)
 
@@ -1154,32 +1154,53 @@ jobs:
         manual = DEGRADED_WF.replace("on: { push: { branches: [main] }, pull_request: {} }",
                                      "on: { workflow_dispatch: {} }")
         ref = find_saw_guard({".github/workflows/z-manual.yml": manual,
-                          guard.WORM_GUARD_FILE: self._rendered()})
-        self.assertEqual(ref.workflow, guard.WORM_GUARD_FILE)
+                          guard.SAW_GUARD_FILE: self._rendered()})
+        self.assertEqual(ref.workflow, guard.SAW_GUARD_FILE)
 
     def test_a_switched_off_job_does_not_condemn_a_healthy_live_gate(self):
         off = DEGRADED_WF.replace("  worm-guard:\n", "  worm-guard:\n    if: false\n")
         ref = find_saw_guard({".github/workflows/a-disabled.yml": off,
-                          guard.WORM_GUARD_FILE: self._rendered()})
-        self.assertEqual(ref.workflow, guard.WORM_GUARD_FILE)
+                          guard.SAW_GUARD_FILE: self._rendered()})
+        self.assertEqual(ref.workflow, guard.SAW_GUARD_FILE)
         self.assertFalse(guard_detect.grade_config(ref).degraded)
 
     def test_a_tidy_disabled_job_cannot_shield_a_degraded_gate_in_the_same_file(self):
         wf = DEGRADED_WF + self._rendered().split("jobs:\n")[1].split("\n\n")[0].replace(
             "  worm-guard:\n", "  decoy:\n    if: false\n")
         pin = guard.Pin("d" * 40, "v0.1.5")
-        plan = guard.plan_setup({guard.WORM_GUARD_FILE: wf}, "main", pin, scanner="0.11.2")
+        plan = guard.plan_setup({guard.SAW_GUARD_FILE: wf}, "main", pin, scanner="0.11.2")
         self.assertEqual(plan.action, "repair")
 
     def test_every_occurrence_is_still_available(self):
-        refs = guard_detect.find_saw_guard_refs({guard.WORM_GUARD_FILE: self._rendered()})
-        self.assertEqual([r.job for r in refs], ["worm-guard", "remediate"])
+        refs = guard_detect.find_saw_guard_refs({guard.SAW_GUARD_FILE: self._rendered()})
+        self.assertEqual([r.job for r in refs], ["saw-guard", "remediate"])
+
+
+class TestADriftIssueOpenedUnderTheEarlierName(unittest.TestCase):
+    def test_it_is_found_instead_of_a_second_one_being_opened(self):
+        earlier = {"worm-guard-drift": [{"title": "Worm-guard protection needs attention", "number": 7}]}
+
+        def open_issues(owner, name, token, *, labels, quiet):
+            return earlier.get(labels, [])
+
+        with mock.patch.object(guard.pindrift.github_api, "list_open_issues", side_effect=open_issues):
+            self.assertEqual(guard.pindrift._find_issue("o", "r", "tok"), 7)
+
+    def test_one_under_the_current_name_is_found_first(self):
+        current = {"saw-guard-drift": [{"title": "SAW Guard protection needs attention", "number": 9}],
+                   "worm-guard-drift": [{"title": "Worm-guard protection needs attention", "number": 7}]}
+
+        def open_issues(owner, name, token, *, labels, quiet):
+            return current.get(labels, [])
+
+        with mock.patch.object(guard.pindrift.github_api, "list_open_issues", side_effect=open_issues):
+            self.assertEqual(guard.pindrift._find_issue("o", "r", "tok"), 9)
 
 
 class TestSetupRepairsADegradedGate(unittest.TestCase):
     def test_a_degraded_gate_at_saws_own_path_is_repaired_not_left_alone(self):
         pin = guard.Pin("c" * 40, "v0.1.4")
-        plan = guard.plan_setup({guard.WORM_GUARD_FILE: DEGRADED_WF}, "main", pin, scanner="0.11.2")
+        plan = guard.plan_setup({guard.SAW_GUARD_FILE: DEGRADED_WF}, "main", pin, scanner="0.11.2")
         import yaml
         self.assertEqual(plan.action, "repair")
         for job in yaml.safe_load(plan.content)["jobs"].values():
@@ -1190,20 +1211,20 @@ class TestSetupRepairsADegradedGate(unittest.TestCase):
 
     def test_the_repaired_gate_grades_clean(self):
         pin = guard.Pin("c" * 40, "v0.1.4")
-        plan = guard.plan_setup({guard.WORM_GUARD_FILE: DEGRADED_WF}, "main", pin, scanner="0.11.2")
-        ref = find_saw_guard({guard.WORM_GUARD_FILE: plan.content})
+        plan = guard.plan_setup({guard.SAW_GUARD_FILE: DEGRADED_WF}, "main", pin, scanner="0.11.2")
+        ref = find_saw_guard({guard.SAW_GUARD_FILE: plan.content})
         self.assertFalse(guard_detect.grade_config(ref).degraded)
 
     def test_an_unknown_input_alone_does_not_trigger_a_rewrite(self):
         wf = DEGRADED_WF.replace("      contents: write\n", "      contents: read\n")
         wf = wf.replace("          remediate: pr\n", "          remediate: pr\n          pr-comment: true\n")
         pin = guard.Pin("c" * 40, "v0.1.4")
-        plan = guard.plan_setup({guard.WORM_GUARD_FILE: wf}, "main", pin, scanner="0.11.2")
+        plan = guard.plan_setup({guard.SAW_GUARD_FILE: wf}, "main", pin, scanner="0.11.2")
         self.assertNotEqual(plan.action, "repair")
 
     def test_the_operator_is_told_why_the_file_was_replaced(self):
         pin = guard.Pin("c" * 40, "v0.1.4")
-        plan = guard.plan_setup({guard.WORM_GUARD_FILE: DEGRADED_WF}, "main", pin, scanner="0.11.2")
+        plan = guard.plan_setup({guard.SAW_GUARD_FILE: DEGRADED_WF}, "main", pin, scanner="0.11.2")
         body = guard.provision._setup_pr_body(plan, "main")
         self.assertIn("Rewrites the configuration of", body)
         self.assertIn("are not preserved", body)

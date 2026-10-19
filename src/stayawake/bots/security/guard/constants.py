@@ -11,7 +11,7 @@ SAW_GUARD_OWNER, SAW_GUARD_REPO = "Ndevu12", "SAW_GUARD"
 SAW_GUARD_ACTION = f"{SAW_GUARD_OWNER}/{SAW_GUARD_REPO}"
 SAW_GUARD_USES = re.escape(SAW_GUARD_ACTION)
 WORKFLOW_DIR = ".github/workflows"
-WORM_GUARD_FILE = f"{WORKFLOW_DIR}/worm-guard.yml"
+SAW_GUARD_FILE = f"{WORKFLOW_DIR}/saw-guard.yml"
 SETUP_BRANCH = "security/guard-setup"
 
 

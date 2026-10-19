@@ -1,4 +1,4 @@
-name: Worm Guard — block infected merges
+name: SAW Guard — block infected merges
 
 # Gate: scan PRs (catch injected indicators) and pushes of real code to main
 # (catch evil merges). README.md is NOT excluded — the content signatures match it,
@@ -18,7 +18,7 @@ permissions:
                    # vars.ENABLE_CODE_SCANNING), so nothing but the scan can ever color this gate.
 
 jobs:
-  worm-guard:
+  saw-guard:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history for evil-merge detection)

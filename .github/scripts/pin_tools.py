@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scanner-pin tooling — the single source for the worm-guard pin invariants.
+"""Scanner-pin tooling — the single source for the SAW Guard pin invariants.
 
 Consolidates what used to be four bash files (`_pin_lib.sh` + `check_pin_freshness.sh` +
 `check_pins_synced.sh` + `check_pin_drift.sh`) into one Python module, so "what is the detection
@@ -33,7 +33,7 @@ from pathlib import Path
 # and a PR that touches only tests/docs never demands a pin bump. This is the seam the pin tracks.
 ENGINE_SUBTREE = "src/stayawake/bots/security"
 # The gate whose pinned scanner the drift backstop compares against main.
-GUARD_FILE = ".github/workflows/worm-guard.yml"
+GUARD_FILE = ".github/workflows/saw-guard.yml"
 # The release self-scan carries a SECOND, independent copy of the pin. It must stay identical to the
 # guard pin or the release gate silently scans a different engine — the drift `synced` prevents. Add
 # any further pin carrier to PIN_FILES.
@@ -85,7 +85,7 @@ def freshness(changed_text: str, diff_text: str, deferred: bool) -> tuple[int, s
                    "PR is labeled 'pin-bump-deferred' — deferral acknowledged. Remember to bump "
                    "sentinel-ref before or at the end of this line of work.")
     return 1, ("::error::This PR changes the detection engine (src/stayawake/bots/security/**) but "
-               "does not bump 'sentinel-ref' in .github/workflows/worm-guard.yml — the worm-guard "
+               "does not bump 'sentinel-ref' in .github/workflows/saw-guard.yml — the SAW Guard "
                "gate would keep scanning with the OLD pinned engine. Fix: bump sentinel-ref to a "
                "current reviewed main SHA in this PR, or add the 'pin-bump-deferred' label to defer "
                "the bump deliberately (e.g. one bump at the end of an epic).")
@@ -107,7 +107,7 @@ def pins_synced(pins: dict[str, str | None]) -> tuple[int, list[str]]:
             ref, ref_file = pin, f
         elif pin != ref:
             msgs.append(f"::error::scanner pin mismatch — {ref_file} pins {ref} but {f} pins {pin}. "
-                        f"Bump BOTH to the same reviewed main SHA (the worm-guard gate and the "
+                        f"Bump BOTH to the same reviewed main SHA (the SAW Guard gate and the "
                         f"release self-scan must scan with the same engine).")
             status = 1
     if status == 0:
@@ -116,7 +116,7 @@ def pins_synced(pins: dict[str, str | None]) -> tuple[int, list[str]]:
 
 
 # ── drift: out-of-band backstop (git + gh glue) ───────────────────────────────────────────────────
-_DRIFT_TITLE = "worm-guard scanner pin is behind main"
+_DRIFT_TITLE = "SAW Guard scanner pin is behind main"
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -166,7 +166,7 @@ def drift() -> int:
         _run(["gh", "issue", "comment", existing, "--body", f"Still drifting as of {short}."])
     else:
         body = (
-            f"The worm-guard gate pins `sentinel-ref: {pin}`, but the detection engine "
+            f"The SAW Guard gate pins `sentinel-ref: {pin}`, but the detection engine "
             f"(`{ENGINE_SUBTREE}/`) on `main` has changed since. **The gate is running an "
             f"out-of-date scanner.**\n\n"
             f"Bump `sentinel-ref` in `{GUARD_FILE}` to a current reviewed `main` SHA (after "
@@ -200,7 +200,7 @@ def _cmd_drift(_args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description="Worm-guard scanner-pin invariants.")
+    ap = argparse.ArgumentParser(description="SAW Guard scanner-pin invariants.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("freshness", help="in-band: engine changed ⇒ pin must be bumped")
     f.add_argument("changed_files", help="file with one changed path per line (gh pr diff --name-only)")

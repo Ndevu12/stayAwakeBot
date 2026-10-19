@@ -46,12 +46,12 @@ class TestARulesetProtectsTheBranch(unittest.TestCase):
 
     def test_a_ruleset_that_does_not_require_the_gate_names_that_gap_and_where_to_add_it(self):
         issues = _audit(None, _rules())
-        self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
+        self.assertEqual([i.id for i in issues], ["saw-guard-not-required"])
         self.assertIn("is protected by a ruleset", issues[0].detail)
         self.assertIn("the ruleset that protects it", issues[0].remediation)
 
     def test_a_ruleset_without_a_saw_guard_workflow_is_held_to_a_worm_check(self):
-        self.assertEqual([i.id for i in _audit(None, _rules(), GateProbe())], ["worm-guard-not-required"])
+        self.assertEqual([i.id for i in _audit(None, _rules(), GateProbe())], ["saw-guard-not-required"])
         self.assertEqual(_audit(None, _rules("Worm Guard — block infected merges"), GateProbe()), [])
 
     def test_branch_protection_and_a_ruleset_together_require_what_either_requires(self):
@@ -65,7 +65,7 @@ class TestWhatWasTrueBeforeStillIs(unittest.TestCase):
     def test_branch_protection_alone_is_read_as_before(self):
         self.assertEqual(_audit({"required_status_checks": {"contexts": ["saw-guard"]}}, ApiRead(value=[])), [])
         issues = _audit({"required_status_checks": {"contexts": ["build"]}}, ApiRead(value=[]))
-        self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
+        self.assertEqual([i.id for i in issues], ["saw-guard-not-required"])
         self.assertIn("protected by branch protection", issues[0].detail)
 
     def test_a_branch_nothing_protects_is_unprotected(self):
@@ -155,7 +155,7 @@ class TestAGateThatCouldNotBeCheckedIsNeverClean(unittest.TestCase):
                     outcome = self._checked(*protection, cause)
                     self.assertNotEqual(outcome.state, CHECKED_CLEAN)
                     self.assertEqual(outcome.state, UNKNOWN)
-                    self.assertEqual([i.id for i in outcome.issues], ["worm-guard-requirement-unchecked"])
+                    self.assertEqual([i.id for i in outcome.issues], ["saw-guard-requirement-unchecked"])
                     self.assertIn("could not be checked", outcome.issues[0].title)
 
     def test_a_branch_nothing_protects_is_unprotected_whether_or_not_the_workflows_could_be_read(self):
@@ -234,7 +234,7 @@ class TestTheStrongerHeadlineStillLeads(unittest.TestCase):
     def test_unverified_start_up_entries_lead_over_a_result_not_known(self):
         from stayawake.bots.security.hygiene.models import SURFACE_UNREADABLE_ID
         for other in ("git-credentials-unread", "cached-github-keychain-unread", "editors-not-examined",
-                      "worm-guard-requirement-unchecked"):
+                      "saw-guard-requirement-unchecked"):
             with self.subTest(other=other):
                 self.assertEqual(self._headline(other, SURFACE_UNREADABLE_ID),
                                  "Local security hygiene: no findings, but the persistence surface is UNVERIFIED.")

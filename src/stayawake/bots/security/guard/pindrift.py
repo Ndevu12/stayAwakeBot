@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Worm-guard PROTECTION backstop: file ONE self-closing issue per repo when its worm-guard gate is
+"""SAW Guard PROTECTION backstop: file ONE self-closing issue per repo when its SAW Guard gate is
 missing or its pinned SAW Guard release has fallen behind — so a repo stays gated and current over time.
 """
 from __future__ import annotations
@@ -15,8 +15,9 @@ from stayawake.utils.textsafe import code as _code
 from stayawake.bots.security.guard import detect
 from stayawake.bots.security.guard.constants import SAW_GUARD_ACTION, SAW_GUARD_NAME
 
-DRIFT_LABEL = "worm-guard-drift"
-DRIFT_TITLE = "Worm-guard protection needs attention"
+DRIFT_LABEL = "saw-guard-drift"
+DRIFT_TITLE = "SAW Guard protection needs attention"
+_EARLIER_DRIFT = (("worm-guard-drift", "Worm-guard protection needs attention"),)
 
 _DEFICIENT = {"no-gate", "no-ci", "behind"}
 _PROTECTED = {"fresh", "floating", "not-saw-guard"}
@@ -53,14 +54,14 @@ def _classify(st: "detect.GuardStatus") -> tuple[str, str]:
         if st.no_ci:
             return "no-ci", ("This repository has no CI workflows, so nothing scans merges for "
                              "supply-chain worm indicators — it is **unprotected**.")
-        return "no-gate", ("This repository has no worm-guard gate, so infected merges are not "
+        return "no-gate", ("This repository has no SAW Guard gate, so infected merges are not "
                            "blocked — it is **unprotected**.")
     if st.ref is None:
         return "not-saw-guard", ""
     if st.fresh is None or st.fresh.state == "unknown":
         return "unknown", ""
     if st.fresh.state == "behind":
-        return "behind", (f"The worm-guard gate ({_code(st.ref.workflow)}) pins "
+        return "behind", (f"The SAW Guard gate ({_code(st.ref.workflow)}) pins "
                           f"`{SAW_GUARD_ACTION}@{st.ref.ref[:12]}…`, but the latest {SAW_GUARD_NAME} release is "
                           f"**{_code(st.fresh.latest_tag or 'unknown')}** — it is running an "
                           f"out-of-date detection engine.")
@@ -74,16 +75,18 @@ def _issue_body(reason: str) -> str:
         "**Fix:** run `saw guard setup` — it installs the gate (or bumps a stale pin) and opens a PR "
         "to review and merge.",
         "",
-        "_Auto-opened by the worm-guard drift check; it closes itself once the repo is protected and "
+        "_Auto-opened by the SAW Guard drift check; it closes itself once the repo is protected and "
         "current._",
     ])
 
 
 def _find_issue(owner: str, name: str, token: str | None) -> int | None:
-    """The number of the existing (open) drift issue for this repo, or None."""
-    for it in github_api.list_open_issues(owner, name, token, labels=DRIFT_LABEL, quiet=True) or []:
-        if it.get("title") == DRIFT_TITLE:
-            return it.get("number")
+    """The number of the existing (open) drift issue for this repo, or None. An issue opened under the
+    gate's earlier name counts too."""
+    for label, title in ((DRIFT_LABEL, DRIFT_TITLE), *_EARLIER_DRIFT):
+        for it in github_api.list_open_issues(owner, name, token, labels=label, quiet=True) or []:
+            if it.get("title") == title:
+                return it.get("number")
     return None
 
 

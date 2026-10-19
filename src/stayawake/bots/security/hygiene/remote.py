@@ -7,7 +7,7 @@ from .models import WORM_GATE_UNCHECKED_ID, HygieneIssue
 
 def check_branch_protection(slug: str | None, token: str | None,
                             branch: str = "main") -> list[HygieneIssue]:
-    """Warn if the default branch isn't protected or the Worm Guard check isn't
+    """Warn if the default branch isn't protected or the SAW Guard check isn't
     required — i.e. the CI gate can be bypassed by a direct push / unchecked merge.
     No-op without a repo slug; a slug that names no repository, or no token, leaves the requirement
     reported as not checked."""
@@ -31,9 +31,9 @@ def check_branch_protection(slug: str | None, token: str | None,
             severity="warning",
             title=f"{slug}@{branch} has no branch protection",
             detail="Anyone with push access can push straight to the default branch, "
-                   "bypassing the Worm Guard CI gate entirely.",
+                   "bypassing the SAW Guard CI gate entirely.",
             remediation="Protect the branch: require a PR review and the "
-                        "'Worm Guard' status check before merging.",
+                        "'SAW Guard' status check before merging.",
         )]
     contexts = prot.required_checks
 
@@ -52,7 +52,7 @@ def check_branch_protection(slug: str | None, token: str | None,
         if ref.job in contexts:
             return []                                   # the real gate context IS required — good
         return [HygieneIssue(
-            id="worm-guard-not-required",
+            id="saw-guard-not-required",
             severity="warning",
             title=f"The {guard.SAW_GUARD_NAME} gate (“{ref.job}”) is not a required status check on {slug}@{branch}",
             detail=f"The repo runs {guard.SAW_GUARD_NAME} ({ref.workflow}) and {slug}@{branch} is protected {prot.held_by}, "
@@ -60,13 +60,14 @@ def check_branch_protection(slug: str | None, token: str | None,
             remediation=f"Add “{ref.job}” to the required status checks of {prot.settings_named}.",
         )]
 
-    if not any("worm" in (c or "").lower() for c in contexts):
+    if not any("worm" in (c or "").lower() or "saw-guard" in (c or "").lower()
+               or "saw guard" in (c or "").lower() for c in contexts):
         return [HygieneIssue(
-            id="worm-guard-not-required",
+            id="saw-guard-not-required",
             severity="warning",
-            title=f"Worm Guard is not a required status check on {slug}@{branch}",
+            title=f"SAW Guard is not a required status check on {slug}@{branch}",
             detail="An infected PR/merge can be merged without the worm scan passing.",
-            remediation="Add 'Worm Guard — block infected merges' to the required status checks "
+            remediation="Add 'SAW Guard — block infected merges' to the required status checks "
                         f"of {prot.settings_named}.",
         )]
     return []
