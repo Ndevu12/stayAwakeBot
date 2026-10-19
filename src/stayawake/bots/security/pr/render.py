@@ -114,7 +114,9 @@ def _submit_text(res: proposal.SubmitResult, *, slug: str, base: str,
             return f"{slug}: {semi}updated existing PR #{res.number} ({res.url}) — no duplicate", True
         return f"{slug}: {semi}opened PR #{res.number} ({res.url})", True
     if res.kind == "pr-create-failed":
-        return f"{slug}: branch pushed but PR API call failed (network/SSL or token scope)", False
+        from stayawake.core.identity import pr_refusal_message
+        return f"{slug}: " + pr_refusal_message(
+            res.pr_reason, "branch pushed but PR API call failed (network/SSL or token scope)"), False
     if res.kind == "fork-pr":
         verb = "updated existing fork PR" if res.action == "updated" else "opened fork PR"
         return f"{slug}: {dash}{verb} #{res.number} ({res.url}) from {res.fork_slug}", True

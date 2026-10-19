@@ -91,12 +91,16 @@ saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O
 
 Keeps each repository gated and current by maintaining one de-duplicated, self-closing tracking
 issue: it opens the issue when a repository has no gate or its pin has fallen behind, and closes it
-once the repository is protected and current. It reports as an issue and never fails a build, so it
-is safe on a schedule.
+once the repository is protected and current. It reports drift as an issue, never as a failed build,
+so it is safe on a schedule. The run fails only when it could not check a repository, or GitHub
+refused to open, update or close its issue; the line for that repository says which.
 
 ```text
 saw guard drift [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O] [--repo OWNER/NAME]
-                [-j N] [--no-stream]
+                [--json] [-j N] [--no-stream]
 ```
 
-Target selection is identical to [`saw guard check`](#saw-guard-check).
+Target selection is identical to [`saw guard check`](#saw-guard-check). `--json` prints each
+repository's result as JSON on stdout: `repository`, its `state`, what became of its tracking issue
+as `issue_action` (`opened`, `refreshed`, `closed`, `failed` or `none`), the `issue` number and the
+`detail`. Progress goes to stderr.

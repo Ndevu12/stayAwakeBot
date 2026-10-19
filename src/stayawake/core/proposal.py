@@ -37,7 +37,9 @@ class SubmitResult:
       "fork-pr-create-failed"— pushed to the fork, but the PR API call failed (`fork_slug`)
       "floor"                — push refused: `patch_path` and/or `issue_note` record the fallback
     `push_reason` (floor): workflow_scope | signed_commits | forbidden | network | unknown —
-    from core.identity.classify (never invent a blanket 'no write access').
+    from core.identity.classify (never invent a blanket 'no write access'). `pr_reason`
+    (pr-create-failed, fork-pr-create-failed): why GitHub refused the pull request, from the same
+    module.
     """
     kind: str
     action: str | None = None
@@ -47,6 +49,7 @@ class SubmitResult:
     patch_path: Path | None = None
     issue_note: str | None = None
     push_reason: str | None = None
+    pr_reason: str | None = None
     push_detail: str = ""
 
 
@@ -125,10 +128,13 @@ def _fork_and_pr(wt: Path, owner: str, name: str, base: str, branch: str,
         return SubmitResult("floor", fork_slug=fork_slug,
                             push_reason=failure.reason, push_detail=failure.detail)
     fork_owner = fork_slug.split("/", 1)[0]
-    result = github_api.open_or_update_pr(owner, name, head_branch=branch, base=base,
-                                          title=title, body=body, token=token, head_owner=fork_owner)
-    if not result:
-        return SubmitResult("fork-pr-create-failed", fork_slug=fork_slug)
+    read = github_api.open_or_update_pr(owner, name, head_branch=branch, base=base,
+                                        title=title, body=body, token=token, head_owner=fork_owner)
+    if read.cause is not None:
+        from stayawake.core.identity import classify_pr_refusal
+        return SubmitResult("fork-pr-create-failed", fork_slug=fork_slug,
+                            pr_reason=classify_pr_refusal(read.cause, read.detail))
+    result = read.value
     return SubmitResult("fork-pr", action=result["action"], number=result["number"],
                         url=result.get("html_url", ""), fork_slug=fork_slug)
 
@@ -166,9 +172,11 @@ def submit_change_pr(wt: Path, slug: str, base: str, *, branch: str, title: str,
         return SubmitResult("floor", patch_path=patch, issue_note=note,
                             push_reason=failure.reason, push_detail=failure.detail)
 
-    result = github_api.open_or_update_pr(owner, name, head_branch=branch, base=base,
-                                          title=title, body=body, token=token)
-    if not result:
-        return SubmitResult("pr-create-failed")
+    read = github_api.open_or_update_pr(owner, name, head_branch=branch, base=base,
+                                        title=title, body=body, token=token)
+    if read.cause is not None:
+        from stayawake.core.identity import classify_pr_refusal
+        return SubmitResult("pr-create-failed", pr_reason=classify_pr_refusal(read.cause, read.detail))
+    result = read.value
     return SubmitResult("pr", action=result["action"], number=result["number"],
                         url=result.get("html_url", ""))

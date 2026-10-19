@@ -56,6 +56,8 @@ def register(sub) -> None:
                    help="config file (default: config/security.yml when present)")
     p.add_argument("--pr", "--open-pr", action="store_true", dest="pr",
                    help="also push the branch and open/update one rolling PR per repo")
+    p.add_argument("--json", action="store_true",
+                   help="print what each repository's fix did as JSON")
     p.add_argument("-r", "--remote", action="store_true",
                    help="sweep GitHub repos (clone → fix → PR): ad-hoc --user/--org/owner-repo, "
                         "else configured targets, else your own repos")
@@ -87,6 +89,9 @@ def run(a: argparse.Namespace) -> int:
         if a.branch:
             print("saw fix amend does not take --branch", file=sys.stderr)
             return exitcodes.INCOMPLETE
+        if a.json:
+            print("saw fix amend does not take --json", file=sys.stderr)
+            return exitcodes.INCOMPLETE
         if a.user or a.org:
             print("saw fix amend does not take --user or --org; name each repository with "
                   "--remote owner/name", file=sys.stderr)
@@ -106,4 +111,4 @@ def run(a: argparse.Namespace) -> int:
                           slugs=(positionals or None) if remote else None,
                           users=a.user or None, orgs=a.org or None, no_stream=no_stream_requested(a),
                           jobs=a.jobs, branches=a.branch or None,
-                          resolver=None if remote else build_resolver())
+                          resolver=None if remote else build_resolver(), json_out=a.json)

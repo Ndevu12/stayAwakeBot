@@ -3,6 +3,7 @@
 up each, streaming per repo; one repo's failure never aborts the run."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -21,7 +22,7 @@ from stayawake.bots.security.guard.constants import SAW_GUARD_NAME
 from stayawake.bots.security.guard.detect import check, render, GuardStatus, latest_saw_guard
 from stayawake.bots.security.guard.provision import (setup, render_setup, resolve_pin,
                                                      resolve_scanner_version, SetupResult)
-from stayawake.bots.security.guard.pindrift import drift_one, render_drift, DriftOutcome
+from stayawake.bots.security.guard.pindrift import drift_one, drift_record, render_drift, DriftOutcome
 
 
 def _guard_config(config_path: str | None):
@@ -51,7 +52,7 @@ def _indent(text: str) -> str:
 
 
 def _guard_sweep(items, labels, make_result, render_one, tag_of, dead, prog: Streamer, *,
-                 jobs, verb: str, no_stream: bool):
+                 jobs, verb: str, no_stream: bool, out=None):
     """Run one guard operation over each item and return the results list for the caller's tally.
     Each repo's OWN rendered result is shown AT the point it completes — never in a separate,
     untrackable pass. NO downgrade to either mode:
@@ -69,7 +70,9 @@ def _guard_sweep(items, labels, make_result, render_one, tag_of, dead, prog: Str
         worker becomes `dead(label, err)` so the tally still fails closed.
 
     `make_result(item, spin=…)` does one repo's work and never raises (wraps in `_safe_*`);
-    `render_one(result)` is its human block; `tag_of(outcome)` gives the board verdict tag."""
+    `render_one(result)` is its human block; `tag_of(outcome)` gives the board verdict tag. `out`
+    is where the board draws, standard output unless the caller keeps it for a machine report."""
+    out = out or sys.stdout
     workers = parallel.resolve_jobs(jobs, len(items))
     results = []
     if workers == 1:
@@ -85,8 +88,8 @@ def _guard_sweep(items, labels, make_result, render_one, tag_of, dead, prog: Str
         return tag, "", _indent(render_one(o.value))
 
     swept = run_sweep(lambda it: make_result(it, spin=False), items, jobs=workers,
-                      backend=parallel.THREAD, labels=labels, describe=describe, out=sys.stdout,
-                      verb=verb, progress_on=stream_enabled(sys.stdout, force_off=no_stream))
+                      backend=parallel.THREAD, labels=labels, describe=describe, out=out,
+                      verb=verb, progress_on=stream_enabled(out, force_off=no_stream))
     for o in swept:
         results.append(o.value if not o.error else dead(labels[o.index], o.error))
     return results
@@ -218,21 +221,24 @@ def _safe_drift(**kw) -> DriftOutcome:
 
 def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool = False,
                   config_path: str | None = None, no_stream: bool = False,
-                  jobs: int | None = None) -> int:
+                  jobs: int | None = None, json_out: bool = False) -> int:
     """`saw guard drift` across many repos — same target model as `saw guard check`. LOCAL by default
     (discover git repos under the given paths / configured `targets.local` / the enclosing repo);
     `remote=True` (or naming users/orgs) resolves GitHub repos via the ladder. For each repo it
     grades the pinned SAW Guard gate and files/refreshes/closes ONE de-duplicated drift issue. The latest
     SAW Guard release is resolved ONCE and reused. A multi-repo sweep runs up to `jobs` repos at once
-    (AUTO by default; `-j 1` forces sequential); each repo files only its OWN issue. Returns 2 on a
-    missing --config / a remote sweep with no credential, else 0 (drift is reported as an issue, never
+    (AUTO by default; `-j 1` forces sequential); each repo files only its OWN issue. With `json_out`
+    it prints each repository's outcome as JSON on stdout and the progress on stderr. Returns 2 on a
+    missing --config / a remote sweep with no credential, or when a repository could not be checked
+    or its issue could not be opened, updated or closed; else 0 (drift is reported as an issue, never
     a build failure)."""
     cfg = _guard_config(config_path)
     if cfg is None:
         return 2
     remote = remote or bool(users) or bool(orgs)
-    prog = Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream))
-    color = supports_color(sys.stdout)
+    report = sys.stderr if json_out else sys.stdout
+    prog = Streamer(enabled=stream_enabled(report, force_off=no_stream), out=report)
+    color = supports_color(report)
 
     if remote:
         bad = resolution.invalid_slugs(slugs)
@@ -243,7 +249,7 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                                                             users=users, orgs=orgs, slugs=slugs)
         if not resolved:
             prog.line(resolution.REMOTE_EMPTY_HINT)
-            return 0
+            return _drift_finish([], json_out)
         if not token:
             prog.line(auth.no_credential_hint("filing pin-drift issues") + "\n")
             return 2
@@ -262,7 +268,7 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
             prog.line(resolution.no_repository_in(_local_patterns(cfg, paths),
                                                   so_nothing_was="checked",
                                                   name_one="saw guard drift"))
-            return 0
+            return _drift_finish([], json_out)
         token, source = auth.resolve_token()
         latest = latest_saw_guard(token)
         prog.line(f"Checking pin drift on {len(repos)} local "
@@ -277,23 +283,35 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
     outcomes = _guard_sweep(
         items, labels, make_result, lambda o: render_drift(o, color=color), _drift_board,
         lambda label, err: DriftOutcome(label, "error", detail=f"drift check failed — {err}"),
-        prog, jobs=jobs, verb="Drift on", no_stream=no_stream)
+        prog, jobs=jobs, verb="Drift on", no_stream=no_stream, out=report)
 
     unprotected = sum(1 for o in outcomes if o.state in ("no-gate", "no-ci"))
     behind = sum(1 for o in outcomes if o.state == "behind")
     opened = sum(1 for o in outcomes if o.action == "opened")
     closed = sum(1 for o in outcomes if o.action == "closed")
     errored = sum(1 for o in outcomes if o.state == "error")
+    failed = sum(1 for o in outcomes if o.action == "failed")
     n = len(outcomes)
     tail = "".join([
         f", {behind} with a stale pin" if behind else "",
         f", {opened} issue(s) opened" if opened else "",
         f", {closed} closed" if closed else "",
+        f", {failed} issue(s) not filed" if failed else "",
         f", {errored} errored" if errored else "",
     ])
     prog.line(f"\nChecked {n} repositor{'y' if n == 1 else 'ies'}: "
               f"{unprotected} UNPROTECTED{tail}.")
-    return 0
+    return _drift_finish(outcomes, json_out)
+
+
+def _drift_finish(outcomes: list[DriftOutcome], json_out: bool) -> int:
+    """Print the drift outcomes as JSON when asked, and finish. Takes the outcomes and whether to
+    print them. Returns 2 when a repository could not be checked or its issue could not be
+    opened, updated or closed, else 0."""
+    if json_out:
+        print(json.dumps({"results": [drift_record(o) for o in outcomes]}, indent=2))
+    incomplete = any(o.state == "error" or o.action == "failed" for o in outcomes)
+    return 2 if incomplete else 0
 
 
 def _safe_setup(repo, **kw) -> SetupResult:

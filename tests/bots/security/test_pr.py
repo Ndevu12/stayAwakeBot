@@ -21,6 +21,7 @@ from stayawake.bots.security.models import Finding, Severity, ScanResult  # noqa
 from stayawake.bots.security.remediation import Change             # noqa: E402
 from stayawake.lib.git.write.commit import CommitResult          # noqa: E402
 from stayawake.lib.git.write.push import PushResult              # noqa: E402
+from stayawake.lib.adapters.github_api import ApiRead            # noqa: E402
 from tests.support import samples
 
 
@@ -115,7 +116,7 @@ class TestNoDuplicatePr(unittest.TestCase):
              mock.patch.object(pr.github_api, "add_labels"), \
              mock.patch.object(pr.github_api, "remove_label"), \
              mock.patch.object(pr.github_api, "create_pull",
-                               return_value={"number": 99, "html_url": "u"}) as create:
+                               return_value=ApiRead(value={"number": 99, "html_url": "u"})) as create:
             outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         return outcome, create, update
 
@@ -185,7 +186,8 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
              mock.patch.object(pr.github_api, "create_issue",
                                return_value={"number": 9, "html_url": "iu"}) as create_issue, \
-             mock.patch.object(pr.github_api, "create_pull", return_value=create_pull_result) as create:
+             mock.patch.object(pr.github_api, "create_pull",
+                               return_value=ApiRead(value=create_pull_result)) as create:
             outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         return SimpleNamespace(outcome=outcome, create=create, update=update, add_labels=add_labels,
                                remove_label=remove_label, create_issue=create_issue)
@@ -280,7 +282,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "create_issue",
                                return_value={"number": 9, "html_url": "iu"}), \
              mock.patch.object(pr.github_api, "create_pull",
-                               return_value={"number": 55, "html_url": "u"}) as create:
+                               return_value=ApiRead(value={"number": 55, "html_url": "u"})) as create:
             outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         classify.assert_called()
         self.assertEqual(classify.call_args.args[1].path, "tailwind.config.js")
@@ -319,7 +321,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "remove_label"), \
              mock.patch.object(pr.github_api, "create_issue"), \
              mock.patch.object(pr.github_api, "create_pull",
-                               return_value={"number": 55, "html_url": "u"}) as create:
+                               return_value=ApiRead(value={"number": 55, "html_url": "u"})) as create:
             outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         classify.assert_called()
         self.assertEqual(classify.call_args.args[1].path, "postcss.config.mjs")
@@ -354,7 +356,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
              mock.patch.object(pr.github_api, "create_issue"), \
              mock.patch.object(pr.github_api, "create_pull",
-                               return_value={"number": 55, "html_url": "u"}) as create:
+                               return_value=ApiRead(value={"number": 55, "html_url": "u"})) as create:
             outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         body = create.call_args.kwargs["body"]
         self.assertIn("PARTIAL", outcome)
@@ -393,7 +395,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "create_issue",
                                return_value={"number": 9, "html_url": "iu"}), \
              mock.patch.object(pr.github_api, "create_pull",
-                               return_value={"number": 55, "html_url": "u"}):
+                               return_value=ApiRead(value={"number": 55, "html_url": "u"})):
             pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
         recover.assert_called_once()
         self.assertEqual(recover.call_args.args[1].path, "tailwind.config.js")
@@ -437,7 +439,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
              mock.patch.object(pr.github_api, "create_issue"), \
              mock.patch.object(pr.github_api, "create_pull",
-                               return_value={"number": 55, "html_url": "u"}):
+                               return_value=ApiRead(value={"number": 55, "html_url": "u"})):
             outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         self.assertIn(("tailwind.config.js", "evil-merge"), classified)
         applyer.assert_called_once()
@@ -500,7 +502,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
              mock.patch.object(pr.github_api, "create_issue", return_value={"number": 9, "html_url": "iu"}), \
              mock.patch.object(pr.github_api, "create_pull",
-                               return_value={"number": 55, "html_url": "u"}) as create:
+                               return_value=ApiRead(value={"number": 55, "html_url": "u"})) as create:
             outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         applyer.assert_called_once()                            # the computed strip WAS applied
         create.assert_called_once()                             # a PR IS opened (computed is shippable)
@@ -594,7 +596,7 @@ class TestSigningWarning(unittest.TestCase):
              mock.patch.object(pr.github_api, "add_labels"), \
              mock.patch.object(pr.github_api, "remove_label"), \
              mock.patch.object(pr.github_api, "create_pull",
-                               return_value={"number": 5, "html_url": "u"}):
+                               return_value=ApiRead(value={"number": 5, "html_url": "u"})):
             return _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
 
     def test_unsigned_commit_warns_but_still_opens_pr(self):
@@ -751,7 +753,8 @@ class TestForkPr(unittest.TestCase):
                                return_value=({"x": 1} if repo_ready else None)), \
              mock.patch.object(pr.github_api, "list_open_pulls",
                                return_value=existing_fork_pulls or []), \
-             mock.patch.object(pr.github_api, "create_pull", return_value=created_pr) as create_pull, \
+             mock.patch.object(pr.github_api, "create_pull",
+                               return_value=ApiRead(value=created_pr)) as create_pull, \
              mock.patch.object(pr.github_api, "update_issue", return_value={"number": 1}), \
              mock.patch.object(pr.github_api, "add_labels"), \
              mock.patch.object(pr.github_api, "remove_label"), \

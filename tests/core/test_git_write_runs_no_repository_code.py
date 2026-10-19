@@ -20,6 +20,7 @@ from stayawake.bots.security.pr import fix as prfix
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets.base import ScanOptions
 from stayawake.core import proposal
+from stayawake.lib.adapters.github_api import ApiRead
 from stayawake.lib.git import auth
 from stayawake.lib.git.query import fetch_refs
 from stayawake.lib.git.write import amend as gitamend
@@ -122,8 +123,8 @@ class TestFixRunsNoRepositoryCode(HostileRepository):
     def test_opening_the_pr_pushes_the_branch_and_runs_nothing(self):
         with mock.patch.object(prfix.gitutil, "origin_slug", lambda repo: "acme/app"), \
              mock.patch.object(proposal.github_api, "open_or_update_pr",
-                               return_value={"action": "created", "number": 7,
-                                             "html_url": "u"}), \
+                               return_value=ApiRead(value={"action": "created", "number": 7,
+                                                            "html_url": "u"})), \
              mock.patch.object(prfix.github_api, "add_labels"), \
              mock.patch.object(prfix.github_api, "remove_label"):
             outcome = pr.submit_fix_pr(self.op, ScanOptions(), SIGNATURES, [], token="t")
@@ -144,8 +145,8 @@ class TestGuardRunsNoRepositoryCode(HostileRepository):
         with mock.patch.object(provision.gitutil, "origin_slug", lambda repo: "acme/app"), \
              mock.patch("stayawake.core.identity.require", return_value=allow), \
              mock.patch.object(proposal.github_api, "open_or_update_pr",
-                               return_value={"action": "created", "number": 3,
-                                             "html_url": "u"}):
+                               return_value=ApiRead(value={"action": "created", "number": 3,
+                                                            "html_url": "u"})):
             result = provision._setup_pr(self.op, plan, "main", "t", False)
         self.assertIsNone(result.error, result.error)
         pushed = self.git(self.remote, "show",
