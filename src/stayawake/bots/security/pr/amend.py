@@ -773,10 +773,11 @@ def _where_held(repo: Path, tips: list[str], oids, original_of: dict[str, str]) 
     return out
 
 
-def _only_the_confirmed(repo: Path, path: str, carries, confirmed):
-    """Narrow a footprint check to the versions of a file saw confirmed. Takes the repo, the path,
-    the check and the confirmed `(path, blob)` versions. Returns a check that holds only for their
-    text, or None when git could not read one of them."""
+def _versions_it_may_repair(repo: Path, path: str, carries, confirmed, rewrite_region: set[str]):
+    """Narrow a footprint check to the versions of a file a repair may change: those saw confirmed,
+    and those the commits being rewritten hold. Takes the repo, the path, the check, the confirmed
+    `(path, blob)` versions and the commits being rewritten. Returns a check that holds only for
+    those versions' text, or None when git could not read one of them."""
     texts = set()
     for found, blob in confirmed:
         if found == path:
@@ -784,6 +785,14 @@ def _only_the_confirmed(repo: Path, path: str, carries, confirmed):
             if text is None:
                 return None
             texts.add(text)
+    if rewrite_region:
+        carrying = _carrying_commits(repo, path, carries)
+        if carrying is None:
+            return None
+        try:
+            texts |= {_stored_text(repo, sha, path) for sha in carrying if sha in rewrite_region}
+        except gitutil.Unread:
+            return None
     return lambda text: text in texts and carries(text)
 
 
@@ -1995,6 +2004,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     graph_now = (gitrebuild.ordered_graph(repo, [tip for _n, tip, _c in heads_now])
                  if heads_now else None)
     repaired_in_the_rewrite: set[str] | None = None
+    rewrite_region: set[str] = set()
     if not infected_now:
         _read_past_commits(repo, display, signatures, allowlist, opts, left_to_another_step,
                            owned_paths, history)
@@ -2008,6 +2018,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             _place_history_finding(repo, finding, entry, signatures, allowlist, opts, owned_paths,
                                    history)
         repaired_in_the_rewrite = set(history.excise)
+        rewrite_region = set(history.region)
         for finding, entry in _past_versions(
                 repo, display, signatures, allowlist, opts,
                 lambda path, oid: (path, oid) in history.judged or left_to_another_step(path, oid),
@@ -2022,9 +2033,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         history.take_out[key] |= commits
     cleaned_at_head = set(clean)
     for path, (carries, corrector) in history.excise.items():
-        if (repaired_in_the_rewrite is not None and path not in repaired_in_the_rewrite
-                and path not in cleaned_at_head):
-            carries = _only_the_confirmed(repo, path, carries, history.confirmed)
+        if repaired_in_the_rewrite is not None and path not in cleaned_at_head:
+            carries = _versions_it_may_repair(
+                repo, path, carries, history.confirmed,
+                rewrite_region if path in repaired_in_the_rewrite else set())
             if carries is None:
                 unread.append(f"every copy of {path}")
                 continue

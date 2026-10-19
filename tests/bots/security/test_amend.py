@@ -1164,6 +1164,28 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertEqual(self._held_on_branches("temp_auto_push.bat"), set())
 
+    def test_your_own_older_settings_are_left_as_they_were(self):
+        from tests.bots.security.test_remediation_acceptance import SETTINGS_INJECTED
+        for own in ('{"editor.tabSize":4,"task.allowAutomaticTasks":"off"}\n',
+                    '{"editor.tabSize":4,"tasks":{"version":"2.0.0"}}\n'):
+            with self.subTest(settings=own):
+                self.setUp()
+                self.write(self.d, ".vscode/settings.json", own)
+                yours = self.commit(self.d, "your own settings")
+                self.write(self.d, ".vscode/settings.json", '{"editor.tabSize":4}\n')
+                self.commit(self.d, "settings trimmed")
+                self.write(self.d, ".vscode/settings.json", SETTINGS_INJECTED)
+                self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+                self.commit(self.d, "infection")
+                self.write(self.d, ".vscode/settings.json", '{"editor.tabSize":4}\n')
+                self.commit(self.d, "settings fixed by hand")
+
+                outcome = self._amend_for(self._loader_at("vite.config.ts"))
+
+                self.assertTrue(outcome.completed, self._causes(outcome))
+                self.assertIn(yours, self.git(self.d, "rev-list", "HEAD").split())
+                self.assertFalse(self._held_on_branches("allowAutomaticTasks\":\"on"))
+
     def test_a_loader_a_forged_merge_also_delivered_is_cut_out_and_later_edits_kept(self):
         clean = "const config = {};\nexport default config;\n"
         self.write(self.d, "postcss.config.mjs", clean)
