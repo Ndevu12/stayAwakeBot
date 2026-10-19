@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="saw guard — install, verify and keep current the worm-guard CI gate across one repository or a fleet. Full option reference.">
+        <meta name="description" content="saw guard — install, verify and keep current the SAW Guard CI gate across one repository or a fleet. Full option reference.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
@@ -77,13 +77,13 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
   <meta property="og:title" content="saw guard — saw documentation">
-  <meta property="og:description" content="saw guard — install, verify and keep current the worm-guard CI gate across one repository or a fleet. Full option reference.">
+  <meta property="og:description" content="saw guard — install, verify and keep current the SAW Guard CI gate across one repository or a fleet. Full option reference.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
   <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/reference/cli/guard/">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="saw guard — saw documentation">
-  <meta name="twitter:description" content="saw guard — install, verify and keep current the worm-guard CI gate across one repository or a fleet. Full option reference.">
+  <meta name="twitter:description" content="saw guard — install, verify and keep current the SAW Guard CI gate across one repository or a fleet. Full option reference.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -93,7 +93,7 @@
       "@context": "https://schema.org",
       "@type": "TechArticle",
       "headline": "saw guard",
-      "description": "saw guard — install, verify and keep current the worm-guard CI gate across one repository or a fleet. Full option reference.",
+      "description": "saw guard — install, verify and keep current the SAW Guard CI gate across one repository or a fleet. Full option reference.",
       "url": "https://saw-docs.ndevuspace.com/latest/reference/cli/guard/",
       "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
@@ -2020,7 +2020,7 @@ so a decorative gate cannot answer for a live one.</p>
 </table>
 <h2 id="saw-guard-setup"><code>saw guard setup</code><a class="headerlink" href="#saw-guard-setup" title="Permanent link">&para;</a></h2>
 <p>Install the gate, or surgically bump an existing pin, across the resolved repositories. It resolves
-the latest worm-guard release to a commit SHA and the latest scanner release to a version, then writes the
+the latest SAW Guard release to a commit SHA and the latest scanner release to a version, then writes the
 workflow described below. When a gate already exists it rewrites only that <code>uses:</code> reference and
 leaves the rest of the file untouched — unless the gate is configured so it cannot report what it
 finds, which is repaired. It is idempotent, fails closed if either release cannot be resolved, and
@@ -2039,14 +2039,14 @@ each holding only what it needs:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>worm-guard</code></td>
+<td><code>saw-guard</code></td>
 <td>every pull request and push to the default branch</td>
 <td><code>contents: read</code>, <code>pull-requests: write</code>, <code>security-events: write</code></td>
 <td>Scans, and reports what it finds: a comment on the pull request, an alert in the Security tab, and the evidence as a run artifact. It <strong>cannot push code to your repository</strong> — it comments and raises alerts, nothing more.</td>
 </tr>
 <tr>
 <td><code>remediate</code></td>
-<td>only once <code>worm-guard</code> has reported an infected verdict</td>
+<td>only once <code>saw-guard</code> has reported an infected verdict</td>
 <td><code>contents: write</code>, <code>pull-requests: write</code></td>
 <td>Opens one rolling <code>security/auto-clean</code> pull request with the payload removed. This is the only job that can push, and on a clean run it never starts.</td>
 </tr>
@@ -2089,7 +2089,7 @@ lost.</p>
 </tr>
 <tr>
 <td><code>--ref SHA\|TAG</code></td>
-<td>Pin this worm-guard ref explicitly instead of resolving the latest release — offline and deterministic. A tag is resolved to its immutable SHA.</td>
+<td>Pin this SAW Guard ref explicitly instead of resolving the latest release — offline and deterministic. A tag is resolved to its immutable SHA.</td>
 </tr>
 <tr>
 <td><code>-b</code>, <code>--branch</code></td>
