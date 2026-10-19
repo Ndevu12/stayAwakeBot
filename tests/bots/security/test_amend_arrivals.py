@@ -751,6 +751,39 @@ class TestWhatIsPutToTheOperator(_Delivery):
         self.assertIn(merge, holders["vendor/helper.txt"])
         self.assertNotIn(own, holders["vendor/helper.txt"])
 
+class TestAnOlderPayloadAtTheSamePath(_Delivery):
+    """A file that arrives where an older payload once sat is still put to the operator."""
+
+    _OLD_SAMPLE = samples.joined("global", "['_V']=function(x){return x};"
+                                           "require('child_process').exec('uname');\n")
+
+    def _delivered_over_an_old_sample(self) -> str:
+        self.write(self.d, "tools/helper.js", self._OLD_SAMPLE)
+        self.commit(self.d, "old sample")
+        self.git(self.d, "rm", "-q", "tools/helper.js")
+        self.commit(self.d, "removed by hand")
+        self._deliver(padding=("tools/helper.js",))
+        self._later()
+        return self._blob("tools/helper.js")
+
+    def test_nobody_to_ask_names_the_file_that_arrived_there(self):
+        self._delivered_over_an_old_sample()
+
+        outcome = self._run()
+
+        self.assertIn(Cause.ARRIVALS_UNDECIDED, self._causes(outcome))
+        self.assertIn("tools/helper.js", render_amend_line(outcome))
+
+    def test_the_operator_is_asked_and_a_take_out_answer_removes_it(self):
+        arrived = self._delivered_over_an_old_sample()
+        resolver, asked = _answering(TAKE_OUT)
+
+        self._run(resolver)
+
+        self.assertIn(["tools/helper.js"], [[f.path for f in q.files] for q in asked])
+        self.assertFalse(self._in_history("tools/helper.js", arrived))
+
+
 class TestTheRecord(unittest.TestCase):
     """The record saw keeps between runs reads back what it wrote and nothing else."""
 

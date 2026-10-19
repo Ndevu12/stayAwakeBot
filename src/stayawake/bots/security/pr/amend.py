@@ -773,6 +773,16 @@ def _where_held(repo: Path, tips: list[str], oids, original_of: dict[str, str]) 
     return out
 
 
+def _left_to_history(repo: Path, history: _HistoryPayloads, path: str, blob: str) -> bool:
+    """Tell whether the step on past commits handles one version of a file. Takes the repo, the
+    `_HistoryPayloads`, the path and the blob. Returns whether that version is taken out, repaired
+    or named for recovery by hand."""
+    if (path, blob) in history.take_out or (path, blob) in history.named:
+        return True
+    repair = history.excise.get(path)
+    return bool(repair and repair[0](gitutil.blob_text(repo, blob) or ""))
+
+
 def _checkout_in_the_way(repo: Path, name: str) -> dict[str, Reason]:
     """Tell whether a checkout holding a branch has changes. Takes the repo and the branch name.
     Returns the branch with its reason when one does, or nothing."""
@@ -1531,22 +1541,24 @@ def _arrival_reasons(settled: arrival_questions.Settled, first_commits: list[str
 
 def _settle_arrivals(repo: Path, slug: str, deliveries: dict, brought: dict, excluded: set[str],
                      resolver, unread_deliveries: list[str], remove_shas: set,
-                     unread: list[str]) -> _Arrivals:
+                     unread: list[str], handled=lambda _path, _blob: False) -> _Arrivals:
     """Put the files each delivery added to the operator, with those an earlier run recorded, and
     schedule the ones taken out. Takes the repo, its slug, each delivery mapped to the payload paths
     saw removes from it, what each delivery brought, the paths to leave out, the resolver, what git
-    could not read while finding the deliveries, the commits to rebuild, which it adds to, and
-    where to name what git could not read. Returns the `_Arrivals`."""
+    could not read while finding the deliveries, the commits to rebuild, which it adds to, where to
+    name what git could not read, and whether another step handles one version of a file. Returns
+    the `_Arrivals`."""
     decided, decided_read = arrival_record.read_decisions(slug)
     seen: set[tuple[str, str]] = set()
     added_by: dict[tuple[str, str], set[str]] = {}
-    live = arrival_questions.from_history(repo, deliveries, brought, excluded, seen, added_by)
+    live = arrival_questions.from_history(repo, deliveries, brought, excluded, seen, added_by, handled)
     records, unreadable = arrival_record.read_all(slug)
     if not decided_read:
         unreadable = [*unreadable, str(arrival_record.state_dir(slug) / arrival_record.DECIDED_NAME)]
     held = _held_since_delivery(repo)
     recorded = [q for record in records for q in record.deliveries]
-    every = live.asked + arrival_questions.from_records(recorded, excluded, seen, held, added_by)
+    every = live.asked + arrival_questions.from_records(recorded, excluded, seen, held, added_by,
+                                                        handled)
     standing = arrival_questions.standing(decided, added_by)
     keeps = frozenset(pair for pair, d in standing.items()
                       if d.decision == arrival_record.KEEP_DECISION)
@@ -2019,8 +2031,9 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     settled_arrivals = _settle_arrivals(
         repo, slug, deliveries, delivery.brought_by_each(repo, deliveries, brought),
         with_a_finding | asked | swept | set(clean) | set(remove) | set(purge) | set(substitute)
-        | {p for ps in uncharacterized_paths.values() for p in ps} | in_history,
-        resolver, unread_deliveries, remove_shas, unread)
+        | {p for ps in uncharacterized_paths.values() for p in ps},
+        resolver, unread_deliveries, remove_shas, unread,
+        lambda path, blob: _left_to_history(repo, history, path, blob))
     arrived = {**merge_taken, **settled_arrivals.arrived}
     taken_forms = {**{(p, b): (sha,) for sha, paths in taken_from.items() for p in paths
                       if (b := merge_taken.get(p))},

@@ -48,12 +48,13 @@ def _with_files(question: DeliveryQuestion, files) -> DeliveryQuestion:
 
 def from_history(repo: Path, deliveries: Mapping[str, tuple[str, ...]],
                  brought: Mapping[str, Brought | None], excluded: set[str],
-                 seen: set[tuple[str, str]], added_by: dict | None = None) -> Questions:
+                 seen: set[tuple[str, str]], added_by: dict | None = None,
+                 handled: Callable[[str, str], bool] = lambda _path, _blob: False) -> Questions:
     """Build one question per delivery from the files it added that nothing else handles. Takes the
     repo, each delivery mapped to the payload paths saw removes from it, what each brought (None
     where git could not read it), the paths to leave out, the files already put, which it adds to,
-    and optionally each file mapped to the ids of every delivery that added it, which it adds to.
-    Returns the `Questions`."""
+    optionally each file mapped to the ids of every delivery that added it, which it adds to, and
+    optionally whether another step handles one version of a file. Returns the `Questions`."""
     out = Questions()
     for commit, removing in deliveries.items():
         found = brought.get(commit)
@@ -62,10 +63,10 @@ def from_history(repo: Path, deliveries: Mapping[str, tuple[str, ...]],
             continue
         if added_by is not None and not found.parentless:
             for path, blob in found.added:
-                if path not in excluded:
+                if path not in excluded and not handled(path, blob):
                     added_by.setdefault((path, blob), set()).add(commit)
         fresh = [ArrivedFile(path, blob) for path, blob in found.added
-                 if path not in excluded and (path, blob) not in seen]
+                 if path not in excluded and not handled(path, blob) and (path, blob) not in seen]
         if found.parentless:
             if fresh:
                 out.first_commits.append(commit[:12])
@@ -82,7 +83,9 @@ def from_history(repo: Path, deliveries: Mapping[str, tuple[str, ...]],
 
 def from_records(recorded, excluded: set[str], seen: set[tuple[str, str]],
                  held: Callable[[tuple[str, ...], str, str], bool],
-                 added_by: dict | None = None) -> list[DeliveryQuestion]:
+                 added_by: dict | None = None,
+                 handled: Callable[[str, str], bool] = lambda _path, _blob: False,
+                 ) -> list[DeliveryQuestion]:
     """Build the questions an earlier run recorded and nobody answered. Takes the recorded
     questions, the paths to leave out, the files already put, which it adds to,
     `held(forms, path, blob)`, which says whether history after that delivery still holds that file,
@@ -92,9 +95,9 @@ def from_records(recorded, excluded: set[str], seen: set[tuple[str, str]],
     for question in recorded:
         if added_by is not None:
             for f in question.files:
-                if f.path not in excluded:
+                if f.path not in excluded and not handled(f.path, f.blob):
                     added_by.setdefault((f.path, f.blob), set()).update(question.forms)
-        fresh = [f for f in question.files if f.path not in excluded
+        fresh = [f for f in question.files if f.path not in excluded and not handled(f.path, f.blob)
                  and (f.path, f.blob) not in seen and held(question.forms, f.path, f.blob)]
         if fresh:
             seen.update((f.path, f.blob) for f in fresh)
