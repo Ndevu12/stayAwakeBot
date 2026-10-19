@@ -1221,6 +1221,30 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         (named,) = [r for r in outcome.reasons if r.cause is Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY]
         self.assertIn("conf/.gitignore", named.subjects)
 
+    def test_a_file_you_keep_is_still_named_when_older_commits_cannot_be_rewritten(self):
+        from stayawake.bots.security.pr.resolve import KEEP, DeliveryAnswer, DeliveryQuestion, Resolution
+        self.write(self.d, "conf/.gitignore", self._MARKERS + "dist\n")
+        self.commit(self.d, "older markers")
+        _git(self.d, "rm", "-q", "conf/.gitignore")
+        message = self.d.parent / "message.txt"
+        message.write_bytes(b"removed by hand caf\xe9\n")
+        _git(self.d, "-c", "i18n.commitEncoding=ISO-8859-1", "commit", "-qF", str(message))
+        self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+        self.write(self.d, "tools/helper.js", "module.exports = 1;\n")
+        self.commit(self.d, "infection")
+        asked = []
+
+        def keep(question):
+            asked.append(question)
+            return DeliveryAnswer(KEEP) if isinstance(question, DeliveryQuestion) else Resolution()
+
+        outcome = self._act_full(ScanResult(target=str(self.d), source="local",
+                                            findings=[self._loader_at("vite.config.ts")]), resolver=keep)
+
+        self.assertEqual(len([q for q in asked if isinstance(q, DeliveryQuestion)]), 1)
+        (kept,) = [r for r in outcome.reasons if r.cause is Cause.ARRIVALS_KEPT]
+        self.assertIn("tools/helper.js", kept.subjects)
+
     def test_a_loader_a_forged_merge_also_delivered_is_cut_out_and_later_edits_kept(self):
         clean = "const config = {};\nexport default config;\n"
         self.write(self.d, "postcss.config.mjs", clean)

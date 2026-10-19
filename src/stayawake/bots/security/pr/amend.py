@@ -1651,12 +1651,16 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     """
     found = _Found()
     answered = _remembering(resolver)
+    slug = gitutil.origin_slug(repo)
+    kept = arrival_record.saved_state(slug) if slug else {}
     try:
         outcome = _history_outcome(
             repo, display, opts, signatures, allowlist, token,
             operator=Operator(pusher, identity_fallback, operator_context, answered),
             keep_operator_changes=operator_checkout, found=found)
     except _OlderWorkBlocked as blocked:
+        if kept is None or (slug and not arrival_record.put_back(slug, kept)):
+            return refused(display, Cause.HISTORY_UNREADABLE, "the record of earlier answers")
         found = _Found()
         outcome = with_reasons(_history_outcome(
             repo, display, opts, signatures, allowlist, token,
