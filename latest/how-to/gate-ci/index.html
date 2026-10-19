@@ -2011,10 +2011,12 @@
 repository</a>; this is the operational view. Flags: <a href="../../reference/cli/guard/">CLI
 reference</a>.</p>
 <h2 id="across-a-fleet">Across a fleet<a class="headerlink" href="#across-a-fleet" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>guard<span class="w"> </span>check<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w"> </span>-f<span class="w">     </span><span class="c1"># fail if any repository lacks a required gate</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>guard<span class="w"> </span>setup<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w">        </span><span class="c1"># clone each repository and open a gate PR</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>guard<span class="w"> </span>drift<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w">        </span><span class="c1"># file/close one drift issue per repository behind its pin</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>guard<span class="w"> </span>check<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w"> </span>-f
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>guard<span class="w"> </span>setup<span class="w"> </span>--org<span class="w"> </span>your-org
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>guard<span class="w"> </span>drift<span class="w"> </span>--org<span class="w"> </span>your-org
 </code></pre></div>
+<p><code>check</code> fails if any repository lacks a required gate, <code>setup</code> clones each repository and opens a
+gate PR, and <code>drift</code> files or closes one drift issue for each repository behind its pin.</p>
 <p><code>setup</code> installs the gate where there is none and otherwise bumps only the pinned action reference,
 leaving the rest of the workflow untouched. It never pushes to a default branch, and it fails closed
 if it cannot resolve the release to a SHA — offline, pass <code>--ref &lt;sha|tag&gt;</code>.</p>
