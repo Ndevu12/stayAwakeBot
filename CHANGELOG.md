@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-10-19
+
 ### Fixed
 - **A withdrawn advisory no longer marks a package as malware.** An advisory its publisher withdrew,
   such as the one that flagged every version of the Supabase CLI, is left out of the advisory
@@ -1711,7 +1713,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.2...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.3...HEAD
+[0.12.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.4...v0.12.0
