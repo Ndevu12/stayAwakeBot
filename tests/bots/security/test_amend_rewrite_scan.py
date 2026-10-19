@@ -77,7 +77,7 @@ class TestTheRewriteIsReadInFull(_Rewrite):
         self.assertEqual("export const app = 1;\n",
                          self.git(self.d, "show", f"{self.base}:src/app.js"))
 
-    def test_a_copy_on_a_branch_it_does_not_rewrite_is_named_and_the_rest_is_cleaned(self):
+    def test_a_copy_on_another_branch_is_taken_out_with_the_rest(self):
         self.git(self.d, "checkout", "-q", "-b", "other")
         self.write(self.d, "tools/s3.js", STAGE3)
         self.commit(self.d, "a copy")
@@ -86,8 +86,7 @@ class TestTheRewriteIsReadInFull(_Rewrite):
         self.rename_and_change_then_delete()
         outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
-        self.assertTrue(outcome.needs_review)
-        self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+        self.assertNotIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
         self.assertFalse(self.ever_holds(STAGE3))
         self.assertFalse(self.ever_holds(LOADER))
 

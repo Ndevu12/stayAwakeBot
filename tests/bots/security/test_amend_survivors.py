@@ -772,7 +772,8 @@ class TestAmendRemovesEveryCopy(_AmendFixture):
         self.write(self.d, self.NEW, self.PAYLOAD)
         self.commit(self.d, "the scanned copy")
         from stayawake.bots.security.pr import amend as amendmod
-        with mock.patch.object(amendmod.gitutil, "blob_paths", return_value=[]):
+        with mock.patch.object(amendmod.gitutil, "blob_paths", return_value=[]), \
+                mock.patch.object(amendmod, "_past_versions", return_value=[]):
             outcome = self._act_removing(self.NEW)
         self.assertFalse(outcome.completed)
         self.assertIn(Cause.PAYLOAD_STILL_REACHABLE, self._reasons(outcome))
@@ -790,7 +791,8 @@ class TestAmendRemovesEveryCopy(_AmendFixture):
     def test_a_copy_the_run_cannot_take_out_makes_it_refuse(self):
         self._renamed_payload()
         from stayawake.bots.security.pr import amend as amendmod
-        with mock.patch.object(amendmod.gitutil, "blob_paths", return_value=[]):
+        with mock.patch.object(amendmod.gitutil, "blob_paths", return_value=[]), \
+                mock.patch.object(amendmod, "_past_versions", return_value=[]):
             outcome = self._act_removing(self.NEW)
         self.assertFalse(outcome.completed)
         self.assertIn(Cause.PAYLOAD_STILL_REACHABLE, self._reasons(outcome))

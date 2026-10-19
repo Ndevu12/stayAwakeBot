@@ -78,14 +78,14 @@ class TestGenuineFilesBesideThePayload(_EvilMerge):
 
 class TestConfirmedCopiesStillHoldTheRunBack(_EvilMerge):
 
-    def test_a_confirmed_file_deleted_later_with_a_copy_elsewhere_is_still_reachable(self):
+    def test_a_confirmed_file_deleted_later_is_taken_out_with_its_copy_on_another_branch(self):
         self.branch_with("other", "tools/stage2.js", STAGE2)
         self.evil_merge({"vendor/x/stage2.js": STAGE2})
         self.git(self.d, "rm", "-q", "vendor/x/stage2.js")
         self.commit(self.d, "tidy")
         outcome = self.run_amend()
-        self.assertFalse(outcome.completed)
-        self.assertIn(Cause.PAYLOAD_STILL_REACHABLE, self._causes(outcome))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self.holds("other", "tools/stage2.js"))
 
     def test_history_too_long_to_walk_is_named_for_review(self):
         self.evil_merge({})
