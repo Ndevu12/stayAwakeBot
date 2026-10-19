@@ -52,6 +52,14 @@ class TestParseOsvRecord(unittest.TestCase):
         self.assertEqual(rec.affected[0].ranges[0].events,
                          (("introduced", "1.0.0"), ("fixed", "2.0.0")))
 
+    def test_a_withdrawn_advisory_carries_nothing_to_match(self):
+        withdrawn = {"id": "MAL-2026-5187", "aliases": ["GHSA-x96m-c5fj-q75c"],
+                     "withdrawn": "2026-06-04T21:24:56Z",
+                     "affected": [{"package": {"ecosystem": "npm", "name": "supabase"},
+                                   "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]}
+        self.assertIsNone(parse_osv_record(withdrawn))
+        self.assertIsNotNone(parse_osv_record({**withdrawn, "withdrawn": ""}))
+
     def test_no_id_is_none(self):
         self.assertIsNone(parse_osv_record({"affected": [{"package": {"ecosystem": "npm",
                                                                       "name": "x"}, "versions": ["1"]}]}))

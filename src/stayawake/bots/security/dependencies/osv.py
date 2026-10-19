@@ -81,8 +81,11 @@ def _parse_ranges(entry: dict[str, Any]) -> tuple[OsvRange, ...]:
 
 def parse_osv_record(rec: dict[str, Any]) -> OsvRecord | None:
     """Normalize one raw OSV object → `OsvRecord`, or None when it carries nothing matchable
-    (no id, or no `affected` entry with either explicit versions or a range)."""
+    (no id, withdrawn by its publisher, or no `affected` entry with either explicit versions or a
+    range)."""
     if not isinstance(rec, dict):
+        return None
+    if rec.get("withdrawn"):
         return None
     rid = str(rec.get("id", "")).strip()
     if not rid:

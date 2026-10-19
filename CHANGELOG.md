@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **A withdrawn advisory no longer marks a package as malware.** An advisory its publisher withdrew,
+  such as the one that flagged every version of the Supabase CLI, is left out of the advisory
+  database. Run `saw db update` once to rebuild yours.
 - **`saw fix amend` no longer leaves a payload in commits older than the infection it cleans.** A
   version left under an old name, one removed by hand before a new infection in another file, or one
   on a branch with nothing else infected is taken out too, instead of staying behind while the run

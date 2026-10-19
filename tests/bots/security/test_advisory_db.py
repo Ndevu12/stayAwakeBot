@@ -47,6 +47,22 @@ class TestAdvisoryDb(unittest.TestCase):
         self.assertIsNotNone(corpus.malicious_match(Purl("npm", "rangeonly", "1.5.0")))  # in range
         self.assertIsNone(corpus.malicious_match(Purl("npm", "rangeonly", "2.0.0")))     # fixed → out
 
+    def test_a_withdrawn_advisory_flags_no_version_of_its_package(self):
+        z = osv_zip({
+            "MAL-withdrawn.json": {"id": "MAL-2026-5187", "aliases": ["GHSA-x96m-c5fj-q75c"],
+                                   "withdrawn": "2026-06-04T21:24:56Z",
+                                   "affected": [{"package": {"ecosystem": "npm", "name": "supabase"},
+                                                 "ranges": [{"type": "SEMVER",
+                                                             "events": [{"introduced": "0"}]}]}]},
+            "MAL-live.json": mal_record("evil-pkg", ["1.0.0"], rid="MAL-2024-1"),
+        })
+        res = db.update_ecosystem("npm", self.cache, fetch=_fetch(z))
+        self.assertEqual((res["count"], res["malicious"]), (1, 1))
+        db.write_manifest(self.cache, [res])
+        corpus = db.load_corpus(self.cache)
+        self.assertIsNone(corpus.malicious_match(Purl("npm", "supabase", "2.108.0")))
+        self.assertIsNotNone(corpus.malicious_match(Purl("npm", "evil-pkg", "1.0.0")))
+
     def test_cache_is_deterministic(self):
         z = osv_zip({"MAL-b.json": mal_record("b", ["2.0.0"], rid="MAL-2024-2"),
                      "MAL-a.json": mal_record("a", ["1.0.0"], rid="MAL-2024-1")})
