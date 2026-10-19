@@ -773,16 +773,6 @@ def _where_held(repo: Path, tips: list[str], oids, original_of: dict[str, str]) 
     return out
 
 
-def _left_to_history(repo: Path, history: _HistoryPayloads, path: str, blob: str) -> bool:
-    """Tell whether the step on past commits handles one version of a file. Takes the repo, the
-    `_HistoryPayloads`, the path and the blob. Returns whether that version is taken out, repaired
-    or named for recovery by hand."""
-    if (path, blob) in history.take_out or (path, blob) in history.named:
-        return True
-    repair = history.excise.get(path)
-    return bool(repair and repair[0](gitutil.blob_text(repo, blob) or ""))
-
-
 def _checkout_in_the_way(repo: Path, name: str) -> dict[str, Reason]:
     """Tell whether a checkout holding a branch has changes. Takes the repo and the branch name.
     Returns the branch with its reason when one does, or nothing."""
@@ -2034,7 +2024,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         with_a_finding | asked | swept | cleaned_at_head | set(remove) | set(purge) | set(substitute)
         | {p for ps in uncharacterized_paths.values() for p in ps},
         resolver, unread_deliveries, remove_shas, unread,
-        lambda path, blob: _left_to_history(repo, history, path, blob))
+        lambda path, blob: (path, blob) in history.confirmed)
     arrived = {**merge_taken, **settled_arrivals.arrived}
     taken_forms = {**{(p, b): (sha,) for sha, paths in taken_from.items() for p in paths
                       if (b := merge_taken.get(p))},
