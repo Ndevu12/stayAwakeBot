@@ -773,6 +773,18 @@ def _where_held(repo: Path, tips: list[str], oids, original_of: dict[str, str]) 
     return out
 
 
+def _checkout_in_the_way(repo: Path, name: str) -> dict[str, Reason]:
+    """Tell whether a checkout holding a branch has changes. Takes the repo and the branch name.
+    Returns the branch with its reason when one does, or nothing."""
+    try:
+        holder = gitamend.checkout_holding(repo, name)
+    except OSError:
+        return {name: Reason(Cause.WORKING_TREE_NOT_CLEAN, name)}
+    if holder is not None and gitamend.is_dirty(holder):
+        return {name: Reason(Cause.WORKING_TREE_NOT_CLEAN, name)}
+    return {}
+
+
 def _purge_carriers(repo: Path, path: str, survives) -> set[str] | None:
     """Walk `path`'s history and collect the commits whose version of it carries a payload. Takes the
     repo, the path, and the `survives` oracle that judges each version. Returns those commits, or None
@@ -2052,6 +2064,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         return _refuse(Cause.COMMIT_ON_NO_BRANCH,
                        ", ".join(sorted(s[:12] for s in all_infected)))
     covered = {n for n, _t, _c in heads}
+    pulled_in = covered - {n for n, _t, _c in heads_now} if infected_now and heads_now else set()
     off_plan, unread_branches = _branches_left(repo, [
         *((p, lambda tr, pth, c=carries: _carries_in(repo, tr, pth, c))
           for p, (carries, _c) in clean.items()),
@@ -2097,18 +2110,30 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     if committer != configured:
         signing = commit_signing.signer_pinned(signing, configured)
 
-    leases, unread = _collect_remote_heads(repo, slug, [n for n, _, _ in heads], token)
+    leases, unread = _collect_remote_heads(repo, slug, [n for n, _, _ in heads if n not in pulled_in],
+                                           token)
     if unread is not None:
         return _refuse(Cause.REMOTE_BRANCH_UNREADABLE, unread)
+    held_back: dict[str, Reason] = {}
+    for name in sorted(pulled_in):
+        lease, missed = _collect_remote_heads(repo, slug, [name], token)
+        if missed is not None:
+            held_back[name] = Reason(Cause.REMOTE_BRANCH_UNREADABLE, name)
+        else:
+            leases.update(lease)
     ahead = {name: gitutil.ancestry(repo, leases[name], tip)
              for name, tip, _cas in heads if leases.get(name)}
     for name, answer in ahead.items():
         if answer is None and not gitutil.ref_exists(repo, f"{leases[name]}^{{commit}}"):
             ahead[name] = False
-    unknown = sorted(name for name, answer in ahead.items() if answer is None)
+    for name, answer in ahead.items():
+        if name in pulled_in and answer is not True:
+            held_back[name] = Reason(Cause.HISTORY_UNREADABLE if answer is None
+                                     else Cause.LOCAL_MISSING_REMOTE_COMMITS, name)
+    unknown = sorted(name for name, answer in ahead.items() if answer is None and name not in held_back)
     if unknown:
         return _refuse(Cause.HISTORY_UNREADABLE, ", ".join(f"branch {name}" for name in unknown))
-    behind = sorted(name for name, answer in ahead.items() if answer is False)
+    behind = sorted(name for name, answer in ahead.items() if answer is False and name not in held_back)
     if behind:
         return _refuse(Cause.LOCAL_MISSING_REMOTE_COMMITS, ", ".join(behind))
 
@@ -2153,6 +2178,11 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     deliverable: list[tuple[str, str, str]] = []
     isolated: list[BranchResult] = []
     for name, tip, cas in heads:
+        if name in pulled_in and name not in held_back:
+            held_back.update(_checkout_in_the_way(repo, name))
+        if name in held_back:
+            isolated.append(BranchResult(name, False, held_back[name]))
+            continue
         if tip in blocked:
             kind, refusal = blocked[tip]
             isolated.append(BranchResult(name, False, Reason(

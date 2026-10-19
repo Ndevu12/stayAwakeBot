@@ -15,6 +15,7 @@ from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_amend import _AmendFixture
 from tests.support import samples
+from tests.support.offline_github import github_answers
 
 LOADER = samples.marked_loader()
 STAGE2 = samples.joined('global', "['_V']=function(x){return x};require('child_process').exec('whoami');\n")
@@ -712,6 +713,76 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         outcome = self.run_amend()
         self.assertEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
         self.assertFalse(outcome.needs_review)
+
+
+
+class TestABranchOnlyAnOlderPayloadReaches(_Rewrite):
+    """A branch only an older payload brings into the run does not stop the rest being cleaned."""
+
+    def setUp(self):
+        super().setUp()
+        self.remote_tips: dict[str, str] = {}
+        self.pushed: list[str] = []
+
+    def _remote(self, *, permitted=True, protected=False):
+        return github_answers(lambda branch: self.remote_tips.get(branch) or self._rev(branch),
+                              permitted=permitted, protected=protected)
+
+    def _amend(self):
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        with self._remote(), \
+                mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+            return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
+                                 pusher=self._push, resolver=None)
+
+    def _push(self, branch, *_args):
+        self.pushed.append(branch)
+        return PushResult(True)
+
+    def _side_with_an_old_sample(self):
+        root = self.git(self.d, "rev-list", "--max-parents=0", "HEAD").strip()
+        self.git(self.d, "checkout", "-qb", "side", root)
+        self.write(self.d, "old/sample.js", STAGE3)
+        self.commit(self.d, "old sample")
+
+    def _side_branch(self, outcome):
+        (side,) = [b for b in outcome.branches if b.name == "side"]
+        return side
+
+    def test_a_branch_behind_its_remote_is_left_and_named_while_the_infected_one_is_cleaned(self):
+        self._side_with_an_old_sample()
+        self.write(self.d, "notes.txt", "pushed by someone else\n")
+        ahead = self.commit(self.d, "teammate work")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git(self.d, "branch", "-f", "side", f"{ahead}^")
+        self.remote_tips["side"] = ahead
+        self.evil_merge()
+
+        outcome = self._amend()
+
+        self.assertIn(self.base, self.pushed)
+        self.assertNotIn("side", self.pushed)
+        self.assertFalse(self.ever_holds(STAGE2))
+        side = self._side_branch(outcome)
+        self.assertFalse(side.force_updated)
+        self.assertIs(side.reason.cause, Cause.LOCAL_MISSING_REMOTE_COMMITS)
+
+    def test_a_branch_checked_out_with_changes_is_left_and_named_while_the_infected_one_is_cleaned(self):
+        self._side_with_an_old_sample()
+        self.git(self.d, "checkout", "-q", self.base)
+        elsewhere = self.owned(self.d.parent / "side-checkout")
+        self.git(self.d, "worktree", "add", "-q", str(elsewhere), "side")
+        (elsewhere / "a.txt").write_text("work in progress\n")
+        self.evil_merge()
+
+        outcome = self._amend()
+
+        self.assertIn(self.base, self.pushed)
+        self.assertNotIn("side", self.pushed)
+        self.assertFalse(self.ever_holds(STAGE2))
+        side = self._side_branch(outcome)
+        self.assertFalse(side.force_updated)
+        self.assertIs(side.reason.cause, Cause.WORKING_TREE_NOT_CLEAN)
 
 
 if __name__ == "__main__":
