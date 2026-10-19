@@ -24,7 +24,7 @@ _INDEX = [
      "audit hygiene credential token branch protection vscode cursor windsurf vscodium editor runner self-hosted persistence"),
     ("saw harden", "put saw's controls in place on this machine",
      "harden host deny control"),
-    ("saw guard", "put saw's SAW Guard CI gate in a repository, and check it",
+    ("saw guard", "put saw's CI gate in a repository, and check it",
      "guard gate worm-guard saw-guard ci workflow setup check pin"),
     ("saw auth", "credential/capability status; register a self-owned Saw GitHub App",
      "auth login credential token scope workflow github app register doctor"),
