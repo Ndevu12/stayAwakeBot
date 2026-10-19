@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw fix amend` no longer leaves a payload in commits older than the infection it cleans.** A
+  version left under an old name, one removed by hand before a new infection, or one on a branch with
+  nothing else infected is taken out too, instead of staying behind while the run reports success.
 - **`saw fix amend` no longer stops at a file that was renamed after the payload arrived.** A copy
   your allowlist covers is left as it is, and when something is still reachable, the run names the
   file and a commit of yours that holds it.

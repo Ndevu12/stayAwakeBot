@@ -342,6 +342,21 @@ def _partly_read_reasons(partly: set[str], runnable: set[str], found_at: set[str
     return reasons
 
 
+def _past_versions(repo: Path, display: str, signatures, allowlist, opts, skip,
+                   out: _HistoryPayloads) -> list:
+    """Read the past commits of every branch, newest first and up to a bound. Takes the repo, how it
+    is shown, the signatures, allowlist and scan options, the skip check and the `_HistoryPayloads`
+    to fill. Returns each confirmed finding with its version."""
+    listed = gitutil.listed_branch_refs(repo)
+    if listed is None:
+        out.unread.append(_PAST_VERSIONS)
+        return []
+    tips = [ref for _n, ref in listed]
+    return (_confirmed_versions(repo, display, tips, [], signatures, allowlist, opts, skip, out,
+                                subject=_PAST_VERSIONS, limit=_PAST_VERSIONS_READ)
+            if tips else [])
+
+
 def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, skip,
                        owned_paths: set[str], out: _HistoryPayloads) -> None:
     """Read the repository's past commits, newest first and up to a bound, and place each confirmed
@@ -349,14 +364,7 @@ def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, sk
     options, the skip check, the paths another step already rewrites and the `_HistoryPayloads` to
     fill. A version the checkout still holds is named for recovery by hand, and one only other refs
     or checkouts hold is recorded in `on_other_refs`."""
-    listed = gitutil.listed_branch_refs(repo)
-    if listed is None:
-        out.unread.append(_PAST_VERSIONS)
-        return
-    tips = [ref for _n, ref in listed]
-    found = (_confirmed_versions(repo, display, tips, [], signatures, allowlist, opts, skip, out,
-                                 subject=_PAST_VERSIONS, limit=_PAST_VERSIONS_READ)
-             if tips else [])
+    found = _past_versions(repo, display, signatures, allowlist, opts, skip, out)
     _read_other_refs(repo, display, signatures, allowlist, opts, skip, out)
     for finding, entry in found:
         try:
@@ -1968,6 +1976,12 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 repo, display, [tip for _n, tip, _c in heads_now],
                 _rewrite_boundary(gitrebuild.commits_to_rebuild(graph_now, infected_now)),
                 signatures, allowlist, opts, left_to_another_step, history):
+            _place_history_finding(repo, finding, entry, signatures, allowlist, opts, owned_paths,
+                                   history)
+        for finding, entry in _past_versions(
+                repo, display, signatures, allowlist, opts,
+                lambda path, oid: (path, oid) in history.judged or left_to_another_step(path, oid),
+                history):
             _place_history_finding(repo, finding, entry, signatures, allowlist, opts, owned_paths,
                                    history)
         _read_other_refs(repo, display, signatures, allowlist, opts, left_to_another_step, history)

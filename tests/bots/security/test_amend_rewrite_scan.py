@@ -367,9 +367,12 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         rewritten = self.git(self.d, "log", "--format=%H", "--grep=add boot", self.base).split()
         self.assertFalse(self.holds(rewritten[0], "src/boot.js"))
 
-    def test_commits_from_before_the_infection_are_not_rewritten(self):
+    def test_commits_older_than_the_first_payload_are_kept_and_the_payload_goes(self):
+        self.write(self.d, "notes.txt", "before any sample\n")
+        older = self.commit(self.d, "notes")
         self.write(self.d, "tests/fixtures/old.js", STAGE3.replace("uname", "date"))
-        before = self.commit(self.d, "test: an old sample")
+        sample = self.commit(self.d, "test: an old sample")
+        old_version = self.git(self.d, "rev-parse", f"{sample}:tests/fixtures/old.js").strip()
         self.evil_merge()
         self.write(self.d, "tests/fixtures/old.js", STAGE2)
         self.commit(self.d, "test: refresh the sample")
@@ -377,7 +380,8 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.commit(self.d, "test: drop the sample")
         outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
-        self.assertIn(before, self.git(self.d, "rev-list", self.base).split())
+        self.assertIn(older, self.git(self.d, "rev-list", self.base).split())
+        self.assertNotIn(old_version, self.git(self.d, "rev-list", "--objects", self.base))
 
     def test_injected_lines_in_an_older_version_are_cut_out_and_the_rest_stays(self):
         self.evil_merge()
