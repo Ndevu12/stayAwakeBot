@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-19
+
 ### Added
 - **`saw fix --json` and `saw guard drift --json` say what each repository came to.** `saw fix --pr
   --json` prints, for each repository, whether its fix became a pull request, a fork pull request, a
@@ -34,8 +36,8 @@ reader, not the mechanism or the weakness it closed.
   update or close the drift issue, the run says so and fails, where it used to report the issue
   opened, updated or closed and pass.
 - **The setup examples show the current release, as code only.** The Action workflow in the README
-  pins scanner 0.12.3, and the setup examples carry no comments; what each line does is in the text
-  beside them.
+  pins the current scanner release, and the setup examples carry no comments; what each line does
+  is in the text beside them.
 
 ## [0.12.3] - 2026-10-19
 
@@ -1737,7 +1739,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.3...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.0...v0.12.1
