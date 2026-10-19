@@ -774,6 +774,19 @@ class TestAnOlderPayloadAtTheSamePath(_Delivery):
         self.assertIn(Cause.ARRIVALS_UNDECIDED, self._causes(outcome))
         self.assertIn("tools/helper.js", render_amend_line(outcome))
 
+    def test_a_file_arriving_where_an_older_repaired_payload_sat_is_named(self):
+        self.write(self.d, ".gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.commit(self.d, "markers added")
+        self.git(self.d, "rm", "-q", ".gitignore")
+        self.commit(self.d, "removed by hand")
+        self._deliver(padding=(".gitignore",))
+        self._later()
+
+        outcome = self._run()
+
+        self.assertIn(Cause.ARRIVALS_UNDECIDED, self._causes(outcome))
+        self.assertIn(".gitignore", render_amend_line(outcome))
+
     def test_the_operator_is_asked_and_a_take_out_answer_removes_it(self):
         arrived = self._delivered_over_an_old_sample()
         resolver, asked = _answering(TAKE_OUT)

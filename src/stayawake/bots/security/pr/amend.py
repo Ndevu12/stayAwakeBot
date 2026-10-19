@@ -2014,6 +2014,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         history.unread.append(_REWRITTEN_VERSIONS)
     for key, commits in (adding or {}).items():
         history.take_out[key] |= commits
+    cleaned_at_head = set(clean)
     for path, (carries, corrector) in history.excise.items():
         carrying = _carrying_commits(repo, path, carries)
         if carrying is None:
@@ -2030,7 +2031,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     with_a_finding = {getattr(f, "path", "") or "" for f in scan.findings}
     settled_arrivals = _settle_arrivals(
         repo, slug, deliveries, delivery.brought_by_each(repo, deliveries, brought),
-        with_a_finding | asked | swept | set(clean) | set(remove) | set(purge) | set(substitute)
+        with_a_finding | asked | swept | cleaned_at_head | set(remove) | set(purge) | set(substitute)
         | {p for ps in uncharacterized_paths.values() for p in ps},
         resolver, unread_deliveries, remove_shas, unread,
         lambda path, blob: _left_to_history(repo, history, path, blob))
