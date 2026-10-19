@@ -121,10 +121,10 @@ Both sweep many repositories at once (`--remote` / `--user` / `--org`), like `sa
 
 A minimal equivalent, if you would rather write it yourself than run `saw guard setup`. The
 installed file is not identical — it also carries a weekly `pin-drift` job and prefers a
-`GH_SECURITY_TOKEN` secret — so run `saw guard setup --dry-run` to see exactly what it would write:
+`GH_SECURITY_TOKEN` secret — so run `saw guard setup --dry-run` to see exactly what it would write.
+Save it as `.github/workflows/worm-scan.yml`:
 
 ```yaml
-# .github/workflows/worm-scan.yml
 name: Worm scan
 
 on:
@@ -132,9 +132,6 @@ on:
     branches: [main]
   pull_request:
 
-# The scan only reads. `saw guard setup` writes a second job for remediation,
-# so that write access exists only on a run that already found something —
-# see the CLI reference for the shape it installs.
 permissions:
   contents: read
   pull-requests: write
@@ -144,16 +141,22 @@ jobs:
   saw-guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 0        # full history is required
+          fetch-depth: 0
 
-      - uses: Ndevu12/SAW_GUARD@93fe465d7b0266c6010778999b73b591ae082f3e  # v0.1.4
+      - uses: Ndevu12/SAW_GUARD@93fe465d7b0266c6010778999b73b591ae082f3e
         with:
-          version: '0.6.0'      # pin the scanner too; blank tracks latest
-          pr-comment: true      # say what was found, on the PR
-          upload-sarif: true    # and in the Security tab
+          version: '0.12.3'
+          pr-comment: true
+          upload-sarif: true
 ```
+
+The scan only reads: `pull-requests: write` lets it say what it found on the pull request
+(`pr-comment`), and `security-events: write` lets it put the findings in the Security tab
+(`upload-sarif`). `saw guard setup` puts remediation in a second job, so write access exists only on
+a run that already found something; see the CLI reference for the shape it installs. `fetch-depth: 0`
+is required, because the scan reads the full history.
 
 ### About the pins
 
@@ -161,9 +164,9 @@ jobs:
 published `stayawakebot` scanner from PyPI.
 
 **Pin every action by commit SHA**, including this one: a tag can be moved to point at different code
-after you have reviewed it, a SHA cannot. The trailing comment records which release the SHA
-corresponds to, so the pin stays readable. In production pin `version:` as well — it selects the
-`stayawakebot` release from PyPI and otherwise tracks whatever is latest at run time.
+after you have reviewed it, a SHA cannot. Here `93fe465d…` is SAW Guard v0.1.4 and `3d3c42e5…` is
+`actions/checkout` v7.0.1. In production pin `version:` as well: it selects the `stayawakebot`
+release from PyPI, 0.12.3 here, and otherwise tracks whatever is latest at run time.
 
 Other inputs: `config-file` to supply your own allowlist, `fail-on` to choose the verdict that fails
 the build (default `infected`), and `upload-sarif` to send findings to code scanning.
