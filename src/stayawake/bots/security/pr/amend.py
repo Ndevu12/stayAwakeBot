@@ -31,7 +31,7 @@ from stayawake.lib.git import remote as gitremote
 from stayawake.lib.git.run import LOCAL_TIMEOUT, UNTRUSTED
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
                                                 amended, names_that_fit, refused,
-                                                render_amend_line, with_checkout)
+                                                render_amend_line, with_checkout, with_reasons)
 from stayawake.lib.git import authority
 from stayawake.lib.git import pushed
 from stayawake.lib.git.write import amend as gitamend
@@ -1650,10 +1650,20 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     the checkout is cleaned as `saw fix` cleans it, the operator's uncommitted work saved first.
     """
     found = _Found()
-    outcome = _history_outcome(
-        repo, display, opts, signatures, allowlist, token,
-        operator=Operator(pusher, identity_fallback, operator_context, resolver),
-        keep_operator_changes=operator_checkout, found=found)
+    answered = _remembering(resolver)
+    try:
+        outcome = _history_outcome(
+            repo, display, opts, signatures, allowlist, token,
+            operator=Operator(pusher, identity_fallback, operator_context, answered),
+            keep_operator_changes=operator_checkout, found=found)
+    except _OlderWorkBlocked as blocked:
+        found = _Found()
+        outcome = with_reasons(_history_outcome(
+            repo, display, opts, signatures, allowlist, token,
+            operator=Operator(pusher, identity_fallback, operator_context, answered),
+            keep_operator_changes=operator_checkout, found=found, read_older=False),
+            [Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, str(len(blocked.names)),
+                    names_that_fit(blocked.names))])
     if not operator_checkout or not gitutil.is_git_repo(repo):
         return outcome
     checkout = live.clean_checkout(repo, opts, signatures, allowlist,
@@ -1665,13 +1675,37 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                          settled=state in (Checkout.CLEAN, Checkout.CLEANED))
 
 
+class _OlderWorkBlocked(Exception):
+    """Taking out the payload versions older than the rewrite would stop what the rewrite does."""
+
+    def __init__(self, names: list[str]):
+        super().__init__(", ".join(names))
+        self.names = names
+
+
+def _remembering(resolver):
+    """Wrap a resolver so a question put twice gets the first answer. Takes the resolver. Returns
+    the wrapper, or None when there is no resolver."""
+    if resolver is None:
+        return None
+    answers: dict[str, object] = {}
+
+    def answer(question):
+        key = repr(question)
+        if key not in answers:
+            answers[key] = resolver(question)
+        return answers[key]
+    return answer
+
+
 def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, token, *,
                      operator: Operator, keep_operator_changes: bool,
-                     found: _Found) -> AmendOutcome:
+                     found: _Found, read_older: bool = True) -> AmendOutcome:
     """Rewrite the history that carries a confirmed payload and move each branch that reached it.
     Takes `amend_outcome`'s scan arguments, the operator context, whether the operator's own
-    uncommitted changes in `repo` are carried across the move, and where to record what was found.
-    Returns the outcome."""
+    uncommitted changes in `repo` are carried across the move, where to record what was found, and
+    whether to read the commits older than the rewrite. Returns the outcome. Raises
+    `_OlderWorkBlocked` when the versions those older commits hold would stop the rewrite."""
     pusher, identity_fallback, operator_context, resolver = operator
     rejected_supply: dict[str, Cause] = {}
     arrival_reasons: list[Reason] = []
@@ -2004,6 +2038,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                  if heads_now else None)
     repaired_in_the_rewrite: set[str] | None = None
     rewrite_region: set[str] = set()
+    older_found: list[str] = []
     if not infected_now:
         _read_past_commits(repo, display, signatures, allowlist, opts, left_to_another_step,
                            owned_paths, history)
@@ -2016,14 +2051,16 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 signatures, allowlist, opts, left_to_another_step, history):
             _place_history_finding(repo, finding, entry, signatures, allowlist, opts, owned_paths,
                                    history)
-        repaired_in_the_rewrite = set(history.excise)
-        rewrite_region = set(history.region)
-        for finding, entry in _past_versions(
-                repo, display, signatures, allowlist, opts,
-                lambda path, oid: (path, oid) in history.judged or left_to_another_step(path, oid),
-                history):
-            _place_history_finding(repo, finding, entry, signatures, allowlist, opts, owned_paths,
-                                   history)
+        if read_older:
+            repaired_in_the_rewrite = set(history.excise)
+            rewrite_region = set(history.region)
+            for finding, entry in _past_versions(
+                    repo, display, signatures, allowlist, opts,
+                    lambda path, oid: (path, oid) in history.judged or left_to_another_step(path, oid),
+                    history):
+                older_found.append(f"{entry.path} in {entry.commit[:12]}")
+                _place_history_finding(repo, finding, entry, signatures, allowlist, opts,
+                                       owned_paths, history)
         _read_other_refs(repo, display, signatures, allowlist, opts, left_to_another_step, history)
     adding = pushed.adding_commits(repo, list(history.region.items()), set(history.take_out))
     if adding is None:
@@ -2219,6 +2256,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         proven={path: versions for path, versions in proven.items()
                 if path in delivered_paths and path not in substitute and path not in purge})
     blocked = rebuilt.blocked
+    if blocked and older_found:
+        raise _OlderWorkBlocked(older_found)
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
     payload_paths = ({p for paths in infected.values() for p in paths}
@@ -2271,6 +2310,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         repo, all_infected, rebuilt, [(name, delivered_tips[tip]) for name, tip, _c in deliverable],
         path_checks, remove)
     if left:
+        if older_found:
+            raise _OlderWorkBlocked(older_found)
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
     unconfirmed += unread_rewrite
     covered_names = {n for n, _t, _c in heads}
@@ -2290,6 +2331,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     if reached is None:
         unconfirmed.append("every branch")
     elif malicious_oids & reached:
+        if older_found:
+            raise _OlderWorkBlocked(older_found)
         holding, unread = [], []
         for name, tip in post_view:
             one = gitutil.reachable_objects(repo, [tip])
@@ -2312,6 +2355,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
              or ((path, oid) in history.judged and (path, oid) not in history.confirmed)),
         rewritten)]
     if still_held:
+        if older_found:
+            raise _OlderWorkBlocked(older_found)
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, names_that_fit(sorted(set(still_held))))
     unconfirmed += rewritten.unread
     arrived_on: list[str] = []

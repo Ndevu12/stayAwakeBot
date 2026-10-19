@@ -1204,6 +1204,23 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertIn(yours, self.git(self.d, "rev-list", "HEAD").split())
         self.assertEqual(self._show(f"{yours}:.vscode/settings.json"), own)
 
+    def test_an_older_commit_it_cannot_rewrite_leaves_the_rest_cleaned_and_names_the_rest(self):
+        self.write(self.d, "conf/.gitignore", self._MARKERS)
+        self.commit(self.d, "markers added")
+        _git(self.d, "rm", "-q", "conf/.gitignore")
+        message = self.d.parent / "message.txt"
+        message.write_bytes(b"removed by hand caf\xe9\n")
+        _git(self.d, "-c", "i18n.commitEncoding=ISO-8859-1", "commit", "-qF", str(message))
+        self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+        self.commit(self.d, "loader later")
+
+        outcome = self._amend_for(self._loader_at("vite.config.ts"))
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(self._held_on_branches(_LOADER[:40]), set())
+        (named,) = [r for r in outcome.reasons if r.cause is Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY]
+        self.assertIn("conf/.gitignore", named.subjects)
+
     def test_a_loader_a_forged_merge_also_delivered_is_cut_out_and_later_edits_kept(self):
         clean = "const config = {};\nexport default config;\n"
         self.write(self.d, "postcss.config.mjs", clean)
