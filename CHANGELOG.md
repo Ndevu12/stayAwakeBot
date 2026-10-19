@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **The setup examples show the current release, as code only.** The Action workflow in the README
+  pins scanner 0.12.3, and the setup examples carry no comments; what each line does is in the text
+  beside them.
+
 ## [0.12.3] - 2026-10-19
 
 ### Fixed

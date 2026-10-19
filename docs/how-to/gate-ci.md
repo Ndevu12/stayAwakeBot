@@ -11,10 +11,13 @@ reference](../reference/cli/guard.md).
 ## Across a fleet
 
 ```bash
-saw guard check --org your-org -f     # fail if any repository lacks a required gate
-saw guard setup --org your-org        # clone each repository and open a gate PR
-saw guard drift --org your-org        # file/close one drift issue per repository behind its pin
+saw guard check --org your-org -f
+saw guard setup --org your-org
+saw guard drift --org your-org
 ```
+
+`check` fails if any repository lacks a required gate, `setup` clones each repository and opens a
+gate PR, and `drift` files or closes one drift issue for each repository behind its pin.
 
 `setup` installs the gate where there is none and otherwise bumps only the pinned action reference,
 leaving the rest of the workflow untouched. It never pushes to a default branch, and it fails closed
