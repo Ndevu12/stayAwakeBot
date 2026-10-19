@@ -15,8 +15,8 @@ reader, not the mechanism or the weakness it closed.
 
 ### Changed
 - **The CI gate is called SAW Guard everywhere.** `saw guard setup` installs it as
-  `.github/workflows/saw-guard.yml` with a `saw-guard` job, and its help, findings and drift issues say
-  SAW Guard. A gate already installed under its earlier name keeps working and is still checked and
+  `.github/workflows/saw-guard.yml` with a `saw-guard` job, and its findings and drift issues say SAW
+  Guard. A gate already installed under its earlier name keeps working and is still checked and
   updated, and a drift issue opened under that name is still updated and closed.
 
 ### Fixed
