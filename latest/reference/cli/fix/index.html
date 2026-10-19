@@ -1899,7 +1899,7 @@ collection — deliberate work, not something <code>fix</code> decides for you. 
 <p><a href="../amend/"><code>saw fix amend</code></a> is a different act: it amends the infected commits and force-updates
 the branches that carried them. Read that page before you run it.</p>
 <p>See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code> will and will not touch.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix [TARGETS...] [--pr] [--json] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
 </code></pre></div>
 <table>
 <thead>
@@ -1916,6 +1916,10 @@ the branches that carried them. Read that page before you run it.</p>
 <tr>
 <td><code>--pr</code>, <code>--open-pr</code></td>
 <td>Also push the branch and open/update one rolling, de-duplicated PR per repository. Needs a credential with repo + PR write; the API is pre-flighted before any push. Not accepted with <code>amend</code>.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Print what each repository's fix came to as JSON on stdout, one record per repository: <code>repository</code>; <code>remediation</code>, one of <code>pr</code>, <code>fork-pr</code>, <code>patch</code>, <code>issue</code>, <code>prepared</code>, <code>skipped</code> or <code>failed</code>; <code>cause</code>, why it came to less than a pull request, such as <code>actions-may-not-open-pull-requests</code>; and the <code>pull_request</code> number and <code>url</code>. Progress stays on stderr. Not accepted with <code>amend</code>.</td>
 </tr>
 <tr>
 <td><code>amend</code></td>
