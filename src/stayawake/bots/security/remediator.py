@@ -2,6 +2,7 @@
 """Remediator service — `saw fix` and `saw discard`."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -26,7 +27,8 @@ from stayawake.bots.security.resolution import (
     resolve_remote as _resolve_remote)
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security import pr as pr_submit
-from stayawake.bots.security.pr.fix_verdict import Checkout, FixVerdict, Grade, render_fix_verdict
+from stayawake.bots.security.pr.fix_verdict import (Checkout, FixVerdict, Grade, remediation_record,
+                                                     render_fix_verdict)
 
 
 def _resolve_config(config_path: str | None, targets: list[str] | None = None) -> dict | None:
@@ -37,10 +39,13 @@ def _resolve_config(config_path: str | None, targets: list[str] | None = None) -
 class FixOutcome:
     """One repo's result. The grade is decided WHERE the failure is known, never re-read from
     the summary: the remote arm's auth and clone failures said nothing a substring test matched, so
-    a repo no credential could reach exited 0. `acted` is whether the run changed something."""
+    a repo no credential could reach exited 0. `acted` is whether the run changed something;
+    `repository` and `verdict` are what a machine-readable report is built from."""
     summary: str
     grade: Grade = Grade.NEEDS_REVIEW
     acted: bool = False
+    repository: str = ""
+    verdict: FixVerdict | None = None
 
     @property
     def needs_review(self) -> bool:
@@ -50,9 +55,9 @@ class FixOutcome:
         return self.summary
 
 
-def _review(summary: str) -> FixOutcome:
+def _review(summary: str, repository: str = "") -> FixOutcome:
     """An outcome a person has to look at."""
-    return FixOutcome(summary, Grade.NEEDS_REVIEW)
+    return FixOutcome(summary, Grade.NEEDS_REVIEW, repository=repository)
 
 
 def _graded_fix(fn, display: str) -> FixOutcome:
@@ -61,11 +66,12 @@ def _graded_fix(fn, display: str) -> FixOutcome:
     try:
         verdict = fn()
     except Exception as exc:  # noqa: BLE001 — isolate a single repo, keep the run going
-        return _review(f"{display}: error — {exc}")
+        return _review(f"{display}: error — {exc}", display)
     if not isinstance(verdict, FixVerdict):
-        return _review(f"{display}: error — the run returned no verdict")
+        return _review(f"{display}: error — the run returned no verdict", display)
     acted = verdict.checkout is not Checkout.CLEAN or bool(verdict.base_fix.branch)
-    return FixOutcome(render_fix_verdict(verdict, prompt.attended()), verdict.grade, acted)
+    return FixOutcome(render_fix_verdict(verdict, prompt.attended()), verdict.grade, acted,
+                      repository=display, verdict=verdict)
 
 
 def _safe(fn, display: str) -> str:
@@ -198,7 +204,7 @@ def _run_fix_sweep(items, labels, make_outcome, prog: Streamer, *, jobs,
                             f"      → {_board_detail(labels[o.index], str(o.value or o.error))}"),
         progress_on=prog.enabled, verb=verb)
     return [o.value if not o.error
-            else _review(f"{labels[o.index]}: error — {o.error}")
+            else _review(f"{labels[o.index]}: error — {o.error}", labels[o.index])
             for o in swept]
 
 
@@ -251,7 +257,7 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
             line = (f"{_disp(repo)}: error — no branch '{name}'. "
                     f"Check the name, or omit --branch to fix the repository default.")
             prog.line(f"      → {line}")     # the sweep only prints what it PROCESSES
-            refused.append(_review(line))
+            refused.append(_review(line, _disp(repo)))
         items += [(repo, base) for base in bases]
     if not items:
         return refused
@@ -268,7 +274,7 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
         if publish:
             tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
             if aerr:      # a repo no credential can reach was NOT fixed
-                return _review(f"{display}: error — {aerr}")
+                return _review(f"{display}: error — {aerr}", display)
             return _graded_fix(lambda: pr_submit.submit_fix_pr(
                 repo, opts, sigs, allowlist, tok, base=base, spin=spin and asking is None,
                 resolver=asking), display)
@@ -304,13 +310,13 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
     def make_outcome(slug, *, spin):
         tok, aerr = auth.act_token(token, source, slug)
         if aerr:
-            return _review(f"{slug}: {aerr}")
+            return _review(f"{slug}: {aerr}", slug)
         # `status` shows a live "cloning…" spinner in the sequential path; off under concurrency
         # (the board reports in-flight state). submit_fix_pr then drives its own phase spinners.
         with status(f"cloning {slug}…", enabled=spin), \
                 resolution.cloned_repo(slug, tok) as clone:        # phase 0: clone (shared helper)
             if clone is None:
-                return _review(f"{slug}: clone failed (check token access)")
+                return _review(f"{slug}: clone failed (check token access)", slug)
             return _graded_fix(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist, tok,
                                                                spin=spin), slug)
 
@@ -446,14 +452,14 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
         paths: list[str] | None = None, users: list[str] | None = None,
         orgs: list[str] | None = None, slugs: list[str] | None = None,
         no_stream: bool = False, jobs: int | None = None,
-        branches: list[str] | None = None, resolver=None) -> int:
+        branches: list[str] | None = None, resolver=None, json_out: bool = False) -> int:
     """`saw fix`: prepare a `security/auto-clean` branch per infected repo (no push). With
     `pr=True` (`--pr`) also push + open/update one rolling PR each; with `remote=True`
     (`--remote`) sweep GitHub targets resolved by the ladder (ad-hoc `users`/`orgs`/
     `slugs` → config → your own repos). A multi-repo sweep runs up to `jobs` repos at once
     (AUTO by default; `-j 1` forces sequential). `resolver` asks the operator about the files added
-    beside a payload when one local repository is fixed. Streams each repo's outcome. Returns
-    INCOMPLETE if
+    beside a payload when one local repository is fixed. Streams each repo's outcome, and with
+    `json_out` prints what each repository's fix did as JSON on stdout. Returns INCOMPLETE if
     an explicit --config is missing or any repo needs review, FINDINGS if any history still stores
     what was cleared, else CLEAN."""
     cfg = _resolve_config(config_path, targets=None if remote else paths)
@@ -472,6 +478,9 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
                 if remote
                 else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr, jobs=jobs,
                                 branches=branches, resolver=resolver))
+    if json_out:
+        print(json.dumps({"results": [remediation_record(o.repository, o.verdict)
+                                      for o in outcomes]}, indent=2))
     if not outcomes:
         return 0
     prog.line(fix_tally(outcomes))

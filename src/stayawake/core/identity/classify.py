@@ -23,6 +23,28 @@ class PushFailure:
     detail: str = ""
 
 
+_ACTIONS_MAY_NOT_OPEN_PULL_REQUESTS = "not permitted to create or approve pull requests"
+
+
+def classify_pr_refusal(cause: str | None, message: str) -> str:
+    """Name why GitHub refused to open or update a pull request. Takes the request's cause and
+    GitHub's message. Returns a stable reason code."""
+    if cause == "forbidden" and _ACTIONS_MAY_NOT_OPEN_PULL_REQUESTS in (message or "").lower():
+        return "actions-may-not-open-pull-requests"
+    return {"forbidden": "forbidden", "unauthorized": "auth", "network": "network",
+            "rate_limited": "rate_limited"}.get(cause or "", "unknown")
+
+
+def pr_refusal_message(reason: str | None, fallback: str) -> str:
+    """Say why a pushed branch has no pull request. Takes the refusal's reason code and the line to
+    use when the reason names no step to take. Returns the line."""
+    if reason == "actions-may-not-open-pull-requests":
+        return ("branch pushed, but this repository does not let GitHub Actions open pull requests "
+                "— turn on “Allow GitHub Actions to create and approve pull requests” in its "
+                "Actions settings")
+    return fallback
+
+
 def classify_push_stderr(stderr: str | None) -> PushFailure:
     """Map git-push stderr to a stable reason code."""
     text = (stderr or "").strip()

@@ -116,18 +116,24 @@ def drift_one(*, repo: str | Path | None = None, slug: str | None = None,
         existing = _find_issue(owner, name, token)
         body = _issue_body(reason)
         if existing:
-            github_api.update_issue(owner, name, existing, token, body=body)
+            if github_api.update_issue(owner, name, existing, token, body=body) is None:
+                return DriftOutcome(target, state, "failed", "could not update the drift issue",
+                                    existing)
             return DriftOutcome(target, state, "refreshed", reason, existing)
         created = github_api.create_issue(owner, name, DRIFT_TITLE, body, token,
                                           labels=[DRIFT_LABEL], quiet=True)
         num = created.get("number") if isinstance(created, dict) else None
+        if num is None:
+            return DriftOutcome(target, state, "failed", "could not open the drift issue")
         return DriftOutcome(target, state, "opened", reason, num)
 
     if state in _PROTECTED:
         if owner and name:
             existing = _find_issue(owner, name, token)
             if existing:
-                github_api.update_issue(owner, name, existing, token, state="closed")
+                if github_api.update_issue(owner, name, existing, token, state="closed") is None:
+                    return DriftOutcome(target, state, "failed", "could not close the drift issue",
+                                        existing)
                 github_api.add_issue_comment(owner, name, existing,
                                              "Repo is protected and current again — closing automatically.",
                                              token)
@@ -142,22 +148,30 @@ def render_drift(o: DriftOutcome, *, color: bool = False) -> str:
     warn, ok, dim = SEVERITY["warning"], SEVERITY["ok"], SEVERITY["info"]
     num = f" #{o.issue}" if o.issue else ""
     verb = {"opened": "opened", "refreshed": "updated"}.get(o.action, "")
+    failed = paint(f" — {o.detail}{num}", warn, on=color) if o.action == "failed" else ""
     if o.state in ("no-gate", "no-ci"):
         head = "UNPROTECTED — no worm gate" if o.state == "no-gate" else "UNPROTECTED — no CI"
-        tail = f" — {verb} protection issue{num}" if verb else \
+        tail = f" — {verb} protection issue{num}" if verb else failed or \
             (f" ({o.detail})" if o.detail else "")
         return paint(f"⚠️  {head}", warn, on=color) + tail
     if o.state == "behind":
-        tail = f" — {verb} drift issue{num}" if verb else ""
+        tail = f" — {verb} drift issue{num}" if verb else failed
         return paint("⚠️  pin behind", warn, on=color) + tail
     if o.state in ("fresh", "floating"):
-        closed = paint("  (closed the issue)", dim, on=color) if o.action == "closed" else ""
+        closed = paint("  (closed the issue)", dim, on=color) if o.action == "closed" else failed
         return paint(f"✓ gated · pin {o.state}", ok, on=color) + closed
     if o.state == "not-saw-guard":
-        closed = paint("  (closed the issue)", dim, on=color) if o.action == "closed" else ""
+        closed = paint("  (closed the issue)", dim, on=color) if o.action == "closed" else failed
         return (paint("✓ gated", ok, on=color)
                 + paint(f" — not the pinned {SAW_GUARD_NAME} action; release freshness not tracked", dim, on=color)
                 + closed)
     if o.state == "unknown":
         return paint("• freshness unknown", dim, on=color) + (f" — {o.detail}" if o.detail else "")
     return paint(f"⚠️  {o.detail or 'drift check failed'}", warn, on=color)
+
+
+def drift_record(o: DriftOutcome) -> dict:
+    """Describe one repository's drift check for a machine to read. Takes its outcome. Returns the
+    record: the gate's `state`, what was done to the tracking issue, the issue and the detail."""
+    return {"repository": o.target, "state": o.state, "issue_action": o.action,
+            "issue": o.issue, "detail": o.detail}

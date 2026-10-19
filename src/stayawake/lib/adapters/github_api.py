@@ -104,13 +104,20 @@ def request(path: str, method: str = "GET", token: str | None = None,
     on any failure. `quiet` suppresses error logging (e.g. expected 404s while polling for an async
     fork)."""
     r = _do_request(path, method, token, data)
-    if r.cause is not None and not quiet:
-        # stderr, never stdout — stdout carries `saw scan --json` / piped report output.
-        if r.status is not None:
-            print(f"GitHub API error: {r.status} {r.detail}", file=sys.stderr)
-        else:
-            print(f"GitHub API request failed: {r.detail}", file=sys.stderr)
+    if not quiet:
+        _report_failure(r)
     return r.value if r.cause is None else None
+
+
+def _report_failure(r: ApiRead) -> None:
+    """Print a failed call's status and GitHub's message to stderr. Takes the call's `ApiRead`."""
+    if r.cause is None:
+        return
+    # stderr, never stdout — stdout carries `saw scan --json` / piped report output.
+    if r.status is not None:
+        print(f"GitHub API error: {r.status} {r.detail}", file=sys.stderr)
+    else:
+        print(f"GitHub API request failed: {r.detail}", file=sys.stderr)
 
 
 def oauth_scopes(token: str | None) -> frozenset[str] | None:
@@ -334,17 +341,20 @@ def list_open_pulls(owner: str, repo: str, head_branch: str, token: str | None,
 
 
 def create_pull(owner: str, repo: str, title: str, head: str, base: str,
-                body: str, token: str | None) -> dict | None:
-    """Open a PR. Returns the created PR dict (with 'number','html_url') or None."""
-    return request(f"/repos/{owner}/{repo}/pulls", method="POST", token=token,
-                   data={"title": title, "head": head, "base": base, "body": body})
+                body: str, token: str | None) -> ApiRead:
+    """Open a pull request. Takes the repository, the title, the head and base branches, the body
+    and the token. Returns an `ApiRead` holding the created pull request, or GitHub's refusal."""
+    return _do_request(f"/repos/{owner}/{repo}/pulls", method="POST", token=token,
+                       data={"title": title, "head": head, "base": base, "body": body})
 
 
 def open_or_update_pr(owner: str, repo: str, *, head_branch: str, base: str, title: str,
-                      body: str, token: str | None, head_owner: str | None = None) -> dict | None:
+                      body: str, token: str | None, head_owner: str | None = None) -> ApiRead:
     """Open a rolling PR from `head_branch`, or UPDATE the one that's already open instead of
-    duplicating it. Returns the PR dict augmented with `'action'` ('opened' | 'updated'), or
-    None if the API call failed. `head_owner` (a fork owner) makes it a cross-fork PR.
+    duplicating it. Returns an `ApiRead` holding the PR dict augmented with `'action'` ('opened' |
+    'updated'), or the cause and message GitHub gave when it refused to open one; an open PR is
+    returned even when its title and body could not be refreshed. `head_owner` (a fork owner)
+    makes it a cross-fork PR.
 
     The shareable open-or-update mechanic — the security feature's `saw fix` (same-repo) and its
     fork fallback (cross-fork) both route through this, so 'don't open a duplicate' is enforced
@@ -355,12 +365,15 @@ def open_or_update_pr(owner: str, repo: str, *, head_branch: str, base: str, tit
     if existing:
         pr = existing[0]
         update_issue(owner, repo, pr["number"], token, title=title, body=body)
-        return {**pr, "action": "updated"}
+        return ApiRead(value={**pr, "action": "updated"})
     head = f"{head_owner}:{head_branch}" if head_owner else head_branch
     created = create_pull(owner, repo, title=title, head=head, base=base, body=body, token=token)
-    if created and created.get("number"):
-        return {**created, "action": "opened"}
-    return None
+    _report_failure(created)
+    if created.cause is not None:
+        return created
+    if not isinstance(created.value, dict) or not created.value.get("number"):
+        return ApiRead(cause="http_error", detail="GitHub did not return the pull request")
+    return ApiRead(value={**created.value, "action": "opened"})
 
 
 def add_labels(owner: str, repo: str, number: int, labels: list[str],

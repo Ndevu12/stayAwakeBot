@@ -495,11 +495,26 @@ def _stopped_verdict(label: str, stop: _Stopped) -> FixVerdict:
     return _verdict(label, BaseFix(stop.state, f"{label}: {stop.text}", stop.base), stop.checkout)
 
 
-def _not_fixed(label: str, fix: _Fix, text: str, *, published: bool) -> FixVerdict:
+def _not_fixed(label: str, fix: _Fix, text: str, *, published: bool, remediation: str = "",
+               cause: str = "") -> FixVerdict:
     """The verdict when nothing was auto-fixable: heuristic findings only, or confirmed ones that
     need a person."""
     state = BaseState.MANUAL if fix.manual else BaseState.SUSPICIOUS_ONLY
-    return _verdict(label, BaseFix(state, text, fix.base, published=published), fix.checkout)
+    return _verdict(label, BaseFix(state, text, fix.base, published=published,
+                                   remediation=remediation, cause=cause), fix.checkout)
+
+
+def _remediation_of(res) -> tuple[str, str]:
+    """Name what a submission came to and why. Takes the submission result. Returns the
+    remediation and its cause."""
+    if res.kind in ("pr", "fork-pr") and res.number is not None:
+        return res.kind, ""
+    if res.kind == "floor":
+        reached = "patch" if res.patch_path else "issue" if res.issue_note else "failed"
+        return reached, res.push_reason or "unknown"
+    if res.kind in ("pr-create-failed", "fork-pr-create-failed"):
+        return "failed", res.pr_reason or "unknown"
+    return "failed", res.kind
 
 
 def _prepared_state(fix: _Fix) -> BaseState:
@@ -567,7 +582,8 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             return _not_fixed(slug, fix, (
                 f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
                 f"need manual review{note}") + manual_review_lines(fix.manual)
-                + suspicious_review_lines(fix.suspicious), published=True)
+                + suspicious_review_lines(fix.suspicious), published=True,
+                remediation="issue" if issue else "failed", cause="" if issue else "issue-not-filed")
         base = fix.base
 
         with status(f"opening PR for {slug}…", enabled=spin):
@@ -587,10 +603,13 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             text = _render_submit(res, slug=slug, base=base, partial=partial)
         state = (BaseState.PR_FAILED if not opened
                  else BaseState.PARTIAL if partial else BaseState.PR_OPENED)
+        remediation, cause = _remediation_of(res)
         return _verdict(slug, BaseFix(
             state, text + _signing_note(fix) + computed_review_lines(fix.computed)
             + manual_review_lines(fix.manual), base, fix.branch,
-            pull_request=res.number if opened else None, published=True), fix.checkout)
+            pull_request=res.number if opened else None, published=True,
+            remediation=remediation, cause=cause,
+            pull_request_url=res.url if opened else ""), fix.checkout)
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)

@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw fix --json` and `saw guard drift --json` say what each repository came to.** `saw fix --pr
+  --json` prints, for each repository, whether its fix became a pull request, a fork pull request, a
+  patch, an issue or a prepared branch, was skipped or failed, and why. `saw guard drift --json`
+  prints each repository's state and what became of its tracking issue. Progress stays on stderr.
+
 ### Changed
 - **The CI gate is called SAW Guard everywhere.** `saw guard setup` installs it as
   `.github/workflows/saw-guard.yml` with a `saw-guard` job, and its findings and drift issues say SAW
@@ -20,6 +26,13 @@ reader, not the mechanism or the weakness it closed.
   updated, and a drift issue opened under that name is still updated and closed.
 
 ### Fixed
+- **A pull request GitHub Actions may not open names the setting to turn on.** When a repository
+  does not let GitHub Actions open pull requests, `saw fix --pr` and `saw guard setup --pr` say to
+  turn on "Allow GitHub Actions to create and approve pull requests", where they used to guess at
+  the network or the token's scope.
+- **`saw guard drift` no longer reports an issue GitHub refused.** When GitHub refuses to open,
+  update or close the drift issue, the run says so and fails, where it used to report the issue
+  opened, updated or closed and pass.
 - **The setup examples show the current release, as code only.** The Action workflow in the README
   pins scanner 0.12.3, and the setup examples carry no comments; what each line does is in the text
   beside them.

@@ -120,7 +120,9 @@ def register(sub) -> None:
                     "automatically once the pin catches up. Same target model as `saw guard check`: "
                     "LOCAL by default (discovers git repos; omit targets for the current repo), "
                     "--remote (or --user/--org) sweeps GitHub repos. Reports drift as an issue, never "
-                    "a build failure. `saw guard setup`'s scheduled pin-drift job runs this.",
+                    "a build failure; the run fails only when it could not check a repo or open, "
+                    "update or close its issue. `saw guard setup`'s scheduled pin-drift job runs "
+                    "this.",
         examples=[
             ("saw guard drift", "file or close the tracking issue"),
             ("saw guard drift --org your-org", "sweep an org (implies --remote)"),
@@ -141,6 +143,8 @@ def register(sub) -> None:
                     help="check this GitHub org's repos (repeatable; implies --remote)")
     dr.add_argument("--repo", metavar="OWNER/NAME", default=None,
                     help="shorthand for a single remote repo (same as `--remote owner/name`)")
+    dr.add_argument("--json", action="store_true",
+                    help="print each repository's result as JSON")
     add_jobs_arg(dr, help="check up to N repositories concurrently (a multi-repo sweep). Default "
                           "AUTO: one repo runs sequentially, several use one worker per CPU core. "
                           "Pass a number to cap it, `-j 1` to force sequential, or `auto`.")
@@ -172,7 +176,7 @@ def run_drift(a: argparse.Namespace) -> int:
     return guard.drift_targets(
         paths=None if remote else (positionals or None),
         slugs=slugs, users=a.user or None, orgs=a.org or None, remote=remote,
-        config_path=a.config, no_stream=no_stream_requested(a), jobs=a.jobs)
+        config_path=a.config, no_stream=no_stream_requested(a), jobs=a.jobs, json_out=a.json)
 
 
 def run_setup(a: argparse.Namespace) -> int:

@@ -93,11 +93,12 @@ the branches that carried them. Read that page before you run it.
 See [the safety envelope](../../explanation/safety-envelope.md) for what `fix` will and will not touch.
 
 ```text
-saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
+saw fix [TARGETS...] [--pr] [--json] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
 | `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `-j` / `--no-stream` | As for [`saw scan`](scan.md). A missing *explicit* `--config` path is a clear error, never a crash. |
 | `--pr`, `--open-pr` | Also push the branch and open/update one rolling, de-duplicated PR per repository. Needs a credential with repo + PR write; the API is pre-flighted before any push. Not accepted with `amend`. |
+| `--json` | Print what each repository's fix came to as JSON on stdout, one record per repository: `repository`; `remediation`, one of `pr`, `fork-pr`, `patch`, `issue`, `prepared`, `skipped` or `failed`; `cause`, why it came to less than a pull request, such as `actions-may-not-open-pull-requests`; and the `pull_request` number and `url`. Progress stays on stderr. Not accepted with `amend`. |
 | `amend` | Replace past commits that still carry the payload and force-update each branch they sat on — see [`saw fix amend`](amend.md). Not accepted with `--pr`, `--branch`, `--user` or `--org`. |

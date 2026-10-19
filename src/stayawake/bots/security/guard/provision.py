@@ -443,8 +443,10 @@ def _render_setup_submit(result: SetupResult, *, color: bool) -> str:
         return (paint(f"✓ {verb} guard fork PR #{res.number}", ok, on=color) +
                 f" ({res.url}) from {res.fork_slug}" + sign)
     if res.kind in ("pr-create-failed", "fork-pr-create-failed"):
-        return paint(f"⚠️  {slug}: branch pushed but the PR API call failed (check token scope)",
-                     warn, on=color) + sign
+        from stayawake.core.identity import pr_refusal_message
+        line = pr_refusal_message(res.pr_reason, "branch pushed but the PR API call failed "
+                                                 "(check token scope)")
+        return paint(f"⚠️  {slug}: {line}", warn, on=color) + sign
     if res.kind == "fork-not-ready":
         return paint(f"⚠️  {slug}: forked to {res.fork_slug} but it wasn't ready in time — retry later",
                      warn, on=color)

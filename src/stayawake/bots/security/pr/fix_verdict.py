@@ -62,7 +62,8 @@ class BaseFix:
 
     `summary` is the operator's account of it, led by the repository. `branch` is set when a fix
     branch was made, `pull_request` when a pull request holds it, and `published` when the run was
-    asked to open one.
+    asked to open one. `remediation` and `cause` say what publishing came to and why, and
+    `pull_request_url` links the pull request.
     """
 
     state: BaseState
@@ -71,6 +72,9 @@ class BaseFix:
     branch: str = ""
     pull_request: int | None = None
     published: bool = False
+    remediation: str = ""
+    cause: str = ""
+    pull_request_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -350,3 +354,23 @@ def render_fix_verdict(verdict: FixVerdict, detail: bool = False) -> str:
         lines.append(_INDENT + "your project still declares known-malicious packages; to remove them:")
         lines += [_INDENT + line for line in plain_lines(verdict.kept_packages, _KEPT_PACKAGES_SHOWN)]
     return "\n".join(lines)
+
+
+def remediation_record(repository: str, verdict: "FixVerdict | None") -> dict:
+    """Describe what one repository's fix did, for a machine to read. Takes the repository and its
+    verdict, or None when the run stopped before reaching one. Returns the record: `remediation`
+    (pr, fork-pr, patch, issue, prepared, skipped or failed), its `cause`, and the pull request."""
+    if verdict is None:
+        return {"repository": repository, "remediation": "failed", "cause": "error",
+                "pull_request": None, "url": ""}
+    fix = verdict.base_fix
+    if fix.remediation:
+        remediation, cause = fix.remediation, fix.cause
+    elif fix.state in (BaseState.NOTHING_TO_FIX, BaseState.SUSPICIOUS_ONLY):
+        remediation, cause = "skipped", ""
+    elif fix.state in (BaseState.PREPARED, BaseState.PARTIAL):
+        remediation, cause = "prepared", ""
+    else:
+        remediation, cause = "failed", fix.state.value
+    return {"repository": verdict.repository or repository, "remediation": remediation,
+            "cause": cause, "pull_request": fix.pull_request, "url": fix.pull_request_url}

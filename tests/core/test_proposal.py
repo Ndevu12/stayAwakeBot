@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.core import proposal
+from stayawake.lib.adapters.github_api import ApiRead
 from stayawake.lib.git.write.push import PushResult
 
 
@@ -42,6 +43,12 @@ def _api(**over):
             for n, f in over.items()]
 
 
+def _pr(opened: dict | None) -> ApiRead:
+    """The read the pull-request call returns. Takes the pull request, or None when GitHub refused
+    it. Returns the read."""
+    return ApiRead(value=opened) if opened else ApiRead(cause="http_error", status=422)
+
+
 def _run(git=None, api=None, *, issue=None, patches_dir=None):
     with tempfile.TemporaryDirectory() as wt:
         with mock.patch.object(proposal.time, "sleep", return_value=None):
@@ -57,15 +64,17 @@ def _run(git=None, api=None, *, issue=None, patches_dir=None):
 
 class TestUpstreamPr(unittest.TestCase):
     def test_open(self):
-        res = _run(api={"open_or_update_pr": {"action": "opened", "number": 5, "html_url": "u"}})
+        res = _run(api={"open_or_update_pr": _pr({"action": "opened", "number": 5,
+                                                       "html_url": "u"})})
         self.assertEqual((res.kind, res.action, res.number, res.url), ("pr", "opened", 5, "u"))
 
     def test_update(self):
-        res = _run(api={"open_or_update_pr": {"action": "updated", "number": 7, "html_url": "u7"}})
+        res = _run(api={"open_or_update_pr": _pr({"action": "updated", "number": 7,
+                                                       "html_url": "u7"})})
         self.assertEqual((res.kind, res.action, res.number), ("pr", "updated", 7))
 
     def test_pr_api_failure(self):
-        res = _run(api={"open_or_update_pr": None})
+        res = _run(api={"open_or_update_pr": _pr(None)})
         self.assertEqual(res.kind, "pr-create-failed")
 
 
@@ -77,7 +86,7 @@ class TestForkRung(unittest.TestCase):
             return slug != "up/repo" and fork_push_ok          # upstream fails; fork per flag
         api = {"get_authenticated_user": user, "create_fork": fork,
                "get_repo": ({"x": 1} if repo_ready else None),
-               "open_or_update_pr": created_pr,
+               "open_or_update_pr": _pr(created_pr),
                "list_open_issues": [], "create_issue": {"number": 9, "html_url": "iu"}}
         return _run(git={"push_branch": push}, api=api, patches_dir=patches_dir, issue=issue)
 
