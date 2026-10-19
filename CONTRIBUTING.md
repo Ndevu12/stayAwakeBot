@@ -63,7 +63,7 @@ If it fails there too, it belongs to your machine, not to your change.
 
 ## Pull requests
 - Keep commits focused; describe **what** changed (not internal roadmap phases).
-- Run the suite locally; the **Worm Guard** CI gate must pass (it blocks any infected/evil-merge change).
+- Run the suite locally; the **SAW Guard** CI gate must pass (it blocks any infected/evil-merge change).
 - For security-sensitive changes, see [`docs/how-to/harden-a-repo.md`](docs/how-to/harden-a-repo.md).
 - Add a `CHANGELOG.md` `[Unreleased]` entry in the same PR for any user-visible change — see below.
 

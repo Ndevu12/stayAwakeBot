@@ -6,7 +6,7 @@ guard`)."""
 from __future__ import annotations
 
 from stayawake.bots.security.guard.constants import (
-    SAW_GUARD_ACTION, SAW_GUARD_NAME, SAW_GUARD_OWNER, SAW_GUARD_REPO, WORKFLOW_DIR, WORM_GUARD_FILE,
+    SAW_GUARD_ACTION, SAW_GUARD_NAME, SAW_GUARD_OWNER, SAW_GUARD_REPO, WORKFLOW_DIR, SAW_GUARD_FILE,
     SETUP_BRANCH,
     ActionPin, CHECKOUT_ACTION, SETUP_PYTHON_ACTION)
 from stayawake.bots.security.guard.detect import (
@@ -24,7 +24,7 @@ from stayawake.bots.security import resolution
 
 __all__ = [
     "SAW_GUARD_ACTION", "SAW_GUARD_NAME", "SAW_GUARD_OWNER", "SAW_GUARD_REPO", "WORKFLOW_DIR",
-    "WORM_GUARD_FILE", "SETUP_BRANCH",
+    "SAW_GUARD_FILE", "SETUP_BRANCH",
     "ActionPin", "CHECKOUT_ACTION", "SETUP_PYTHON_ACTION",
     "SawGuardRef", "classify_pin", "find_saw_guard", "WormGate", "find_worm_gate", "Freshness",
     "LatestSawGuard", "latest_saw_guard", "freshness", "GuardStatus", "RemoteRead", "GateProbe",

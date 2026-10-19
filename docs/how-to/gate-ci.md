@@ -1,5 +1,5 @@
 ---
-description: Stop an infected change from merging: install the worm-guard CI gate across one repository or a whole fleet, and prove it is enforced.
+description: Stop an infected change from merging: install the SAW Guard CI gate across one repository or a whole fleet, and prove it is enforced.
 ---
 
 # Gate CI

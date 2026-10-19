@@ -1218,7 +1218,7 @@ class TestBranchProtection(unittest.TestCase):
     def test_without_a_repository_it_says_nothing_and_without_a_token_the_gate_is_unknown(self):
         self.assertEqual(hygiene.check_branch_protection(None, "t"), [])
         self.assertEqual([i.id for i in hygiene.check_branch_protection("o/r", None)],
-                         ["worm-guard-requirement-unchecked"])
+                         ["saw-guard-requirement-unchecked"])
 
     def test_unprotected_branch_warns(self):
         with mock.patch("stayawake.lib.adapters.github_api.get_branch_rules", return_value=_NO_RULES), \
@@ -1233,7 +1233,16 @@ class TestBranchProtection(unittest.TestCase):
              mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
              mock.patch("stayawake.bots.security.guard.probe_remote_gate", return_value=GateProbe()):  # no saw-guard wf
             issues = hygiene.check_branch_protection("o/r", "tok")
-        self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
+        self.assertEqual([i.id for i in issues], ["saw-guard-not-required"])
+
+    def test_a_required_saw_guard_check_counts_as_the_gate(self):
+        for context in ("saw-guard", "SAW Guard — block infected merges"):
+            with self.subTest(context=context):
+                prot = {"required_status_checks": {"contexts": [context]}}
+                with mock.patch("stayawake.lib.adapters.github_api.get_branch_rules", return_value=_NO_RULES), \
+                     mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
+                     mock.patch("stayawake.bots.security.guard.probe_remote_gate", return_value=GateProbe()):
+                    self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
 
     def test_worm_guard_required_is_clean_via_heuristic(self):
         # No SAW Guard workflow found → fall back to the fuzzy "worm" context match.
@@ -1262,7 +1271,7 @@ class TestBranchProtection(unittest.TestCase):
              mock.patch("stayawake.bots.security.guard.probe_remote_gate",
                         return_value=GateProbe(ref=SawGuardRef(".github/workflows/w.yml", "saw-guard", "v0.1.4", "tag"))):
             issues = hygiene.check_branch_protection("o/r", "tok")
-        self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
+        self.assertEqual([i.id for i in issues], ["saw-guard-not-required"])
         self.assertIn("saw-guard", issues[0].title)      # names the ACTUAL context, not "worm"
 
     def test_read_failure_does_not_launder_into_a_false_not_required(self):
@@ -1276,7 +1285,7 @@ class TestBranchProtection(unittest.TestCase):
              mock.patch("stayawake.bots.security.guard.probe_remote_gate",
                         return_value=GateProbe(cause="forbidden")):
             issues = hygiene.check_branch_protection("o/r", "tok")
-        self.assertEqual([i.id for i in issues], ["worm-guard-requirement-unchecked"])
+        self.assertEqual([i.id for i in issues], ["saw-guard-requirement-unchecked"])
         self.assertEqual(issues[0].severity, "unknown")
 
 

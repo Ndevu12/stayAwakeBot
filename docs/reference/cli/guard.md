@@ -1,5 +1,5 @@
 ---
-description: saw guard — install, verify and keep current the worm-guard CI gate across one repository or a fleet. Full option reference.
+description: saw guard — install, verify and keep current the SAW Guard CI gate across one repository or a fleet. Full option reference.
 ---
 
 # `saw guard`
@@ -44,7 +44,7 @@ saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]
 ## `saw guard setup`
 
 Install the gate, or surgically bump an existing pin, across the resolved repositories. It resolves
-the latest worm-guard release to a commit SHA and the latest scanner release to a version, then writes the
+the latest SAW Guard release to a commit SHA and the latest scanner release to a version, then writes the
 workflow described below. When a gate already exists it rewrites only that `uses:` reference and
 leaves the rest of the file untouched — unless the gate is configured so it cannot report what it
 finds, which is repaired. It is idempotent, fails closed if either release cannot be resolved, and
@@ -57,8 +57,8 @@ each holding only what it needs:
 
 | Job | Runs on | Permissions | What it does |
 | --- | --- | --- | --- |
-| `worm-guard` | every pull request and push to the default branch | `contents: read`, `pull-requests: write`, `security-events: write` | Scans, and reports what it finds: a comment on the pull request, an alert in the Security tab, and the evidence as a run artifact. It **cannot push code to your repository** — it comments and raises alerts, nothing more. |
-| `remediate` | only once `worm-guard` has reported an infected verdict | `contents: write`, `pull-requests: write` | Opens one rolling `security/auto-clean` pull request with the payload removed. This is the only job that can push, and on a clean run it never starts. |
+| `saw-guard` | every pull request and push to the default branch | `contents: read`, `pull-requests: write`, `security-events: write` | Scans, and reports what it finds: a comment on the pull request, an alert in the Security tab, and the evidence as a run artifact. It **cannot push code to your repository** — it comments and raises alerts, nothing more. |
+| `remediate` | only once `saw-guard` has reported an infected verdict | `contents: write`, `pull-requests: write` | Opens one rolling `security/auto-clean` pull request with the payload removed. This is the only job that can push, and on a clean run it never starts. |
 | `pin-drift` | weekly, and on demand | `contents: read`, `issues: write` | Files one self-closing issue when the pinned SAW Guard release falls behind. |
 
 The gate stays **red until the fix pull request is merged**: remediation opens the fix, it does not
@@ -83,7 +83,7 @@ saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O
 | --- | --- |
 | `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `-j` / `--no-stream` | As for [`saw scan`](scan.md). |
 | `--pr`, `--open-pr` | Open/update a rolling `security/guard-setup` PR per repository instead of writing into the working tree. `--remote` always opens a PR. Needs a token with the `workflow` permission. |
-| `--ref SHA\|TAG` | Pin this worm-guard ref explicitly instead of resolving the latest release — offline and deterministic. A tag is resolved to its immutable SHA. |
+| `--ref SHA\|TAG` | Pin this SAW Guard ref explicitly instead of resolving the latest release — offline and deterministic. A tag is resolved to its immutable SHA. |
 | `-b`, `--branch` | Default branch to target (default: auto-detect). |
 | `--dry-run` | Print what would be written; write nothing. |
 

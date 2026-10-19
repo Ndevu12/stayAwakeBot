@@ -1,6 +1,6 @@
 name: Scanner pin drift
 
-# The worm-guard gate pins its scanner to a reviewed SHA (sentinel-ref) so a later
+# The SAW Guard gate pins its scanner to a reviewed SHA (sentinel-ref) so a later
 # compromise of main can't silently change what the gate runs. The cost of a pin is that
 # it goes stale — and a stale pin runs an out-of-date DETECTION ENGINE while you think
 # you're covered. This is the OUT-OF-BAND backstop: weekly (and on demand) it compares the
@@ -31,7 +31,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect engine drift from the worm-guard pin
+      - name: Detect engine drift from the SAW Guard pin
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/pin_tools.py drift

@@ -106,7 +106,7 @@ PROCESSES_NOT_READABLE_ID = "process-arguments-not-readable"
 APP_BUNDLE_SCAN_BLOCKED_ID = "app-bundle-scan-blocked"
 APP_BUNDLE_MODULE_UNREADABLE_ID = "app-bundle-module-unreadable"
 HOST_ARTIFACT_SCAN_BLOCKED_ID = "host-artifact-scan-blocked"
-WORM_GATE_UNCHECKED_ID = "worm-guard-requirement-unchecked"
+WORM_GATE_UNCHECKED_ID = "saw-guard-requirement-unchecked"
 UNCHECKED_GATE_IDS = frozenset({WORM_GATE_UNCHECKED_ID})
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID, BLOCKED_SURFACE_ID,
                               SURFACE_NOT_IMPLEMENTED_ID, PROCESSES_NOT_READABLE_ID,

@@ -18,7 +18,7 @@ from stayawake.lib import git as gitutil
 from stayawake.utils.render import SEVERITY, paint
 from stayawake.bots.security.guard.constants import (
     SAW_GUARD_ACTION, SAW_GUARD_NAME, SAW_GUARD_OWNER, SAW_GUARD_REPO, SAW_GUARD_USES, WORKFLOW_DIR,
-    WORM_GUARD_FILE)
+    SAW_GUARD_FILE)
 
 _SAW_GUARD_USES = re.compile(rf"^{SAW_GUARD_USES}@(?P<ref>\S+?)\s*(?:#.*)?$", re.IGNORECASE)
 _SHA = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)

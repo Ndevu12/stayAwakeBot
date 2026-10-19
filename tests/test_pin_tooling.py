@@ -41,7 +41,7 @@ class TestExtractPin(unittest.TestCase):
     def test_pin_files_lists_both_carriers(self):
         # PIN_FILES is the single source for "which files pin the scanner" — both the worm-guard gate
         # and the release self-scan must be in it, or `synced` can't gate one.
-        self.assertIn(".github/workflows/worm-guard.yml", pt.PIN_FILES)
+        self.assertIn(".github/workflows/saw-guard.yml", pt.PIN_FILES)
         self.assertIn(".github/workflows/release.yml", pt.PIN_FILES)
 
 
@@ -55,7 +55,7 @@ PIN_CONTEXT_DIFF = f"           sentinel-ref: {SHA_B}\n"        # leading space,
 PIN_FLOATING_DIFF = f"-          sentinel-ref: {SHA_B}\n+          sentinel-ref: main\n"
 
 ENGINE = "src/stayawake/bots/security/matchers/heuristic.py\n"
-GUARD = ".github/workflows/worm-guard.yml\n"
+GUARD = ".github/workflows/saw-guard.yml\n"
 
 
 class TestFreshness(unittest.TestCase):
