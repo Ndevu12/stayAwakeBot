@@ -733,6 +733,38 @@ def _commits_after(repo: Path, plan, forms) -> set[str] | None:
     return out
 
 
+def _former_paths(repo: Path, path: str, holders) -> list[tuple[str, str]] | None:
+    """Find the other paths a file's first carried versions were also held at. Takes the repo, the
+    path and the commits whose version of it carries a payload. Returns each other path with the
+    version it shares, or None when the history is too long to walk. Raises `Unread` when git could
+    not tell."""
+    found: dict[str, str] = {}
+    for sha in delivery.first_carriers(repo, {path: holders}):
+        entry = _stored_entry(repo, sha, path)
+        if entry is None:
+            continue
+        paths = gitutil.blob_paths(repo, entry[1])
+        if paths is None:
+            return None
+        for other in paths:
+            if other != path:
+                found.setdefault(other, entry[1])
+    return list(found.items())
+
+
+def _where_held(repo: Path, tips: list[str], oids, original_of: dict[str, str]) -> list[str]:
+    """Name a file and a commit that hold each version. Takes the repo, the branch tips, the blob
+    ids and the commit each rebuilt one replaces. Returns `path in commit` for each version git can
+    place, naming the operator's own commit."""
+    out: list[str] = []
+    for oid in oids:
+        found = gitutil.blob_holder(repo, oid, tips)
+        if found is not None:
+            commit, path = found
+            out.append(f"{path} in {original_of.get(commit, commit)[:12]}")
+    return out
+
+
 def _purge_carriers(repo: Path, path: str, survives) -> set[str] | None:
     """Walk `path`'s history and collect the commits whose version of it carries a payload. Takes the
     repo, the path, and the `survives` oracle that judges each version. Returns those commits, or None
@@ -1659,6 +1691,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     clean_shas: set[str] = set()
     clean_holders: dict[str, set[str]] = {}
     cleaned_head: dict[str, str] = {}
+    flat = every_signature(signatures)
+    repair_under: dict[str, Callable[[str], Repair]] = {}
     for finding, carries, corrector, head_clean in _content_targets(repo, scan, signatures, unread):
         with _naming_unread(unread):
             carrying = _carrying_commits(repo, finding.path, carries)
@@ -1670,6 +1704,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             clean_shas.update(carrying)
             clean_holders[finding.path] = set(carrying)
             cleaned_head[finding.path] = head_clean
+            repair_under[finding.path] = (
+                lambda name, f=finding: _repair_checks(replace(f, path=name), flat))
 
     for path, carries, corrector in _predates_content_targets(
             repo, scan, signatures, allowlist, opts, set(clean), unread):
@@ -1682,6 +1718,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             clean[path] = (carries, corrector)
             clean_shas.update(carrying)
             clean_holders[path] = set(carrying)
+            repair_under[path] = lambda name: Repair(footprint.carries_code_loader(flat),
+                                                     footprint.code_loader_corrector(name, flat))
 
     remove: dict[str, str] = {}
     remove_shas: set[str] = set()
@@ -1730,6 +1768,36 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 remove_holders[former] = set(former_foreign)
 
     survives = oracle.survives(repo, signatures, allowlist, opts)
+    payload = oracle.payload_matchers(signatures)
+    following = list(clean)
+    while following:
+        path = following.pop()
+        with _naming_unread(unread):
+            formers = _former_paths(repo, path, clean_holders[path])
+            if formers is None:
+                return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
+            for former, oid in formers:
+                if former in clean or former in remove or former in varied or former in swept:
+                    continue
+                content = gitutil.blob(repo, oid)
+                if content is None:
+                    raise gitutil.Unread(f"every copy of {former}")
+                if not oracle.content_confirms(content, former, payload, allowlist, opts):
+                    continue
+                carries, corrector = repair_under[path](former)
+                if carries is None or corrector is None:
+                    continue
+                carrying = _carrying_commits(repo, former, carries)
+                if carrying is None:
+                    return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, former)
+                if not carrying:
+                    continue
+                clean[former] = (carries, corrector)
+                clean_shas.update(carrying)
+                clean_holders[former] = set(carrying)
+                repair_under[former] = repair_under[path]
+                following.append(former)
+
     substitute: dict[str, tuple[str, tuple[str, str]]] = {}
     substitute_shas: set[str] = set()
     supply_paths: set[str] = set()
@@ -2131,7 +2199,12 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 unread.append(name)
             elif malicious_oids & one:
                 holding.append(name)
-        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, names_that_fit(sorted(holding or unread)))
+        original_of = {new: old for old, new in rebuilt.mapping.items()}
+        where = names_that_fit(_where_held(repo, [tip for _n, tip in post_view],
+                                           sorted(malicious_oids & reached)[:3], original_of))
+        branches = names_that_fit(sorted(holding or unread))
+        detail = f"{where} on {branches}" if where and holding else where or branches
+        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, detail)
     taken_out = {oid for _path, oid in history.take_out}
     rewritten = _HistoryPayloads()
     still_held = [f"{entry.path} in {entry.commit[:12]}" for _finding, entry in _confirmed_versions(

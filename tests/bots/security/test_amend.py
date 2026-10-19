@@ -1055,11 +1055,11 @@ def _seam_line(clean_prefix: str) -> str:
 class TestAmendActsOnContentPayload(_AmendFixture):
     """A confirmed payload in a file, carrying no commit id, is rewritten out of history."""
 
-    def _act_full(self, scan, pusher=_ok_push, resolver=None):
+    def _act_full(self, scan, pusher=_ok_push, resolver=None, allowlist=()):
         with self._remote():
             with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
                 return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(),
-                                     [], "t", pusher=pusher, resolver=resolver)
+                                     list(allowlist), "t", pusher=pusher, resolver=resolver)
 
     def test_a_loader_a_forged_merge_also_delivered_is_cut_out_and_later_edits_kept(self):
         clean = "const config = {};\nexport default config;\n"
@@ -1131,6 +1131,115 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertNotIn("temp_auto_push.bat", head)
         self.assertNotIn("branch_structure.json", head)
         self.assertTrue(calls)
+
+    def test_markers_in_a_file_that_was_later_renamed_go_from_both_names(self):
+        self.write(self.d, "conf/.gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.commit(self.d, "markers added")
+        _git(self.d, "mv", "conf", "config")
+        self.commit(self.d, "rename conf to config")
+        self.write(self.d, "later.txt", "later work\n")
+        self.commit(self.d, "later work")
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          "config/.gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+
+        outcome = self._act_full(scan)
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        for commit in self.git(self.d, "rev-list", "HEAD").split():
+            with self.subTest(commit=commit[:8]):
+                held = self.git_may_fail(self.d, "grep", "-l", "temp_auto_push.bat", commit)
+                self.assertFalse(held.stdout.strip())
+        self.assertEqual(self._show("HEAD:config/.gitignore"), "node_modules\n")
+
+    def test_an_earlier_name_is_repaired_as_a_file_of_that_name(self):
+        self.write(self.d, "conf/.gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.commit(self.d, "markers added")
+        _git(self.d, "mv", "conf", "config")
+        self.commit(self.d, "rename conf to config")
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          "config/.gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        from stayawake.bots.security.pr import amend as amend_module
+        repaired_as = []
+
+        def recording(found, flat):
+            repaired_as.append(found.path)
+            return real(found, flat)
+
+        real = amend_module._repair_checks
+        with mock.patch.object(amend_module, "_repair_checks", side_effect=recording):
+            outcome = self._act_full(scan)
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn("conf/.gitignore", repaired_as)
+
+    def test_markers_left_under_the_old_name_of_a_file_renamed_with_an_edit_go_too(self):
+        self.write(self.d, "conf/.gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.commit(self.d, "markers added")
+        _git(self.d, "mv", "conf", "config")
+        self.write(self.d, "config/.gitignore",
+                   "node_modules\ntemp_auto_push.bat\nbranch_structure.json\ndist\n")
+        self.commit(self.d, "rename conf to config and add a rule")
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          "config/.gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+
+        outcome = self._act_full(scan)
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        for commit in self.git(self.d, "rev-list", "HEAD").split():
+            with self.subTest(commit=commit[:8]):
+                held = self.git_may_fail(self.d, "grep", "-l", "temp_auto_push.bat", commit)
+                self.assertFalse(held.stdout.strip())
+
+    def test_a_copy_you_allowlisted_is_left_alone_and_named_where_it_is(self):
+        markers = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"
+        self.write(self.d, "tests/fixtures/infected/.gitignore", markers)
+        fixture = self.commit(self.d, "planted fixture")
+        self.write(self.d, ".gitignore", markers)
+        self.commit(self.d, "markers added")
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          ".gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        before = self._rev()
+
+        outcome = self._act_full(scan, allowlist=[{"signature": "gitignore-autopush-markers",
+                                                   "path_glob": "tests/fixtures/infected/.gitignore"}])
+
+        self.assertEqual(before, self._rev(), "nothing moved")
+        self.assertEqual(self._show(f"{before}:tests/fixtures/infected/.gitignore"), markers)
+        (reason,) = [r for r in outcome.reasons if r.cause is Cause.PAYLOAD_STILL_REACHABLE]
+        self.assertIn(f"tests/fixtures/infected/.gitignore in {fixture[:12]}", reason.detail)
+
+    def test_a_file_a_forged_merge_delivered_is_still_taken_out_after_a_rename(self):
+        _git(self.d, "merge", "--no-ff", "--no-commit", "-q", "feature")
+        self.write(self.d, "x/.gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.write(self.d, "x/helper.js", "module.exports = 1;\n")
+        _git(self.d, "add", "-A")
+        _git(self.d, "-c", "user.name=Injected", "-c", "user.email=inj@t.test", "commit", "-qm",
+             "merge (forged)")
+        merge = self._rev()
+        (self.d / "y").mkdir()
+        _git(self.d, "mv", "x/.gitignore", "y/.gitignore")
+        self.commit(self.d, "rename x to y")
+        content = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          "y/.gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[content, self._confirmed_finding(merge, ("x/.gitignore", "x/helper.js"))])
+
+        outcome = self._act_full(scan)
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        rebuilt_merge = self.git(self.d, "log", "-1", "--format=%H", "--grep=merge (forged)").strip()
+        held = self.git(self.d, "ls-tree", "-r", "--name-only", rebuilt_merge).split()
+        self.assertNotIn("x/.gitignore", held)
+        self.assertNotIn("x/helper.js", held)
 
     def test_a_confirmed_finding_it_cannot_excise_leaves_review_work(self):
         self.write(self.d, "postcss.config.mjs", "const config = {};\nexport default config;\n")
