@@ -189,6 +189,11 @@ def with_checkout(outcome: AmendOutcome, clauses: Sequence[str], *,
     return replace(outcome, checkout=tuple(clauses), checkout_settled=settled)
 
 
+def with_reasons(outcome: AmendOutcome, reasons: Sequence[Reason]) -> AmendOutcome:
+    """`outcome` with more reasons. Takes the outcome and the reasons. Returns the new outcome."""
+    return replace(outcome, reasons=tuple(outcome.reasons) + tuple(reasons))
+
+
 def refused(repository: str, cause: Cause, detail: str = "", subjects: str = "",
             recovery: str = "", also: tuple[Reason, ...] = ()) -> AmendOutcome:
     """Nothing was force-updated, and this is the leading reason why. No ref moved.

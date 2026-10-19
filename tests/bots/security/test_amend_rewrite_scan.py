@@ -15,6 +15,7 @@ from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_amend import _AmendFixture
 from tests.support import samples
+from tests.support.offline_github import github_answers
 
 LOADER = samples.marked_loader()
 STAGE2 = samples.joined('global', "['_V']=function(x){return x};require('child_process').exec('whoami');\n")
@@ -77,7 +78,7 @@ class TestTheRewriteIsReadInFull(_Rewrite):
         self.assertEqual("export const app = 1;\n",
                          self.git(self.d, "show", f"{self.base}:src/app.js"))
 
-    def test_a_copy_on_a_branch_it_does_not_rewrite_is_named_and_the_rest_is_cleaned(self):
+    def test_a_copy_on_another_branch_is_taken_out_with_the_rest(self):
         self.git(self.d, "checkout", "-q", "-b", "other")
         self.write(self.d, "tools/s3.js", STAGE3)
         self.commit(self.d, "a copy")
@@ -86,8 +87,7 @@ class TestTheRewriteIsReadInFull(_Rewrite):
         self.rename_and_change_then_delete()
         outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
-        self.assertTrue(outcome.needs_review)
-        self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+        self.assertNotIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
         self.assertFalse(self.ever_holds(STAGE3))
         self.assertFalse(self.ever_holds(LOADER))
 
@@ -367,9 +367,12 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         rewritten = self.git(self.d, "log", "--format=%H", "--grep=add boot", self.base).split()
         self.assertFalse(self.holds(rewritten[0], "src/boot.js"))
 
-    def test_commits_from_before_the_infection_are_not_rewritten(self):
+    def test_commits_older_than_the_first_payload_are_kept_and_the_payload_goes(self):
+        self.write(self.d, "notes.txt", "before any sample\n")
+        older = self.commit(self.d, "notes")
         self.write(self.d, "tests/fixtures/old.js", STAGE3.replace("uname", "date"))
-        before = self.commit(self.d, "test: an old sample")
+        sample = self.commit(self.d, "test: an old sample")
+        old_version = self.git(self.d, "rev-parse", f"{sample}:tests/fixtures/old.js").strip()
         self.evil_merge()
         self.write(self.d, "tests/fixtures/old.js", STAGE2)
         self.commit(self.d, "test: refresh the sample")
@@ -377,7 +380,23 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.commit(self.d, "test: drop the sample")
         outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
-        self.assertIn(before, self.git(self.d, "rev-list", self.base).split())
+        self.assertIn(older, self.git(self.d, "rev-list", self.base).split())
+        self.assertNotIn(old_version, self.git(self.d, "rev-list", "--objects", self.base))
+
+    def test_injected_lines_are_cut_out_of_the_commits_that_kept_them_unchanged(self):
+        self.evil_merge()
+        self.write(self.d, ".gitignore", "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.commit(self.d, "markers added")
+        self.write(self.d, "notes.txt", "unrelated work\n")
+        self.commit(self.d, "unrelated work")
+        self.write(self.d, ".gitignore", "node_modules\n")
+        self.commit(self.d, "markers removed by hand")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        for commit in self.git(self.d, "rev-list", self.base).split():
+            with self.subTest(commit=commit[:8]):
+                held = self.git_may_fail(self.d, "grep", "-l", "temp_auto_push.bat", commit)
+                self.assertFalse(held.stdout.strip())
 
     def test_injected_lines_in_an_older_version_are_cut_out_and_the_rest_stays(self):
         self.evil_merge()
@@ -709,6 +728,76 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         outcome = self.run_amend()
         self.assertEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
         self.assertFalse(outcome.needs_review)
+
+
+
+class TestABranchOnlyAnOlderPayloadReaches(_Rewrite):
+    """A branch only an older payload brings into the run does not stop the rest being cleaned."""
+
+    def setUp(self):
+        super().setUp()
+        self.remote_tips: dict[str, str] = {}
+        self.pushed: list[str] = []
+
+    def _remote(self, *, permitted=True, protected=False):
+        return github_answers(lambda branch: self.remote_tips.get(branch) or self._rev(branch),
+                              permitted=permitted, protected=protected)
+
+    def _amend(self):
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        with self._remote(), \
+                mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+            return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
+                                 pusher=self._push, resolver=None)
+
+    def _push(self, branch, *_args):
+        self.pushed.append(branch)
+        return PushResult(True)
+
+    def _side_with_an_old_sample(self):
+        root = self.git(self.d, "rev-list", "--max-parents=0", "HEAD").strip()
+        self.git(self.d, "checkout", "-qb", "side", root)
+        self.write(self.d, "old/sample.js", STAGE3)
+        self.commit(self.d, "old sample")
+
+    def _side_branch(self, outcome):
+        (side,) = [b for b in outcome.branches if b.name == "side"]
+        return side
+
+    def test_a_branch_behind_its_remote_is_left_and_named_while_the_infected_one_is_cleaned(self):
+        self._side_with_an_old_sample()
+        self.write(self.d, "notes.txt", "pushed by someone else\n")
+        ahead = self.commit(self.d, "teammate work")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git(self.d, "branch", "-f", "side", f"{ahead}^")
+        self.remote_tips["side"] = ahead
+        self.evil_merge()
+
+        outcome = self._amend()
+
+        self.assertIn(self.base, self.pushed)
+        self.assertNotIn("side", self.pushed)
+        self.assertFalse(self.ever_holds(STAGE2))
+        side = self._side_branch(outcome)
+        self.assertFalse(side.force_updated)
+        self.assertIs(side.reason.cause, Cause.LOCAL_MISSING_REMOTE_COMMITS)
+
+    def test_a_branch_checked_out_with_changes_is_left_and_named_while_the_infected_one_is_cleaned(self):
+        self._side_with_an_old_sample()
+        self.git(self.d, "checkout", "-q", self.base)
+        elsewhere = self.owned(self.d.parent / "side-checkout")
+        self.git(self.d, "worktree", "add", "-q", str(elsewhere), "side")
+        (elsewhere / "a.txt").write_text("work in progress\n")
+        self.evil_merge()
+
+        outcome = self._amend()
+
+        self.assertIn(self.base, self.pushed)
+        self.assertNotIn("side", self.pushed)
+        self.assertFalse(self.ever_holds(STAGE2))
+        side = self._side_branch(outcome)
+        self.assertFalse(side.force_updated)
+        self.assertIs(side.reason.cause, Cause.WORKING_TREE_NOT_CLEAN)
 
 
 if __name__ == "__main__":

@@ -1061,6 +1061,190 @@ class TestAmendActsOnContentPayload(_AmendFixture):
                 return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(),
                                      list(allowlist), "t", pusher=pusher, resolver=resolver)
 
+    _MARKERS = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"
+    _CLEAN = "const config = {};\nexport default config;\n"
+
+    def _markers_at(self, path):
+        return Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM, path, "markers",
+                       remediation="strip-gitignore-markers", confidence=CONFIRMED)
+
+    def _loader_at(self, path):
+        return Finding("loader-seed-var", "code-loader", Severity.CRITICAL, path, "loader",
+                       remediation="recover", confidence=CONFIRMED)
+
+    def _amend_for(self, *findings):
+        return self._act_full(ScanResult(target=str(self.d), source="local", findings=list(findings)))
+
+    def _held_on_branches(self, needle):
+        heads = self.git(self.d, "for-each-ref", "--format=%(refname)", "refs/heads").split()
+        held = set()
+        for commit in self.git(self.d, "rev-list", *heads).split():
+            found = self.git_may_fail(self.d, "grep", "-l", "-F", needle, commit).stdout.split()
+            held |= {(commit[:12], name.split(":", 1)[1]) for name in found}
+        return held
+
+    def test_markers_under_an_old_name_a_heavily_edited_rename_hides_go_too(self):
+        self.write(self.d, "conf/.gitignore", self._MARKERS)
+        self.commit(self.d, "markers added")
+        _git(self.d, "mv", "conf", "config")
+        self.write(self.d, "config/.gitignore",
+                   self._MARKERS + "".join(f"build-output-{i}/\n" for i in range(12)))
+        self.commit(self.d, "move conf to config and add rules")
+
+        outcome = self._amend_for(self._markers_at("config/.gitignore"))
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(self._held_on_branches("temp_auto_push.bat"), set())
+
+    def test_markers_in_a_file_deleted_and_added_again_elsewhere_go_from_the_old_copy(self):
+        self.write(self.d, "conf/.gitignore", self._MARKERS)
+        self.commit(self.d, "markers added")
+        _git(self.d, "rm", "-q", "conf/.gitignore")
+        self.commit(self.d, "drop conf")
+        self.write(self.d, "config/.gitignore", self._MARKERS + "dist\n")
+        self.commit(self.d, "add config")
+
+        outcome = self._amend_for(self._markers_at("config/.gitignore"))
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(self._held_on_branches("temp_auto_push.bat"), set())
+
+    def test_markers_from_before_a_hand_cleanup_go_when_the_file_is_infected_again(self):
+        self.write(self.d, "conf/.gitignore", self._MARKERS)
+        self.commit(self.d, "markers added")
+        self.write(self.d, "conf/.gitignore", "node_modules\n")
+        self.commit(self.d, "cleanup")
+        _git(self.d, "mv", "conf", "config")
+        self.commit(self.d, "rename")
+        self.write(self.d, "config/.gitignore", self._MARKERS + "dist\n")
+        self.commit(self.d, "infected again")
+
+        outcome = self._amend_for(self._markers_at("config/.gitignore"))
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(self._held_on_branches("temp_auto_push.bat"), set())
+
+    def test_a_loader_left_under_an_old_name_the_repair_cannot_clean_is_taken_out(self):
+        self.write(self.d, "vite.config.js", "// vite\n" + self._CLEAN)
+        self.commit(self.d, "add")
+        self.write(self.d, "vite.config.js", "// vite\n" + self._CLEAN + _LOADER + "\n")
+        self.commit(self.d, "loader added")
+        _git(self.d, "mv", "vite.config.js", "vite.config.ts")
+        self.write(self.d, "vite.config.ts", "// typed\n" + _seam_line("// vite\n" + self._CLEAN))
+        self.commit(self.d, "move to ts")
+
+        outcome = self._amend_for(self._loader_at("vite.config.ts"))
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(self._held_on_branches(_LOADER[:40]), set())
+
+    def test_a_payload_removed_by_hand_earlier_goes_when_another_file_is_infected(self):
+        self.write(self.d, "conf/.gitignore", self._MARKERS)
+        self.commit(self.d, "markers added")
+        _git(self.d, "rm", "-q", "conf/.gitignore")
+        self.commit(self.d, "removed by hand")
+        self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+        self.commit(self.d, "loader later")
+
+        outcome = self._amend_for(self._loader_at("vite.config.ts"))
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(self._held_on_branches("temp_auto_push.bat"), set())
+
+    def test_a_payload_on_a_branch_with_nothing_else_infected_goes_too(self):
+        _git(self.d, "checkout", "-q", "-b", "side")
+        self.write(self.d, "conf/.gitignore", self._MARKERS)
+        self.commit(self.d, "side markers")
+        _git(self.d, "checkout", "-q", "-")
+        self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+        self.commit(self.d, "loader on main")
+
+        outcome = self._amend_for(self._loader_at("vite.config.ts"))
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(self._held_on_branches("temp_auto_push.bat"), set())
+
+    def test_your_own_older_settings_are_left_as_they_were(self):
+        from tests.bots.security.test_remediation_acceptance import SETTINGS_INJECTED
+        for own in ('{"editor.tabSize":4,"task.allowAutomaticTasks":"off"}\n',
+                    '{"editor.tabSize":4,"tasks":{"version":"2.0.0"}}\n'):
+            with self.subTest(settings=own):
+                self.setUp()
+                self.write(self.d, ".vscode/settings.json", own)
+                yours = self.commit(self.d, "your own settings")
+                self.write(self.d, ".vscode/settings.json", '{"editor.tabSize":4}\n')
+                self.commit(self.d, "settings trimmed")
+                self.write(self.d, ".vscode/settings.json", SETTINGS_INJECTED)
+                self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+                self.commit(self.d, "infection")
+                self.write(self.d, ".vscode/settings.json", '{"editor.tabSize":4}\n')
+                self.commit(self.d, "settings fixed by hand")
+
+                outcome = self._amend_for(self._loader_at("vite.config.ts"))
+
+                self.assertTrue(outcome.completed, self._causes(outcome))
+                self.assertIn(yours, self.git(self.d, "rev-list", "HEAD").split())
+                self.assertFalse(self._held_on_branches("allowAutomaticTasks\":\"on"))
+
+    def test_your_own_settings_restored_from_an_older_commit_are_left_there(self):
+        from tests.bots.security.test_remediation_acceptance import SETTINGS_INJECTED
+        own = '{"editor.tabSize":4,"task.allowAutomaticTasks":"off"}\n'
+        self.write(self.d, ".vscode/settings.json", own)
+        yours = self.commit(self.d, "your own settings")
+        self.write(self.d, "notes.txt", "notes\n")
+        self.commit(self.d, "notes")
+        self.write(self.d, ".vscode/settings.json", SETTINGS_INJECTED)
+        self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+        self.commit(self.d, "infection")
+        _git(self.d, "checkout", yours, "--", ".vscode/settings.json")
+        self.commit(self.d, "settings restored")
+
+        self._amend_for(self._loader_at("vite.config.ts"))
+
+        self.assertIn(yours, self.git(self.d, "rev-list", "HEAD").split())
+        self.assertEqual(self._show(f"{yours}:.vscode/settings.json"), own)
+
+    def test_an_older_commit_it_cannot_rewrite_leaves_the_rest_cleaned_and_names_the_rest(self):
+        self.write(self.d, "conf/.gitignore", self._MARKERS)
+        self.commit(self.d, "markers added")
+        _git(self.d, "rm", "-q", "conf/.gitignore")
+        message = self.d.parent / "message.txt"
+        message.write_bytes(b"removed by hand caf\xe9\n")
+        _git(self.d, "-c", "i18n.commitEncoding=ISO-8859-1", "commit", "-qF", str(message))
+        self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+        self.commit(self.d, "loader later")
+
+        outcome = self._amend_for(self._loader_at("vite.config.ts"))
+
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(self._held_on_branches(_LOADER[:40]), set())
+        (named,) = [r for r in outcome.reasons if r.cause is Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY]
+        self.assertIn("conf/.gitignore", named.subjects)
+
+    def test_a_file_you_keep_is_still_named_when_older_commits_cannot_be_rewritten(self):
+        from stayawake.bots.security.pr.resolve import KEEP, DeliveryAnswer, DeliveryQuestion, Resolution
+        self.write(self.d, "conf/.gitignore", self._MARKERS + "dist\n")
+        self.commit(self.d, "older markers")
+        _git(self.d, "rm", "-q", "conf/.gitignore")
+        message = self.d.parent / "message.txt"
+        message.write_bytes(b"removed by hand caf\xe9\n")
+        _git(self.d, "-c", "i18n.commitEncoding=ISO-8859-1", "commit", "-qF", str(message))
+        self.write(self.d, "vite.config.ts", _seam_line("// vite\n" + self._CLEAN))
+        self.write(self.d, "tools/helper.js", "module.exports = 1;\n")
+        self.commit(self.d, "infection")
+        asked = []
+
+        def keep(question):
+            asked.append(question)
+            return DeliveryAnswer(KEEP) if isinstance(question, DeliveryQuestion) else Resolution()
+
+        outcome = self._act_full(ScanResult(target=str(self.d), source="local",
+                                            findings=[self._loader_at("vite.config.ts")]), resolver=keep)
+
+        self.assertEqual(len([q for q in asked if isinstance(q, DeliveryQuestion)]), 1)
+        (kept,) = [r for r in outcome.reasons if r.cause is Cause.ARRIVALS_KEPT]
+        self.assertIn("tools/helper.js", kept.subjects)
+
     def test_a_loader_a_forged_merge_also_delivered_is_cut_out_and_later_edits_kept(self):
         clean = "const config = {};\nexport default config;\n"
         self.write(self.d, "postcss.config.mjs", clean)

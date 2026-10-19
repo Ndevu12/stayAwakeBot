@@ -250,3 +250,26 @@ def keep_decisions(slug: str, decisions) -> bool:
     Returns whether that was done."""
     return _replace_decisions(slug, list(decisions))
 
+
+def saved_state(slug: str) -> dict[Path, bytes] | None:
+    """Read the decisions and records one repository's runs keep. Takes the repository's slug.
+    Returns each file mapped to its bytes, or None when one could not be read."""
+    root = state_dir(slug)
+    try:
+        files = [root / DECIDED_NAME, *sorted(root.glob(f"*/{RECORD_NAME}"))]
+        return {path: path.read_bytes() for path in files if path.is_file()}
+    except OSError:
+        return None
+
+
+def put_back(slug: str, saved: dict[Path, bytes]) -> bool:
+    """Put the decisions and records back as `saved_state` read them. Takes the repository's slug and
+    what it read. Returns whether every file was put back."""
+    root = state_dir(slug)
+    try:
+        for path in [root / DECIDED_NAME, *root.glob(f"*/{RECORD_NAME}")]:
+            if path not in saved and path.is_file():
+                path.unlink()
+    except OSError:
+        return False
+    return all(atomicwrite.replace(path, body) for path, body in saved.items())
