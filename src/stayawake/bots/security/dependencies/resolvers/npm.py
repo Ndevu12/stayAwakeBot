@@ -102,7 +102,7 @@ class NpmResolver(Resolver):
                 if m:
                     for name in names:
                         if name:
-                            out.append((name, m.group(1)))
+                            out.append((_real_name(name), m.group(1)))
         return out
 
     # ── pnpm-lock.yaml (`packages:` keyed by /name@version(peers) or /name/version_peer) ──
@@ -120,7 +120,7 @@ class NpmResolver(Resolver):
                 for key in block:
                     nv = _pnpm_key_name_version(key)
                     if nv:
-                        out.append(nv)
+                        out.append((_real_name(nv[0]), nv[1]))
         return out
 
 
@@ -131,6 +131,13 @@ def _exact_version(spec: str) -> str | None:
     if s[:1] == "v" and s[1:2].isdigit():          # a `v1.2.3` pin → drop the leading v
         s = s[1:]
     return s if _EXACT_VERSION.match(s) else None
+
+
+def _real_name(name: str) -> str:
+    """Name the package a lockfile entry installs. Takes the entry's name, which an alias writes as
+    `alias@npm:package`. Returns the package's own name."""
+    at = name.find("@npm:", 1)
+    return name[at + len("@npm:"):] if at > 0 else name
 
 
 def _yarn_spec_name(spec: str) -> str:

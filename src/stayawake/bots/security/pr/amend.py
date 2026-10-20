@@ -28,6 +28,7 @@ from stayawake.lib.git.auth import run_remote_git
 from stayawake.lib.git.borrowed import BorrowError, borrow
 from stayawake.lib.git.objects import read_blobs
 from stayawake.lib.git import remote as gitremote
+from stayawake.lib.git.history_tips import history_tips
 from stayawake.lib.git.run import LOCAL_TIMEOUT, UNTRUSTED
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
                                                 amended, names_that_fit, refused,
@@ -387,7 +388,7 @@ def _read_other_refs(repo: Path, display: str, signatures, allowlist, opts, skip
     `_HistoryPayloads` whose `on_other_refs`, `unread`, `partly_read`, `runnable`, `submodules` and
     `cut_at` it fills."""
     listed = gitutil.listed_branch_refs(repo)
-    candidates, unsure = _candidate_refs(repo)
+    candidates, unsure = history_tips(repo)
     if listed is None:
         out.unread.append(_PAST_VERSIONS)
         return
@@ -1139,121 +1140,6 @@ def _branches_left(repo: Path, checks, covered: set[str]) -> tuple[list[str], li
     return sorted(out), sorted(unsure)
 
 
-def _answer(repo: Path, args: list[str]) -> str | None:
-    """Run one read-only git command. Takes the repo and the arguments. Returns its output, or None
-    when git could not answer."""
-    res = gitutil.run(repo, args, context=UNTRUSTED)
-    return None if res is None or res.returncode != 0 else (res.stdout or "")
-
-
-_PER_CHECKOUT = ("refs/bisect/", "refs/worktree/", "refs/rewritten/")
-_PSEUDO_REFS = ("ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
-                "REBASE_HEAD", "BISECT_HEAD", "AUTO_MERGE")
-
-
-def _pseudo_refs_in(repo: Path, gitdir: Path) -> list[tuple[str, str]] | None:
-    """List the pseudo-refs one checkout holds, such as `ORIG_HEAD`, with what they point at. Takes
-    the repo and the directory git keeps that checkout's refs in. Returns `(name, object id)` for
-    each present, or None when git could not answer."""
-    res = gitutil.run(repo, [f"--git-dir={gitdir}", "cat-file", "--batch-check"],
-                      context=UNTRUSTED, input_text="".join(f"{name}\n" for name in _PSEUDO_REFS))
-    if res is None or res.returncode != 0:
-        return None
-    lines = (res.stdout or "").splitlines()
-    if len(lines) != len(_PSEUDO_REFS):
-        return None
-    out = []
-    for name, line in zip(_PSEUDO_REFS, lines):
-        parts = line.split()
-        if len(parts) == 3:
-            out.append((name, parts[0]))
-        elif parts[-1:] != ["missing"]:
-            return None
-    return out
-
-
-def _refs_in(repo: Path, patterns: list[str], gitdir: Path | None = None) -> list[tuple[str, str]] | None:
-    """List refs with their tips, leaving out a symbolic ref whose target is listed in its own right.
-    Takes the repo, the ref patterns, and the directory git keeps one checkout's refs in when those
-    are the ones asked for. Returns `(name, tip)` pairs, or None when git could not list them."""
-    pinned = [f"--git-dir={gitdir}"] if gitdir is not None else []
-    named = _answer(repo, [*pinned, "for-each-ref",
-                           "--format=%(refname)%00%(objectname)%00%(symref)", *patterns])
-    if named is None:
-        return None
-    rows = [parts for parts in (line.split("\0") for line in named.splitlines())
-            if len(parts) == 3 and parts[1]]
-    listed = {name for name, _tip, _target in rows}
-    return [(name, tip) for name, tip, target in rows if target not in listed]
-
-
-def _checkout_dirs(repo: Path) -> list[tuple[str, Path]] | None:
-    """Find the directory git keeps each checkout's own refs in. Takes the repo. Returns each as
-    `(label, directory)`, labelled the way git addresses another checkout's refs, or None when they
-    could not be found."""
-    common = _answer(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    if common is None or not common.strip():
-        return None
-    root = Path(common.strip())
-    dirs = [("main-worktree", root)]
-    try:
-        dirs += [(f"worktrees/{d.name}", d) for d in sorted((root / "worktrees").iterdir())
-                 if d.is_dir()]
-    except FileNotFoundError:
-        pass
-    except OSError:
-        return None
-    return dirs
-
-
-def _candidate_refs(repo: Path) -> tuple[list[tuple[str, str]], list[str]]:
-    """List the refs and checkouts that can still reach a commit. Takes the repo. Returns each as
-    `(name, tip)`, and what could not be listed."""
-    out: list[tuple[str, str]] = []
-    unsure: list[str] = []
-    shared = _refs_in(repo, ["refs/"])
-    if shared is None:
-        unsure.append("the tags, stashes and other refs")
-    else:
-        out += [(name, tip) for name, tip in shared if not name.startswith(_PER_CHECKOUT)]
-    checkouts = _checkout_dirs(repo)
-    if checkouts is None:
-        unsure.append("the other checkouts' own refs")
-    for label, gitdir in checkouts or []:
-        own = _refs_in(repo, list(_PER_CHECKOUT), gitdir)
-        pseudo = _pseudo_refs_in(repo, gitdir)
-        if own is None or pseudo is None:
-            unsure.append(f"the refs of {label}")
-        out += [(f"{label}/{name}", tip) for name, tip in (own or []) + (pseudo or [])]
-    if any(name == "refs/stash" for name, _tip in out):
-        entries = _answer(repo, ["rev-list", "-g", "refs/stash"])
-        if entries is None:
-            unsure.append("the stash entries")
-        else:
-            stashed = entries.split()
-            out = [(name, tip) for name, tip in out if name != "refs/stash" or tip not in stashed]
-            out += [(f"stash@{{{i}}}", sha) for i, sha in enumerate(stashed)]
-    heads = _checkout_heads(repo)
-    if heads is None:
-        unsure.append("the other checkouts")
-    return out + (heads or []), unsure
-
-
-def _checkout_heads(repo: Path) -> list[tuple[str, str]] | None:
-    """List the commit each checkout of the repository is on. Takes the repo. Returns the label and
-    commit of each checkout on a commit, or None when git could not list them."""
-    worktrees = _answer(repo, ["worktree", "list", "--porcelain"])
-    if worktrees is None:
-        return None
-    heads, path = [], ""
-    for line in worktrees.splitlines():
-        if line.startswith("worktree "):
-            path = line[len("worktree "):]
-        elif line.startswith("HEAD ") and line[len("HEAD "):].strip().strip("0"):
-            heads.append((f"worktree {path}", line[len("HEAD "):].strip()))
-    return heads
-
-
 def _refs_still_reaching(repo: Path, oids: set[str],
                          clean_tips: list[str]) -> tuple[list[str], list[str]]:
     """Name the refs from whose history any id in `oids` is still reachable, judging each ref by what
@@ -1261,7 +1147,7 @@ def _refs_still_reaching(repo: Path, oids: set[str],
     Returns the names of the refs that still reach one, and what could not be established."""
     if not oids:
         return [], []
-    candidates, unsure = _candidate_refs(repo)
+    candidates, unsure = history_tips(repo)
     if not candidates:
         return [], unsure
     everything = gitutil.reachable_objects(repo, [s for _n, s in candidates], clean_tips)
@@ -2326,7 +2212,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     for name, ref in others or []:
         if name in covered_names:
             continue
-        tip = (_answer(repo, ["rev-parse", ref]) or "").strip()
+        tip = (gitutil.answer(repo, ["rev-parse", ref]) or "").strip()
         if tip:
             post_view.append((name, tip))
         else:

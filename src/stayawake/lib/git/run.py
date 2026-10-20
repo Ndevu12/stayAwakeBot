@@ -234,3 +234,10 @@ def stdout(repo: str | Path | None, args: list[str], *, context: Context = UNTRU
     """Run a git command; return its stdout ('' on any failure)."""
     res = run(repo, args, context=context)
     return res.stdout if (res is not None and res.returncode == 0) else ""
+
+
+def answer(repo: str | Path | None, args: list[str], *, context: Context = UNTRUSTED) -> str | None:
+    """Run one read-only git command. Takes the repo, the arguments and the context. Returns its
+    output, or None when git could not answer."""
+    res = run(repo, args, context=context)
+    return None if res is None or res.returncode != 0 else (res.stdout or "")
