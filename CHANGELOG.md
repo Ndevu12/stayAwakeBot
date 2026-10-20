@@ -22,6 +22,9 @@ reader, not the mechanism or the weakness it closed.
   project's lockfile in the checkout names it, and so is one installed at a version its lockfile does
   not list; the finding names the version the lockfile lists. An aliased dependency is read as the
   package it installs, so a known-malicious package behind an alias is reported by the lockfile audit.
+- **`saw fix amend` reads every version another checkout of the repository keeps.** When it looks
+  for the earlier versions of a file a merge swept, it reads every stash entry and what each checkout
+  holds, as `saw scan --history` does, and when it cannot list one of them it says so for review.
 
 ## [0.13.1] - 2026-10-20
 
