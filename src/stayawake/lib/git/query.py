@@ -251,21 +251,29 @@ class _Beyond:
     others: list[str]
 
 
+def _commits_beyond_the_refs(repo: str | Path) -> tuple[list[str], list[str], bool]:
+    """List the tips no ref names: stash entries and each checkout's own refs, by what they peel
+    to. Takes the repo. Returns their commits, the tips that are not commits, and whether every tip
+    was listed and typed."""
+    tips, unlisted = history_tips(repo)
+    shas = list(dict.fromkeys(sha for name, sha in tips if not name.startswith("refs/")))
+    if not shas:
+        return [], [], not unlisted
+    kinds = own_view_fed(repo, ["cat-file", "--batch-check"],
+                         "".join(f"{sha}^{{}}\n" for sha in shas).encode())
+    if kinds is None:
+        return [], [], False
+    rows = [line.split() for line in kinds.decode("utf-8", "replace").splitlines()]
+    commits = [row[0] for row in rows if len(row) == 3 and row[1] == "commit"]
+    others = [row[0] for row in rows if len(row) == 3 and row[1] != "commit"]
+    return commits, others, not unlisted and len(rows) == len(shas)
+
+
 def _tips_beyond_the_refs(repo: str | Path) -> tuple[_Beyond, bool]:
     """Read the history kept by stash entries and by each checkout's own refs, which a walk of the
     refs does not reach. Takes the repo. Returns the trees of that history and the tips that are not
     commits, and whether every tip was listed and walked."""
-    tips, unlisted = history_tips(repo)
-    shas = list(dict.fromkeys(sha for name, sha in tips if not name.startswith("refs/")))
-    if not shas:
-        return _Beyond([], []), not unlisted
-    kinds = own_view_fed(repo, ["cat-file", "--batch-check"],
-                         "".join(f"{sha}^{{}}\n" for sha in shas).encode())
-    if kinds is None:
-        return _Beyond([], []), False
-    rows = [line.split() for line in kinds.decode("utf-8", "replace").splitlines()]
-    commits = [row[0] for row in rows if len(row) == 3 and row[1] == "commit"]
-    others = [row[0] for row in rows if len(row) == 3 and row[1] != "commit"]
+    commits, others, listed = _commits_beyond_the_refs(repo)
     walked = (own_view_fed(repo, ["rev-list", "--stdin", "--format=%T"],
                            "".join(f"{sha}\n" for sha in commits).encode())
               if commits else b"")
@@ -273,7 +281,7 @@ def _tips_beyond_the_refs(repo: str | Path) -> tuple[_Beyond, bool]:
         return _Beyond([], others), False
     trees = [ln.strip() for ln in walked.decode("utf-8", "replace").splitlines()
              if ln.strip() and not ln.startswith("commit ")]
-    return _Beyond(trees, others), not unlisted and len(rows) == len(shas)
+    return _Beyond(trees, others), listed
 
 
 def _all_readable(repo: str | Path, at_path: dict) -> bool:
@@ -718,36 +726,22 @@ def _raw_record(meta: bytes) -> str | None:
     return "" if set(blob) == {"0"} else blob
 
 
-def _stash_entries(repo: str | Path) -> list[str]:
-    """List every stash entry's commit. Takes the repo. Returns the ids, none when there is no
-    stash. Raises `Unread` when git could not list it."""
-    has = run(repo, ["rev-parse", "--verify", "--quiet", "refs/stash"])
-    if has is None or has.returncode not in (0, 1):
-        raise Unread("the stash")
-    if has.returncode == 1:
-        return []
-    listed = own_view(repo, ["log", "-g", "--format=%H", "refs/stash", "--"])
-    if listed is None or listed.returncode != 0:
-        raise Unread("the stash")
-    entries = [line.strip() for line in (listed.stdout or "").splitlines() if line.strip()]
-    if not all(len(e) in (40, 64) and set(e) <= set("0123456789abcdef") for e in entries):
-        raise Unread("the stash")
-    return entries
-
-
 def path_versions(repo: str | Path, paths, limit: int = 100_000) -> dict[str, dict[str, str]] | None:
-    """Find every version any ref's history, or any stash entry, wrote at each of several paths.
-    Takes the repo, the paths and the walk bound. Returns each path mapped to each blob id written
-    there and one commit that wrote it, or None when the history is longer than the bound. Raises
-    `Unread` when git could not walk it or printed what it could not read."""
+    """Find every version written at each of several paths by any ref's history, any stash entry
+    or another checkout's own refs. Takes the repo, the paths and the walk bound. Returns each path
+    mapped to each blob id written there and one commit that wrote it, or None when the history is
+    longer than the bound. Raises `Unread` when git could not walk it, list what keeps it, or
+    printed what it could not read."""
     wanted = list(dict.fromkeys(paths))
     found: dict[str, dict[str, str]] = {p: {} for p in wanted}
-    stash = _stash_entries(repo)
+    beyond, _not_commits, listed = _commits_beyond_the_refs(repo)
+    if not listed:
+        raise Unread("the stash entries and the other checkouts")
     for batch in _batches(wanted):
         names = set(batch)
         args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H",
                 "--diff-merges=separate", "--raw", "-z", "--no-abbrev", "--no-renames", "--all",
-                "--full-history", *stash, "--", *batch]
+                "--full-history", *beyond, "--", *batch]
         out = own_view_fed(repo, args, b"")
         if out is None:
             raise Unread(f"every copy of {batch[0]}")

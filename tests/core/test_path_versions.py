@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""`path_versions` finds every version any ref's history wrote at a path."""
+"""`path_versions` finds every version any ref's history, any stash entry or another checkout's own
+refs wrote at a path."""
 from __future__ import annotations
 
 import unittest
@@ -69,6 +70,44 @@ class TestPathVersions(GitSandbox):
         self.git(self.d, "stash", "push", "-q", "-m", "newer")
         older = self.git(self.d, "rev-parse", "stash@{1}:a.js").strip()
         self.assertIn(older, gitutil.path_versions(self.d, ["a.js"])["a.js"])
+
+    def _another_checkout(self):
+        other = self.d.parent / "versions-other"
+        self.git(self.d, "worktree", "add", "-q", str(other), "-b", "side")
+        self.addCleanup(lambda: self.git(self.d, "worktree", "remove", "--force", str(other)))
+        return other
+
+    def test_a_version_only_another_checkouts_own_ref_holds_is_found(self):
+        self.write(self.d, "a.js", "one\n")
+        self.commit(self.d, "one")
+        other = self._another_checkout()
+        self.git(other, "checkout", "-q", "--detach")
+        self.write(other, "a.js", "kept by a bisect\n")
+        self.commit(other, "kept")
+        self.git(other, "update-ref", "refs/bisect/bad", "HEAD")
+        kept = self.git(other, "rev-parse", "HEAD:a.js").strip()
+        self.git(other, "checkout", "-q", "side")
+        self.assertIn(kept, gitutil.path_versions(self.d, ["a.js"])["a.js"])
+
+    def test_a_version_only_another_checkouts_orig_head_holds_is_found(self):
+        self.write(self.d, "a.js", "one\n")
+        self.commit(self.d, "one")
+        other = self._another_checkout()
+        self.write(other, "a.js", "reset away\n")
+        self.commit(other, "reset away")
+        kept = self.git(other, "rev-parse", "HEAD:a.js").strip()
+        self.git(other, "reset", "-q", "--hard", "HEAD~1")
+        self.assertIn(kept, gitutil.path_versions(self.d, ["a.js"])["a.js"])
+
+    def test_what_keeps_history_git_could_not_list_is_named_not_skipped(self):
+        import stayawake.lib.git.history_tips as tipsmod
+        self.write(self.d, "a.js", "one\n")
+        self.commit(self.d, "one")
+        real = tipsmod.answer
+        with mock.patch.object(tipsmod, "answer",
+                               lambda repo, args, **kw: None if args[:1] == ["worktree"] else real(repo, args, **kw)):
+            with self.assertRaises(gitutil.Unread):
+                gitutil.path_versions(self.d, ["a.js"])
 
     def test_a_history_past_the_bound_is_not_listed(self):
         self.write(self.d, "a.js", "one\n")
