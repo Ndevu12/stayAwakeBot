@@ -117,6 +117,7 @@ class ScanResult:
     advisories: list[Finding] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     informational: list[Finding] = field(default_factory=list)
+    stored_payload: str | None = None
 
     @property
     def verdict(self) -> str:
@@ -191,6 +192,8 @@ class ScanResult:
         }
         if self.informational:
             out["informational"] = [i.to_dict() for i in self.informational]
+        if self.stored_payload:
+            out["stored_payload"] = self.stored_payload
         return out
 
 

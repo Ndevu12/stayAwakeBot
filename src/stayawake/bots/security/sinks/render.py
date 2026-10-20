@@ -194,6 +194,10 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
         out += ["", "SUSPECT: something to review by hand; saw does not report it as malware."]
     if s.get("residue"):
         out += ["", "residue: nothing here runs, but these files are not what the project would carry."]
+    stored = _stored_payloads(payload)
+    if stored:
+        out += ["", "Stored in history:"] + [
+            f"  {MARKER['warning']} {textsafe.plain(n, limit=_NOTE_LIMIT)}" for n in stored]
     notes = _coverage_notes(payload)
     if notes:
         out += ["", "Notes:"] + [
@@ -236,6 +240,14 @@ def _code_that_runs_here(payload: dict[str, Any]) -> list[tuple[str, str]]:
     return list(paths)
 
 
+def _stored_payloads(payload: dict[str, Any]) -> list[str]:
+    """Say what each target's history still stores with a payload. Takes the report payload.
+    Returns one line per target that stores one, named by the target when there are several."""
+    results = list(payload.get("results", []))
+    stored = [(r.get("target") or "", r["stored_payload"]) for r in results if r.get("stored_payload")]
+    return [text if len(results) == 1 else f"{target} — {text}" for target, text in stored]
+
+
 def _coverage_notes(payload: dict[str, Any]) -> list[str]:
     """Coverage notes, named by the target that owes them when they are not true of every target.
 
@@ -246,7 +258,8 @@ def _coverage_notes(payload: dict[str, Any]) -> list[str]:
     results = list(payload.get("results", []))
     if not results:
         return []
-    per_target = [(r.get("target") or "", list(dict.fromkeys(r.get("notes") or [])))
+    per_target = [(r.get("target") or "",
+                   [n for n in dict.fromkeys(r.get("notes") or []) if n != r.get("stored_payload")])
                   for r in results]
     common = set(per_target[0][1])
     for _, notes in per_target[1:]:
@@ -385,6 +398,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 if a.get("reference"):
                     out.append(f"  - details: {_md_url(a['reference'])}")
             out.append("")
+    stored = _stored_payloads(payload)
+    if stored:
+        out += ["## Stored in history", ""]
+        out += [f"- {textsafe.code(n)}" for n in stored] + [""]
     notes = _coverage_notes(payload)
     if notes:
         out += ["## Notes", ""]

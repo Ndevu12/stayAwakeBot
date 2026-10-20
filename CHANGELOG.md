@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **A payload the repository's history still stores has its own heading.** `saw scan --history`
+  shows it under **Stored in history**, apart from the notes on what the scan covered, and names it
+  as `stored_payload` in `--json`; the verdict is unchanged. When a path keeps more versions than
+  the history read takes, the line says how many it left and that their state is unknown.
 - **`saw scan --history` reads all that the repository keeps.** It reads every stash entry and what
   each checkout of the repository holds, as `saw fix amend` does when it checks what still holds a
   payload, and when it cannot list one of them the history reads as read in part, not as clean.
