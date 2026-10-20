@@ -17,6 +17,7 @@ from stayawake.bots.security.pr.outcome import Cause, render_amend_line
 from stayawake.bots.security.remediation.footprint import REMOVE_FILE
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.lib.git.write.push import PushResult
+import stayawake.lib.git.history_tips as tipsmod
 from tests.bots.security.test_amend import _AmendFixture
 
 _FILE = "src/fonts/BlockchainFont.woff2"
@@ -219,7 +220,7 @@ class TestAmendNamesSurvivorsOnOtherRefs(_Survivors):
         self.git(self.d, "stash", "push", "-u", "-m", "one")
         (self.d / "wip.txt").write_text("b\n")
         self.git(self.d, "stash", "push", "-u", "-m", "two")
-        names = {r for r, _ in amendmod._candidate_refs(self.d)[0]}
+        names = {r for r, _ in amendmod.history_tips(self.d)[0]}
         self.assertIn("stash@{0}", names)
         self.assertIn("stash@{1}", names)
 
@@ -231,7 +232,7 @@ class TestAmendNamesSurvivorsOnOtherRefs(_Survivors):
         self.git(self.d, "update-ref", "refs/remotes/origin/main", tip)
         self.git(self.d, "tag", "v9")
         self.git(self.d, "update-ref", "refs/backup/x", tip)
-        names = {r for r, _ in amendmod._candidate_refs(self.d)[0]}
+        names = {r for r, _ in amendmod.history_tips(self.d)[0]}
         self.assertLessEqual({"refs/tags/v9", "refs/backup/x", f"refs/heads/{self.base}",
                               "refs/remotes/origin/main"}, names)
 
@@ -264,12 +265,12 @@ class TestAmendNeverCallsAnUnansweredCheckClean(_Survivors):
     def test_other_refs_git_could_not_list_are_named_for_review(self):
         self._foreign_on_main()
         from stayawake.bots.security.pr import amend as amendmod
-        real = amendmod._answer
+        real = tipsmod.answer
 
         def unlisted(repo, args):
             return None if args[:1] == ["worktree"] else real(repo, args)
 
-        with mock.patch.object(amendmod, "_answer", unlisted):
+        with mock.patch.object(tipsmod, "answer", unlisted):
             outcome = self._act_removing_foreign()
         self._completes_and_names(outcome, "the other checkouts")
 
@@ -279,12 +280,12 @@ class TestAmendNeverCallsAnUnansweredCheckClean(_Survivors):
         self.git(self.d, "add", "wip.js")
         self.git(self.d, "stash")
         from stayawake.bots.security.pr import amend as amendmod
-        real = amendmod._answer
+        real = tipsmod.answer
 
         def unlisted(repo, args):
             return None if args[:2] == ["rev-list", "-g"] else real(repo, args)
 
-        with mock.patch.object(amendmod, "_answer", unlisted):
+        with mock.patch.object(tipsmod, "answer", unlisted):
             outcome = self._act_removing_foreign()
         self._completes_and_names(outcome, "the stash entries")
 
@@ -298,43 +299,43 @@ class TestAmendNeverCallsAnUnansweredCheckClean(_Survivors):
     def test_refs_git_could_not_list_are_named_for_review(self):
         self._foreign_on_main()
         from stayawake.bots.security.pr import amend as amendmod
-        real = amendmod._answer
+        real = tipsmod.answer
 
         def unlisted(repo, args):
             return None if args[-1:] == ["refs/"] else real(repo, args)
 
-        with mock.patch.object(amendmod, "_answer", unlisted):
+        with mock.patch.object(tipsmod, "answer", unlisted):
             outcome = self._act_removing_foreign()
         self._completes_and_names(outcome, "the tags, stashes and other refs")
 
     def test_checkouts_git_could_not_locate_are_named_for_review(self):
         self._foreign_on_main()
         from stayawake.bots.security.pr import amend as amendmod
-        real = amendmod._answer
+        real = tipsmod.answer
 
         def unlocated(repo, args):
             return None if "--git-common-dir" in args else real(repo, args)
 
-        with mock.patch.object(amendmod, "_answer", unlocated):
+        with mock.patch.object(tipsmod, "answer", unlocated):
             outcome = self._act_removing_foreign()
         self._completes_and_names(outcome, "the other checkouts' own refs")
 
     def test_a_checkout_whose_own_refs_git_could_not_list_is_named_for_review(self):
         self._foreign_on_main()
         from stayawake.bots.security.pr import amend as amendmod
-        real = amendmod._answer
+        real = tipsmod.answer
 
         def unlisted(repo, args):
             return None if "refs/bisect/" in args else real(repo, args)
 
-        with mock.patch.object(amendmod, "_answer", unlisted):
+        with mock.patch.object(tipsmod, "answer", unlisted):
             outcome = self._act_removing_foreign()
         self._completes_and_names(outcome, "the refs of main-worktree")
 
     def test_pseudo_refs_git_could_not_read_are_named_for_review(self):
         self._foreign_on_main()
         from stayawake.bots.security.pr import amend as amendmod
-        with mock.patch.object(amendmod, "_pseudo_refs_in", return_value=None):
+        with mock.patch.object(tipsmod, "_pseudo_refs_in", return_value=None):
             outcome = self._act_removing_foreign()
         self._completes_and_names(outcome, "the refs of main-worktree")
 
@@ -342,12 +343,12 @@ class TestAmendNeverCallsAnUnansweredCheckClean(_Survivors):
         self._foreign_on_main()
         self.git(self.d, "tag", "v1.0")
         from stayawake.bots.security.pr import amend as amendmod
-        real = amendmod._answer
+        real = tipsmod.answer
 
         def unlisted(repo, args):
             return None if args[:1] == ["worktree"] else real(repo, args)
 
-        with mock.patch.object(amendmod, "_answer", unlisted):
+        with mock.patch.object(tipsmod, "answer", unlisted):
             outcome = self._act_removing_foreign()
         self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._reasons(outcome))
         self.assertIn("refs/tags/v1.0", render_amend_line(outcome))
@@ -403,12 +404,12 @@ class TestAmendNeverCallsAnUnansweredCheckClean(_Survivors):
         self.git(self.d, "branch", "other")
         self._foreign_on_main()
         from stayawake.bots.security.pr import amend as amendmod
-        real = amendmod._answer
+        real = amendmod.gitutil.answer
 
         def failing(repo, args):
             return None if args[:1] == ["rev-parse"] else real(repo, args)
 
-        with mock.patch.object(amendmod, "_answer", failing):
+        with mock.patch.object(amendmod.gitutil, "answer", failing):
             outcome = self._act_removing_foreign()
         self._completes_and_names(outcome, "branch other")
 
@@ -626,7 +627,7 @@ class TestEachGateCheckAnswersYesNoOrUnknown(_AmendFixture):
     def test_a_walk_that_keeps_failing_stops_at_its_budget_and_counts_the_rest(self):
         amendmod = self._amend()
         refs = [("refs/tags/a", "1" * 40), ("refs/tags/b", "2" * 40), ("refs/tags/c", "3" * 40)]
-        with mock.patch.object(amendmod, "_candidate_refs", return_value=(refs, [])), \
+        with mock.patch.object(amendmod, "history_tips", return_value=(refs, [])), \
                 mock.patch.object(amendmod.gitutil, "reachable_objects", return_value=None), \
                 mock.patch.object(amendmod.time, "monotonic", side_effect=[0.0] + [1e9] * 5):
             holding, unsure = amendmod._refs_still_reaching(self.d, {"f" * 40}, [])

@@ -691,7 +691,7 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         held = [SimpleNamespace(path=p, oid=o) for p, o in (("a.js", "1" * 40), ("b.js", "2" * 40))]
         out = amendmod._HistoryPayloads(judged={(e.path, e.oid) for e in held})
         with mock.patch.object(amendmod.gitutil, "listed_branch_refs", return_value=[]), \
-                mock.patch.object(amendmod, "_candidate_refs",
+                mock.patch.object(amendmod, "history_tips",
                                   return_value=([("refs/tags/t", "3" * 40)], [])), \
                 mock.patch.object(amendmod.pushed, "tip_versions",
                                   return_value=([], held, 0, True)), \
@@ -701,7 +701,7 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         self.assertEqual(0, out.cut_at)
 
     def test_refs_it_could_not_list_are_named(self):
-        with mock.patch.object(amendmod, "_candidate_refs", return_value=([], ["the tags"])):
+        with mock.patch.object(amendmod, "history_tips", return_value=([], ["the tags"])):
             outcome = self.run_amend()
         self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
         self.assertTrue(outcome.needs_review)

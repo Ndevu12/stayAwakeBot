@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw scan --history` reads all that the repository keeps.** It reads every stash entry and what
+  each checkout of the repository holds, as `saw fix amend` does when it checks what still holds a
+  payload, and when it cannot list one of them the history reads as read in part, not as clean.
+
 ## [0.13.1] - 2026-10-20
 
 ### Fixed
