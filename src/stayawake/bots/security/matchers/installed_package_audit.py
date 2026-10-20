@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, build_corroborated_loader_check
@@ -37,15 +39,15 @@ class InstalledPackageAuditMatcher(Matcher):
         findings: list[Finding] = []
         for tree in self._trees:
             installed = list(tree.read(target))
-            locked = (self._locked_names(tree.ecosystem, target)
-                      if (installed and tree.ghost_reconcilable) else set())
+            locked = (self._locked(tree.ecosystem, target)
+                      if (installed and tree.ghost_reconcilable) else _Lockfiles({}))
             for pkg in installed:
                 advisory = (store.advisory_for(Purl(tree.ecosystem, pkg.name, pkg.version))
                             if (pkg.version and not store.is_empty()) else None)
                 if advisory is not None:
                     findings.append(_malicious(advisory, pkg))
-                elif tree.ghost_reconcilable and pkg.name not in locked:
-                    findings.append(_ghost(by_id.get("ghost-package"), pkg))
+                elif tree.ghost_reconcilable and not locked.lists(pkg):
+                    findings.append(_ghost(by_id.get("ghost-package"), pkg, locked.versions_of(pkg)))
                 if hook_patterns and pkg.hooks:
                     findings.append(_lifecycle_hook(hook_sig, hook_patterns, pkg))
                 if entry_check is not None:
@@ -61,13 +63,55 @@ class InstalledPackageAuditMatcher(Matcher):
                              "known to be clean.")
         return [f for f in findings if f is not None]
 
-    def _locked_names(self, ecosystem: str, target) -> set[str]:
-        names: set[str] = set()
+    def _locked(self, ecosystem: str, target) -> "_Lockfiles":
+        """Collect what each folder's lockfiles list. Takes the ecosystem and the target. Returns
+        each folder mapped to the packages listed there and the versions they are listed at."""
+        listed: dict[str, dict[str, set]] = {}
         for r in self._resolvers:
             if getattr(r, "ecosystem", None) == ecosystem:
                 for dep in r.resolve(target):
-                    names.add(dep.purl.name)
-        return names
+                    folder = str(PurePosixPath(dep.source_path).parent)
+                    listed.setdefault(folder, {}).setdefault(dep.purl.name, set()).add(dep.purl.version)
+        return _Lockfiles(listed)
+
+
+@dataclass(frozen=True)
+class _Lockfiles:
+    """The packages each folder's lockfiles list, with the versions they are listed at."""
+
+    listed: dict[str, dict[str, set]]
+
+    def lists(self, pkg) -> bool:
+        """Tell whether a lockfile in the folder a package is installed in, or above it, lists it
+        at the version installed. Takes the installed package. Returns the answer; a version
+        either side does not name counts as listed."""
+        versions = self.versions_of(pkg)
+        if versions is None:
+            return False
+        return not pkg.version or None in versions or pkg.version in versions
+
+    def versions_of(self, pkg) -> set | None:
+        """Name the versions the lockfiles in or above a package's folder list it at. Takes the
+        installed package. Returns them, or None when none of those lockfiles lists it."""
+        here = _install_folder(pkg.path)
+        found = [names[pkg.name] for folder, names in self.listed.items()
+                 if pkg.name in names and _at_or_above(folder, here)]
+        return set().union(*found) if found else None
+
+
+def _at_or_above(folder: str, here: str) -> bool:
+    """Tell whether a folder is a package's install folder or one of the folders above it. Takes
+    both, relative to the target. Returns the answer."""
+    return folder == "." or here == folder or here.startswith(f"{folder}/")
+
+
+def _install_folder(path: str) -> str:
+    """Name the folder whose `node_modules` holds an installed package. Takes the package's path.
+    Returns the folder, `.` for the top of the target."""
+    parts = PurePosixPath(path).parts
+    if "node_modules" not in parts:
+        return "."
+    return str(PurePosixPath(*parts[:parts.index("node_modules")])) or "."
 
 
 def _malicious(advisory, pkg) -> Finding:
@@ -86,16 +130,21 @@ def _malicious(advisory, pkg) -> Finding:
         reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 
-def _ghost(sig, pkg) -> Finding | None:
+def _ghost(sig, pkg, listed_at: set | None = None) -> Finding | None:
     if sig is None:
         return None
+    if listed_at:
+        shown = ", ".join(sorted(v for v in listed_at if v))
+        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed, but the lockfile lists {pkg.name} "
+                    f"at {shown} — a postinstall may have swapped it")
+    else:
+        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed but absent from the lockfile — "
+                    f"a postinstall may have dropped it off-lockfile")
     return Finding(
         signature_id=sig["id"], category=sig["category"],
         severity=Severity.parse(sig["severity"]), path=pkg.path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
-        evidence=f"{pkg.name}@{pkg.version or '?'} is installed but absent from the lockfile — "
-                 f"a postinstall may have dropped it off-lockfile",
-        vector=sig["category"], composed_evidence=True)
+        evidence=evidence, vector=sig["category"], composed_evidence=True)
 
 
 def _tampered(sig, t) -> Finding:
