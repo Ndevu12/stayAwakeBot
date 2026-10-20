@@ -28,6 +28,14 @@ Write for a new/collaborating developer. New work is expected to honor these; be
   narrating the code. Aim two lines, not nine; long rationale belongs in the commit message.
 - **Altitude — fix at the right depth, no bandaids.** A special case layered on shared infra is a
   smell; prefer generalizing the underlying mechanism. But don't over-engineer the maximal engine.
+- **Extend what exists; add only what the task uniquely needs.** Before writing new code, find the
+  mechanism that already does most of the job (the scanner's matcher runner, a shared lister or
+  renderer, a resolver) and improve it so it carries the new case; write only the small piece nothing
+  has yet. A caller that built its own path beside a shared mechanism (its own target, loop or
+  lister) is brought back through it, never patched alongside it: a rule one path enforces while
+  another reaches the same thing is a recurring defect (working guide, `defect-classes.md` §3). A
+  capability the mechanism lacks is added to the mechanism, named for what it means, so every caller
+  gets it.
 
 ## Sequencing: extract-after-2nd-case — with one override
 
