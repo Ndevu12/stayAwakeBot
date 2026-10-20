@@ -16,6 +16,8 @@ reader, not the mechanism or the weakness it closed.
 ## [0.13.1] - 2026-10-20
 
 ### Fixed
+- **The container image carries aiohttp 3.14.4.** The image's pinned dependencies move to the aiohttp
+  release that fixes two denial-of-service advisories, with the yarl release it requires.
 - **The checkout and pull hooks name what they found when they warn of suspicious signals.** The
   warning lists each finding and where it is, as the infected warning does, confirmed ones first and
   at most five; both warnings then say how many more there are and that `saw scan` lists them all.
