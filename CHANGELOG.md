@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-20
+
 ### Fixed
 - **The checkout and pull hooks name what they found when they warn of suspicious signals.** The
   warning lists each finding and where it is, as the infected warning does, confirmed ones first and
@@ -1748,7 +1750,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.1...v0.12.2
