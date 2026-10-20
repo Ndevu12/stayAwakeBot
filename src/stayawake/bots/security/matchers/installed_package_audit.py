@@ -46,8 +46,9 @@ class InstalledPackageAuditMatcher(Matcher):
                             if (pkg.version and not store.is_empty()) else None)
                 if advisory is not None:
                     findings.append(_malicious(advisory, pkg))
-                elif tree.ghost_reconcilable and not locked.lists(pkg):
-                    findings.append(_ghost(by_id.get("ghost-package"), pkg, locked.versions_of(pkg)))
+                elif tree.ghost_reconcilable and not locked.lists(pkg, tree.install_folder(pkg.path)):
+                    findings.append(_ghost(by_id.get("ghost-package"), pkg,
+                                           locked.versions_of(pkg, tree.install_folder(pkg.path))))
                 if hook_patterns and pkg.hooks:
                     findings.append(_lifecycle_hook(hook_sig, hook_patterns, pkg))
                 if entry_check is not None:
@@ -81,21 +82,21 @@ class _Lockfiles:
 
     listed: dict[str, dict[str, set]]
 
-    def lists(self, pkg) -> bool:
-        """Tell whether a lockfile in the folder a package is installed in, or above it, lists it
-        at the version installed. Takes the installed package. Returns the answer; a version
+    def lists(self, pkg, folder: str) -> bool:
+        """Tell whether a lockfile in the folder a package belongs to, or above it, lists it at the
+        version installed. Takes the installed package and its folder. Returns the answer; a version
         either side does not name counts as listed."""
-        versions = self.versions_of(pkg)
+        versions = self.versions_of(pkg, folder)
         if versions is None:
             return False
         return not pkg.version or None in versions or pkg.version in versions
 
-    def versions_of(self, pkg) -> set | None:
+    def versions_of(self, pkg, folder: str) -> set | None:
         """Name the versions the lockfiles in or above a package's folder list it at. Takes the
-        installed package. Returns them, or None when none of those lockfiles lists it."""
-        here = _install_folder(pkg.path)
-        found = [names[pkg.name] for folder, names in self.listed.items()
-                 if pkg.name in names and _at_or_above(folder, here)]
+        installed package and its folder. Returns them, or None when none of those lockfiles lists
+        it."""
+        found = [names[pkg.name] for listed_in, names in self.listed.items()
+                 if pkg.name in names and _at_or_above(listed_in, folder)]
         return set().union(*found) if found else None
 
 
@@ -103,15 +104,6 @@ def _at_or_above(folder: str, here: str) -> bool:
     """Tell whether a folder is a package's install folder or one of the folders above it. Takes
     both, relative to the target. Returns the answer."""
     return folder == "." or here == folder or here.startswith(f"{folder}/")
-
-
-def _install_folder(path: str) -> str:
-    """Name the folder whose `node_modules` holds an installed package. Takes the package's path.
-    Returns the folder, `.` for the top of the target."""
-    parts = PurePosixPath(path).parts
-    if "node_modules" not in parts:
-        return "."
-    return str(PurePosixPath(*parts[:parts.index("node_modules")])) or "."
 
 
 def _malicious(advisory, pkg) -> Finding:

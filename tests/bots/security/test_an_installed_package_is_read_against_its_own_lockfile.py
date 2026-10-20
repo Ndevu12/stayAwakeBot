@@ -99,6 +99,20 @@ class TestAPackageIsReadAgainstItsOwnLockfile(unittest.TestCase):
         self.assertEqual(len(_off_lockfile(self.root)), 1)
 
 
+class TestEachTreeNamesItsOwnInstallFolder(unittest.TestCase):
+    def test_a_tree_names_the_folder_its_install_directory_sits_in(self):
+        from stayawake.bots.security.dependencies.installed import InstalledTree, NpmInstalledTree
+        npm = NpmInstalledTree()
+        self.assertEqual(npm.install_folder("node_modules/a/package.json"), ".")
+        self.assertEqual(npm.install_folder("tools/node_modules/a/package.json"), "tools")
+        self.assertEqual(npm.install_folder("node_modules/.pnpm/a@1/node_modules/a/package.json"), ".")
+
+        class Vendored(InstalledTree):
+            installed_dir = "vendor"
+        self.assertEqual(Vendored().install_folder("app/vendor/acme/lib/composer.json"), "app")
+        self.assertEqual(InstalledTree().install_folder("tools/node_modules/a/package.json"), ".")
+
+
 class TestAnAliasIsReadAsThePackageItInstalls(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="alias-"))
