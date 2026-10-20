@@ -13,6 +13,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 _RELEASED = re.compile(r"^## \[(\d+\.\d+\.\d+)\]", re.MULTILINE)
 _PINNED = re.compile(r"^\s+version:\s*['\"]?(\d+\.\d+\.\d+)['\"]?\s*(#.*)?$", re.MULTILINE)
+_SAID_TO_BE_PINNED = re.compile(r"\b(\d+\.\d+\.\d+) here\b")
 
 
 def _newest_release() -> str:
@@ -23,11 +24,13 @@ def _newest_release() -> str:
 
 
 def _documented_versions() -> dict[str, list[str]]:
-    """Collect every scanner version a setup example pins. Returns each page mapped to them."""
+    """Collect every scanner version a setup example pins or the text beside it says it pins.
+    Returns each page mapped to them."""
     pages = [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]
     out: dict[str, list[str]] = {}
     for page in pages:
-        pinned = [found[0] for found in _PINNED.findall(page.read_text(encoding="utf-8"))]
+        text = page.read_text(encoding="utf-8")
+        pinned = [found[0] for found in _PINNED.findall(text)] + _SAID_TO_BE_PINNED.findall(text)
         if pinned:
             out[str(page.relative_to(REPO))] = pinned
     return out

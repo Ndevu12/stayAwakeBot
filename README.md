@@ -145,7 +145,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: Ndevu12/SAW_GUARD@93fe465d7b0266c6010778999b73b591ae082f3e
+      - uses: Ndevu12/SAW_GUARD@7d3ef571f0094c223902fcfc500838abc46e1d7b
         with:
           version: '0.13.1'
           pr-comment: true
@@ -164,9 +164,9 @@ is required, because the scan reads the full history.
 published `stayawakebot` scanner from PyPI.
 
 **Pin every action by commit SHA**, including this one: a tag can be moved to point at different code
-after you have reviewed it, a SHA cannot. Here `93fe465d…` is SAW Guard v0.1.4 and `3d3c42e5…` is
+after you have reviewed it, a SHA cannot. Here `7d3ef571…` is SAW Guard v0.2.0 and `3d3c42e5…` is
 `actions/checkout` v7.0.1. In production pin `version:` as well: it selects the `stayawakebot`
-release from PyPI, 0.12.3 here, and otherwise tracks whatever is latest at run time.
+release from PyPI, 0.13.1 here, and otherwise tracks whatever is latest at run time.
 
 Other inputs: `config-file` to supply your own allowlist, `fail-on` to choose the verdict that fails
 the build (default `infected`), and `upload-sarif` to send findings to code scanning.

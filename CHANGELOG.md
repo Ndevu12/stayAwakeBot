@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **The README's SAW Guard example pins the current release.** It pins SAW Guard v0.2.0 by its
+  commit SHA, and the text beside it names scanner 0.13.1, the version the example installs.
 - **A payload the repository's history still stores has its own heading.** `saw scan --history`
   shows it under **Stored in history**, apart from the notes on what the scan covered, and names it
   as `stored_payload` in `--json`; the verdict is unchanged. When a path keeps more versions than
