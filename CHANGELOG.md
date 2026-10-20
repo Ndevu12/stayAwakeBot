@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw fix` names every branch that still carries what it removed.** A branch fetched from origin
+  is named as well as a local one, such as `origin/feature`, with `saw fix amend` to take it out,
+  so a fresh clone or a CI checkout no longer leaves the other branches unnamed.
 - **The README's SAW Guard example pins the current release.** It pins SAW Guard v0.2.0 by its
   commit SHA, and the text beside it names scanner 0.13.1, the version the example installs.
 - **A payload the repository's history still stores has its own heading.** `saw scan --history`

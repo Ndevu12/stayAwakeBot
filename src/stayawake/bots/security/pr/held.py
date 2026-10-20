@@ -8,6 +8,7 @@ from typing import Mapping
 
 from stayawake.bots.security.pr.fix_verdict import History, HistoryHold, Remedy
 from stayawake.bots.security.remediation import live
+from stayawake.lib import git as gitutil
 from stayawake.lib.git.run import run
 
 
@@ -122,20 +123,31 @@ def _at_head(repo: Path, paths, baseref: str, stored) -> list[HistoryHold]:
 
 
 def _on_branches(repo: Path, paths, baseref: str, stored, fix_branch: str) -> list[HistoryHold]:
-    listing = _git(repo, ["for-each-ref", "--format=%(refname)%00%(objectname)", "refs/heads"])
-    if listing.returncode != 0:
+    """Find the branches other than the one checked out that still store what the judge confirms,
+    local and fetched from origin, as `saw fix amend` lists them. Takes the repository, the paths,
+    the ref the fix is prepared against, the judge and the branch the fix is prepared on. Returns
+    one hold per branch, named as git names the ref that holds it."""
+    listed = gitutil.listed_branch_refs(repo)
+    if listed is None:
         raise _Unanswered("could not list the branches")
-    current = _current_branch(repo)
-    holds = []
-    for line in (listing.stdout or "").splitlines():
-        ref, _, commit = line.partition("\0")
-        if not commit or ref in (current, f"refs/heads/{fix_branch}"):
+    skipped = {_current_branch(repo).removeprefix("refs/heads/"), fix_branch}
+    holds: dict[str, HistoryHold] = {}
+    for name, ref in listed:
+        if name in skipped:
             continue
-        held = _held_at(repo, commit, paths, stored)
-        if held:
-            holds.append(HistoryHold("branch", ref.removeprefix("refs/heads/"), held,
-                                     _remedy(repo, commit, baseref)))
-    return holds
+        held = _held_at(repo, ref, paths, stored)
+        if not held:
+            continue
+        remedy = _remedy(repo, ref, baseref)
+        earlier = holds.get(name)
+        if earlier is None:
+            holds[name] = HistoryHold("branch", ref.removeprefix("refs/heads/").removeprefix(
+                "refs/remotes/"), held, remedy)
+        else:
+            holds[name] = HistoryHold(
+                "branch", earlier.name, tuple(sorted({*earlier.paths, *held})),
+                Remedy.AMEND if Remedy.AMEND in (earlier.remedy, remedy) else remedy)
+    return list(holds.values())
 
 
 def _in_stash(repo: Path, paths, stored) -> list[HistoryHold]:
