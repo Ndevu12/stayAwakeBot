@@ -6,6 +6,8 @@ executes scanned code). One responsibility: target in → ScanResult out.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import inspect
 from pathlib import Path
 from fnmatch import fnmatch
@@ -208,12 +210,29 @@ def attach_history_note(result, root, opts, signatures, allowlist) -> None:
     if not getattr(opts, "history", False):
         return
     result.notes = [n for n in result.notes if not n.startswith(_CHECKED_OUT_ONLY)]
-    note = history_residue_note(root, opts, signatures, allowlist)
-    if note:
-        result.notes.append(note)
+    reading = history_reading(root, opts, signatures, allowlist)
+    if reading.text:
+        result.notes.append(reading.text)
+    if reading.found_payload:
+        result.stored_payload = reading.text
+
+
+@dataclass(frozen=True)
+class HistoryReading:
+    """What a read of a repository's stored history came to: the sentence that says so, and whether
+    it found a confirmed payload there."""
+
+    text: str | None
+    found_payload: bool = False
 
 
 def history_residue_note(root, opts, signatures, allowlist) -> str | None:
+    """Say what the repository still stores that a scan of the files checked out cannot see. Takes
+    the root, the scan options, the signatures and the allowlist. Returns the sentence."""
+    return history_reading(root, opts, signatures, allowlist).text
+
+
+def history_reading(root, opts, signatures, allowlist) -> HistoryReading:
     """What the repository still STORES that a scan of the working tree cannot see.
 
     Coverage, never a finding: nothing here runs on clone or on build, and gating on it would turn
@@ -229,8 +248,8 @@ def history_residue_note(root, opts, signatures, allowlist) -> str | None:
     except Exception as exc:
         # Total by contract. This runs after the tree scan, and a raise here reached a caller that
         # discarded the whole ScanResult — turning a real INFECTED verdict into "could not scan".
-        return (f"History could not be read ({type(exc).__name__}), so whether this repository "
-                "still stores a payload is UNKNOWN, not no.")
+        return HistoryReading(f"History could not be read ({type(exc).__name__}), so whether this "
+                              "repository still stores a payload is UNKNOWN, not no.")
 
 
 def _may_read_beyond_local(opts) -> bool:
@@ -245,7 +264,7 @@ def _may_read_beyond_local(opts) -> bool:
         return False
 
 
-def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
+def _history_residue_note(root, opts, signatures, allowlist) -> HistoryReading:
     from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
     from stayawake.lib.git.query import holds_its_objects, stored_link_targets
     offline = not _may_read_beyond_local(opts)
@@ -258,9 +277,10 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
         # genuinely nothing here" arrive identically; `complete` is what separates them. Silence is
         # what this note exists to end, but a fresh repository has honestly nothing to report.
         if complete and every_link:
-            return "History was read: this repository stores no earlier version of any path."
-        return ("History could not be read: nothing was returned for this repository, so whether "
-                f"it still stores a payload is UNKNOWN, not no.{finish}")
+            return HistoryReading("History was read: this repository stores no earlier version of "
+                                  "any path.")
+        return HistoryReading("History could not be read: nothing was returned for this repository, so "
+                              f"whether it still stores a payload is UNKNOWN, not no.{finish}")
     hits, scanned, unread, elsewhere = [], 0, set(), set()
     for index in range(_HISTORY_ROUNDS):
         target = HistoryTarget(root, str(root), opts, versions, index,
@@ -278,6 +298,10 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     cut = ""
     if not complete or not every_link:
         cut += " Not all of what it stores could be enumerated."
+    if beyond:
+        past = sum(1 for v in versions.values() if len(v) > _HISTORY_ROUNDS)
+        cut += (f" {beyond} earlier version(s) of {past} path(s) are past the {_HISTORY_ROUNDS} "
+                "versions of each path it reads, so whether they hold a payload is UNKNOWN, not no.")
     cut += finish
     if unread:
         # By PATH, not by failed attempt: every version is read once per matcher, so counting
@@ -290,11 +314,11 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
                 "`git lfs fetch --all`, then scan again.")
     if not hits:
         if complete and every_link and not unread and not elsewhere and not beyond:
-            return (f"History was read: no confirmed payload in {scanned} stored version(s) across "
-                    f"{len(versions)} path(s).{cut}")
-        return (f"History was read in part: no confirmed payload in {scanned} stored version(s) "
-                f"across {len(versions)} path(s), so whether it still stores one is UNKNOWN, not "
-                f"no.{cut}")
+            return HistoryReading(f"History was read: no confirmed payload in {scanned} stored "
+                                  f"version(s) across {len(versions)} path(s).{cut}")
+        return HistoryReading(f"History was read in part: no confirmed payload in {scanned} stored "
+                              f"version(s) across {len(versions)} path(s), so whether it still "
+                              f"stores one is UNKNOWN, not no.{cut}")
     paths = sorted({f.path for f in hits})
     payloads = [path for path in paths if path not in links]
     redirects = [path for path in paths if path in links]
@@ -302,9 +326,10 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     named += (payloads[3:] + redirects[2:])[:max(0, 5 - len(named))]
     shown = [textsafe.plain(path, limit=200) for path in named]
     more = len(paths) - len(named)
-    return (f"{len(paths)} file(s) are still stored with the payload in this repository's "
-            f"history: {'; '.join(shown)}"
-            f"{f'; and {more} more' if more > 0 else ''}. Run `saw fix amend` to take them out.{cut}")
+    return HistoryReading(f"{len(paths)} file(s) are still stored with the payload in this "
+                          f"repository's history: {'; '.join(shown)}"
+                          f"{f'; and {more} more' if more > 0 else ''}. Run `saw fix amend` to "
+                          f"take them out.{cut}", found_payload=True)
 
 
 _CHECKED_OUT_ONLY = "This covers the files checked out now,"

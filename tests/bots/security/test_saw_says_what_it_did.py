@@ -30,7 +30,7 @@ def _scan(*, history: bool, reads_history: bool):
     """Finish a scan of a repository, asked for its history or not, that reads history or not."""
     opts = mock.Mock(history=history)
     with mock.patch.object(scanner, "_history_scope_note", return_value=_SCOPE), \
-            mock.patch.object(scanner, "history_residue_note", return_value=_READ):
+            mock.patch.object(scanner, "history_reading", return_value=scanner.HistoryReading(_READ)):
         result = scanner.finalize("repo", "local", {}, [], [], [], opts, "/repo", [], [],
                                   is_repo=True)
         if reads_history:
