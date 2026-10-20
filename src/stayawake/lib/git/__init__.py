@@ -13,7 +13,7 @@ Submodules:
   merge   — evil-merge analysis (merge_commits, evil_merge_paths, merge_evidence)
   write   — mutations (add_worktree, stage_all, commit_fix, push_branch, …)
 """
-from stayawake.lib.git.run import (run, run_ok, stdout, UNTRUSTED, SAW_OWNED, OPERATOR_PUSH,
+from stayawake.lib.git.run import (answer, run, run_ok, stdout, UNTRUSTED, SAW_OWNED, OPERATOR_PUSH,
                                    OPERATOR_CONFIG, GitRefused)
 from stayawake.lib.git.auth import github_https_auth, github_remote, run_remote_git
 from stayawake.lib.git.objects import blob, blob_text, reachable_objects
@@ -77,7 +77,7 @@ from stayawake.lib.git.write import (
 
 __all__ = [
     "blob", "blob_text", "reachable_objects",
-    "run", "run_ok", "stdout", "UNTRUSTED", "SAW_OWNED", "OPERATOR_PUSH", "OPERATOR_CONFIG",
+    "answer", "run", "run_ok", "stdout", "UNTRUSTED", "SAW_OWNED", "OPERATOR_PUSH", "OPERATOR_CONFIG",
     "GitRefused", "github_https_auth", "github_remote", "run_remote_git",
     "is_git_repo", "slug_from_url", "origin_slug", "default_branch", "ref_exists",
     "parents", "changed_paths", "stores_path", "names_a_commit", "file_text_at", "Unread", "holds_its_history", "entry_at", "ancestry", "list_tree", "tracked", "tracked_under",

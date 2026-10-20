@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git import remote as gitremote
+from stayawake.lib.git.history_tips import history_tips
 from stayawake.lib.git.objects import (batch_objects, blob_text, link_targets, own_env, own_view,
                                        own_view_fed)
 from stayawake.lib.git.run import run, stdout, stdout_bytes, stdout_bytes_fed
@@ -177,10 +178,10 @@ def _read_trees(repo: str | Path, ids: list[str]) -> tuple[dict[str, list], bool
 
 def stored_entries(repo: str | Path, *, limit: int = 200_000,
                    offline: bool = True) -> tuple[dict[str, list[tuple[str, int]]], bool]:
-    """Walk a repository's reachable history and collect what it stores at every path. Takes the
-    repo, a bound on the paths visited and whether the read must stay local. Returns each path
-    mapped to the `(object id, entry type)` pairs stored there, and whether the whole history was
-    read."""
+    """Walk a repository's reachable history and collect what it stores at every path: every ref,
+    every stash entry and what each checkout holds. Takes the repo, a bound on the paths visited and
+    whether the read must stay local. Returns each path mapped to the `(object id, entry type)`
+    pairs stored there, and whether the whole history was read."""
     if offline and not holds_its_objects(repo):
         return {}, False
     roots = own_view(repo, ["rev-list", "--all", "--format=%T"])
@@ -190,6 +191,10 @@ def stored_entries(repo: str | Path, *, limit: int = 200_000,
     complete = not roots.stderr.strip()
     named = [ln.strip() for ln in roots.stdout.splitlines() if not ln.startswith("commit ")]
     wanted = [ln.strip() for ln in refs.stdout.splitlines() if ln.strip()]
+    beyond, reached = _tips_beyond_the_refs(repo)
+    complete = complete and reached
+    named += beyond.trees
+    wanted += beyond.others
     peeled = own_view_fed(repo, ["cat-file", "--batch-check"],
                            "".join(f"{ref}^{{tree}}\n" for ref in wanted).encode())
     targets = own_view_fed(repo, ["cat-file", "--batch-check"],
@@ -230,6 +235,40 @@ def stored_entries(repo: str | Path, *, limit: int = 200_000,
                     out[path].append((sha, kind))
         level = deeper
     return out, complete and _all_readable(repo, out)
+
+
+@dataclass(frozen=True)
+class _Beyond:
+    """What the tips no ref names hold: the trees of their commits' history, and the tips that are
+    not commits, to be peeled with the refs."""
+
+    trees: list[str]
+    others: list[str]
+
+
+def _tips_beyond_the_refs(repo: str | Path) -> tuple[_Beyond, bool]:
+    """Read the history kept by stash entries and by each checkout's own refs, which a walk of the
+    refs does not reach. Takes the repo. Returns the trees of that history and the tips that are not
+    commits, and whether every tip was listed and walked."""
+    tips, unlisted = history_tips(repo)
+    shas = list(dict.fromkeys(sha for name, sha in tips if not name.startswith("refs/")))
+    if not shas:
+        return _Beyond([], []), not unlisted
+    kinds = own_view_fed(repo, ["cat-file", "--batch-check"],
+                         "".join(f"{sha}^{{}}\n" for sha in shas).encode())
+    if kinds is None:
+        return _Beyond([], []), False
+    rows = [line.split() for line in kinds.decode("utf-8", "replace").splitlines()]
+    commits = [row[0] for row in rows if len(row) == 3 and row[1] == "commit"]
+    others = [row[0] for row in rows if len(row) == 3 and row[1] != "commit"]
+    walked = (own_view_fed(repo, ["rev-list", "--stdin", "--format=%T"],
+                           "".join(f"{sha}\n" for sha in commits).encode())
+              if commits else b"")
+    if walked is None:
+        return _Beyond([], others), False
+    trees = [ln.strip() for ln in walked.decode("utf-8", "replace").splitlines()
+             if ln.strip() and not ln.startswith("commit ")]
+    return _Beyond(trees, others), not unlisted and len(rows) == len(shas)
 
 
 def _all_readable(repo: str | Path, at_path: dict) -> bool:
