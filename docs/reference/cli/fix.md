@@ -63,8 +63,8 @@ commit holds nothing clean there.
 A file in the middle of a merge keeps its other versions and stays unresolved, so git will not let
 you commit it until you choose one. Everything else you staged is left as it was.
 
-**Your history is reported on its own.** When the commit you are on, another local branch or a stash
-entry still stores what the run removed, or a payload your commit holds that you have since deleted
+**Your history is reported on its own.** When the commit you are on, another branch, local or
+fetched from origin, or a stash entry still stores what the run removed, or a payload your commit holds that you have since deleted
 or changed, on disk or in your staged changes, the run says so and names the remedy: the fix pull request
 for a commit the base branch already has, and [`saw fix amend`](amend.md) for your own commits. A
 stash entry is named only, because it also holds your own work.
