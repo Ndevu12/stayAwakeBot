@@ -77,7 +77,7 @@ def run_matchers(target, matcher_names: list[str],
         if not matcher:
             continue
         reads = target
-        if not matcher.partitionable:
+        if not getattr(matcher, "partitionable", False):
             if whole is None:
                 unnarrowed = getattr(target, "unnarrowed", None)
                 whole = unnarrowed() if unnarrowed else target
