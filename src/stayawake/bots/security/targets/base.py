@@ -6,6 +6,7 @@ through, so local and cloned repositories look the same to every matcher.
 """
 from __future__ import annotations
 
+import copy
 import os
 import re
 import stat as _stat
@@ -123,6 +124,17 @@ class Target:
     @property
     def repo_root(self) -> Path:
         return self.root
+
+    def unnarrowed(self) -> "Target":
+        """Return this target read in full: the same root, part and settings without the files it
+        was narrowed to, recording unreadable paths and coverage gaps where this one does. A target
+        that was not narrowed, or that names one file, is returned as it is."""
+        if self.include_only is None or getattr(self, "names_one_file", False):
+            return self
+        whole = copy.copy(self)
+        whole.include_only = None
+        whole._walk_cache = None
+        return whole
 
     @property
     def scan_root(self) -> Path:

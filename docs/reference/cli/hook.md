@@ -35,8 +35,9 @@ saw hook status [--no-stream]
   you to examine. What could not be put back is said, with the command to run.
 - **[`saw audit`](audit.md) reports** a hook saw did not install, or one of saw's that was changed;
   `saw hook repair` puts it back.
-- **Scans are quick and bounded.** A pull, a switch, a rebase, an amend or a file checkout scans only what changed.
-  Each scan has a time
+- **Scans are quick and bounded, and agree with `saw scan`.** A pull, a switch, a rebase, an amend or
+  a file checkout scans what changed, and what it says about the project as a whole is what
+  [`saw scan`](scan.md) says. Each scan has a time
   budget (`SAW_HOOK_TIMEOUT`: 60s, 20s for a push). What could not be checked in time reads as not
   verified, never clean.
 - **A push goes through.** A worm it would publish is named with the commit that carries it and

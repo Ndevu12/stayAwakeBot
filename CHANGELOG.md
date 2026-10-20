@@ -17,6 +17,10 @@ reader, not the mechanism or the weakness it closed.
 - **The checkout and pull hooks name what they found when they warn of suspicious signals.** The
   warning lists each finding and where it is, as the infected warning does, confirmed ones first and
   at most five; both warnings then say how many more there are and that `saw scan` lists them all.
+- **saw's checkout and pull hooks agree with `saw scan`.** After a checkout, pull or rebase that
+  leaves the lockfile alone, the hook no longer reports every installed package as off-lockfile, and
+  what it says about the project as a whole is what `saw scan` says, whichever files the operation
+  changed.
 
 ## [0.13.0] - 2026-10-19
 
