@@ -343,6 +343,51 @@ class TestTheHookJudgesAsTheScanDoes(_Isolated):
             self.assertEqual(self._clone_event(repo, config_path=str(config)), 0)
         self.assertEqual(len(scans), 2)
 
+    def _landed(self, repo, event, change):
+        """Commit `change` the way a pull or a branch switch lands it, and run the event. Takes the
+        repository, `post-merge` or `post-checkout`, and the files to write. Returns the event's
+        status and what it printed."""
+        base = self._head(repo)
+        for rel, text in change.items():
+            (repo / rel).write_text(text)
+        _run(repo, "add", "-A")
+        _run(repo, "commit", "-qm", "landed")
+        (repo / ".git" / "ORIG_HEAD").write_text(base + "\n")
+        argv = ["0"] if event == "post-merge" else [base, self._head(repo), "1"]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = hook.run_event(event, argv)
+        return code, err.getvalue()
+
+    def _installed_as_locked(self):
+        lock = {"": {"name": "app"}, "node_modules/is-odd": {"version": "3.0.1"},
+                "node_modules/is-number": {"version": "6.0.0"}}
+        repo = self._repo_here({".gitignore": "node_modules/\n", "README.md": "one\n",
+                                "package.json": json.dumps({"name": "app", "dependencies": {"is-odd": "3.0.1"}}),
+                                "package-lock.json": json.dumps({"lockfileVersion": 3, "packages": lock})})
+        for name, version in (("is-odd", "3.0.1"), ("is-number", "6.0.0")):
+            (repo / "node_modules" / name).mkdir(parents=True)
+            (repo / "node_modules" / name / "package.json").write_text(
+                json.dumps({"name": name, "version": version}))
+        return repo
+
+    def test_a_pull_or_switch_that_leaves_the_lockfile_alone_says_nothing_of_installed_packages(self):
+        for event in ("post-merge", "post-checkout"):
+            with self.subTest(event=event):
+                code, said = self._landed(self._installed_as_locked(), event, {"README.md": "two\n"})
+                self.assertEqual(code, 0)
+                self.assertNotIn("suspicious", said)
+
+    def test_a_pull_that_puts_a_payload_in_a_script_a_folder_open_task_runs_is_infected(self):
+        task = {"label": "dev", "type": "shell", "command": "npm run watch",
+                "runOptions": {"runOn": "folderOpen"}}
+        repo = self._repo_here({".vscode/tasks.json": json.dumps({"version": "2.0.0", "tasks": [task]}),
+                                "package.json": json.dumps({"name": "app", "scripts": {"watch": "node app.js"}})})
+        payload = json.dumps({"name": "app", "scripts": {"watch": f"node {samples.FONT_PAYLOAD}"}})
+        code, said = self._landed(repo, "post-merge", {"package.json": payload})
+        self.assertEqual(code, 1)
+        self.assertIn("package.json", said)
+
     def test_a_scanned_repository_is_still_one_repair_looks_after(self):
         repo = self._repo_here({".gitignore": _INFECTED})
         self._clone_event(repo)

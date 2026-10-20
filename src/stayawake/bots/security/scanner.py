@@ -65,18 +65,27 @@ def run_matchers(target, matcher_names: list[str],
                  signatures_by_matcher: dict[str, list[dict[str, Any]]],
                  all_sigs: list[dict[str, Any]]) -> dict[str, list[Finding]]:
     """Run the named matchers over `target`, returning {matcher_name: [raw Finding, …]} in each
-    matcher's own emission order. RAW: no allowlist/confidence/advisory decisions and no sort — those
-    are `finalize`'s job, applied ONCE so the sequential and (merged) parallel paths are identical.
+    matcher's own emission order. A per-file matcher reads the files the target was narrowed to; a
+    whole-target matcher reads the target in full, as a chunked scan gives it. RAW: no allowlist/
+    confidence/advisory decisions and no sort — those are `finalize`'s job, applied ONCE so the
+    sequential and (merged) parallel paths are identical.
     Side effect: `target.read_errors` / `coverage_notes` accumulate as files are read."""
     out: dict[str, list[Finding]] = {}
+    whole = None
     for name in matcher_names:
         matcher = REGISTRY.get(name)
         if not matcher:
             continue
+        reads = target
+        if not matcher.partitionable:
+            if whole is None:
+                unnarrowed = getattr(target, "unnarrowed", None)
+                whole = unnarrowed() if unnarrowed else target
+            reads = whole
         sigs = signatures_by_matcher.get(name, [])
         with stalls_recorded() as stalled:
-            findings = (matcher.scan(target, sigs, all_signatures=all_sigs)
-                        if _accepts_all_signatures(matcher) else matcher.scan(target, sigs))
+            findings = (matcher.scan(reads, sigs, all_signatures=all_sigs)
+                        if _accepts_all_signatures(matcher) else matcher.scan(reads, sigs))
         target.read_errors.extend(f"{name}: {why}" for why in stalled)
         out[name] = list(findings)
     return out
