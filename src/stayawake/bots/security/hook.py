@@ -29,8 +29,7 @@ from stayawake.lib.git.contexts import empty_hooks_dir
 from stayawake.bots.security import checkout_writes, clean_contents, hookscript, outbound, push_record
 from stayawake.lib.git.run import stdout_bytes
 from stayawake.lib.git.write.working_tree import uncommitted_paths
-from stayawake.bots.security.found import what_it_is, where_it_is
-from stayawake.bots.security.models import CONFIRMED
+from stayawake.bots.security.found import confirmed_first, left_out_line, what_it_is, where_it_is
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.matchers.git_history import MOST_MERGES_CHECKED
 from stayawake.bots.security.hook_report import BRAND as _BRAND, command as _cmd, paint_at as _paint
@@ -1383,9 +1382,20 @@ _MOST_FINDINGS_NAMED = 5
 
 
 def _named_in_a_warning(findings) -> list:
-    """Choose the findings an infected warning names, confirmed ones first. Takes the findings. Returns
-    them, at most `_MOST_FINDINGS_NAMED`."""
-    return sorted(findings, key=lambda f: f.confidence != CONFIRMED)[:_MOST_FINDINGS_NAMED]
+    """Choose the findings a warning names, confirmed ones first. Takes the findings. Returns them, at
+    most `_MOST_FINDINGS_NAMED`."""
+    return confirmed_first(findings, lambda f: f.confidence)[:_MOST_FINDINGS_NAMED]
+
+
+def _name_findings(findings, err) -> None:
+    """Print what each finding a warning names is and where it is, then how many it left out. Takes
+    the findings and the stream."""
+    for f in _named_in_a_warning(findings):
+        loc = textsafe.plain(where_it_is(f.path, f.line, f.commit_sha))
+        print("     " + _paint("•", "warn", err) + f" {what_it_is(f.signature_id, f.category)}  —  {loc}", file=err)
+    left = len(findings) - _MOST_FINDINGS_NAMED
+    if left > 0:
+        print(_paint(f"     • {left_out_line(left)}", "dim", err), file=err)
 
 
 def _warn_infected(display: str, quoted_root: str, result, findings=None) -> None:
@@ -1396,12 +1406,7 @@ def _warn_infected(display: str, quoted_root: str, result, findings=None) -> Non
     findings = result.findings if findings is None else findings
     print("\n" + _paint(f"⚠  {_BRAND}: WORM DETECTED in freshly-landed code — {display}",
                         "warn", err), file=err)
-    for f in _named_in_a_warning(findings):
-        loc = textsafe.plain(where_it_is(f.path, f.line, f.commit_sha))
-        print("     " + _paint("•", "warn", err) + f" {what_it_is(f.signature_id, f.category)}  —  {loc}", file=err)
-    extra = len(findings) - _MOST_FINDINGS_NAMED
-    if extra > 0:
-        print(_paint(f"     • …and {extra} more", "dim", err), file=err)
+    _name_findings(findings, err)
     print(_paint(f"   Until it is cleaned, do NOT {_AVOID}.", "warn", err), file=err)
     print("   " + _paint("Inspect:", "dim", err) + " " + _cmd(f"saw scan {quoted_root}", err)
           + _paint("   ·   Remediate:", "dim", err) + " "
@@ -1696,6 +1701,7 @@ def _tell(result, shown: str, rescan: str, quoted_root: str, *, root: Path | Non
     if result.suspicious:
         print(_paint(f"⚠  {_BRAND}: {shown} — {len(result.findings)} suspicious signal(s). "
                      f"Until you've reviewed it, do NOT {_AVOID}.", "warn", err), file=err)
+        _name_findings(result.findings, err)
         print("   " + _paint("Review:", "dim", err) + " " + _cmd(rescan, err), file=err)
         return 0
     if result.residue:
