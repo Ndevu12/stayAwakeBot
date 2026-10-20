@@ -1903,7 +1903,7 @@ a scan that could not complete never reports clean. <a href="../fix/"><code>saw 
 </tr>
 <tr>
 <td><code>--history</code></td>
-<td>Also read what the repository still <strong>stores</strong> — other branches, tags, earlier commits, every stash entry and what each of its checkouts holds. A file cleaned from your folder is still there and one command away (<code>git show</code>, <code>git clone --branch</code>). Reported as coverage; it never changes the verdict, because nothing stored there runs on clone or on build. Slow: it reads every stored version, not the current one.</td>
+<td>Also read what the repository still <strong>stores</strong> — other branches, tags, earlier commits, every stash entry and what each of its checkouts holds. A file cleaned from your folder is still there and one command away (<code>git show</code>, <code>git clone --branch</code>). A payload it still stores is shown under its own heading, <strong>Stored in history</strong>, and as <code>stored_payload</code> in <code>--json</code>; it never changes the verdict, because nothing stored there runs on clone or on build. Slow: it reads every stored version, not the current one.</td>
 </tr>
 <tr>
 <td><code>--require-db</code></td>
