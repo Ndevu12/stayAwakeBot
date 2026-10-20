@@ -193,7 +193,7 @@ def stored_entries(repo: str | Path, *, limit: int = 200_000,
     wanted = [ln.strip() for ln in refs.stdout.splitlines() if ln.strip()]
     beyond, reached = _tips_beyond_the_refs(repo)
     complete = complete and reached
-    named += beyond.trees
+    of_the_refs = len(wanted)
     wanted += beyond.others
     peeled = own_view_fed(repo, ["cat-file", "--batch-check"],
                            "".join(f"{ref}^{{tree}}\n" for ref in wanted).encode())
@@ -204,36 +204,41 @@ def stored_entries(repo: str | Path, *, limit: int = 200_000,
     lines = peeled.decode("utf-8", "replace").splitlines()
     kinds = targets.decode("utf-8", "replace").splitlines()
     complete = complete and len(lines) == len(wanted) == len(kinds)
-    named += [p[0] for p in (ln.split() for ln in lines) if len(p) == 3 and p[1] == "tree"]
+    trees = [p[0] if len(p) == 3 and p[1] == "tree" else "" for p in (ln.split() for ln in lines)]
+    aligned = len(lines) == len(wanted)
+    named += trees[:of_the_refs] if aligned else trees
+    later = beyond.trees + (trees[of_the_refs:] if aligned else [])
     out: dict[str, list[tuple[str, int]]] = {}
     for ref, line in zip(wanted, kinds):
         parts = line.split()
         if len(parts) == 3 and parts[1] == "blob":
             out.setdefault(f"/{ref}", []).append((parts[0], _FILE_TYPE))
     seen: set[tuple[str, str]] = set()
-    level = [(tree, "") for tree in dict.fromkeys(named) if tree]
-    while level:
-        level = [pair for pair in dict.fromkeys(level) if pair not in seen]
-        if not level:
-            break
-        if len(seen) + len(level) > limit:
-            return out, False
-        seen.update(level)
-        entries_of, read_all = _read_trees(repo, sorted({tree for tree, _ in level}))
-        complete = complete and read_all
-        deeper = []
-        for tree, base in level:
-            for mode, name, sha in entries_of.get(tree, ()):
-                kind = _entry_type(mode)
-                rel = name.decode("utf-8", "replace")
-                path = f"{base}/{rel}" if base else rel
-                if kind == _TREE_TYPE:
-                    deeper.append((sha, path))
-                elif kind is None:
-                    complete = False
-                elif (sha, kind) not in out.setdefault(path, []):
-                    out[path].append((sha, kind))
-        level = deeper
+    # The refs' history is walked first, so the bound is spent on it exactly as before.
+    for roots in (named, later):
+        level = [(tree, "") for tree in dict.fromkeys(roots) if tree]
+        while level:
+            level = [pair for pair in dict.fromkeys(level) if pair not in seen]
+            if not level:
+                break
+            if len(seen) + len(level) > limit:
+                return out, False
+            seen.update(level)
+            entries_of, read_all = _read_trees(repo, sorted({tree for tree, _ in level}))
+            complete = complete and read_all
+            deeper = []
+            for tree, base in level:
+                for mode, name, sha in entries_of.get(tree, ()):
+                    kind = _entry_type(mode)
+                    rel = name.decode("utf-8", "replace")
+                    path = f"{base}/{rel}" if base else rel
+                    if kind == _TREE_TYPE:
+                        deeper.append((sha, path))
+                    elif kind is None:
+                        complete = False
+                    elif (sha, kind) not in out.setdefault(path, []):
+                        out[path].append((sha, kind))
+            level = deeper
     return out, complete and _all_readable(repo, out)
 
 

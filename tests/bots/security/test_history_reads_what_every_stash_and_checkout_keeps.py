@@ -16,6 +16,7 @@ import stayawake.lib.git.history_tips as tipsmod
 from stayawake.bots.security.scanner import history_residue_note
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import ScanOptions
+from stayawake.lib.git.query import stored_entries
 
 _PAYLOAD = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"
 _FOUND = "1 file(s) are still stored with the payload in this repository's history: .gitignore."
@@ -101,6 +102,28 @@ class TestCleanStashesAndCheckoutsReadClean(_Repo):
             (self.repo / "README.md").write_text(f"draft {n}\n")
             _git(self.repo, "stash", "push", "-q", "-m", f"draft {n}")
         self.assertTrue(self._note().startswith("History was read: no confirmed payload"), self._note())
+
+
+class TestTheBranchesHistoryIsReadFirst(_Repo):
+    def test_at_the_bound_the_branches_history_is_read_in_full_before_another_checkouts(self):
+        for depth in ("src/app/core", "lib/util"):
+            (self.repo / depth).mkdir(parents=True)
+            (self.repo / depth / "a.js").write_text("export const a = 1;\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "code")
+        bound = next(n for n in range(1, 200) if stored_entries(self.repo, limit=n)[1])
+        branches = set(stored_entries(self.repo, limit=bound)[0])
+        other = self._checkout()
+        _git(other, "checkout", "-q", "--detach")
+        (other / "drafts" / "a" / "b" / "c").mkdir(parents=True)
+        (other / "drafts" / "a" / "b" / "c" / "note.txt").write_text("draft\n")
+        _git(other, "add", "-A")
+        _git(other, "commit", "-qm", "drafts")
+        _git(other, "update-ref", "refs/bisect/bad", "HEAD")
+        _git(other, "checkout", "-q", "side")
+        held, complete = stored_entries(self.repo, limit=bound)
+        self.assertLessEqual(branches, set(held))
+        self.assertFalse(complete)
 
 
 class TestWhatCannotBeListedLeavesTheHistoryUnknown(_Repo):
