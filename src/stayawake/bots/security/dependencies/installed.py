@@ -9,7 +9,7 @@ import json
 import os
 import stat as _stat
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterator
 
 from stayawake.bots.security.dependencies import layout
@@ -62,9 +62,19 @@ class InstalledTree:
     ecosystem: str = ""
     _MAX_DEPTH = 8
     ghost_reconcilable: bool = True
+    installed_dir: str | None = None
 
     def read(self, target) -> Iterator[InstalledPackage]:
         raise NotImplementedError
+
+    def install_folder(self, path: str) -> str:
+        """Name the folder an installed package belongs to: the one holding the install directory
+        the package sits in. Takes the package's path. Returns the folder, `.` for the top of the
+        target or when this tree has no install directory."""
+        parts = PurePosixPath(path).parts
+        if not self.installed_dir or self.installed_dir not in parts:
+            return "."
+        return str(PurePosixPath(*parts[:parts.index(self.installed_dir)])) or "."
 
     def tampered(self, target) -> Iterator[TamperedFile]:
         """Installed files whose on-disk bytes no longer match the package's OWN per-file integrity
@@ -136,6 +146,7 @@ def _npm_entry_files(data: dict, pkg_dir: str, repo_root: Path) -> tuple[str, ..
 
 class NpmInstalledTree(InstalledTree):
     ecosystem = "npm"
+    installed_dir = layout.INSTALLED_DIR
 
     def read(self, target) -> Iterator[InstalledPackage]:
         seen: set[str] = set()

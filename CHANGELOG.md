@@ -17,6 +17,11 @@ reader, not the mechanism or the weakness it closed.
 - **`saw scan --history` reads all that the repository keeps.** It reads every stash entry and what
   each checkout of the repository holds, as `saw fix amend` does when it checks what still holds a
   payload, and when it cannot list one of them the history reads as read in part, not as clean.
+- **An installed package is read against its own lockfile, at its version.** An installed npm package
+  that the lockfile beside it, or above it, does not list is reported off-lockfile even when another
+  project's lockfile in the checkout names it, and so is one installed at a version its lockfile does
+  not list; the finding names the version the lockfile lists. An aliased dependency is read as the
+  package it installs, so a known-malicious package behind an alias is reported by the lockfile audit.
 
 ## [0.13.1] - 2026-10-20
 
