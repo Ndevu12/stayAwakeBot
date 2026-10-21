@@ -1926,10 +1926,10 @@ and its submodules, a pull, a branch switch, a rebase, a file checkout) and warn
 task runs it. A <code>git push</code> is checked for everything it would publish <em>before</em> the code leaves your
 machine. The hooks warn and point at <a href="../fix/"><code>saw fix</code></a>; they never change your code, never break a
 git command, and never stop a push. See <a href="../../../how-to/scan-on-clone/">scan on clone</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw hook install [PATH...] [-c FILE] [--no-stream]
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw hook repair [--no-stream]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw hook install [PATH...] [-c FILE] [--json] [--no-stream]
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw hook repair [--json] [--no-stream]
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw hook uninstall [--no-stream]
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw hook status [--no-stream]
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw hook status [--json] [--no-stream]
 </code></pre></div>
 <table>
 <thead>
@@ -1958,6 +1958,10 @@ git command, and never stop a push. See <a href="../../../how-to/scan-on-clone/"
 <tr>
 <td><code>status</code></td>
 <td>Whether the hooks are in place and will run.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>One JSON document on stdout for a program to read. <code>installed</code> says whether scan-on-clone is in place. <code>events</code> names the git events it covers. <code>via</code> lists <code>template</code> and <code>git-settings</code> for each way the hooks are in place. <code>disabled_by_env</code> is true when <code>SAW_HOOK_DISABLED</code> is set. <code>problems</code> lists each problem in the report, with a stable <code>code</code>, the report's sentence, and the command that addresses it. <code>install</code> and <code>repair</code> add <code>changed</code>, the sentences that say what they changed.</td>
 </tr>
 <tr>
 <td><code>-c</code>, <code>--config FILE</code></td>
