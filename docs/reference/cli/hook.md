@@ -11,10 +11,10 @@ machine. The hooks warn and point at [`saw fix`](fix.md); they never change your
 git command, and never stop a push. See [scan on clone](../../how-to/scan-on-clone.md).
 
 ```text
-saw hook install [PATH...] [-c FILE] [--no-stream]
-saw hook repair [--no-stream]
+saw hook install [PATH...] [-c FILE] [--json] [--no-stream]
+saw hook repair [--json] [--no-stream]
 saw hook uninstall [--no-stream]
-saw hook status [--no-stream]
+saw hook status [--json] [--no-stream]
 ```
 
 | Option / subcommand | Description |
@@ -24,6 +24,7 @@ saw hook status [--no-stream]
 | `repair` | Put back every hook saw installed, and set aside whatever stood in its place. |
 | `uninstall` | Remove saw's hooks, from new clones and from the repositories you gave them to or they have run in, and restore any hook of yours they ran before. |
 | `status` | Whether the hooks are in place and will run. |
+| `--json` | One JSON document on stdout for a program to read. `installed` says whether scan-on-clone is in place. `events` names the git events it covers. `via` lists `template` and `git-settings` for each way the hooks are in place. `disabled_by_env` is true when `SAW_HOOK_DISABLED` is set. `problems` lists each problem in the report, with a stable `code`, the report's sentence, and the command that addresses it. `install` and `repair` add `changed`, the sentences that say what they changed. |
 | `-c`, `--config FILE` | Your config, whose allowlist the hooks scan with. A repository's own config is never read. |
 | `--no-stream` | Plain instant lines instead of live progress. Same as `STAYAWAKE_NO_STREAM=1`. |
 

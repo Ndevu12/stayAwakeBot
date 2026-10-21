@@ -16,7 +16,8 @@ from stayawake.bots.security import remediator
 from stayawake.bots.security.models import ScanReport
 from stayawake.cli.commands import capabilities
 from stayawake.utils import json_documents, scratch
-from stayawake.utils.json_documents import SCHEMA_VERSION_OF_EACH_DOCUMENT, command_of, versioned
+from stayawake.utils.json_documents import (
+    SCHEMA_VERSION_OF_EACH_DOCUMENT, command_of, commands_for, versioned)
 
 _PRINTS_A_LIST_NOT_A_DOCUMENT = {("search",)}
 
@@ -82,6 +83,7 @@ _PRINT_EACH_DOCUMENT = {
                     _drift_with_no_remote_repository],
     "capabilities": [lambda: _stdout_of(lambda: cli.main(["capabilities", "--json"]))],
     "audit": [lambda: _stdout_of(_audit_with_nothing_to_report)],
+    "hook-status": [lambda: _stdout_of(lambda: cli.main(["hook", "status", "--json", "--no-stream"]))],
 }
 
 
@@ -108,7 +110,8 @@ class TestEveryJsonDocumentSaysItsSchema(unittest.TestCase):
         self.assertTrue(capabilities.asks_for_json(parser))
 
     def test_every_command_that_prints_json_is_a_versioned_document(self):
-        versioned_commands = {tuple(command_of(d)) for d in SCHEMA_VERSION_OF_EACH_DOCUMENT}
+        versioned_commands = {command for document in SCHEMA_VERSION_OF_EACH_DOCUMENT
+                              for command in commands_for(document)}
         self.assertEqual(_commands_that_take_json(cli.build_parser()),
                          versioned_commands | _PRINTS_A_LIST_NOT_A_DOCUMENT)
 
