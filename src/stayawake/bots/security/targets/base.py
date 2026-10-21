@@ -11,11 +11,10 @@ import os
 import re
 import stat as _stat
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Callable, Iterator
 
-from stayawake.lib.git.run import stdout_bytes
-from stayawake.bots.security.models import ROLLBACK_DIR, SAW_DIR
+from stayawake.bots.security.models import SAW_DIR
 from stayawake.bots.security.write_sinks import sink_label
 
 
@@ -85,19 +84,6 @@ def stream_runs_of_text(read: Callable[[int], bytes], size: int,
             yield line_offset, "\n".join(runs)
 
 
-_ROLLBACK_NAME = PurePosixPath(ROLLBACK_DIR).name
-
-
-def descended(dirpath: str, dirnames: list[str], exclude_dirs) -> list[str]:
-    """Pick the folders a walk goes into. Takes the folder being walked, its folders and the folder
-    names left out. Returns the folders to go into."""
-    if SAW_DIR not in exclude_dirs:
-        return [d for d in dirnames if d not in exclude_dirs]
-    in_saws_own = Path(dirpath).name == SAW_DIR
-    return [d for d in dirnames if (d == SAW_DIR or d not in exclude_dirs)
-            and not (in_saws_own and d == _ROLLBACK_NAME)]
-
-
 def is_source_path(rel: str) -> bool:
     """Tell whether the content checks read a path as source. Takes the path. Returns True when its
     extension is a source extension."""
@@ -107,7 +93,7 @@ def is_source_path(rel: str) -> bool:
 @dataclass
 class ScanOptions:
     exclude_dirs: set[str] = field(default_factory=lambda: {
-        ".git", "node_modules", ".next", "dist", "build", SAW_DIR})
+        ".git", "node_modules", ".next", "dist", "build"})
     keep_dirs: set[str] = field(default_factory=set)
     max_file_bytes: int = 2_000_000
     remote_clone_depth: int = 50
@@ -117,6 +103,9 @@ class ScanOptions:
     confirm_remote_read: object = None
     deep: bool = False
     history: bool = False        # also read what the repository still stores on other refs
+
+    def __post_init__(self):
+        self.exclude_dirs = set(self.exclude_dirs) - {SAW_DIR}
 
 
 class Target:
@@ -163,28 +152,12 @@ class Target:
         if self._walk_cache is None:            # walk once, memoize (byte-identical replay after)
             cache: list[str] = []
             for dirpath, dirnames, filenames in os.walk(self.scan_root, onerror=self._note_unwalkable):
-                walked = descended(dirpath, dirnames, self.opts.exclude_dirs)
-                left = set(dirnames) - set(walked)
-                rollback_left = Path(dirpath).name == SAW_DIR and _ROLLBACK_NAME in left
-                self.pruned_dirs.update(SAW_DIR if rollback_left and d == _ROLLBACK_NAME else d
-                                        for d in left)
-                dirnames[:] = walked
+                self.pruned_dirs.update(d for d in dirnames if d in self.opts.exclude_dirs)
+                dirnames[:] = [d for d in dirnames if d not in self.opts.exclude_dirs]
                 for fn in filenames:
                     cache.append(str((Path(dirpath) / fn).relative_to(self.root)))
-                if rollback_left:
-                    cache += self._committed_in(Path(dirpath) / _ROLLBACK_NAME)
             self._walk_cache = cache
         yield from self._walk_cache
-
-    def _committed_in(self, folder: Path) -> list[str]:
-        """List the files git tracks in a folder. Takes the folder. Returns each one on disk,
-        relative to the target, or an empty list when git lists none."""
-        if folder.is_symlink() or not folder.is_dir():
-            return []
-        listed = stdout_bytes(folder, ["ls-files", "--recurse-submodules", "-z"])
-        names = [os.fsdecode(n) for n in (listed or b"").split(b"\0") if n]
-        return [str((folder / n).relative_to(self.root)) for n in names
-                if os.path.lexists(folder / n)]
 
     def _note_unwalkable(self, err: OSError) -> None:
         """A directory the walk could not enter is a scan GAP, and fails the target closed.

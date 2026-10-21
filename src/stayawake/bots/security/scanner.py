@@ -17,6 +17,7 @@ from stayawake.utils import textsafe
 from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL, RESIDUE,
                                             ROLLBACK_DIR, Finding, ScanResult, Severity,
                                             reported_only)
+from stayawake.bots.security import kept_copies
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.dependencies.installed import stated_at
 from stayawake.bots.security.signatures import every_signature
@@ -139,6 +140,7 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
         if finding is not None:
             result.findings.append(finding)
         if is_repo:
+            _grade_kept_copies(result, Path(root))
             note = _history_scope_note(root)
             if note:
                 result.notes.append(note)
@@ -154,6 +156,31 @@ def _payload_merge_note(findings) -> str | None:
         return None
     return (f"{len(merges)} merge commit(s) in this repository's history carry a known payload: "
             f"{', '.join(merges)}. Run `saw fix amend` to take them out.")
+
+
+def _grade_kept_copies(result: ScanResult, root: Path) -> None:
+    """Grade what is found in the copies an older `saw fix` kept as residue, and say which ones
+    `saw fix` removes. Takes the result and the repository. Returns nothing; the target errors when
+    git could not say which copies are kept."""
+    copies = kept_copies.proven(root)
+    if copies is None:
+        result.error = result.error or (f"git could not say what {ROLLBACK_DIR}/ holds; run "
+                                        "`saw scan` again")
+        return
+    if not copies:
+        return
+    kept_at = {c.path for c in copies}
+    for finding in result.findings:
+        if finding.path in kept_at:
+            finding.confidence = RESIDUE
+    fixed = sum(c.fix_committed for c in copies)
+    note = (f"{len(copies)} file(s) in {ROLLBACK_DIR}/ are copies an older `saw fix` kept of files "
+            "it changed or took out.")
+    if fixed:
+        note += f" Run `saw fix` to remove the {fixed} whose fix is committed."
+    if fixed < len(copies):
+        note += f" {len(copies) - fixed} stay until their fix is committed."
+    result.notes.append(note)
 
 
 def _cleanup_residue(root: Path) -> Finding | None:

@@ -9,6 +9,7 @@ import unicodedata
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
+from stayawake.bots.security import kept_copies
 from stayawake.bots.security.models import SAW_DIR, confirmed_for_removal
 from stayawake.bots.security.remediation import (changes as ch, git_settings, installed, manifest,
                                                   preserve)
@@ -97,6 +98,8 @@ class CheckoutResult:
     cleared: list[str] = field(default_factory=list)
     index_unread: str = ""
     settings_left: list[str] = field(default_factory=list)
+    copies_removed: list[str] = field(default_factory=list)
+    copies_left: list[str] = field(default_factory=list)
 
     @property
     def infected(self) -> bool:
@@ -151,6 +154,7 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
     reads += [scan(_directory(repo, opts, d), payload, allowlist) for d in [*kept_dirs, *first]]
     scan_error = ("your checkout was not read in full, so it is not clean"
                   if any(read.error for read in reads) else "")
+    copies_removed, copies_left = kept_copies.remove_fixed(repo)
     findings = list({(f.path, getattr(f, "signature_id", None)): f
                      for read in reads for f in read.findings
                      if confirmed_for_removal(f)}.values())
@@ -162,7 +166,8 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
     staged_only = [p for p in staged_payloads if p not in on_disk]
     if not findings and not staged_only and not base_confirmed:
         return CheckoutResult(scan_error=scan_error, index_unread=index_unread,
-                              cleared=committed_payloads)
+                              cleared=committed_payloads, copies_removed=copies_removed,
+                              copies_left=copies_left)
     limit = getattr(opts, "max_file_bytes", preserve.MAX_SAVED_BYTES)
     payload_digests = _digests(repo, findings, limit) | stored.confirmed_digests
     report, failure, theirs, present = None, "", [], []
@@ -249,7 +254,8 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
                           scan_error=scan_error,
                           unstaged=unstaged,
                           index_unread=unasked or index_unread,
-                          settings_left=settings_taken.left_reasons)
+                          settings_left=settings_taken.left_reasons,
+                          copies_removed=copies_removed, copies_left=copies_left)
 
 
 def _tracked_as_committed(repo: Path, rel: str) -> bool:
@@ -471,8 +477,7 @@ def _unread(path: str, opts, kept: list[str]) -> bool:
 
 
 def _skipped_within(repo: Path, opts, read_whole: list[str], leave_out=()) -> list[str]:
-    """The directories on disk the scan leaves out by name, other than git's store and saw's own
-    at the root.
+    """The directories on disk the scan leaves out by name, other than git's store.
 
     Takes the repository, the scan options, the directories already read whole, and the names to
     leave out of the answer. Returns each outermost one, relative to the repository.
@@ -483,7 +488,7 @@ def _skipped_within(repo: Path, opts, read_whole: list[str], leave_out=()) -> li
         rel_top = Path(top).relative_to(repo).as_posix()
         for name in list(dirs):
             rel = name if rel_top == "." else f"{rel_top}/{name}"
-            if name == ".git" or rel == SAW_DIR or rel in read_whole:
+            if name == ".git" or rel in read_whole:
                 dirs.remove(name)
             elif name in names:
                 dirs.remove(name)

@@ -191,6 +191,12 @@ def checkout_of(result) -> tuple[Checkout, CheckoutDetail]:
         notes.append(f"took {len(result.unstaged)} confirmed file(s) out of your staged changes")
     if result.index_unread:
         notes.append(f"git could not say what its index holds ({result.index_unread})")
+    if getattr(result, "copies_removed", None):
+        notes.append(f"removed {len(result.copies_removed)} file(s) an older `saw fix` kept as "
+                     "copies of files whose fix is committed")
+    if getattr(result, "copies_left", None):
+        notes.append(f"could not remove {len(result.copies_left)} file(s) an older `saw fix` "
+                     f"kept as copies: {_paths(result.copies_left)}")
     detail = CheckoutDetail(removed=len(removed.removed), stripped=len(removed.stripped),
                             still_in=tuple(result.still_in), unread=tuple(removed.unread),
                             reasons=tuple(reasons), notes=tuple(notes))

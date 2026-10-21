@@ -30,7 +30,7 @@ class TestRemediation(unittest.TestCase):
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp()) / "repo"
         samples.write_infected_project(self.repo)
-        self.q = self.repo / ROLLBACK_DIR
+        self.q = Path(tempfile.mkdtemp()) / "rollback"
 
     def _findings(self):
         return scan_target(LocalRepoTarget(self.repo, "t", ScanOptions()), SIGS, []).findings

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""A file a repository keeps in saw's own folder is read like any other; the copies `saw fix` keeps
-there are not."""
+"""Everything in saw's own folder is read. A copy an older `saw fix` kept is told apart only by what
+the repository's history proves, and goes once its fix is committed."""
 from __future__ import annotations
 
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from stayawake.bots.security.models import CONFIRMED, INFECTED
+from stayawake.bots.security import kept_copies
+from stayawake.bots.security.models import CONFIRMED, INFECTED, RESIDUE, RESIDUE_VERDICT
+from stayawake.bots.security.pr.fix_verdict import checkout_of
+from stayawake.bots.security.remediation import live
 from stayawake.bots.security.scanner import scan_target
-from stayawake.bots.security.service import workers
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.targets.base import ScanOptions, Target
@@ -28,6 +31,10 @@ def _found(result) -> set[tuple[str, str]]:
     return {(f.signature_id, f.path) for f in result.findings}
 
 
+def _paths(result) -> set[str]:
+    return {f.path for f in result.findings}
+
+
 class _Repository(GitSandbox):
     def setUp(self):
         super().setUp()
@@ -38,22 +45,32 @@ class _Repository(GitSandbox):
         self.write(self.repo, rel, text)
         self.commit(self.repo, "add")
 
-    def scan(self):
-        return _scan(LocalRepoTarget(self.repo, "p", ScanOptions()))
+    def scan(self, opts: ScanOptions | None = None):
+        return _scan(LocalRepoTarget(self.repo, "p", opts or ScanOptions()))
+
+    def kept_by_an_older_fix(self, rel: str = "app.woff", *, fix_committed: bool = True) -> str:
+        """Lay out what an older `saw fix` left: the infected version committed, its copy kept
+        uncommitted, and the file rewritten. Returns the copy's path."""
+        self.committed(".gitignore", ".saw/\n")
+        self.committed(rel)
+        copy = f".saw/rollback/{rel}"
+        self.write(self.repo, copy, LOADER)
+        self.write(self.repo, rel, "module.exports = 1;\n")
+        if fix_committed:
+            self.commit(self.repo, "the fix")
+        return copy
 
 
-class TestWhatARepositoryCommitsInSawsFolder(_Repository):
+class TestWhatARepositoryKeepsInSawsFolder(_Repository):
     def test_a_payload_committed_there_reads_infected(self):
         self.committed(".saw/text.woff")
         result = self.scan()
         self.assertEqual(INFECTED, result.verdict)
-        self.assertIn(".saw/text.woff", {path for _, path in _found(result)})
+        self.assertIn(".saw/text.woff", _paths(result))
 
-    def test_one_committed_among_the_rollback_copies_reads_infected(self):
+    def test_one_committed_among_the_copies_reads_infected(self):
         self.committed(".saw/rollback/text.woff")
-        result = self.scan()
-        self.assertEqual(INFECTED, result.verdict)
-        self.assertIn(".saw/rollback/text.woff", {path for _, path in _found(result)})
+        self.assertEqual(INFECTED, self.scan().verdict)
 
     def test_one_in_a_folder_of_that_name_further_down_reads_infected(self):
         self.committed("packages/app/.saw/text.woff")
@@ -64,46 +81,122 @@ class TestWhatARepositoryCommitsInSawsFolder(_Repository):
         self.write(self.repo, ".saw/text.woff", LOADER)
         self.assertEqual(INFECTED, self.scan().verdict)
 
+    def test_a_setting_that_leaves_saws_folder_out_still_reads_it(self):
+        self.committed(".saw/text.woff")
+        opts = ScanOptions(exclude_dirs=ScanOptions().exclude_dirs | {".saw"})
+        self.assertEqual(INFECTED, self.scan(opts).verdict)
 
-class TestTheCopiesSawFixKeeps(_Repository):
-    def test_they_are_not_read(self):
-        self.committed(".gitignore", ".saw/\n")
-        self.write(self.repo, ".saw/rollback/fonts/text.woff", LOADER)
-        result = self.scan()
-        self.assertEqual([], result.findings)
-        self.assertIsNone(result.error)
-
-    def test_a_committed_one_beside_them_is_read_and_they_are_not(self):
-        self.committed(".saw/rollback/committed.woff")
-        self.write(self.repo, ".saw/rollback/kept.woff", LOADER)
-        paths = {path for _, path in _found(self.scan())}
-        self.assertIn(".saw/rollback/committed.woff", paths)
-        self.assertNotIn(".saw/rollback/kept.woff", paths)
-
-    def test_a_repository_committed_among_them_is_read(self):
+    def test_a_repository_committed_among_the_copies_is_read(self):
         library = self.new_repo("library")
         self.write(library, "text.woff", LOADER)
         self.commit(library, "add")
         self.git(self.repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library),
                  ".saw/rollback/sub")
         self.commit(self.repo, "a library")
-        self.assertIn(".saw/rollback/sub/text.woff", {path for _, path in _found(self.scan())})
+        self.assertIn(".saw/rollback/sub/text.woff", _paths(self.scan()))
 
-    def test_a_folder_of_that_name_you_leave_out_elsewhere_stays_out(self):
+    def test_a_folder_named_rollback_you_leave_out_elsewhere_stays_out(self):
         self.committed("lib/rollback/text.woff")
         opts = ScanOptions(exclude_dirs=ScanOptions().exclude_dirs | {"rollback"})
         target = LocalRepoTarget(self.repo, "p", opts)
-        self.assertNotIn("lib/rollback/text.woff", {path for _, path in _found(_scan(target))})
+        self.assertNotIn("lib/rollback/text.woff", _paths(_scan(target)))
         self.assertIn("rollback", target.pruned_dirs)
 
-    def test_a_link_in_their_place_is_not_read_through(self):
+
+class TestACopyTheHistoryProves(_Repository):
+    def test_it_reads_residue_and_the_note_says_saw_fix_removes_it(self):
+        copy = self.kept_by_an_older_fix()
+        result = self.scan()
+        self.assertEqual(RESIDUE_VERDICT, result.verdict)
+        self.assertTrue(all(f.confidence == RESIDUE for f in result.findings if f.path == copy))
+        self.assertIn(copy, _paths(result))
+        self.assertTrue(any("Run `saw fix` to remove the 1 whose fix is committed" in n
+                            for n in result.notes), result.notes)
+
+    def test_its_fix_not_yet_committed_keeps_it_and_says_so(self):
+        copy = self.kept_by_an_older_fix(fix_committed=False)
+        result = self.scan()
+        self.assertNotEqual(INFECTED, result.verdict)
+        self.assertTrue(any("1 stay until their fix is committed" in n for n in result.notes))
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((self.repo / copy).exists())
+
+    def test_one_put_back_over_its_committed_fix_is_kept(self):
+        copy = self.kept_by_an_older_fix()
+        self.write(self.repo, "app.woff", LOADER)
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((self.repo / copy).exists())
+
+    def test_saw_fix_removes_it_and_the_folders_it_leaves_empty(self):
+        copy = self.kept_by_an_older_fix("src/app.woff")
+        self.assertEqual(([copy], []), kept_copies.remove_fixed(self.repo))
+        self.assertFalse((self.repo / ".saw").exists())
+
+    def test_saw_fix_in_place_removes_it_and_says_so(self):
+        copy = self.kept_by_an_older_fix()
+        result = live.clean_checkout(self.repo, ScanOptions(), SIGS, [])
+        self.assertEqual([copy], result.copies_removed)
+        self.assertFalse((self.repo / copy).exists())
+        _, detail = checkout_of(result)
+        self.assertTrue(any("removed 1 file(s) an older `saw fix` kept as copies" in n
+                            for n in detail.notes), detail.notes)
+
+    def test_a_file_beside_it_the_history_does_not_prove_reads_infected_and_stays(self):
+        self.kept_by_an_older_fix()
+        self.write(self.repo, ".saw/rollback/other.woff", LOADER)
+        result = self.scan()
+        self.assertEqual(INFECTED, result.verdict)
+        self.assertIn(".saw/rollback/other.woff",
+                      {f.path for f in result.findings if f.confidence == CONFIRMED})
+        kept_copies.remove_fixed(self.repo)
+        self.assertTrue((self.repo / ".saw/rollback/other.woff").exists())
+
+    def test_one_committed_reads_infected_even_where_the_history_would_prove_it(self):
+        copy = self.kept_by_an_older_fix()
+        self.git(self.repo, "add", "-f", copy)
+        self.commit(self.repo, "the copy")
+        self.assertEqual(INFECTED, self.scan().verdict)
+        self.assertEqual([], kept_copies.proven(self.repo))
+
+
+class TestACopyTheHistoryDoesNotProve(_Repository):
+    def test_bytes_committed_at_another_path_read_infected(self):
+        self.committed(".gitignore", ".saw/\n")
+        self.committed("lib/a.woff")
+        self.write(self.repo, ".saw/rollback/b.woff", LOADER)
+        self.assertEqual(INFECTED, self.scan().verdict)
+
+    def test_bytes_never_committed_read_infected(self):
+        self.committed(".gitignore", ".saw/\n")
+        self.write(self.repo, ".saw/rollback/app.woff", LOADER)
+        self.assertEqual(INFECTED, self.scan().verdict)
+
+    def test_a_linked_rollback_folder_is_left_where_it_points(self):
         elsewhere = self.new_repo("elsewhere")
-        self.write(elsewhere, "text.woff", LOADER)
+        self.write(elsewhere, "app.woff", LOADER)
         self.commit(elsewhere, "add")
-        (self.repo / ".saw").mkdir()
+        self.kept_by_an_older_fix()
+        (self.repo / ".saw" / "rollback" / "app.woff").unlink()
+        (self.repo / ".saw" / "rollback").rmdir()
         (self.repo / ".saw" / "rollback").symlink_to(elsewhere, target_is_directory=True)
-        paths = {path for _, path in _found(self.scan())}
-        self.assertFalse(any(path.startswith(".saw/rollback/") for path in paths), paths)
+        self.assertEqual([], kept_copies.proven(self.repo))
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((elsewhere / "app.woff").exists())
+
+    def test_a_linked_saw_folder_is_left_where_it_points(self):
+        self.kept_by_an_older_fix()
+        elsewhere = Path(tempfile.mkdtemp())
+        (self.repo / ".saw").rename(elsewhere / ".saw")
+        (self.repo / ".saw").symlink_to(elsewhere / ".saw", target_is_directory=True)
+        self.assertEqual([], kept_copies.proven(self.repo))
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((elsewhere / ".saw/rollback/app.woff").exists())
+
+    def test_git_failing_to_say_errors_the_target(self):
+        self.kept_by_an_older_fix()
+        with mock.patch.object(kept_copies, "stdout_bytes", return_value=None):
+            result = self.scan()
+        self.assertIsNotNone(result.error)
 
 
 class TestALinkInSawsFolder(_Repository):
@@ -128,17 +221,9 @@ class TestAFolderThatIsNotARepository(unittest.TestCase):
         self.put(".saw/text.woff")
         self.assertEqual(INFECTED, _scan(Target(self.folder, "f", ScanOptions())).verdict)
 
-    def test_the_copies_saw_fix_keeps_are_not_read_and_the_note_says_so(self):
+    def test_a_payload_among_the_copies_reads_infected(self):
         self.put("project/.saw/rollback/text.woff")
-        target = Target(self.folder, "f", ScanOptions())
-        result = _scan(target)
-        self.assertEqual([], result.findings)
-        self.assertIsNotNone(workers.pruning_note(target.pruned_dirs))
-
-    def test_a_scan_that_leaves_nothing_out_reads_them(self):
-        self.put(".saw/rollback/text.woff")
-        opts = ScanOptions(exclude_dirs={".git"})
-        self.assertEqual(INFECTED, _scan(Target(self.folder, "f", opts)).verdict)
+        self.assertEqual(INFECTED, _scan(Target(self.folder, "f", ScanOptions())).verdict)
 
 
 class TestAMergeThatAddsAPayloadInSawsFolder(_Merges):

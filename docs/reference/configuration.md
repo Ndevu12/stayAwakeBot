@@ -19,7 +19,7 @@ Every `settings` key is optional, and the CLI equivalent wins when both are give
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `exclude_dirs` | `.git`, `node_modules`, `.next`, `dist`, `build`, `.saw`, `.venv` | Directories never traversed. Keep the list minimal. |
+| `exclude_dirs` | `.git`, `node_modules`, `.next`, `dist`, `build`, `.venv` | Directories never traversed. Keep the list minimal. |
 | `keep_dirs` | *(empty)* | Directories a fix never removes, each written relative to the repository root (`data`, `dist/assets`). A path outside the repository is ignored. `exclude_dirs` does not decide this. |
 | `max_file_bytes` | `2000000` | Size up to which a file is read in one piece. A larger text file is still read in full for the content checks. |
 | `remote_clone_depth` | `50` | Clone depth for `--remote` targets. |
