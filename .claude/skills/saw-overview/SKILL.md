@@ -32,6 +32,10 @@ maintainer rather than working around it.
   "auto-cleaned".
 - **Fail closed.** A target that could not be fully scanned (unreadable file, failed clone, malformed
   config) must never read as clean — the run fails. Warn loudly; never fail silently.
+- **Nothing saw leaves in a scanned tree is trusted unless it is proven.** A scan never skips saw's
+  own folder. A file there reads as saw's own only when the operator's state or the repository's
+  history proves it, never because of what the repository says about it; anything unproven is graded
+  on its evidence. What saw keeps, it removes once the reason for keeping it is met.
 - **Operator documentation never mentions exit codes.** No `docs/reference/exit-codes.md`, no Exit
   tables, no `0`/`1`/`2`/`3` as command results, no `echo $?`. Operators read the **verdict** on the
   report. Do not put process-status numbers in `docs/`, `README.md`, `SUPPORT.md`, or a new

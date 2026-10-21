@@ -93,7 +93,7 @@ def is_source_path(rel: str) -> bool:
 @dataclass
 class ScanOptions:
     exclude_dirs: set[str] = field(default_factory=lambda: {
-        ".git", "node_modules", ".next", "dist", "build", SAW_DIR})
+        ".git", "node_modules", ".next", "dist", "build"})
     keep_dirs: set[str] = field(default_factory=set)
     max_file_bytes: int = 2_000_000
     remote_clone_depth: int = 50
@@ -103,6 +103,9 @@ class ScanOptions:
     confirm_remote_read: object = None
     deep: bool = False
     history: bool = False        # also read what the repository still stores on other refs
+
+    def __post_init__(self):
+        self.exclude_dirs = set(self.exclude_dirs) - {SAW_DIR}
 
 
 class Target:

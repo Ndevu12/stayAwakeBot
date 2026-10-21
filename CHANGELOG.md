@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Security
+- **`saw scan` reads more of a repository's files.** `saw fix` removes a confirmed payload found in
+  them as it does anywhere else. Re-run `saw scan` on repositories you scanned before this release.
+- **Copies an older `saw fix` kept in your checkout read residue.** `saw fix` removes each one once
+  its fix is committed.
+
 ### Fixed
 - **`saw fix` names every branch that still carries what it removed.** A branch fetched from origin
   is named as well as a local one, such as `origin/feature`, with `saw fix amend` to take it out,
