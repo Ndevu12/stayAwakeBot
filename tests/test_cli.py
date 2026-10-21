@@ -23,7 +23,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from stayawake import cli
-from tests.support.real_host import READS_THE_REAL_HOST
+from tests.support.real_host import READS_THE_REAL_HOST, probes_that_find_nothing
 from stayawake.utils import exitcodes
 
 
@@ -374,32 +374,22 @@ class TestDiscard(unittest.TestCase):
 
 
 class TestAudit(unittest.TestCase):
-    @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
-    @mock.patch("stayawake.bots.security.hygiene.check_host_artifacts", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_persistence", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_runner_persistence", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_editors", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_credentials", return_value=[])
-    @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
-    def test_clean_audit_returns_zero(self, *_):
-        with redirect_stdout(io.StringIO()):
-            self.assertEqual(cli.main(["audit"]), 0, READS_THE_REAL_HOST)
+    def _audit(self, argv, findings=None):
+        with mock.patch("stayawake.bots.security.hygiene.render", return_value=""), \
+             mock.patch("stayawake.bots.security.hygiene.audit_checks",
+                        return_value=probes_that_find_nothing(findings)), \
+             mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None)), \
+             redirect_stdout(io.StringIO()):
+            return cli.main(argv)
 
-    @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
-    @mock.patch("stayawake.bots.security.hygiene.check_host_artifacts", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_persistence", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_runner_persistence", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_editors", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_credentials")
-    @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
-    def test_fail_flag_gates_on_warning(self, _tok, m_cred, *_):
+    def test_clean_audit_returns_zero(self):
+        self.assertEqual(self._audit(["audit"]), 0, READS_THE_REAL_HOST)
+
+    def test_fail_flag_gates_on_warning(self):
         warning = mock.Mock()
         warning.severity = "warning"
-        m_cred.return_value = [warning]
-        with redirect_stdout(io.StringIO()):
-            self.assertEqual(cli.main(["audit", "-f"]), 1, READS_THE_REAL_HOST)
+        self.assertEqual(self._audit(["audit", "-f"], {"cached credentials": [warning]}), 1,
+                         READS_THE_REAL_HOST)
 
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
     @mock.patch("stayawake.bots.security.hygiene.audit_checks", return_value=[])

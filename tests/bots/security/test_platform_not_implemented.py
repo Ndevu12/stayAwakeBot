@@ -14,7 +14,7 @@ from contextlib import redirect_stdout
 from unittest import mock
 
 from stayawake.bots.security import hygiene
-from tests.support.real_host import READS_THE_REAL_HOST
+from tests.support.real_host import READS_THE_REAL_HOST, probes_that_find_nothing
 from stayawake.bots.security.hygiene.models import (ROTATION_UNSAFE_IDS, SURFACE_NOT_IMPLEMENTED_ID,
                                                     persistence_surface_is_enumerable)
 from stayawake.bots.security.hygiene.outcome import CHECKED_CLEAN, NOT_IMPLEMENTED
@@ -39,24 +39,34 @@ def tearDownModule():
 
 
 class TestAPlatformWithNoImplementationIsNotClean(unittest.TestCase):
-    def _states(self, platform):
-        with mock.patch("sys.platform", platform):
-            return {o.label: o.state for o in hygiene.audit_outcomes()}
+    def _graded_on(self, platform):
+        """Grade every registered probe on `platform` without reading the machine. Returns each
+        probe's state and the labels whose check was called."""
+        called = []
+        probes = probes_that_find_nothing(called=called)
+        with mock.patch("sys.platform", platform), \
+             mock.patch.object(hygiene, "audit_checks", return_value=probes):
+            states = {o.label: o.state for o in hygiene.audit_outcomes()}
+        return states, called
 
     def test_the_posix_only_probes_say_so_rather_than_clean(self):
-        states = self._states("win32")
+        states, called = self._graded_on("win32")
         for label in hygiene._POSIX_ONLY_PROBES:
             with self.subTest(probe=label):
                 self.assertEqual(states[label], NOT_IMPLEMENTED)
+                self.assertNotIn(label, called)
 
     def test_a_cross_platform_probe_still_runs_there(self):
-        self.assertEqual(self._states("win32")["git exec config"], CHECKED_CLEAN)
+        states, called = self._graded_on("win32")
+        self.assertEqual(states["git exec config"], CHECKED_CLEAN)
+        self.assertIn("git exec config", called)
 
     def test_on_posix_they_run_normally(self):
-        states = self._states("darwin")
+        states, called = self._graded_on("darwin")
         for label in hygiene._POSIX_ONLY_PROBES:
             with self.subTest(probe=label):
                 self.assertNotEqual(states[label], NOT_IMPLEMENTED)
+                self.assertIn(label, called)
 
     def test_every_posix_only_probe_names_a_registered_one(self):
         labels = {label for label, _c in hygiene.audit_checks()}

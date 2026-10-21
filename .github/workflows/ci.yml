@@ -28,6 +28,9 @@ jobs:
       fail-fast: false   # report every minor's result, not just the first to fail
       matrix:
         python-version: ['3.11', '3.12', '3.13', '3.14']   # the supported range (see requires-python)
+        share: [1, 2, 3]   # parallel parts of the suite; keep SHARES below equal to its length
+    env:
+      SHARES: 3
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -37,5 +40,40 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run test suite
-        run: python -m unittest discover -s tests -v
+      - name: Run test suite (share ${{ matrix.share }})
+        run: python -m tests.support.shard run ${{ matrix.share }} "$SHARES" "share-${{ matrix.share }}.json"
+
+      - name: Keep what this share ran
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        with:
+          name: tests-${{ matrix.python-version }}-share-${{ matrix.share }}
+          path: share-${{ matrix.share }}.json
+          if-no-files-found: error
+          retention-days: 3
+
+  every-test-ran-once:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Collect what each share ran
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with:
+          pattern: tests-*-share-*
+          path: shares
+
+      - name: Every test ran in exactly one share, on every Python version
+        run: |
+          status=0
+          for version in $(ls shares | sed -E 's/^tests-(.*)-share-[0-9]+$/\1/' | sort -u); do
+            echo "Python $version:"
+            python -m tests.support.shard verify shares/tests-"$version"-share-*/share-*.json || status=1
+          done
+          exit $status
