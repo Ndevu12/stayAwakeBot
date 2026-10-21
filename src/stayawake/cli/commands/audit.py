@@ -46,11 +46,14 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
+    # The parser sets this. A caller that builds the arguments itself, the way the tests do, has
+    # no such attribute, and that caller wants the human report.
+    as_json = getattr(a, "json", False)
     token, _ = auth.resolve_token()
     if a.repo and not token:
         print(auth.no_credential_hint("auditing branch protection") +
               " Skipping the branch-protection check.\n",
-              file=sys.stderr if a.json else sys.stdout)
+              file=sys.stderr if as_json else sys.stdout)
     progress_on = stream_enabled(sys.stderr, force_off=no_stream_requested(a))
     outcomes: list[hygiene.CheckOutcome] = []
     for label, check in hygiene.audit_checks(a.repo, token, a.branch,
@@ -58,7 +61,7 @@ def run(a: argparse.Namespace) -> int:
         with status(f"checking {label}…", enabled=progress_on):
             outcomes.append(hygiene.run_check(label, check))
     issues = [i for o in outcomes for i in o.issues]
-    if a.json:
+    if as_json:
         print(json.dumps(versioned("audit", hygiene.as_document(outcomes)), indent=2))
     else:
         report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width(),
