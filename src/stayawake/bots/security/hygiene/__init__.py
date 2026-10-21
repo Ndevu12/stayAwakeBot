@@ -14,14 +14,14 @@ from .models import (HygieneIssue, display_rank, INCIDENT_TRIGGER_IDS, ACTIVE_PE
                      BLOCKED_ID, BLOCKED_SURFACE_ID,
                      CREDENTIAL_EXPOSURE_IDS, UNVERIFIED_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
                      UNCHECKED_GATE_IDS,
-                     SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID,
+                     SURFACE_ABSENT_ID,
                      ROTATION_SAFE, ROTATION_SAFE_PENDING_CHECK,
                      ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
                      ROTATION_UNSAFE_STAGING,
                      TIER_UNCONFIRMED_STAGING, unconfirmed_staging_note,
                      TIER_LEFT_OUTSIDE_A_CONTROL, left_outside_a_control_note,
                      TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
-                     persistence_surface_is_enumerable, response_order, rotation_safety,
+                     persistence_surface_is_enumerable, rotation_safety,
                      incident_response_sequence, credential_exposure_note)
 from .outcome import (CheckOutcome, run_probe, CHECKED_CLEAN, FOUND, UNKNOWN, BLOCKED,
                       NOT_IMPLEMENTED)
@@ -32,7 +32,7 @@ from .coverage import check_persistence_coverage
 from .autorun import check_autorun
 from .global_prefix import check_global_install_tree
 from .host_artifacts import check_host_artifacts
-from .process import check_live_processes, live_process_scope_note
+from .process import check_live_processes
 from .app_bundle import check_app_bundles
 from .agents import check_agents
 from .watching import check_self_check
@@ -40,7 +40,7 @@ from .editor import check_editors
 from .mechanism import (check_ssh_authorized_keys, check_shell_profile,
                         check_git_config_execution, git_config_predicate)
 from .remote import check_branch_protection
-from stayawake.utils import docs_site, textsafe
+from .document import as_document, finding_groups, rotation_sentence, scope_notes, shown
 from stayawake.utils.render import MARKER, SEVERITY, block, marked_list, paint
 
 __all__ = [
@@ -51,7 +51,8 @@ __all__ = [
     "check_app_bundles",
     "check_editors", "check_agents", "check_self_check", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
     "check_live_processes",
-    "check_branch_protection", "audit", "audit_checks", "audit_outcomes", "run_check", "render",
+    "check_branch_protection", "audit", "audit_checks", "audit_outcomes", "as_document",
+    "run_check", "render",
     "CheckOutcome", "CHECKED_CLEAN", "FOUND", "UNKNOWN", "BLOCKED", "NOT_IMPLEMENTED",
 ]
 
@@ -155,13 +156,9 @@ def _icon(severity: str) -> str:
     return MARKER.get(severity, MARKER["info"])
 
 
-_REPORT_FIELD_LIMIT = 4000
-
-
 def _safe(text: str) -> str:
-    """One call for every untrusted field here, so a field added later cannot skip the defanging."""
-    out = textsafe.plain(text, limit=_REPORT_FIELD_LIMIT)
-    return out if len(out) < _REPORT_FIELD_LIMIT else out + " […]"   # a cut is never silent
+    """Prepare one untrusted field the way the report prints it. Takes the text. Returns it."""
+    return shown(text)
 
 
 def _banner(issue_ids: set[str], *, color: bool, width: int, content_scanned: bool = False) -> list[str]:
@@ -198,27 +195,13 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
     SAFE (surface enumerated + clean), UNSAFE-persistence (a live foothold → the harden/rotate-LAST
     runbook follows in _banner), UNSAFE-unknown (surface could not be read → treat as unsafe)."""
     verdict = rotation_safety({i.id for i in issues})
-    if verdict == ROTATION_SAFE_PENDING_CHECK:
-        return [paint(f"{MARKER['ok']} Rotation safety: safe once you confirm the item(s) below are "
-                      "yours — if any is not, treat this as an incident and rotate LAST.",
-                      SEVERITY["ok"], on=color)]
-    if verdict == ROTATION_SAFE:
-        return [paint(f"{MARKER['ok']} Rotation safety: persistence surface enumerated and clean "
-                      "— rotating credentials is safe.", SEVERITY["ok"], on=color)]
-    if verdict == ROTATION_UNSAFE_STAGING:
-        what = ("a global resolution path was left outside a control"
-                if incident_tier({i.id for i in issues}) == TIER_LEFT_OUTSIDE_A_CONTROL
-                else "a staging artifact is in more than one place")
-        lines = [paint(f"{MARKER['warning']}  Rotation safety: UNSAFE — {what}; inspect it before "
-                       "rotating any credential (note below).", SEVERITY["warning"], on=color)]
-    elif verdict == ROTATION_UNSAFE_PERSISTENCE:
-        lines = [paint(f"{MARKER['warning']}  Rotation safety: UNSAFE — active host persistence "
-                       "detected; do NOT rotate any credential yet (runbook below).",
-                       SEVERITY["warning"], on=color)]
+    sentence = rotation_sentence(issues)
+    if verdict in (ROTATION_SAFE, ROTATION_SAFE_PENDING_CHECK):
+        return [paint(f"{MARKER['ok']} {sentence}", SEVERITY["ok"], on=color)]
+    if verdict == ROTATION_UNSAFE_UNKNOWN:
+        lines = [paint(f"{MARKER['unknown']}  {sentence}", SEVERITY["warning"], on=color)]
     else:
-        lines = [paint(f"{MARKER['unknown']}  Rotation safety: UNKNOWN — the persistence surface "
-                       "could not be established, so treat credential rotation as UNSAFE "
-                       "until it is.", SEVERITY["warning"], on=color)]
+        lines = [paint(f"{MARKER['warning']}  {sentence}", SEVERITY["warning"], on=color)]
     # The UNKNOWN surface is disclosed on BOTH unsafe paths. `rotation_safety` is a PRIORITY
     # function — active persistence dominates — so keying this disclosure off its verdict hid the
     # list in the one state that needs it most: a live foothold PLUS a location nobody could read.
@@ -248,31 +231,13 @@ def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, widt
     return lines
 
 
-_SCOPE_DOCS = docs_site.WHAT_A_CLEAN_AUDIT_MEANS
-
-
 def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
     """Build the line that says what an audit's result covers. Takes the audit's issues, whether to
     colour, and the width. Returns the lines."""
-    ids = {i.id for i in issues}
-    surface_unverified = bool(ids & {SURFACE_UNREADABLE_ID, BLOCKED_SURFACE_ID})
-    parts = []
-    if not persistence_surface_is_enumerable():
-        parts.append("start-up entries are not checked on this platform")
-    elif surface_unverified:
-        parts.append("the start-up entries above were not all read")
-    if incident_tier(ids) == TIER_ACTIVE_PERSISTENCE:
-        parts.append("scope your response wider than this list")
-    means = f" — {'; '.join(parts)}." if parts else "."
-    processes = live_process_scope_note()
-    text = f"Scope: this machine, not your online accounts. Not exhaustive{means} {_SCOPE_DOCS}"
-    lines = block(text, indent=2, width=width, marker=f"{MARKER['meta']} ",
-                  code=SEVERITY["info"], color=color)
-    if processes:
-        # Every machine runs processes this user may not read. Disclosed, never gating: withholding
-        # the verdict on that would withhold it on every unprivileged run.
-        lines += block(processes.capitalize() + ".", indent=2, width=width,
-                       marker=f"{MARKER['meta']} ", code=SEVERITY["info"], color=color)
+    lines: list[str] = []
+    for text in scope_notes(issues):
+        lines += block(text, indent=2, width=width, marker=f"{MARKER['meta']} ",
+                       code=SEVERITY["info"], color=color)
     return lines
 
 
@@ -320,13 +285,7 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80,
     # Worst-first WITHIN each group: a live foothold above a credential exposure above the rest,
     # which is the order the response runbook asks for. Findings arrived in probe-registration
     # order, so what appeared first was whichever check happened to be listed first.
-    def worst_first(items):
-        return sorted(items, key=lambda i: (response_order(i.id), i.title))
-
-    ranked = {id(i): display_rank(i.id, i.severity) for i in issues}
-    criticals = worst_first(i for i in issues if ranked[id(i)] == "critical")
-    warnings = worst_first(i for i in issues if ranked[id(i)] == "warning")
-    reviews = worst_first(i for i in issues if i.severity == "info")
+    criticals, warnings, reviews = finding_groups(issues)
     unrun = _blocked_block(issues, color=color, width=width)
 
     if not (criticals or warnings or reviews):
@@ -365,6 +324,7 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80,
         lines += banner + [""]
     lines += unrun
 
+    ranked = {id(i): display_rank(i.id, i.severity) for i in issues}
     show_headers = sum(map(bool, (criticals, warnings, reviews))) > 1
     for gtitle, gsub, gsev, items in (
             ("CRITICAL", "act on this first", "critical", criticals),

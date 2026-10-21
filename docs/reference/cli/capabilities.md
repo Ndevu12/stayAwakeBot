@@ -23,6 +23,7 @@ $ saw capabilities --json
     "doctor": 1,
     "auth-status": 1,
     "guard-drift": 1,
+    "audit": 1,
     "capabilities": 1
   },
   "features": [
@@ -31,6 +32,7 @@ $ saw capabilities --json
     "doctor.json",
     "auth.status.json",
     "guard.drift.json",
+    "audit.json",
     "capabilities.json"
   ],
   "platform": {

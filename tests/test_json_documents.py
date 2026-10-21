@@ -59,6 +59,13 @@ def _in_an_empty_folder(argv):
         return _stdout_of(lambda: cli.main([*argv, "--no-stream", str(folder)]))
 
 
+def _audit_with_nothing_to_report():
+    with mock.patch("stayawake.cli.commands.audit.hygiene.audit_checks", return_value=[]), \
+         mock.patch("stayawake.bots.security.hygiene.document.live_process_scope_note",
+                    return_value=""):
+        cli.main(["audit", "--json", "--no-stream"])
+
+
 def _drift_with_no_remote_repository():
     with mock.patch("stayawake.bots.security.guard.sweep.resolution.resolve_remote",
                     return_value=([], None, None)):
@@ -74,6 +81,7 @@ _PRINT_EACH_DOCUMENT = {
     "guard-drift": [lambda: _in_an_empty_folder(["guard", "drift", "--json"]),
                     _drift_with_no_remote_repository],
     "capabilities": [lambda: _stdout_of(lambda: cli.main(["capabilities", "--json"]))],
+    "audit": [lambda: _stdout_of(_audit_with_nothing_to_report)],
 }
 
 
