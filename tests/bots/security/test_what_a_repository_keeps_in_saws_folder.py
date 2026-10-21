@@ -172,9 +172,8 @@ class TestACopyTheHistoryDoesNotProve(_Repository):
         self.assertEqual(INFECTED, self.scan().verdict)
 
     def test_a_linked_rollback_folder_is_left_where_it_points(self):
-        elsewhere = self.new_repo("elsewhere")
-        self.write(elsewhere, "app.woff", LOADER)
-        self.commit(elsewhere, "add")
+        elsewhere = Path(tempfile.mkdtemp())
+        (elsewhere / "app.woff").write_text(LOADER, encoding="utf-8")
         self.kept_by_an_older_fix()
         (self.repo / ".saw" / "rollback" / "app.woff").unlink()
         (self.repo / ".saw" / "rollback").rmdir()
@@ -191,6 +190,73 @@ class TestACopyTheHistoryDoesNotProve(_Repository):
         self.assertEqual([], kept_copies.proven(self.repo))
         self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
         self.assertTrue((elsewhere / ".saw/rollback/app.woff").exists())
+
+    def test_bytes_only_another_ref_holds_read_infected(self):
+        self.committed(".gitignore", ".saw/\n")
+        self.git(self.repo, "checkout", "-q", "-b", "elsewhere")
+        self.committed("app.woff")
+        self.git(self.repo, "update-ref", "refs/x/hidden", "HEAD")
+        self.git(self.repo, "checkout", "-q", "main")
+        self.git(self.repo, "branch", "-D", "elsewhere")
+        self.write(self.repo, ".saw/rollback/app.woff", LOADER)
+        self.assertEqual(INFECTED, self.scan().verdict)
+
+    def test_a_repository_among_them_reads_infected_and_stays(self):
+        self.committed(".gitignore", ".saw/\n")
+        self.committed("sub/text.woff")
+        self.committed("sub/text.woff", "module.exports = 1;\n")
+        library = self.new_repo("library")
+        self.write(library, "text.woff", LOADER)
+        self.commit(library, "add")
+        self.git(self.repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "-f",
+                 str(library), ".saw/rollback/sub")
+        self.commit(self.repo, "a library")
+        self.assertEqual(INFECTED, self.scan().verdict)
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((self.repo / ".saw/rollback/sub/text.woff").exists())
+
+    def test_one_inside_a_repository_nested_among_them_reads_infected(self):
+        copy = self.kept_by_an_older_fix("sub/text.woff")
+        self.git(self.repo / ".saw/rollback/sub", "init", "-q")
+        self.assertEqual(INFECTED, self.scan().verdict)
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((self.repo / copy).exists())
+
+    def test_a_committed_folder_named_otherwise_than_saw_names_it_is_left_alone(self):
+        self.committed("config.json", '{"a": 1}\n')
+        self.committed("config.json", '{"a": 2}\n')
+        self.committed(".saw/Rollback/config.json", '{"a": 1}\n')
+        self.assertEqual([], kept_copies.proven(self.repo))
+        kept_copies.remove_fixed(self.repo)
+        self.assertIn(".saw/Rollback/config.json", self.git(self.repo, "ls-files"))
+        self.assertEqual("", self.git(self.repo, "status", "--porcelain"))
+
+    def test_a_repository_among_them_that_lost_its_marker_is_still_left_alone(self):
+        self.test_a_repository_among_them_reads_infected_and_stays()
+        (self.repo / ".saw/rollback/sub/.git").unlink()
+        self.assertEqual([], kept_copies.proven(self.repo))
+
+    def test_a_copy_git_tracks_in_another_letter_case_is_left_alone(self):
+        copy = self.kept_by_an_older_fix()
+        blob = self.git(self.repo, "hash-object", "-w", str(self.repo / copy)).strip()
+        self.git(self.repo, "update-index", "--add", "--cacheinfo",
+                 f"100644,{blob},.saw/Rollback/app.woff")
+        self.assertEqual([], kept_copies.proven(self.repo))
+
+    def test_a_folder_named_otherwise_than_saw_names_it_is_not_its_copies(self):
+        self.committed(".gitignore", ".saw/\n")
+        self.committed("app.woff")
+        self.committed("app.woff", "module.exports = 1;\n")
+        self.write(self.repo, ".saw/Rollback/app.woff", LOADER)
+        self.assertEqual([], kept_copies.proven(self.repo))
+        kept_copies.remove_fixed(self.repo)
+        self.assertTrue((self.repo / ".saw/Rollback/app.woff").exists())
+
+    def test_one_too_large_to_prove_reads_on_its_evidence(self):
+        self.kept_by_an_older_fix()
+        with mock.patch.object(kept_copies, "_LARGEST_COPY", 8):
+            self.assertEqual([], kept_copies.proven(self.repo))
+            self.assertEqual(INFECTED, self.scan().verdict)
 
     def test_git_failing_to_say_errors_the_target(self):
         self.kept_by_an_older_fix()

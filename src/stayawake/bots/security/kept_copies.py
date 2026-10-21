@@ -6,12 +6,14 @@ from __future__ import annotations
 import hashlib
 import os
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from stayawake.bots.security.models import ROLLBACK_DIR, SAW_DIR
 from stayawake.lib.git.run import stdout_bytes
 
 _PATHS_PER_CALL = 256
+_LARGEST_COPY = 64 * 1024 * 1024
+_ROLLBACK_NAME = PurePosixPath(ROLLBACK_DIR).name
 
 
 @dataclass(frozen=True)
@@ -30,11 +32,12 @@ def proven(root: Path) -> list[KeptCopy] | None:
     held = _held(Path(root))
     if not held:
         return []
-    tracked = _listed(root, ["ls-files", "-z", "--", ROLLBACK_DIR])
+    tracked = _listed(root, ["ls-files", "-z"])
     oid_of = _object_id_function(root)
     if tracked is None or oid_of is None:
         return None
-    held = {path: data for path, data in held.items() if path not in tracked}
+    tracked = {path.casefold() for path in tracked}
+    held = {path: data for path, data in held.items() if not _under_any(path, tracked)}
     copies = {path: (path[len(ROLLBACK_DIR) + 1:], oid_of(data)) for path, data in held.items()}
     committed = _committed_versions(root, sorted({original for original, _ in copies.values()}))
     if committed is None:
@@ -70,13 +73,17 @@ def remove_fixed(root: Path) -> tuple[list[str], list[str]]:
 
 
 def _held(root: Path) -> dict[str, bytes]:
-    """Read every file and link under the rollback folder. Takes the repository. Returns each one's
-    bytes by its path, empty when the folder is not there or is reached through a link."""
+    """Read every file and link under the rollback folder, outside any repository within it. Takes
+    the repository. Returns each one's bytes by its path, empty when the folder is not there under
+    exactly its own name or is reached through a link."""
     folder = root / ROLLBACK_DIR
-    if _through_a_link(root, folder) or folder.is_symlink() or not folder.is_dir():
+    if (not _named_exactly(root, SAW_DIR) or not _named_exactly(root / SAW_DIR, _ROLLBACK_NAME)
+            or _through_a_link(root, folder) or folder.is_symlink() or not folder.is_dir()
+            or os.path.lexists(folder / ".git")):
         return {}
     held: dict[str, bytes] = {}
     for top, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if not os.path.lexists(os.path.join(top, d, ".git"))]
         for name in [*files, *(d for d in dirs if os.path.islink(os.path.join(top, d)))]:
             data = _on_disk(Path(top) / name)
             if data is not None:
@@ -90,7 +97,9 @@ def _on_disk(path: Path) -> bytes | None:
     try:
         if path.is_symlink():
             return os.fsencode(os.readlink(path))
-        return path.read_bytes() if path.is_file() else None
+        if not path.is_file() or path.stat().st_size > _LARGEST_COPY:
+            return None
+        return path.read_bytes()
     except OSError:
         return None
 
@@ -111,7 +120,7 @@ def _committed_versions(root: Path, originals: list[str]) -> set[tuple[str, str]
     versions: set[tuple[str, str]] = set()
     for start in range(0, len(originals), _PATHS_PER_CALL):
         chunk = originals[start:start + _PATHS_PER_CALL]
-        listed = stdout_bytes(root, ["log", "--all", "--root", "-m", "--no-renames", "--format=",
+        listed = stdout_bytes(root, ["log", "HEAD", "--root", "-m", "--no-renames", "--format=",
                                      "--raw", "-z", "--no-abbrev", "--", *chunk])
         if listed is None:
             return None
@@ -147,6 +156,22 @@ def _listed(root: Path, args: list[str]) -> set[str] | None:
     None when git could not say."""
     listed = stdout_bytes(root, args)
     return None if listed is None else {os.fsdecode(p) for p in listed.split(b"\0") if p}
+
+
+def _named_exactly(folder: Path, name: str) -> bool:
+    """Tell whether a folder holds an entry by exactly this name. Takes the folder and the name.
+    Returns the answer, False when the folder cannot be listed."""
+    try:
+        return name in os.listdir(folder)
+    except OSError:
+        return False
+
+
+def _under_any(path: str, tracked: set[str]) -> bool:
+    """Tell whether git tracks a path or a folder above it, in any letter case. Takes the path and
+    the tracked paths, case-folded. Returns the answer."""
+    here = PurePosixPath(path.casefold())
+    return any(str(p) in tracked for p in (here, *here.parents))
 
 
 def _through_a_link(root: Path, path: Path) -> bool:
