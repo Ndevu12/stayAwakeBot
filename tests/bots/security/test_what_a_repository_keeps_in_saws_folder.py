@@ -80,6 +80,15 @@ class TestTheCopiesSawFixKeeps(_Repository):
         self.assertIn(".saw/rollback/committed.woff", paths)
         self.assertNotIn(".saw/rollback/kept.woff", paths)
 
+    def test_a_repository_committed_among_them_is_read(self):
+        library = self.new_repo("library")
+        self.write(library, "text.woff", LOADER)
+        self.commit(library, "add")
+        self.git(self.repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library),
+                 ".saw/rollback/sub")
+        self.commit(self.repo, "a library")
+        self.assertIn(".saw/rollback/sub/text.woff", {path for _, path in _found(self.scan())})
+
     def test_a_folder_of_that_name_you_leave_out_elsewhere_stays_out(self):
         self.committed("lib/rollback/text.woff")
         opts = ScanOptions(exclude_dirs=ScanOptions().exclude_dirs | {"rollback"})

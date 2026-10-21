@@ -181,7 +181,7 @@ class Target:
         relative to the target, or an empty list when git lists none."""
         if folder.is_symlink() or not folder.is_dir():
             return []
-        listed = stdout_bytes(folder, ["ls-files", "-z"])
+        listed = stdout_bytes(folder, ["ls-files", "--recurse-submodules", "-z"])
         names = [os.fsdecode(n) for n in (listed or b"").split(b"\0") if n]
         return [str((folder / n).relative_to(self.root)) for n in names
                 if os.path.lexists(folder / n)]
