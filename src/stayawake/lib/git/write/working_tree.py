@@ -6,7 +6,6 @@ A checkout follows its branch by writing the changed paths with those same conve
 saw-owned repository and swapping in an index prepared on a private copy."""
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import shutil
@@ -16,9 +15,11 @@ from pathlib import Path
 
 from stayawake.lib.git import operator_config
 from stayawake.lib.git.borrowed import borrow
+from stayawake.lib.git.objects import blob_id
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes, stdout_bytes_fed
 from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.utils import scratch
+from stayawake.utils.pathsafe import passes_through_a_link
 
 _GITLINK = b"160000"
 _SYMLINK = b"120000"
@@ -62,13 +63,6 @@ def _index_entries(worktree: Path) -> dict[bytes, tuple[bytes, bytes, bytes]]:
         mode, oid, stage_number = info.split(b" ")
         entries[path] = (mode, oid, stage_number)
     return entries
-
-
-def _blob_id(data: bytes, object_format: str) -> bytes:
-    digest = hashlib.new("sha256" if object_format == "sha256" else "sha1")
-    digest.update(b"blob %d\0" % len(data))
-    digest.update(data)
-    return digest.hexdigest().encode()
 
 
 def _recorded_stats(worktree: Path) -> dict[bytes, dict[bytes, bytes]] | None:
@@ -177,13 +171,6 @@ def _converted_as_in(repo: Path, borrowed, paths: list[bytes]) -> bool:
     return True
 
 
-def _blob_id(data: bytes, object_format: str) -> bytes:
-    digest = hashlib.new("sha256" if object_format == "sha256" else "sha1")
-    digest.update(b"blob %d\0" % len(data))
-    digest.update(data)
-    return digest.hexdigest().encode()
-
-
 def _content_matches(borrowed, worktree: Path, rel: bytes, mode: bytes, oid: bytes,
                      object_format: str, track_executable: bool, conversion: list[str]) -> bool:
     """Whether the file at `rel` holds what the index records, its bytes converted by git's
@@ -191,13 +178,13 @@ def _content_matches(borrowed, worktree: Path, rel: bytes, mode: bytes, oid: byt
     recorded mode and id, the object format, whether the executable bit counts and the
     operator's end-of-line settings as `-c` arguments."""
     path = worktree / os.fsdecode(rel)
-    if _has_link_above(worktree, rel):
+    if passes_through_a_link(worktree, path):
         return False
     try:
         info = os.lstat(path)
         if mode == _SYMLINK:
-            return stat.S_ISLNK(info.st_mode) and _blob_id(os.fsencode(os.readlink(path)),
-                                                          object_format) == oid
+            return (stat.S_ISLNK(info.st_mode)
+                    and blob_id(os.fsencode(os.readlink(path)), object_format).encode() == oid)
         if not stat.S_ISREG(info.st_mode):
             return False
         if track_executable and bool(info.st_mode & stat.S_IXUSR) != (mode == _EXECUTABLE):
@@ -342,7 +329,8 @@ def changes_in_the_way(worktree: str | Path, commit: str) -> ChangesInTheWay | N
     across = set(committed) | set(target)
     rewritten = {rel for rel in across if committed.get(rel) != target.get(rel)}
     blocking = [rel for rel, entry in indexed.items() if entry[2] != b"0"]
-    blocking += [rel for rel in rewritten if _has_link_above(worktree, rel)]
+    blocking += [rel for rel in rewritten
+                 if passes_through_a_link(worktree, worktree / os.fsdecode(rel))]
     blocking += [name.encode() for name in operations]
     carryable: list[bytes] = []
     already: list[bytes] = []
@@ -389,15 +377,6 @@ def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
     return found is None or bool(found)
 
 
-def _has_link_above(worktree: Path, rel: bytes) -> bool:
-    here = worktree
-    for part in os.fsdecode(rel).split("/")[:-1]:
-        here = here / part
-        if os.path.islink(here):
-            return True
-    return False
-
-
 def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[bytes]) -> bool:
     """Write what `commit` records at `paths` into `worktree`, converted by git's built-in
     end-of-line and ident rules, and delete every path in `paths` it does not record; a directory
@@ -405,7 +384,7 @@ def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[b
     deleted = [p for p in paths if p not in entries]
     written = [p for p in paths if p in entries and entries[p][0] != _GITLINK]
     for rel in deleted:
-        if _has_link_above(worktree, rel):
+        if passes_through_a_link(worktree, worktree / os.fsdecode(rel)):
             return False
         target = worktree / os.fsdecode(rel)
         try:

@@ -129,6 +129,18 @@ def is_safe_write_target(path: Path, root: Path) -> bool:
         return False
 
 
+def entry_id(path: str | Path) -> tuple[int, int] | None:
+    """Name the directory entry at `path`. Takes the path. Returns its device and inode when the
+    inode is real, or None when the entry cannot be read or the inode is zero."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return None
+    if not info.st_ino:
+        return None
+    return (info.st_dev, info.st_ino)
+
+
 def canonical_id(path: str | Path) -> tuple | str:
     """An identity two names for the same object share.
 
@@ -167,6 +179,21 @@ def trusted_ancestor(path: Path) -> bool:
     if stat.S_ISLNK(st.st_mode):
         return st.st_uid == 0 and path.is_dir()
     return stat.S_ISDIR(st.st_mode)
+
+
+def passes_through_a_link(root: Path, path: Path) -> bool:
+    """Tell whether a directory between `root` and `path` is a link. Takes both. Returns True
+    when one is, and when `path` lies outside `root`."""
+    try:
+        parts = path.relative_to(root).parts[:-1]
+    except ValueError:
+        return True
+    here = root
+    for part in parts:
+        here = here / part
+        if here.is_symlink():
+            return True
+    return False
 
 
 def reached_where_it_was_named(path: Path) -> bool:

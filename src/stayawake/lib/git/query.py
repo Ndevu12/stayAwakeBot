@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +17,25 @@ from stayawake.lib.git.history_tips import history_tips
 from stayawake.lib.git.objects import (batch_objects, blob_text, link_targets, own_env, own_view,
                                        own_view_fed)
 from stayawake.lib.git.run import run, stdout, stdout_bytes, stdout_bytes_fed
+
+
+def composed_path(path: str, *, fold: bool) -> str:
+    """Write a path in the form git compares. Takes the path and whether letter case folds. Returns
+    the Unicode composed form, case-folded when `fold` is set."""
+    composed = unicodedata.normalize("NFC", path)
+    return composed.casefold() if fold else composed
+
+
+def path_key(repo: str | Path):
+    """Build the key under which two spellings of one path meet. Takes the repository. Returns
+    `key(path)`, the Unicode composed form of a path, case-folded when the repository ignores
+    case."""
+    folds = stdout(repo, ["config", "--get", "--type=bool", "core.ignorecase"]).strip() == "true"
+
+    def key(path: str) -> str:
+        return composed_path(path, fold=folds)
+
+    return key
 
 
 def is_git_repo(repo: str | Path) -> bool:

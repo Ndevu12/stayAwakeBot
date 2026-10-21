@@ -3,14 +3,15 @@
 history proves, and their removal once their fix is committed."""
 from __future__ import annotations
 
-import hashlib
 import os
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from stayawake.bots.security.models import ROLLBACK_DIR, SAW_DIR
+from stayawake.lib.git.objects import blob_id
+from stayawake.lib.git.query import path_key
 from stayawake.lib.git.run import stdout_bytes
+from stayawake.utils.pathsafe import entry_id, passes_through_a_link, read_regular_no_follow
 
 _PATHS_PER_CALL = 256
 _LARGEST_COPY = 64 * 1024 * 1024
@@ -43,8 +44,13 @@ def proven(root: Path) -> list[KeptCopy] | None:
     oid_of = _object_id_function(root)
     if in_index is None or in_head is None or oid_of is None:
         return None
-    tracked = {_folded(path) for path in in_index | in_head}
-    held = {path: data for path, data in held.items() if not _under_any(path, tracked)}
+    key = path_key(root)
+    names = in_index | in_head
+    tracked = {key(path) for path in names}
+    entries = _tracked_entries(Path(root), names)
+    held = {path: data for path, data in held.items()
+            if not _under_any(path, tracked, key)
+            and not _shares_a_tracked_file(Path(root), path, entries)}
     copies = {path: (path[len(ROLLBACK_DIR) + 1:], oid_of(data)) for path, data in held.items()}
     committed = _committed_versions(root, sorted({original for original, _ in copies.values()}))
     if committed is None:
@@ -69,7 +75,7 @@ def remove_fixed(root: Path) -> tuple[list[str], list[str]]:
     for copy in (c for c in copies if c.fix_committed):
         where = Path(root) / copy.path
         try:
-            if _through_a_link(Path(root), where):
+            if passes_through_a_link(Path(root), where):
                 raise OSError("a folder on the way is a link")
             os.unlink(where)
             removed.append(copy.path)
@@ -85,7 +91,7 @@ def _held(root: Path) -> dict[str, bytes]:
     exactly its own name or is reached through a link."""
     folder = root / ROLLBACK_DIR
     if (not _named_exactly(root, SAW_DIR) or not _named_exactly(root / SAW_DIR, _ROLLBACK_NAME)
-            or _through_a_link(root, folder) or folder.is_symlink() or not folder.is_dir()
+            or passes_through_a_link(root, folder) or folder.is_symlink() or not folder.is_dir()
             or os.path.lexists(root / SAW_DIR / ".git") or os.path.lexists(folder / ".git")):
         return {}
     held: dict[str, bytes] = {}
@@ -104,9 +110,7 @@ def _on_disk(path: Path) -> bytes | None:
     try:
         if path.is_symlink():
             return os.fsencode(os.readlink(path))
-        if not path.is_file() or path.stat().st_size > _LARGEST_COPY:
-            return None
-        return path.read_bytes()
+        return read_regular_no_follow(path, _LARGEST_COPY)
     except OSError:
         return None
 
@@ -117,8 +121,7 @@ def _object_id_function(root: Path):
     answer = stdout_bytes(root, ["rev-parse", "--show-object-format"])
     if answer is None:
         return None
-    digest = hashlib.sha256 if answer.strip() == b"sha256" else hashlib.sha1
-    return lambda data: digest(b"blob %d\0" % len(data) + data).hexdigest()
+    return lambda data: blob_id(data, os.fsdecode(answer.strip()))
 
 
 def _committed_versions(root: Path, originals: list[str]) -> set[tuple[str, str]] | None:
@@ -174,35 +177,38 @@ def _named_exactly(folder: Path, name: str) -> bool:
         return False
 
 
-def _under_any(path: str, tracked: set[str]) -> bool:
-    """Tell whether git tracks a path or a folder above it, in any letter case. Takes the path and
-    the tracked paths, folded. Returns the answer."""
-    here = PurePosixPath(_folded(path))
+def _tracked_entries(root: Path, paths: set[str]) -> set[tuple[int, int]]:
+    """Name the directory entries git tracks. Takes the repository and the tracked paths. Returns
+    the entries that could be read."""
+    found = set()
+    for path in paths:
+        ident = entry_id(root / path)
+        if ident is not None:
+            found.add(ident)
+    return found
+
+
+def _shares_a_tracked_file(root: Path, path: str, tracked: set[tuple[int, int]]) -> bool:
+    """Tell whether a path is a tracked file. Takes the repository, the path and the tracked
+    entries. Returns the answer, True when the path cannot be identified."""
+    ident = entry_id(root / path)
+    if ident is None:
+        return True
+    return ident in tracked
+
+
+def _under_any(path: str, tracked: set[str], key) -> bool:
+    """Tell whether git tracks a path or a folder above it. Takes the path, the tracked paths under
+    `key`, and that key. Returns the answer."""
+    here = PurePosixPath(key(path))
     return any(str(p) in tracked for p in (here, *here.parents))
-
-
-def _folded(path: str) -> str:
-    """Write a path as a disk that ignores letter case and Unicode form would. Takes the path.
-    Returns it."""
-    return unicodedata.normalize("NFC", path).casefold()
-
-
-def _through_a_link(root: Path, path: Path) -> bool:
-    """Tell whether a folder between the repository and a path is a link. Takes both. Returns the
-    answer."""
-    here = root
-    for part in path.relative_to(root).parts[:-1]:
-        here = here / part
-        if here.is_symlink():
-            return True
-    return False
 
 
 def _drop_empty_folders(root: Path) -> None:
     """Remove the rollback folder's empty folders, then it and saw's own folder when empty. Takes
     the repository. Returns nothing."""
     folder = root / ROLLBACK_DIR
-    if _through_a_link(root, folder) or folder.is_symlink() or not folder.is_dir():
+    if passes_through_a_link(root, folder) or folder.is_symlink() or not folder.is_dir():
         return
     for top, _, _ in sorted(os.walk(folder), key=lambda entry: -len(entry[0])):
         try:

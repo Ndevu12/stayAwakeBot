@@ -9,6 +9,7 @@ from typing import Mapping
 from stayawake.bots.security.pr.fix_verdict import History, HistoryHold, Remedy
 from stayawake.bots.security.remediation import live
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.query import path_key
 from stayawake.lib.git.run import run
 
 
@@ -72,7 +73,7 @@ def _git(repo: Path, args: list[str]):
 
 
 def _held_at(repo: Path, treeish: str, paths: list[str], stored) -> tuple[str, ...]:
-    key = live.path_key(repo)
+    key = path_key(repo)
     found = live.entries(repo, ["ls-tree", "-r", "-z", "--full-tree", treeish],
                          live.literal_pathspecs(), staged=False, key=key)
     if found is None:
