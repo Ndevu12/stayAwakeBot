@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from stayawake.bots.security.jsonc import line_of_entry, object_spans
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, load_jsonc
 from stayawake.bots.security.dependencies.installed import NPM_LIFECYCLE_KEYS, stated_at
@@ -22,18 +23,22 @@ class NpmManifestMatcher(Matcher):
         for rel in target.iter_files():
             if rel.rsplit("/", 1)[-1] != "package.json":
                 continue
-            for key, cmd in lifecycle_scripts(target.read_text(rel) or ""):
+            text = target.read_text(rel) or ""
+            spans = object_spans(text, "scripts")
+            span = spans[0] if spans else None
+            for key, cmd in lifecycle_scripts(text):
+                line = line_of_entry(text, key, cmd, span)
                 for sig, rx in compiled:
                     if rx.search(cmd):
-                        findings.append(self._emit(sig, rel, f"{key}: {cmd[:80]}"))
+                        findings.append(self._emit(sig, rel, f"{key}: {cmd[:80]}", line=line))
         return findings
 
     @staticmethod
-    def _emit(sig, rel, ev):
+    def _emit(sig, rel, ev, *, line=None):
         return Finding(signature_id=sig["id"], category=sig["category"],
                        severity=Severity.parse(stated_at(sig, "severity", rel)), path=rel,
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
-                       evidence=ev, vector=sig["category"])
+                       line=line, evidence=ev, vector=sig["category"])
 
 
 def lifecycle_scripts(text: str) -> list[tuple[str, str]]:

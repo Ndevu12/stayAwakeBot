@@ -106,3 +106,151 @@ def load_jsonc(text: str) -> Any:
             return json.loads(_without_trailing_commas(code_only(text)))
         except json.JSONDecodeError:
             return None
+
+
+def _skip_ws(text: str, index: int, end: int) -> int:
+    while index < end and text[index] in " \t\r\n":
+        index += 1
+    return index
+
+
+def _matching_end(text: str, open_at: int, open_ch: str, close_ch: str) -> int:
+    depth = 0
+    index = open_at
+    size = len(text)
+    while index < size:
+        char = text[index]
+        if char == '"':
+            index = _string_end(text, index)
+            continue
+        if char == open_ch:
+            depth += 1
+        elif char == close_ch:
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return size
+
+
+def _value_span(code: str, key: str) -> tuple[int, int] | None:
+    needle = f'"{key}"'
+    index = 0
+    size = len(code)
+    while index < size:
+        at = code.find(needle, index)
+        if at == -1:
+            return None
+        after = _skip_ws(code, at + len(needle), size)
+        if after < size and code[after] == ":":
+            after = _skip_ws(code, after + 1, size)
+            if after < size and code[after] in "{[":
+                close = "}" if code[after] == "{" else "]"
+                return after, _matching_end(code, after, code[after], close)
+        index = at + len(needle)
+    return None
+
+
+def object_spans(text: str, key: str) -> list[tuple[int, int]]:
+    """The `[start, end)` of each object `key`'s array holds, or of the object itself.
+
+    Takes the document and the key. Returns those spans in order, or none when `key` holds neither
+    an object nor an array.
+    """
+    code = code_only(text)
+    found = _value_span(code, key)
+    if found is None:
+        return []
+    start, end = found
+    if code[start] == "{":
+        return [(start, end)]
+    spans: list[tuple[int, int]] = []
+    index = start + 1
+    while index < end - 1:
+        index = _skip_ws(code, index, end)
+        if index >= end - 1:
+            break
+        char = code[index]
+        if char == "{":
+            obj_end = _matching_end(code, index, "{", "}")
+            spans.append((index, obj_end))
+            index = obj_end
+        elif char == "[":
+            index = _matching_end(code, index, "[", "]")
+        elif char == '"':
+            index = _string_end(code, index)
+        else:
+            index += 1
+    return spans
+
+
+def _quoted(value: str) -> list[str]:
+    plain = json.dumps(value, ensure_ascii=False)
+    escaped = json.dumps(value)
+    return [plain] if plain == escaped else [plain, escaped]
+
+
+def _holds(code: str, value: str, at: int, end: int) -> bool:
+    if any(code.startswith(form, at) and at + len(form) <= end for form in _quoted(value)):
+        return True
+    if at >= end or code[at] != '"':
+        return False
+    stop = _string_end(code, at)
+    if stop > end:
+        return False
+    try:
+        return json.loads(code[at:stop]) == value
+    except json.JSONDecodeError:
+        return False
+
+
+def _keys(code: str, key: str, start: int, end: int):
+    needle = f'"{key}"'
+    index = start
+    while index < end:
+        at = code.find(needle, index, end)
+        if at == -1:
+            return
+        after = _skip_ws(code, at + len(needle), end)
+        if after < end and code[after] == ":":
+            yield at, _skip_ws(code, after + 1, end)
+        index = at + len(needle)
+
+
+def _bounded(text: str, span: tuple[int, int] | None):
+    if span is None:
+        return None
+    code = code_only(text)
+    start, end = span
+    return code, max(0, start), min(end, len(code))
+
+
+def line_of_entry(text: str, key: str, value: str, span: tuple[int, int] | None) -> int | None:
+    """The 1-based line of `key`'s string value.
+
+    Takes the document, the key, the value and the `[start, end)` span to look in. Returns the line
+    of that value, or None when the span does not hold it.
+    """
+    bounded = _bounded(text, span)
+    if bounded is None:
+        return None
+    code, start, end = bounded
+    for _at, after in _keys(code, key, start, end):
+        if _holds(code, value, after, end):
+            return text.count("\n", 0, after) + 1
+    return None
+
+
+def line_of_key(text: str, key: str, span: tuple[int, int] | None) -> int | None:
+    """The 1-based line of `key`.
+
+    Takes the document, the key and the `[start, end)` span to look in. Returns the line of that
+    key, or None when the span does not hold it.
+    """
+    bounded = _bounded(text, span)
+    if bounded is None:
+        return None
+    code, start, end = bounded
+    for at, _after in _keys(code, key, start, end):
+        return text.count("\n", 0, at) + 1
+    return None

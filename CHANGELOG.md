@@ -36,6 +36,8 @@ reader, not the mechanism or the weakness it closed.
   writes one JSON event per line on stderr: when the run starts, each step or target, and when it
   finishes. The report on stdout is unchanged, and the human progress stays off stderr.
   `saw capabilities` lists `progress.jsonl`.
+- **An editor task, an editor setting, and a package script name the line they sit on.** The report
+  and `saw scan --json` show that line.
 
 ### Security
 - **`saw scan` reads more of a repository's files.** `saw fix` removes a confirmed payload found in

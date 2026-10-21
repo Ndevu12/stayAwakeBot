@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import re
 
+from stayawake.bots.security.jsonc import line_of_entry, line_of_key, object_spans
 from stayawake.bots.security.models import CONFIRMED, Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, load_jsonc, build_confirmed_loader_check)
 from stayawake.bots.security.matchers.command_shape import runs_downloaded_or_decoded_code
 from stayawake.bots.security.matchers.editor_task import (
-    command_lines, command_text, hidden_from_the_task_list, keeps_its_terminal_out_of_sight, named,
-    runs_when_the_folder_opens)
+    command_lines, command_text, command_texts, hidden_from_the_task_list,
+    keeps_its_terminal_out_of_sight, named, runs_when_the_folder_opens)
 from stayawake.bots.security.matchers.payload_command import may_run_a_font, plain_call
 
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
@@ -115,6 +116,36 @@ def _runs_only_ordinary_commands(task: dict, task_file: dict, tasks: list[dict],
     return True
 
 
+def _command_line(text: str, task: dict, span, matched: str) -> int | None:
+    """The line of the command a task's command line was built from.
+
+    Takes the file text, the task, its span and the command line. Returns that line, or None when
+    the command is not in the span.
+    """
+    commands = sorted(set(command_texts(task)), key=len, reverse=True)
+    for command in commands:
+        if matched == command or matched.startswith(command + " "):
+            found = line_of_entry(text, "command", command, span)
+            if found is not None:
+                return found
+    return None
+
+
+def _run_on_line(text: str, task: dict, span) -> int | None:
+    """The line of a task's runOn value.
+
+    Takes the file text, the task and its span. Returns that line, or None when the value is not
+    in the span.
+    """
+    options = task.get("runOptions")
+    if isinstance(options, dict) and isinstance(options.get("runOn"), str):
+        return line_of_entry(text, "runOn", options["runOn"], span)
+    legacy = task.get("runOn")
+    if isinstance(legacy, str):
+        return line_of_entry(text, "runOn", legacy, span)
+    return None
+
+
 def _hides_panels_or_holds_tasks(settings: dict) -> bool:
     """Tell whether an editor settings file hides the terminal or debug panel when the folder opens, or
     holds a list of tasks. Takes the settings. Returns the answer."""
@@ -135,9 +166,10 @@ class StructuralJsonMatcher(Matcher):
             base = rel.rsplit("/", 1)[-1]
             slashed = f"/{rel}"
             if "/.vscode/" in slashed and base in ("tasks.json", "settings.json"):
-                data = load_jsonc(target.read_text(rel) or "")
+                text = target.read_text(rel) or ""
+                data = load_jsonc(text)
                 if isinstance(data, dict):
-                    findings.extend(self._inspect(target, rel, base, data, by_kind))
+                    findings.extend(self._inspect(target, rel, base, data, by_kind, text))
             elif "/.claude/" in slashed and base in ("settings.json", "settings.local.json"):
                 data = load_jsonc(target.read_text(rel) or "")
                 if isinstance(data, dict):
@@ -145,11 +177,11 @@ class StructuralJsonMatcher(Matcher):
         return findings
 
     @staticmethod
-    def _emit(sig, rel, ev, *, composed=False):
+    def _emit(sig, rel, ev, *, line=None, composed=False):
         return Finding(signature_id=sig["id"], category=sig["category"],
                        severity=Severity.parse(sig["severity"]), path=rel,
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
-                       evidence=ev, vector=sig["category"], composed_evidence=composed)
+                       line=line, evidence=ev, vector=sig["category"], composed_evidence=composed)
 
     # ── VS Code tasks (unchanged) ──────────────────────────────────────────────────
     @staticmethod
@@ -159,15 +191,17 @@ class StructuralJsonMatcher(Matcher):
             return [x for x in t if isinstance(x, dict)]
         return [t] if isinstance(t, dict) else []
 
-    def _inspect(self, target, rel, base, data, by_kind):
-        out = self._task_findings(rel, data, by_kind)
+    def _inspect(self, target, rel, base, data, by_kind, text):
+        out = self._task_findings(rel, data, by_kind, text)
         if base == "settings.json":
             value = data.get("task.allowAutomaticTasks")
             if value is True or (isinstance(value, str) and value != "off"):
                 armed = _hides_panels_or_holds_tasks(data) or self._launcher_beside(target, rel, by_kind)
                 kind = "vscode-allow-automatic-tasks" if armed else "vscode-allow-automatic-tasks-alone"
                 if kind in by_kind:
-                    out.append(self._emit(by_kind[kind], rel, f"task.allowAutomaticTasks: {value!r}"))
+                    line = line_of_key(text, "task.allowAutomaticTasks", (0, len(text)))
+                    out.append(self._emit(by_kind[kind], rel, f"task.allowAutomaticTasks: {value!r}",
+                                          line=line))
         return out
 
     def _launcher_beside(self, target, rel, by_kind) -> bool:
@@ -176,14 +210,15 @@ class StructuralJsonMatcher(Matcher):
         signatures by kind. Returns the answer."""
         confirmed = {s["id"] for s in by_kind.values() if s.get("confidence") == CONFIRMED}
         tasks_path = rel[:-len("settings.json")] + "tasks.json"
-        tasks = load_jsonc(target.read_text(tasks_path) or "")
+        tasks_text = target.read_text(tasks_path) or ""
+        tasks = load_jsonc(tasks_text)
         if not isinstance(tasks, dict):
             return False
         if any(runs_when_the_folder_opens(task) and _conceals_itself(task, tasks) for task in self._tasks(tasks)):
             return True
-        return any(f.signature_id in confirmed for f in self._task_findings(tasks_path, tasks, by_kind))
+        return any(f.signature_id in confirmed for f in self._task_findings(tasks_path, tasks, by_kind, tasks_text))
 
-    def _task_findings(self, rel, data, by_kind):
+    def _task_findings(self, rel, data, by_kind, text):
         out = []
         runs_font_signature = by_kind.get("vscode-task-runs-font", {})
         font_tools = frozenset(str(name).lower() for name in runs_font_signature.get("font_tools", ()))
@@ -192,7 +227,9 @@ class StructuralJsonMatcher(Matcher):
                     for tool, subcommands in (ordinary_signature.get("ordinary_commands") or {}).items()}
         editor_types = frozenset(ordinary_signature.get("editor_task_types") or ())
         tasks = self._tasks(data)
-        for task in tasks:
+        spans = object_spans(text, "tasks")
+        for index, task in enumerate(tasks):
+            span = spans[index] if index < len(spans) else None
             if runs_when_the_folder_opens(task):
                 # Auto-running is what the setting is FOR. Legitimate auto-run tasks are ordinary;
                 # legitimate auto-run tasks that hide themselves are not, so the pair is the signal.
@@ -204,10 +241,12 @@ class StructuralJsonMatcher(Matcher):
                             else "vscode-task-autorun")
                 if kind in by_kind:
                     out.append(self._emit(by_kind[kind], rel,
-                                          f"task '{task.get('label','?')}' runOn=folderOpen"))
+                                          f"task '{task.get('label','?')}' runOn=folderOpen",
+                                          line=_run_on_line(text, task, span)))
             runs_font = _font_named_by(task, data, font_tools)
             if runs_font is not None and "vscode-task-runs-font" in by_kind:
-                out.append(self._emit(by_kind["vscode-task-runs-font"], rel, runs_font[:90]))
+                out.append(self._emit(by_kind["vscode-task-runs-font"], rel, runs_font[:90],
+                                      line=_command_line(text, task, span, runs_font)))
         return out
 
     # ── Claude Code hooks ──────────────────────────────────────────────────────────
