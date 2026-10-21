@@ -11,6 +11,7 @@ from stayawake.cli.helptext import add_command
 from stayawake.core.identity import Intent, require, resolve_session
 from stayawake.lib import github_app
 from stayawake.utils import exitcodes
+from stayawake.utils.json_documents import versioned
 from stayawake.utils.streaming import busy, say
 from stayawake.cli.argtypes import no_stream_requested
 
@@ -44,7 +45,7 @@ def run(a: argparse.Namespace) -> int:
         fix = require(Intent.OPEN_FIX_PR, session=sess)
 
     if a.json:
-        print(json.dumps({
+        print(json.dumps(versioned("doctor", {
             "saw_on_path": saw_path,
             "credential": sess.source,
             "actor": sess.actor,
@@ -57,7 +58,7 @@ def run(a: argparse.Namespace) -> int:
             "open_guard_pr": guard.allowed,
             "health_scripts_installed": bool(health),
             "version": __version__,
-        }, indent=2))
+        }), indent=2))
         return exitcodes.CLEAN
     def mark(ok: bool) -> str:
         return "✓" if ok else "✗"

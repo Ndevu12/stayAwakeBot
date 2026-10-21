@@ -10,6 +10,8 @@ from dataclasses import dataclass, field, asdict
 from enum import IntEnum
 from typing import Any
 
+from stayawake.utils.json_documents import versioned
+
 SAW_DIR = ".saw"
 ROLLBACK_DIR = f"{SAW_DIR}/rollback"
 
@@ -231,7 +233,7 @@ class ScanReport:
     def to_payload(self) -> dict[str, Any]:
         """The canonical scan payload dict consumed by every sink."""
         results = self.results
-        return {
+        return versioned("scan", {
             "generated_at": self.generated_at,
             "summary": {
                 "targets": len(results),
@@ -250,4 +252,4 @@ class ScanReport:
             "any_residue": self.any_residue,
             "any_error": self.any_error,
             "results": [r.to_dict() for r in results],
-        }
+        })

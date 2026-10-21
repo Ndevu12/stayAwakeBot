@@ -1,5 +1,5 @@
 ---
-description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor and completion.
+description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor, capabilities and completion.
 ---
 
 # `saw` command reference
@@ -32,6 +32,7 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | [`search`](search.md) | Find the command you want | — |
 | [`intro`](intro.md) | Tour (also the bare-`saw` welcome) | — |
 | [`doctor`](doctor.md) | Check the install and the GitHub credential | — |
+| [`capabilities`](capabilities.md) | What this saw supports, for tools that run it | — |
 | [`completion`](completion.md) | Print a shell-completion script | — |
 
 Three sections apply across commands: [remote targeting](remote.md), [report sinks](sinks.md) and
@@ -43,13 +44,13 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 | Option | Description |
 | --- | --- |
 | `-h`, `--help` | Help for `saw` or for any command. |
-| `--version` | Package version and capability inventory. |
+| `--version` | Package version. `saw capabilities` lists what this version supports. |
 
 ## Flags shared by several commands
 
 | Option | Where | Description |
 | --- | --- | --- |
-| `--json` | `scan`, `auth status`, `doctor`, `search` | Machine-readable output on stdout. |
+| `--json` | `scan`, `fix`, `auth status`, `doctor`, `guard drift`, `search`, `capabilities` | Machine-readable output on stdout. Each document carries a [`schema_version`](capabilities.md#schema-versions). |
 | `-q`, `--quiet` | `doctor`, `search` | Only the essentials. |
 | `-f`, `--fail` | `audit`, `guard check` | Fail the run on a warning-level issue. **`saw scan` has no `--fail`** — the last line of the report is the verdict unconditionally. |
 | `--no-stream` | every command | Plain instant lines instead of live progress. |

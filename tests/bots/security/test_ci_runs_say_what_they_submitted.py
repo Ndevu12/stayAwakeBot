@@ -222,7 +222,7 @@ class TestSawFixJson(unittest.TestCase):
 
     def test_nothing_to_fix_still_prints_a_report(self):
         _rc, out, _err = self._fix([])
-        self.assertEqual(json.loads(out), {"results": []})
+        self.assertEqual(json.loads(out), {"schema_version": 1, "results": []})
 
     def test_the_flag_reaches_the_fix(self):
         with mock.patch.object(remediator, "fix", return_value=0) as fix:
@@ -311,7 +311,7 @@ class TestDriftSaysWhenItCouldNotFileItsIssue(unittest.TestCase):
         rc, out, err = self._sweep(guard.DriftOutcome("o/r", "behind", "opened", "behind", 7),
                                    json_out=True)
         self.assertEqual(rc, 0)
-        self.assertEqual(json.loads(out), {"results": [
+        self.assertEqual(json.loads(out), {"schema_version": 1, "results": [
             {"repository": "o/r", "state": "behind", "issue_action": "opened", "issue": 7,
              "detail": "behind"}]})
         self.assertIn("Checked 1 repository", err)

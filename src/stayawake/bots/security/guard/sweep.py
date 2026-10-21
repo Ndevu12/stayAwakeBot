@@ -12,6 +12,7 @@ from stayawake.lib import auth
 from stayawake.lib import git as gitutil
 from stayawake.utils import parallel
 from stayawake.utils.config import load_yaml
+from stayawake.utils.json_documents import versioned
 from stayawake.utils.streaming import Streamer, stream_enabled, status as spin_status
 from stayawake.utils.sweep import run_sweep
 from stayawake.utils.terminal import supports_color
@@ -309,7 +310,8 @@ def _drift_finish(outcomes: list[DriftOutcome], json_out: bool) -> int:
     print them. Returns 2 when a repository could not be checked or its issue could not be
     opened, updated or closed, else 0."""
     if json_out:
-        print(json.dumps({"results": [drift_record(o) for o in outcomes]}, indent=2))
+        print(json.dumps(versioned("guard-drift", {"results": [drift_record(o) for o in outcomes]}),
+                         indent=2))
     incomplete = any(o.state == "error" or o.action == "failed" for o in outcomes)
     return 2 if incomplete else 0
 
