@@ -38,6 +38,20 @@ def no_stream_requested(a: argparse.Namespace) -> bool:
     return bool(getattr(a, "no_stream", False))
 
 
+def add_progress_arg(parser: argparse.ArgumentParser) -> None:
+    """Register `--progress=jsonl` — one JSON object per line on stderr, for a program drawing its
+    own progress. Takes the parser. The human progress stays off stderr while it is on."""
+    parser.add_argument("--progress", choices=("jsonl",), default=None,
+                        help="write progress as one JSON object per line on stderr "
+                             "(start, step, target, done); the human progress stays off stderr")
+
+
+def progress_requested(a: argparse.Namespace) -> bool:
+    """Whether this run was asked for progress events. Takes the parsed namespace. Returns False
+    when the flag was not given."""
+    return getattr(a, "progress", None) == "jsonl"
+
+
 def add_jobs_arg(parser: argparse.ArgumentParser, *, help: str) -> None:
     """Register the shared `-j/--jobs` flag on a sweep command — SAME type parser, flag names,
     `dest`, and `metavar` everywhere, but each command supplies its OWN `help` text (its wording

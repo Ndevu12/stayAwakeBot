@@ -9,7 +9,8 @@ from typing import Any, Callable, Iterable, TextIO
 
 from stayawake.utils import parallel
 from stayawake.utils.parallel import Outcome
-from stayawake.utils.progress import make_progress
+from stayawake.utils.progress import ProgressReporter, make_progress
+from stayawake.utils.progress_events import current
 from stayawake.utils.terminal import supports_color
 
 
@@ -36,11 +37,16 @@ def run_sweep(work_fn: Callable[[Any], Any], items: Iterable[Any], *, jobs: int,
     """
     out = out or sys.stderr
     work = list(items)
-    progress = make_progress(enabled=progress_on, out=out, color=supports_color(out), verb=verb)
+    events = current()
+    if events.enabled:
+        progress: ProgressReporter = ProgressReporter()
+    else:
+        progress = make_progress(enabled=progress_on, out=out, color=supports_color(out), verb=verb)
     progress.start(len(work))
 
     def on_start(index: int, _item: Any) -> None:
         progress.item_started(labels[index])
+        events.target(labels[index], index=index + 1, of=len(work))
 
     def on_done(outcome: Outcome) -> None:
         if outcome.error:

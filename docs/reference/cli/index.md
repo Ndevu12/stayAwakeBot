@@ -51,10 +51,23 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 | Option | Where | Description |
 | --- | --- | --- |
 | `--json` | `scan`, `fix`, `audit`, `hook status`, `hook install`, `hook repair`, `auth status`, `doctor`, `guard drift`, `search`, `capabilities` | Machine-readable output on stdout. Each document carries a [`schema_version`](capabilities.md#schema-versions). |
+| `--progress=jsonl` | `scan`, `audit`, `fix` | One JSON event per line on stderr, so a program can draw its own progress. The report stays on stdout. The human progress stays off stderr. See [Progress events](#progress-events). Not accepted with `fix amend`. |
 | `-q`, `--quiet` | `doctor`, `search` | Only the essentials. |
 | `-f`, `--fail` | `audit`, `guard check` | Fail the run on a warning-level issue. **`saw scan` has no `--fail`** — the last line of the report is the verdict unconditionally. |
 | `--no-stream` | every command | Plain instant lines instead of live progress. |
 | `-j`, `--jobs N` | `scan`, `fix`, `guard check`/`setup`/`drift` | Work on up to N repositories at once. Default `auto` (one repo sequential, several use one worker per core); `-j 1` forces sequential. On `scan` it also splits one large repository across workers. |
+
+## Progress events
+
+`--progress=jsonl` on `saw scan`, `saw audit` and `saw fix` writes one JSON object per line to
+stderr. A program should ignore an event it does not recognise, so a later saw can add one.
+
+| Event | What it says |
+| --- | --- |
+| `start` | The run began. `command` is `scan`, `audit` or `fix`. `steps`, when present, is how many steps the run will report. |
+| `step` | One step. `label` is the same words the spinner shows. `id` names the step. `index` and `of`, when present, say which step this is. |
+| `target` | One repository or path, in `path`. `index` and `of`, when present, say which target this is. |
+| `done` | The run finished. |
 
 ## Command aliases
 

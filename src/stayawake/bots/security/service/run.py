@@ -19,6 +19,7 @@ import heapq
 from stayawake.utils import parallel
 from stayawake.utils.io import reports_dir_choice, resolve_reports_dir
 from stayawake.utils import textsafe
+from stayawake.utils.progress_events import current
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
@@ -230,7 +231,9 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     One scope per run. Persists NOTHING by default (terminal-first); files/alerts are opt-in.
     Remediation lives in `saw fix`, never here. Returns the verdict as an exit code: 1 if
     any target is INFECTED, else 0 — unconditionally (a CI gate just reads it)."""
-    progress_on = stream_enabled(sys.stderr, force_off=no_stream)
+    events = current()
+    events.start()
+    progress_on = stream_enabled(sys.stderr, force_off=no_stream) and not events.enabled
     report_on = stream_enabled(sys.stdout, force_off=no_stream)
     prog = Streamer(enabled=progress_on, out=sys.stderr)
     cfg = _read_config(config_path, targets=paths)
@@ -258,7 +261,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         resolved, token, source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
         if not resolved:
             print(REMOTE_EMPTY_HINT, file=sys.stderr)
-        else:
+        elif not events.enabled:
             print(f"Scanning {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
                   f"({_remote_scope(cfg, users, orgs, slugs)}, via {source or 'anonymous'}).",
                   file=sys.stderr)
@@ -289,12 +292,17 @@ def scan(config_path: str | None = None, *, remote: bool = False,
             return 2
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
-        if progress_on and unsearched:
-            prog.line(f"{len(unsearched)} folder{'' if len(unsearched) == 1 else 's'} could not be "
+        if unsearched and (progress_on or events.enabled):
+            unread = (f"{len(unsearched)} folder{'' if len(unsearched) == 1 else 's'} could not be "
                       "read, so the scan is not complete. Check their permissions and scan again.")
+            if events.enabled:
+                print(unread, file=sys.stderr)
+            else:
+                prog.line(unread)
         if len(repos) == 1:
             home = os.path.expanduser("~")
             display = str(found[0].label).replace(home, "~")
+            events.target(str(found[0].root), index=1, of=1)
             results = [_scan_one_target(found[0], display, opts, sigs, allowlist,
                                         _file_workers(jobs_pref), progress_on, settings)]
         elif repos:
@@ -334,10 +342,11 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         tmp = scratch.kept_dir("the full report")
         FileSink(tmp).emit(report)
         report_path = tmp / "latest.md"
-    if report_path is not None:
+    if report_path is not None and not events.enabled:
         reason = f"{len(results)} repositories" if len(results) > LARGE_FLEET else ""
         _print_report_pointer(report_path, spilled=spill, reason=reason)
-    _print_dependency_actions(results)
+    if not events.enabled:
+        _print_dependency_actions(results)
 
     if report.any_infected:
         return 1
