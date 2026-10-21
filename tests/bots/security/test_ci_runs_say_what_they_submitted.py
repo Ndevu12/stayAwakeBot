@@ -126,7 +126,9 @@ class TestWhatEachFixCameTo(unittest.TestCase):
         record = self._record(BaseFix(BaseState.PR_OPENED, "", pull_request=4, published=True,
                                       remediation="pr", pull_request_url="u"))
         self.assertEqual(record, {"repository": "o/r", "remediation": "pr", "cause": "",
-                                  "pull_request": 4, "url": "u"})
+                                  "pull_request": 4, "url": "u", "partial": False, "branch": "",
+                                  "base": "", "removed": [], "history_holds_payload": False,
+                                  "needs_review": []})
 
     def test_a_repository_with_nothing_to_fix_is_skipped(self):
         for state in (BaseState.NOTHING_TO_FIX, BaseState.SUSPICIOUS_ONLY):
@@ -142,7 +144,50 @@ class TestWhatEachFixCameTo(unittest.TestCase):
         self.assertEqual((record["remediation"], record["cause"]), ("failed", "aborted"))
 
     def test_a_repository_that_never_reached_a_verdict_is_failed(self):
-        self.assertEqual(remediation_record("o/r", None)["remediation"], "failed")
+        record = remediation_record("o/r", None)
+        self.assertEqual(record["remediation"], "failed")
+        self.assertNotIn("uncommitted", record)
+        self.assertEqual(record["needs_review"], [])
+
+    def test_a_prepared_fix_names_its_branches_and_what_it_could_not_save(self):
+        from stayawake.bots.security.pr.fix import _CheckoutSeen, _verdict
+        from stayawake.bots.security.pr.fix_verdict import History, HistoryHold, Remedy, render_fix_verdict
+        from stayawake.bots.security.remediation.preserve import NO_IDENTITY, Preserved
+        saved = Preserved(reason=NO_IDENTITY, blocked=True, files=2)
+        seen = _CheckoutSeen(
+            Checkout.CLEANED,
+            history=History(holds=(HistoryHold("branch", "feature", ("a.js",), Remedy.AMEND),)),
+            removed=(".vscode/tasks.json",),
+            preserved=saved)
+        verdict = _verdict("o/r", BaseFix(BaseState.PARTIAL, "o/r: PARTIAL", "main",
+                                          "security/auto-clean-main"), seen,
+                           review=("Manual review needed (inspect before running any command):",))
+        record = remediation_record("o/r", verdict)
+        self.assertEqual(record["remediation"], "prepared")
+        self.assertIs(record["partial"], True)
+        self.assertEqual((record["branch"], record["base"]), ("security/auto-clean-main", "main"))
+        self.assertEqual(record["removed"], [".vscode/tasks.json"])
+        self.assertEqual(record["uncommitted"],
+                         {"branch": "", "files": 2, "withheld": 0, "unsaved": 0, "unread": 0,
+                          "reason": NO_IDENTITY})
+        self.assertIs(record["history_holds_payload"], True)
+        self.assertTrue(any("feature" in line for line in record["needs_review"]))
+        self.assertIn("Manual review needed (inspect before running any command):",
+                      record["needs_review"])
+        rendered = render_fix_verdict(verdict)
+        self.assertIn("feature", rendered)
+        for line in record["needs_review"]:
+            if line.startswith("Manual review"):
+                continue
+            self.assertIn(line, rendered)
+
+    def test_a_fix_with_nothing_to_save_names_the_clean_up_branch_only(self):
+        record = self._record(BaseFix(BaseState.PREPARED, "", base="main",
+                                      branch="security/auto-clean-main"))
+        self.assertNotIn("uncommitted", record)
+        self.assertEqual(record["branch"], "security/auto-clean-main")
+        self.assertIs(record["partial"], False)
+        self.assertIs(record["history_holds_payload"], False)
 
 
 class TestAFixRunRecordsItsSubmission(unittest.TestCase):
@@ -169,7 +214,13 @@ class TestAFixRunRecordsItsSubmission(unittest.TestCase):
         verdict = self._submit(ApiRead(value={"number": 99, "html_url": "u"}))
         self.assertEqual(remediation_record("owner/repo", verdict),
                          {"repository": "owner/repo", "remediation": "pr", "cause": "",
-                          "pull_request": 99, "url": "u"})
+                          "pull_request": 99, "url": "u", "partial": False,
+                          "branch": "security/auto-clean-main", "base": "main", "removed": [],
+                          "history_holds_payload": False,
+                          "needs_review": [
+                              "your checkout is not clean — 1 confirmed file(s) are still in it; "
+                              "the installed tree was left, because your uncommitted work could "
+                              "not be held: git could not list the working tree"]})
 
     def test_a_pull_request_actions_may_not_open_is_recorded_with_the_setting(self):
         verdict = self._submit(ApiRead(cause="forbidden", status=403, detail=_ACTIONS_MAY_NOT))
@@ -215,9 +266,12 @@ class TestSawFixJson(unittest.TestCase):
         _rc, out, err = self._fix(outcomes)
         self.assertEqual(json.loads(out)["results"], [
             {"repository": "o/r", "remediation": "failed",
-             "cause": "actions-may-not-open-pull-requests", "pull_request": None, "url": ""},
+             "cause": "actions-may-not-open-pull-requests", "pull_request": None, "url": "",
+             "partial": False, "branch": "security/x", "base": "", "removed": [],
+             "history_holds_payload": False, "needs_review": []},
             {"repository": "o/s", "remediation": "failed", "cause": "error",
-             "pull_request": None, "url": ""}])
+             "pull_request": None, "url": "", "partial": False, "branch": "", "base": "",
+             "removed": [], "history_holds_payload": False, "needs_review": []}])
         self.assertIn("Processed 2 repositories", err)
 
     def test_nothing_to_fix_still_prints_a_report(self):

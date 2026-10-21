@@ -17,6 +17,7 @@ from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC, c
 from stayawake.bots.security.remediation import delivery, live, manifest
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
+from stayawake.bots.security.remediation.preserve import Preserved
 from stayawake.core import proposal
 from stayawake.bots.security.pr import arrivals_for_fix, dependency_questions, held
 from stayawake.bots.security.pr.constants import FIX_BRANCH, PARTIAL_LABEL
@@ -60,12 +61,15 @@ def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, 
 @dataclass(frozen=True)
 class _CheckoutSeen:
     """What the checkout pass came to, what the history still stores where it cleared, what was
-    added beside it, and the known-malicious packages the project still declares."""
+    added beside it, the known-malicious packages the project still declares, the paths taken out,
+    and the uncommitted work put aside."""
     state: Checkout = Checkout.UNREAD
     detail: CheckoutDetail = CheckoutDetail()
     history: History = History()
     arrivals: Arrivals = Arrivals()
     kept_packages: tuple = ()
+    removed: tuple[str, ...] = ()
+    preserved: Preserved | None = None
 
 
 @dataclass(frozen=True)
@@ -302,6 +306,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
 
     with status(f"fixing {label}…", enabled=spin):
         lockfile_changes: list = []
+        lockfiles_removed: list = []
         applied: list = []
         seen_cl: set = set()
         manual_reviews: dict = {}
@@ -318,18 +323,20 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             choose_dependencies=choose_dependencies)
         chosen_dependencies = choose_dependencies(findings)
         if _removable(findings) and not scan.error:
-            removed = list(getattr(checkout.report, "removed_lockfiles", None) or ())
+            lockfiles_removed = list(
+                getattr(checkout.report, "removed_lockfiles", None) or ())
             if not installed.lockfile_stays():
-                removed += installed.remove_lockfiles_of(
+                lockfiles_removed += installed.remove_lockfiles_of(
                     wt, keep=getattr(opts, "keep_dirs", ()) or ())
-            lockfile_changes = _lockfile_changes(wt, removed)
+            lockfile_changes = _lockfile_changes(wt, lockfiles_removed)
         state, detail = checkout_of(checkout)
         seen = _CheckoutSeen(state, detail, held.history_holds(
             repo, checkout.cleared, baseref, signatures, allowlist, opts, fix_branch=branch),
             arrivals_for_fix.arrivals_beside(repo, checkout.cleared, findings, signatures,
                                              allowlist, opts, resolver=resolver, baseref=baseref,
                                              fix_branch=branch),
-            choose_dependencies.kept())
+            choose_dependencies.kept(),
+            tuple(dict.fromkeys([*checkout.cleared, *lockfiles_removed])), checkout.kept)
 
         def stopped(text: str) -> tuple[_Stopped, Path]:
             return _Stopped(BaseState.ABORTED, text, base, seen), wt
@@ -486,9 +493,19 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                 signed=signed, checkout=seen), wt
 
 
-def _verdict(repository: str, base_fix: BaseFix, checkout: _CheckoutSeen) -> FixVerdict:
+def _left(fix: _Fix) -> tuple[str, ...]:
+    """The review lines a prepared fix already shows. Takes the fix. Returns each non-empty line."""
+    text = "\n".join(part for part in (
+        computed_review_lines(fix.computed), manual_review_lines(fix.manual),
+        suspicious_review_lines(fix.suspicious)) if part)
+    return tuple(line.strip() for line in text.splitlines() if line.strip())
+
+
+def _verdict(repository: str, base_fix: BaseFix, checkout: _CheckoutSeen, *,
+             review: tuple[str, ...] = ()) -> FixVerdict:
+    preserved = checkout.preserved if checkout.preserved is not None else Preserved()
     return FixVerdict(repository, base_fix, checkout.state, checkout.history, checkout.detail,
-                      checkout.arrivals, checkout.kept_packages)
+                      checkout.arrivals, checkout.kept_packages, checkout.removed, preserved, review)
 
 
 def _stopped_verdict(label: str, stop: _Stopped) -> FixVerdict:
@@ -501,7 +518,8 @@ def _not_fixed(label: str, fix: _Fix, text: str, *, published: bool, remediation
     need a person."""
     state = BaseState.MANUAL if fix.manual else BaseState.SUSPICIOUS_ONLY
     return _verdict(label, BaseFix(state, text, fix.base, published=published,
-                                   remediation=remediation, cause=cause), fix.checkout)
+                                   remediation=remediation, cause=cause), fix.checkout,
+                    review=_left(fix))
 
 
 def _remediation_of(res) -> tuple[str, str]:
@@ -550,7 +568,7 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = N
                      f"`git -C {repo} diff {fix.base}...{fix.branch}`, then `saw fix --pr` to open a PR"
                      ) + _signing_note(fix))
         return _verdict(slug, BaseFix(_prepared_state(fix), text, fix.base, fix.branch),
-                        fix.checkout)
+                        fix.checkout, review=_left(fix))
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)
@@ -609,7 +627,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             + manual_review_lines(fix.manual), base, fix.branch,
             pull_request=res.number if opened else None, published=True,
             remediation=remediation, cause=cause,
-            pull_request_url=res.url if opened else ""), fix.checkout)
+            pull_request_url=res.url if opened else ""), fix.checkout, review=_left(fix))
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)
@@ -637,7 +655,7 @@ def _submit_without_origin(repo: Path, opts, signatures, allowlist, *, base: str
                 + _signing_note(fix) + computed_review_lines(fix.computed)
                 + manual_review_lines(fix.manual))
         return _verdict(label, BaseFix(_prepared_state(fix), text, fix.base, fix.branch,
-                                       published=True), fix.checkout)
+                                       published=True), fix.checkout, review=_left(fix))
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)
