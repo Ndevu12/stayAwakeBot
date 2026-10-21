@@ -33,6 +33,11 @@ def proven(root: Path) -> list[KeptCopy] | None:
     held = _held(Path(root))
     if not held:
         return []
+    top = stdout_bytes(root, ["rev-parse", "--show-toplevel"])
+    if top is None:
+        return None
+    if os.path.realpath(os.fsdecode(top.rstrip(b"\n"))) != os.path.realpath(root):
+        return []
     in_index = _listed(root, ["ls-files", "-z"])
     in_head = _listed(root, ["ls-tree", "-r", "-z", "--name-only", "--full-tree", "HEAD"])
     oid_of = _object_id_function(root)

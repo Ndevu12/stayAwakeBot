@@ -277,6 +277,16 @@ class TestACopyTheHistoryDoesNotProve(_Repository):
                  f"100644,{blob},.saw/rollback/{composed}")
         self.assertEqual([], kept_copies.proven(self.repo))
 
+    def test_copies_in_a_folder_below_the_repositorys_top_are_left_alone(self):
+        self.git(self.repo, "config", "diff.relative", "true")
+        self.committed(".gitignore", ".saw/\n")
+        self.committed("sub/app.woff")
+        self.committed("sub/app.woff", "module.exports = 1;\n")
+        self.write(self.repo, "sub/.saw/rollback/app.woff", LOADER)
+        self.assertEqual([], kept_copies.proven(self.repo / "sub"))
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo / "sub"))
+        self.assertTrue((self.repo / "sub/.saw/rollback/app.woff").exists())
+
     def test_one_too_large_to_prove_reads_on_its_evidence(self):
         self.kept_by_an_older_fix()
         with mock.patch.object(kept_copies, "_LARGEST_COPY", 8):
