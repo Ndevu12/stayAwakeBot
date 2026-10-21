@@ -28,6 +28,7 @@ reader, not the mechanism or the weakness it closed.
   its fix is committed.
 
 ### Fixed
+- **A copy kept by an older `saw fix` is recognised when it is its own file.** On a repository that keeps letter case, a tracked path spelled differently no longer stands in for a different file, and `saw fix` removes the copy once its fix is committed. The same file is left where it is.
 - **`saw fix` names every branch that still carries what it removed.** A branch fetched from origin
   is named as well as a local one, such as `origin/feature`, with `saw fix amend` to take it out,
   so a fresh clone or a CI checkout no longer leaves the other branches unnamed.

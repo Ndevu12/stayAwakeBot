@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import unicodedata
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
@@ -16,8 +15,9 @@ from stayawake.bots.security.remediation import (changes as ch, git_settings, in
 from stayawake.bots.security.remediation.oracle import (ABSENT, REFUSED, UNREADABLE,
                                                         content_confirms, payload_matchers,
                                                         still_condemned)
-from stayawake.lib.git.write.working_tree import rewrite_index, uncommitted_paths
+from stayawake.lib.git.query import path_key
 from stayawake.lib.git.run import run, stdout, stdout_bytes, stdout_bytes_fed
+from stayawake.lib.git.write.working_tree import rewrite_index, uncommitted_paths
 
 
 _HELD_BACK_FOR_A_CONFIRMED_HOOK = ("your uncommitted work and staged changes were left as they are, because a confirmed "
@@ -426,17 +426,6 @@ class StoredContent:
             if self._verdicts[judged]:
                 self.confirmed_digests.add(hashlib.sha256(blob).digest())
         return self._verdicts[judged]
-
-
-def path_key(repo: Path):
-    """`key(path) -> str` under which two spellings of one path the repository stores meet: the
-    Unicode composed form, case-folded when the repository ignores case. Takes the repository."""
-    folds = stdout(repo, ["config", "--get", "--type=bool", "core.ignorecase"]).strip() == "true"
-
-    def key(path: str) -> str:
-        composed = unicodedata.normalize("NFC", path)
-        return composed.casefold() if folds else composed
-    return key
 
 
 def entries(repo: Path, args: list[str], env: dict, *, staged: bool, key=None):

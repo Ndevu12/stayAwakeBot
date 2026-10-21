@@ -3,6 +3,7 @@
 the repository's history proves, and goes once its fix is committed."""
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -237,11 +238,71 @@ class TestACopyTheHistoryDoesNotProve(_Repository):
         self.assertEqual([], kept_copies.proven(self.repo))
 
     def test_a_copy_git_tracks_in_another_letter_case_is_left_alone(self):
+        self.git(self.repo, "config", "core.ignorecase", "true")
         copy = self.kept_by_an_older_fix()
         blob = self.git(self.repo, "hash-object", "-w", str(self.repo / copy)).strip()
         self.git(self.repo, "update-index", "--add", "--cacheinfo",
                  f"100644,{blob},.saw/Rollback/app.woff")
         self.assertEqual([], kept_copies.proven(self.repo))
+
+    def test_the_same_file_in_another_letter_case_is_left_alone(self):
+        self.git(self.repo, "config", "core.ignorecase", "false")
+        copy = self.kept_by_an_older_fix()
+        other = self.repo / ".saw/Rollback/app.woff"
+        if not other.exists():
+            self.skipTest("this volume keeps both spellings")
+        blob = self.git(self.repo, "hash-object", "-w", str(other)).strip()
+        self.git(self.repo, "update-index", "--add", "--cacheinfo",
+                 f"100644,{blob},.saw/Rollback/app.woff")
+        self.assertEqual([], kept_copies.proven(self.repo))
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((self.repo / copy).exists())
+        self.assertTrue(other.exists())
+
+    def test_every_name_of_a_tracked_file_is_left_alone(self):
+        self.committed(".gitignore", ".saw/\n")
+        self.committed("a.woff")
+        self.committed("b.woff")
+        self.write(self.repo, ".saw/rollback/a.woff", LOADER)
+        os.link(self.repo / ".saw/rollback/a.woff", self.repo / ".saw/rollback/b.woff")
+        self.write(self.repo, "a.woff", "module.exports = 1;\n")
+        self.write(self.repo, "b.woff", "module.exports = 1;\n")
+        self.commit(self.repo, "the fix")
+        (self.repo / "alias").symlink_to(Path(".saw/rollback"), target_is_directory=True)
+        blob = self.git(self.repo, "hash-object", "-w",
+                        str(self.repo / ".saw/rollback/a.woff")).strip()
+        self.git(self.repo, "update-index", "--add", "--cacheinfo",
+                 f"100644,{blob},alias/a.woff")
+        self.assertEqual([], kept_copies.proven(self.repo))
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((self.repo / ".saw/rollback/a.woff").exists())
+        self.assertTrue((self.repo / ".saw/rollback/b.woff").exists())
+        self.assertTrue((self.repo / "alias/a.woff").exists())
+
+    def test_a_tracked_alias_of_the_copy_is_left_alone(self):
+        copy = self.kept_by_an_older_fix()
+        (self.repo / "alias").symlink_to(Path(".saw/rollback"), target_is_directory=True)
+        blob = self.git(self.repo, "hash-object", "-w", str(self.repo / copy)).strip()
+        self.git(self.repo, "update-index", "--add", "--cacheinfo",
+                 f"100644,{blob},alias/app.woff")
+        self.assertEqual([], kept_copies.proven(self.repo))
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((self.repo / copy).exists())
+
+    def test_a_different_file_in_another_letter_case_is_its_own_path(self):
+        self.git(self.repo, "config", "core.ignorecase", "false")
+        copy = self.kept_by_an_older_fix()
+        other = self.repo / ".saw/Rollback/app.woff"
+        if other.exists():
+            self.skipTest("this volume has one file for both spellings")
+        other.parent.mkdir(parents=True)
+        other.write_bytes((self.repo / copy).read_bytes())
+        blob = self.git(self.repo, "hash-object", "-w", str(other)).strip()
+        self.git(self.repo, "update-index", "--add", "--cacheinfo",
+                 f"100644,{blob},.saw/Rollback/app.woff")
+        self.assertEqual([copy], [found.path for found in kept_copies.proven(self.repo)])
+        self.assertEqual(([copy], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue(other.exists())
 
     def test_a_folder_named_otherwise_than_saw_names_it_is_not_its_copies(self):
         self.committed(".gitignore", ".saw/\n")

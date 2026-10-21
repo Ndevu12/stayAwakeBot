@@ -2,6 +2,7 @@
 """Read the objects a repository holds, never a view configured over them."""
 from __future__ import annotations
 
+import hashlib
 import locale
 import os
 import sys
@@ -135,6 +136,15 @@ def reachable_objects(repo: str | Path, tips: list[str], exclude: list[str] | No
     if out is None:
         return None
     return {line.split()[0].decode("ascii", "replace") for line in out.splitlines() if line.split()}
+
+
+def blob_id(data: bytes, object_format: str) -> str:
+    """Name the blob git would store for these bytes. Takes the bytes and the repository's object
+    format, `sha1` or `sha256`. Returns the object id."""
+    digest = hashlib.new("sha256" if object_format == "sha256" else "sha1")
+    digest.update(b"blob %d\0" % len(data))
+    digest.update(data)
+    return digest.hexdigest()
 
 
 def blob(repo: str | Path, oid: str) -> bytes | None:
