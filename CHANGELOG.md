@@ -27,6 +27,11 @@ reader, not the mechanism or the weakness it closed.
 - **`saw hook status --json` says whether scan-on-clone is in place.** It names the git events the
   hooks cover and each problem, with the command that addresses it. `saw hook install --json` and
   `saw hook repair --json` print that same document as it stands after they run, and what they changed.
+- **`saw fix --json` names the branches it made and what it could not do.** Each repository's record
+  names the clean-up branch and the branch it was made from, what was removed, and, when uncommitted
+  work was saved or could not be saved, that branch or the reason. It says when the fix is only part
+  of what was found, when history still holds what was removed, and what the report leaves for you
+  to decide.
 
 ### Security
 - **`saw scan` reads more of a repository's files.** `saw fix` removes a confirmed payload found in

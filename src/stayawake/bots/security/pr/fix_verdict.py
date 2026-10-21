@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from stayawake.bots.security.dependencies.remediation import plain_lines
+from stayawake.bots.security.remediation.preserve import Preserved
 from stayawake.utils import textsafe
 
 
@@ -153,6 +154,9 @@ class FixVerdict:
     checkout_detail: CheckoutDetail = CheckoutDetail()
     arrivals: Arrivals = Arrivals()
     kept_packages: tuple = ()
+    removed: tuple[str, ...] = ()
+    preserved: Preserved = Preserved()
+    review: tuple[str, ...] = ()
 
     @property
     def grade(self) -> Grade:
@@ -362,13 +366,49 @@ def render_fix_verdict(verdict: FixVerdict, detail: bool = False) -> str:
     return "\n".join(lines)
 
 
+def _shown(text: str, limit: int = 300) -> str:
+    return textsafe.plain(text, limit)
+
+
+def _uncommitted(saved: Preserved) -> dict | None:
+    """The uncommitted work a run saved or could not save. Takes what was put aside. Returns the
+    record, or None when there was nothing to save."""
+    if not (saved.branch or saved.reason or saved.files or saved.withheld or saved.unsaved
+            or saved.unread):
+        return None
+    return {"branch": _shown(saved.branch, 120), "files": saved.files, "withheld": saved.withheld,
+            "unsaved": saved.unsaved, "unread": saved.unread, "reason": _shown(saved.reason, 4000)}
+
+
+def _left_for_review(verdict: "FixVerdict") -> list[str]:
+    """The sentences the report leaves for the operator. Takes the verdict. Returns them."""
+    items: list[str] = []
+    if verdict.checkout in (Checkout.UNREAD, Checkout.NOT_CLEAN):
+        items.append(checkout_sentence(verdict.checkout, verdict.checkout_detail, detail=False))
+    items += [note for note in verdict.checkout_detail.notes if "could not" in note]
+    if verdict.history.holds and verdict.checkout is not Checkout.CLEANED:
+        items.append("your history still carries it:")
+    items += [_hold_line(hold, verdict.base_fix) for hold in verdict.history.holds]
+    items += [line.strip() for line in _taken_out_lines(verdict.arrivals, verdict.base_fix, False)]
+    if verdict.history.unread:
+        items.append("git could not say what your history holds, so it is not called clean")
+    items += _arrival_lines(verdict.arrivals, False)
+    if verdict.kept_packages:
+        items.append("your project still declares known-malicious packages; to remove them:")
+        items += plain_lines(verdict.kept_packages, _KEPT_PACKAGES_SHOWN)
+    items += list(verdict.review)
+    return [_shown(item, 4000) for item in items if item.strip()]
+
+
 def remediation_record(repository: str, verdict: "FixVerdict | None") -> dict:
     """Describe what one repository's fix did, for a machine to read. Takes the repository and its
     verdict, or None when the run stopped before reaching one. Returns the record: `remediation`
-    (pr, fork-pr, patch, issue, prepared, skipped or failed), its `cause`, and the pull request."""
+    (pr, fork-pr, patch, issue, prepared, skipped or failed), its `cause`, the pull request, the
+    branches, what was removed, and what is left for the operator."""
     if verdict is None:
         return {"repository": repository, "remediation": "failed", "cause": "error",
-                "pull_request": None, "url": ""}
+                "pull_request": None, "url": "", "partial": False, "branch": "", "base": "",
+                "removed": [], "history_holds_payload": False, "needs_review": []}
     fix = verdict.base_fix
     if fix.remediation:
         remediation, cause = fix.remediation, fix.cause
@@ -378,5 +418,14 @@ def remediation_record(repository: str, verdict: "FixVerdict | None") -> dict:
         remediation, cause = "prepared", ""
     else:
         remediation, cause = "failed", fix.state.value
-    return {"repository": verdict.repository or repository, "remediation": remediation,
-            "cause": cause, "pull_request": fix.pull_request, "url": fix.pull_request_url}
+    record = {"repository": verdict.repository or repository, "remediation": remediation,
+              "cause": cause, "pull_request": fix.pull_request, "url": fix.pull_request_url,
+              "partial": fix.state is BaseState.PARTIAL,
+              "branch": _shown(fix.branch, 120), "base": _shown(fix.base, 120),
+              "removed": [_shown(path, 200) for path in verdict.removed],
+              "history_holds_payload": bool(verdict.history.holds or verdict.arrivals.taken_out_held),
+              "needs_review": _left_for_review(verdict)}
+    saved = _uncommitted(verdict.preserved)
+    if saved is not None:
+        record["uncommitted"] = saved
+    return record
