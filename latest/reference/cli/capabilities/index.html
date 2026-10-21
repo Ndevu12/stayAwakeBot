@@ -1948,13 +1948,14 @@ instead of comparing version numbers. It is offline and read-only.</p>
 <a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="go">    "guard.drift.json",</span>
 <a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="go">    "audit.json",</span>
 <a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="go">    "hook.status.json",</span>
-<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="go">    "capabilities.json"</span>
-<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="go">  ],</span>
-<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="go">  "platform": {</span>
-<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="go">    "os": "linux",</span>
-<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="go">    "supported": true</span>
-<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="go">  }</span>
-<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="go">}</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="go">    "capabilities.json",</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="go">    "progress.jsonl"</span>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="go">  ],</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="go">  "platform": {</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="go">    "os": "linux",</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="go">    "supported": true</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="go">  }</span>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="go">}</span>
 </code></pre></div>
 <table>
 <thead>
@@ -1974,7 +1975,7 @@ instead of comparing version numbers. It is offline and read-only.</p>
 </tr>
 <tr>
 <td><code>features</code></td>
-<td>What this saw can do. <code>&lt;command&gt;.json</code> means that command takes <code>--json</code>.</td>
+<td>What this saw can do. <code>&lt;command&gt;.json</code> means that command takes <code>--json</code>. <code>progress.jsonl</code> means <code>saw scan</code>, <code>saw audit</code> and <code>saw fix</code> take <code>--progress=jsonl</code>.</td>
 </tr>
 <tr>
 <td><code>platform</code></td>

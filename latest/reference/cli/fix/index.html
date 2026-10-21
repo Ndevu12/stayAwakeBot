@@ -1929,7 +1929,7 @@ collection — deliberate work, not something <code>fix</code> decides for you. 
 <p><a href="../amend/"><code>saw fix amend</code></a> is a different act: it amends the infected commits and force-updates
 the branches that carried them. Read that page before you run it.</p>
 <p>See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code> will and will not touch.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix [TARGETS...] [--pr] [--json] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix [TARGETS...] [--pr] [--json] [--progress=jsonl] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
 </code></pre></div>
 <table>
 <thead>
@@ -1950,6 +1950,10 @@ the branches that carried them. Read that page before you run it.</p>
 <tr>
 <td><code>--json</code></td>
 <td>Print what each repository's fix came to as JSON on stdout, one record per repository. <code>remediation</code> is <code>pr</code>, <code>fork-pr</code>, <code>patch</code>, <code>issue</code>, <code>prepared</code>, <code>skipped</code> or <code>failed</code>. <code>cause</code> says why it came to less than a pull request, such as <code>actions-may-not-open-pull-requests</code>, and <code>pull_request</code> and <code>url</code> name the pull request. <code>branch</code> and <code>base</code> name the clean-up branch and the branch it was made from. <code>partial</code> is true when the fix is only part of what was found. <code>removed</code> lists what was removed. <code>uncommitted</code>, when there was uncommitted work, names the branch that holds it, or why it could not be saved. <code>history_holds_payload</code> says whether history still holds what was removed. <code>needs_review</code> lists what the report leaves for you to decide. Progress stays on stderr. Not accepted with <code>amend</code>.</td>
+</tr>
+<tr>
+<td><code>--progress=jsonl</code></td>
+<td>Progress as one JSON event per line on stderr. The report stays on stdout, and the human progress stays off stderr. See <a href="../#progress-events">progress events</a>. Not accepted with <code>amend</code>.</td>
 </tr>
 <tr>
 <td><code>amend</code></td>

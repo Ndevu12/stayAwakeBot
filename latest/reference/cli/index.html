@@ -1870,6 +1870,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#progress-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Progress events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#command-aliases" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2061,6 +2072,11 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <td>Machine-readable output on stdout. Each document carries a <a href="capabilities/#schema-versions"><code>schema_version</code></a>.</td>
 </tr>
 <tr>
+<td><code>--progress=jsonl</code></td>
+<td><code>scan</code>, <code>audit</code>, <code>fix</code></td>
+<td>One JSON event per line on stderr, so a program can draw its own progress. The report stays on stdout. The human progress stays off stderr. See <a href="#progress-events">Progress events</a>. Not accepted with <code>fix amend</code>.</td>
+</tr>
+<tr>
 <td><code>-q</code>, <code>--quiet</code></td>
 <td><code>doctor</code>, <code>search</code></td>
 <td>Only the essentials.</td>
@@ -2079,6 +2095,35 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <td><code>-j</code>, <code>--jobs N</code></td>
 <td><code>scan</code>, <code>fix</code>, <code>guard check</code>/<code>setup</code>/<code>drift</code></td>
 <td>Work on up to N repositories at once. Default <code>auto</code> (one repo sequential, several use one worker per core); <code>-j 1</code> forces sequential. On <code>scan</code> it also splits one large repository across workers.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="progress-events">Progress events<a class="headerlink" href="#progress-events" title="Permanent link">&para;</a></h2>
+<p><code>--progress=jsonl</code> on <code>saw scan</code>, <code>saw audit</code> and <code>saw fix</code> writes one JSON object per line to
+stderr. A program should ignore an event it does not recognise, so a later saw can add one.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>What it says</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>start</code></td>
+<td>The run began. <code>command</code> is <code>scan</code>, <code>audit</code> or <code>fix</code>. <code>steps</code>, when present, is how many steps the run will report.</td>
+</tr>
+<tr>
+<td><code>step</code></td>
+<td>One step. <code>label</code> is the same words the spinner shows. <code>id</code> names the step. <code>index</code> and <code>of</code>, when present, say which step this is.</td>
+</tr>
+<tr>
+<td><code>target</code></td>
+<td>One repository or path, in <code>path</code>. <code>index</code> and <code>of</code>, when present, say which target this is.</td>
+</tr>
+<tr>
+<td><code>done</code></td>
+<td>The run finished.</td>
 </tr>
 </tbody>
 </table>

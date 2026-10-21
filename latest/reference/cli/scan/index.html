@@ -1860,7 +1860,7 @@ of what was found; a large scan prints the summary and writes the full report fo
 <code>--json</code> carries the full evidence. Progress goes to stderr. The last line is the verdict, and
 a scan that could not complete never reports clean. <a href="../fix/"><code>saw fix</code></a> removes what it finds.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>         [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>         [--json] [--progress=jsonl] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>         [--no-advisories] [-x | --external] [--deep] [--require-db]
 </code></pre></div>
 <table>
@@ -1894,6 +1894,10 @@ a scan that could not complete never reports clean. <a href="../fix/"><code>saw 
 <tr>
 <td><code>--json</code></td>
 <td>JSON report to stdout, with full evidence. Pipe it; it writes no file.</td>
+</tr>
+<tr>
+<td><code>--progress=jsonl</code></td>
+<td>Progress as one JSON event per line on stderr. The report stays on stdout. See <a href="../#progress-events">progress events</a>.</td>
 </tr>
 <tr>
 <td><code>--sarif FILE</code></td>

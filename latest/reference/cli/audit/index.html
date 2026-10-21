@@ -1859,7 +1859,7 @@ repository's branch protection and rulesets. Every run ends with a <strong>rotat
 machine</a> for what to do with each outcome. Scope: <a href="../../../how-to/audit-a-machine/#what-a-clean-audit-does-and-does-not-mean">what a clean
 audit does and does not
 mean</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--json] [--no-stream]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--json] [--progress=jsonl] [--no-stream]
 </code></pre></div>
 <table>
 <thead>
@@ -1888,6 +1888,10 @@ mean</a>.</p>
 <tr>
 <td><code>--json</code></td>
 <td>Print one JSON document on stdout for a program to read. <code>rotation.verdict</code> is <code>safe</code>, <code>safe-once-confirmed</code>, <code>unsafe</code>, or <code>incomplete</code>. <code>rotation.to_confirm</code> names the findings to confirm. Every finding in the report is in the document.</td>
+</tr>
+<tr>
+<td><code>--progress=jsonl</code></td>
+<td>Progress as one JSON event per line on stderr, one step per check. The report stays on stdout. See <a href="../#progress-events">progress events</a>.</td>
 </tr>
 </tbody>
 </table>
