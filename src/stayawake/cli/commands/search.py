@@ -32,6 +32,8 @@ _INDEX = [
      "doctor diagnose verify install check health auth scope"),
     ("saw intro", "a branded tour of what saw is and how to get started",
      "intro welcome tour guide getting started banner logo about help onboarding"),
+    ("saw capabilities", "what this saw supports, for tools that run it",
+     "capabilities features schema version json extension editor integration supported platform"),
     ("saw completion", "emit a shell-completion script",
      "completion shell bash zsh fish autocomplete tab"),
 ]

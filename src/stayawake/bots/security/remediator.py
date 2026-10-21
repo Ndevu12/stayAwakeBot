@@ -10,6 +10,7 @@ from pathlib import Path
 
 from stayawake.lib import auth
 from stayawake.utils import env, exitcodes, parallel, prompt
+from stayawake.utils.json_documents import versioned
 from stayawake.lib import git as gitutil
 from stayawake.lib.adapters import github_api
 from stayawake.utils.streaming import Streamer, stream_enabled, status
@@ -479,8 +480,8 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
                 else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr, jobs=jobs,
                                 branches=branches, resolver=resolver))
     if json_out:
-        print(json.dumps({"results": [remediation_record(o.repository, o.verdict)
-                                      for o in outcomes]}, indent=2))
+        print(json.dumps(versioned("fix", {"results": [remediation_record(o.repository, o.verdict)
+                                                       for o in outcomes]}), indent=2))
     if not outcomes:
         return 0
     prog.line(fix_tally(outcomes))

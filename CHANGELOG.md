@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw capabilities` says what the installed saw supports.** `saw capabilities --json` lists its
+  version, the schema version of each JSON document it prints, and its features, so an editor
+  extension or script can check for a feature instead of comparing version numbers.
+- **Every JSON document saw prints starts with a `schema_version`.** That covers `saw scan`, `saw fix`,
+  `saw doctor`, `saw auth status` and `saw guard drift` with `--json`, and the `-d` report. The
+  version changes only when a change would break a reader; a new field does not change it.
+
 ### Security
 - **`saw scan` reads more of a repository's files.** `saw fix` removes a confirmed payload found in
   them as it does anywhere else. Re-run `saw scan` on repositories you scanned before this release.

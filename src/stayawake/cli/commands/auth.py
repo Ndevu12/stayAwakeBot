@@ -14,6 +14,7 @@ from stayawake.utils.render import LINK, SEVERITY, block, paint, term_width
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.terminal import supports_color
 from stayawake.utils import exitcodes
+from stayawake.utils.json_documents import versioned
 from stayawake.cli.argtypes import no_stream_requested
 
 
@@ -182,7 +183,7 @@ def _status(a: argparse.Namespace) -> int:
         "intents": rows,
     }
     if getattr(a, "json", False):
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(versioned("auth-status", payload), indent=2))
         return 0 if sess.live or sess.token is None else 1
 
     if not sess.token:
