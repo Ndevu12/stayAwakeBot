@@ -132,7 +132,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-and-completion" class="md-skip">
+        <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-capabilities-and-completion" class="md-skip">
           Skip to content
         </a>
       
@@ -905,6 +905,8 @@
       
         
       
+        
+      
     
     
     
@@ -1335,6 +1337,34 @@
     
   
     saw doctor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="capabilities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw capabilities
   
 
     
@@ -1795,10 +1825,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-and-completion" class="md-nav__link">
+  <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-capabilities-and-completion" class="md-nav__link">
     <span class="md-ellipsis">
       
-        description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor and completion.
+        description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor, capabilities and completion.
       
     </span>
   </a>
@@ -1892,7 +1922,7 @@
 
 
 <hr />
-<h2 id="description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-and-completion">description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor and completion.<a class="headerlink" href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-and-completion" title="Permanent link">&para;</a></h2>
+<h2 id="description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-capabilities-and-completion">description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor, capabilities and completion.<a class="headerlink" href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-capabilities-and-completion" title="Permanent link">&para;</a></h2>
 <h1 id="saw-command-reference"><code>saw</code> command reference<a class="headerlink" href="#saw-command-reference" title="Permanent link">&para;</a></h1>
 <p>Every <code>saw</code> flag is documented here, and only here — the guides link to these pages rather than
 repeating them. <code>saw &lt;command&gt; -h</code> states what that command is for, lists its flags, and ends
@@ -1982,6 +2012,11 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <td>—</td>
 </tr>
 <tr>
+<td><a href="capabilities/"><code>capabilities</code></a></td>
+<td>What this saw supports, for tools that run it</td>
+<td>—</td>
+</tr>
+<tr>
 <td><a href="completion/"><code>completion</code></a></td>
 <td>Print a shell-completion script</td>
 <td>—</td>
@@ -2006,7 +2041,7 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 </tr>
 <tr>
 <td><code>--version</code></td>
-<td>Package version and capability inventory.</td>
+<td>Package version. <code>saw capabilities</code> lists what this version supports.</td>
 </tr>
 </tbody>
 </table>
@@ -2022,8 +2057,8 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <tbody>
 <tr>
 <td><code>--json</code></td>
-<td><code>scan</code>, <code>auth status</code>, <code>doctor</code>, <code>search</code></td>
-<td>Machine-readable output on stdout.</td>
+<td><code>scan</code>, <code>fix</code>, <code>auth status</code>, <code>doctor</code>, <code>guard drift</code>, <code>search</code>, <code>capabilities</code></td>
+<td>Machine-readable output on stdout. Each document carries a <a href="capabilities/#schema-versions"><code>schema_version</code></a>.</td>
 </tr>
 <tr>
 <td><code>-q</code>, <code>--quiet</code></td>
