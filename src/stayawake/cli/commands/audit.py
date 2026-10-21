@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from stayawake.bots.security import hygiene
 from stayawake.cli.helptext import add_command
 from stayawake.lib import auth
+from stayawake.utils.json_documents import versioned
 from stayawake.utils.render import term_width
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.terminal import supports_color
@@ -26,6 +28,7 @@ def register(sub) -> None:
             "surface was read."),
         examples=[
             ("saw audit", "ends with the rotation-safety verdict"),
+            ("saw audit --json", "the same verdict, for a program to read"),
             ("saw audit --verify", "content-scan what a weak signal names"),
             ("saw audit --repo your-org/repo -f", "also gate on branch protection"),
         ])
@@ -38,14 +41,19 @@ def register(sub) -> None:
                         "check whether the branch requires the worm gate")
     p.add_argument("--verify", action="store_true", dest="verify_artifacts",
                    help="also read the files a finding points to, to confirm it (slower)")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=run)
 
 
 def run(a: argparse.Namespace) -> int:
+    # The parser sets this. A caller that builds the arguments itself, the way the tests do, has
+    # no such attribute, and that caller wants the human report.
+    as_json = getattr(a, "json", False)
     token, _ = auth.resolve_token()
     if a.repo and not token:
         print(auth.no_credential_hint("auditing branch protection") +
-              " Skipping the branch-protection check.\n")
+              " Skipping the branch-protection check.\n",
+              file=sys.stderr if as_json else sys.stdout)
     progress_on = stream_enabled(sys.stderr, force_off=no_stream_requested(a))
     outcomes: list[hygiene.CheckOutcome] = []
     for label, check in hygiene.audit_checks(a.repo, token, a.branch,
@@ -53,9 +61,12 @@ def run(a: argparse.Namespace) -> int:
         with status(f"checking {label}…", enabled=progress_on):
             outcomes.append(hygiene.run_check(label, check))
     issues = [i for o in outcomes for i in o.issues]
-    report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width(),
-                            content_scanned=a.verify_artifacts)
-    Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream_requested(a))).line(report)
+    if as_json:
+        print(json.dumps(versioned("audit", hygiene.as_document(outcomes)), indent=2))
+    else:
+        report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width(),
+                                content_scanned=a.verify_artifacts)
+        Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream_requested(a))).line(report)
     # persistence surface that could not be verified withholds the all-clear → exit 3 ("rotation
     # unsafe / not verified"), regardless of -f, because rotating into a live wiper is data-loss. The
     # weaker hygiene warnings keep their opt-in gate (-f → 1). 3 is additive: every `rc==0`/`rc!=0`

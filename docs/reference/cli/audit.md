@@ -11,7 +11,7 @@ audit does and does not
 mean](../../how-to/audit-a-machine.md#what-a-clean-audit-does-and-does-not-mean).
 
 ```text
-saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--no-stream]
+saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--json] [--no-stream]
 ```
 
 | Option | Description |
@@ -20,3 +20,4 @@ saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--no-stream]
 | `-b`, `--branch NAME` | Branch whose protection is checked (default: `main`). |
 | `-f`, `--fail` | Fail the run on a weaker warning-level hygiene issue, and when `--repo` could not check whether the branch requires the worm gate. The rotation-safety axis gates unconditionally, independent of this flag. |
 | `--verify` | **Opt-in:** content-scan a suspicious directory the audit flagged outside a repository and say what it found: malicious code, clean, or not cleared. A directory that is not cleared is never reported clean, and the audit then does not say that changing credentials is safe. It examines that one directory and never changes how `saw scan` behaves. |
+| `--json` | Print one JSON document on stdout for a program to read. `rotation.verdict` is `safe`, `safe-once-confirmed`, `unsafe`, or `incomplete`. `rotation.to_confirm` names the findings to confirm. Every finding in the report is in the document. |

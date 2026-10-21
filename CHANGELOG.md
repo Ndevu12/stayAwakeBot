@@ -18,8 +18,11 @@ reader, not the mechanism or the weakness it closed.
   version, the schema version of each JSON document it prints, and its features, so an editor
   extension or script can check for a feature instead of comparing version numbers.
 - **Every JSON document saw prints starts with a `schema_version`.** That covers `saw scan`, `saw fix`,
-  `saw doctor`, `saw auth status` and `saw guard drift` with `--json`, and the `-d` report. The
+  `saw audit`, `saw doctor`, `saw auth status` and `saw guard drift` with `--json`, and the `-d` report. The
   version changes only when a change would break a reader; a new field does not change it.
+- **`saw audit --json` prints the rotation verdict for a program to read.** It says whether changing
+  credentials is safe, safe once you confirm the items it names, unsafe, or the audit did not finish,
+  and it lists each finding.
 
 ### Security
 - **`saw scan` reads more of a repository's files.** `saw fix` removes a confirmed payload found in

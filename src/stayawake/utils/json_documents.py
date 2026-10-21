@@ -15,6 +15,7 @@ SCHEMA_VERSION_OF_EACH_DOCUMENT = {
     "doctor": 1,
     "auth-status": 1,
     "guard-drift": 1,
+    "audit": 1,
     "capabilities": 1,
 }
 
