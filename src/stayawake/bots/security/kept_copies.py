@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -32,11 +33,12 @@ def proven(root: Path) -> list[KeptCopy] | None:
     held = _held(Path(root))
     if not held:
         return []
-    tracked = _listed(root, ["ls-files", "-z"])
+    in_index = _listed(root, ["ls-files", "-z"])
+    in_head = _listed(root, ["ls-tree", "-r", "-z", "--name-only", "--full-tree", "HEAD"])
     oid_of = _object_id_function(root)
-    if tracked is None or oid_of is None:
+    if in_index is None or in_head is None or oid_of is None:
         return None
-    tracked = {path.casefold() for path in tracked}
+    tracked = {_folded(path) for path in in_index | in_head}
     held = {path: data for path, data in held.items() if not _under_any(path, tracked)}
     copies = {path: (path[len(ROLLBACK_DIR) + 1:], oid_of(data)) for path, data in held.items()}
     committed = _committed_versions(root, sorted({original for original, _ in copies.values()}))
@@ -79,7 +81,7 @@ def _held(root: Path) -> dict[str, bytes]:
     folder = root / ROLLBACK_DIR
     if (not _named_exactly(root, SAW_DIR) or not _named_exactly(root / SAW_DIR, _ROLLBACK_NAME)
             or _through_a_link(root, folder) or folder.is_symlink() or not folder.is_dir()
-            or os.path.lexists(folder / ".git")):
+            or os.path.lexists(root / SAW_DIR / ".git") or os.path.lexists(folder / ".git")):
         return {}
     held: dict[str, bytes] = {}
     for top, dirs, files in os.walk(folder):
@@ -169,9 +171,15 @@ def _named_exactly(folder: Path, name: str) -> bool:
 
 def _under_any(path: str, tracked: set[str]) -> bool:
     """Tell whether git tracks a path or a folder above it, in any letter case. Takes the path and
-    the tracked paths, case-folded. Returns the answer."""
-    here = PurePosixPath(path.casefold())
+    the tracked paths, folded. Returns the answer."""
+    here = PurePosixPath(_folded(path))
     return any(str(p) in tracked for p in (here, *here.parents))
+
+
+def _folded(path: str) -> str:
+    """Write a path as a disk that ignores letter case and Unicode form would. Takes the path.
+    Returns it."""
+    return unicodedata.normalize("NFC", path).casefold()
 
 
 def _through_a_link(root: Path, path: Path) -> bool:

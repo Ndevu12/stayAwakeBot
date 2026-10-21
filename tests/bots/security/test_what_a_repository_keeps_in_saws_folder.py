@@ -252,6 +252,31 @@ class TestACopyTheHistoryDoesNotProve(_Repository):
         kept_copies.remove_fixed(self.repo)
         self.assertTrue((self.repo / ".saw/Rollback/app.woff").exists())
 
+    def test_a_saw_folder_that_is_a_repository_is_left_alone(self):
+        copy = self.kept_by_an_older_fix()
+        self.git(self.repo / ".saw", "init", "-q")
+        self.assertEqual([], kept_copies.proven(self.repo))
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((self.repo / copy).exists())
+
+    def test_one_the_current_commit_stores_is_left_alone_after_it_leaves_the_index(self):
+        copy = self.kept_by_an_older_fix()
+        self.git(self.repo, "add", "-f", copy)
+        self.commit(self.repo, "the copy")
+        self.git(self.repo, "rm", "-q", "--cached", copy)
+        self.assertEqual([], kept_copies.proven(self.repo))
+        self.assertEqual(([], []), kept_copies.remove_fixed(self.repo))
+        self.assertTrue((self.repo / copy).exists())
+
+    def test_one_git_tracks_under_another_unicode_form_is_left_alone(self):
+        self.git(self.repo, "config", "core.precomposeunicode", "false")
+        decomposed, composed = "cafe\u0301.woff", "caf\u00e9.woff"
+        copy = self.kept_by_an_older_fix(decomposed)
+        blob = self.git(self.repo, "hash-object", "-w", str(self.repo / copy)).strip()
+        self.git(self.repo, "update-index", "--add", "--cacheinfo",
+                 f"100644,{blob},.saw/rollback/{composed}")
+        self.assertEqual([], kept_copies.proven(self.repo))
+
     def test_one_too_large_to_prove_reads_on_its_evidence(self):
         self.kept_by_an_older_fix()
         with mock.patch.object(kept_copies, "_LARGEST_COPY", 8):
