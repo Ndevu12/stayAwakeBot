@@ -24,6 +24,7 @@ $ saw capabilities --json
     "auth-status": 1,
     "guard-drift": 1,
     "audit": 1,
+    "hook-status": 1,
     "capabilities": 1
   },
   "features": [
@@ -33,6 +34,7 @@ $ saw capabilities --json
     "auth.status.json",
     "guard.drift.json",
     "audit.json",
+    "hook.status.json",
     "capabilities.json"
   ],
   "platform": {

@@ -16,7 +16,13 @@ SCHEMA_VERSION_OF_EACH_DOCUMENT = {
     "auth-status": 1,
     "guard-drift": 1,
     "audit": 1,
+    "hook-status": 1,
     "capabilities": 1,
+}
+
+# `hook install` and `hook repair` print the hook-status document. Their names are not that document.
+ALSO_PRINTED_BY = {
+    "hook-status": (("hook", "install"), ("hook", "repair")),
 }
 
 
@@ -31,3 +37,11 @@ def command_of(document: str) -> list[str]:
     """Name the command words that print `document`. Returns them in order, e.g. `["auth",
     "status"]`."""
     return document.split("-")
+
+
+def commands_for(document: str) -> list[tuple[str, ...]]:
+    """Name every command that prints `document`.
+
+    Takes the document's name. Returns the command its name is, then any other command that
+    prints the same document."""
+    return [tuple(command_of(document)), *ALSO_PRINTED_BY.get(document, ())]

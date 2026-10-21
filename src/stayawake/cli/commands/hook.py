@@ -42,6 +42,7 @@ def register(sub) -> None:
             ("saw hook install", "scan every future clone and pull"),
             ("saw hook install -c ~/security.yml", "scan them against your allowlist"),
             ("saw hook install ~/code", "hooks for every repo under ~/code"),
+            ("saw hook install --json", "the same result, for a program to read"),
         ])
     ins.add_argument("paths", nargs="*", metavar="PATH",
                      help="existing repositories, directories or globs to add the hooks to "
@@ -49,6 +50,7 @@ def register(sub) -> None:
     ins.add_argument("-c", "--config", default=None,
                      help="your config, whose allowlist the hooks scan with; a repository's own "
                           "config is never read")
+    ins.add_argument("--json", action="store_true", help="machine-readable output")
     ins.set_defaults(func=run_install)
 
     un = add_command(
@@ -70,7 +72,9 @@ def register(sub) -> None:
                     "from, for you to examine.",
         examples=[
             ("saw hook repair", "after `saw audit` reports an altered saw hook"),
+            ("saw hook repair --json", "the same result, for a program to read"),
         ])
+    rp.add_argument("--json", action="store_true", help="machine-readable output")
     rp.set_defaults(func=run_repair)
 
     stt = add_command(
@@ -80,7 +84,9 @@ def register(sub) -> None:
                     "would stop them.",
         examples=[
             ("saw hook status", "are the hooks in place, and will they run?"),
+            ("saw hook status --json", "the same answer, for a program to read"),
         ])
+    stt.add_argument("--json", action="store_true", help="machine-readable output")
     stt.set_defaults(func=run_status)
 
     rn = hsub.add_parser("run")                # the entry git's hook calls, not offered in help
@@ -95,13 +101,13 @@ def register(sub) -> None:
 
 def run_repair(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.repair(no_stream=no_stream_requested(a))
+    return hook.repair(no_stream=no_stream_requested(a), as_json=getattr(a, "json", False))
 
 
 def run_install(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
     return hook.install(config_path=a.config, no_stream=no_stream_requested(a),
-                        repositories=a.paths, standing_in=True)
+                        repositories=a.paths, standing_in=True, as_json=getattr(a, "json", False))
 
 
 def run_uninstall(a: argparse.Namespace) -> int:
@@ -111,7 +117,7 @@ def run_uninstall(a: argparse.Namespace) -> int:
 
 def run_status(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.status(no_stream=no_stream_requested(a))
+    return hook.status(no_stream=no_stream_requested(a), as_json=getattr(a, "json", False))
 
 
 def run_run(a: argparse.Namespace) -> int:

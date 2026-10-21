@@ -50,7 +50,7 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 
 | Option | Where | Description |
 | --- | --- | --- |
-| `--json` | `scan`, `fix`, `audit`, `auth status`, `doctor`, `guard drift`, `search`, `capabilities` | Machine-readable output on stdout. Each document carries a [`schema_version`](capabilities.md#schema-versions). |
+| `--json` | `scan`, `fix`, `audit`, `hook status`, `hook install`, `hook repair`, `auth status`, `doctor`, `guard drift`, `search`, `capabilities` | Machine-readable output on stdout. Each document carries a [`schema_version`](capabilities.md#schema-versions). |
 | `-q`, `--quiet` | `doctor`, `search` | Only the essentials. |
 | `-f`, `--fail` | `audit`, `guard check` | Fail the run on a warning-level issue. **`saw scan` has no `--fail`** — the last line of the report is the verdict unconditionally. |
 | `--no-stream` | every command | Plain instant lines instead of live progress. |
