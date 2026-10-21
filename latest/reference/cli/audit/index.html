@@ -1859,7 +1859,7 @@ repository's branch protection and rulesets. Every run ends with a <strong>rotat
 machine</a> for what to do with each outcome. Scope: <a href="../../../how-to/audit-a-machine/#what-a-clean-audit-does-and-does-not-mean">what a clean
 audit does and does not
 mean</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--no-stream]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--json] [--no-stream]
 </code></pre></div>
 <table>
 <thead>
@@ -1884,6 +1884,10 @@ mean</a>.</p>
 <tr>
 <td><code>--verify</code></td>
 <td><strong>Opt-in:</strong> content-scan a suspicious directory the audit flagged outside a repository and say what it found: malicious code, clean, or not cleared. A directory that is not cleared is never reported clean, and the audit then does not say that changing credentials is safe. It examines that one directory and never changes how <code>saw scan</code> behaves.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Print one JSON document on stdout for a program to read. <code>rotation.verdict</code> is <code>safe</code>, <code>safe-once-confirmed</code>, <code>unsafe</code>, or <code>incomplete</code>. <code>rotation.to_confirm</code> names the findings to confirm. Every finding in the report is in the document.</td>
 </tr>
 </tbody>
 </table>
