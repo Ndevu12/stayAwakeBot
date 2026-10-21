@@ -30,14 +30,31 @@ def register(sub) -> None:
     p.set_defaults(func=lambda a: run(a, sub.choices))
 
 
+def _names_json(text: str) -> bool:
+    """Say whether `text` names JSON output. A progress choice of `jsonl` does not."""
+    return "json" in text.replace("jsonl", "")
+
+
 def asks_for_json(parser: argparse.ArgumentParser) -> bool:
     """Say whether `parser` can ask for JSON output. Takes a command's parser. Returns whether one
     of its options names JSON, by its flag, its destination or one of its choices."""
-    return any("json" in (action.dest or "")
-               or any("json" in option for option in action.option_strings)
-               or any("json" in str(choice) for choice in (action.choices or ())
+    return any(_names_json(action.dest or "")
+               or any(_names_json(option) for option in action.option_strings)
+               or any(_names_json(str(choice)) for choice in (action.choices or ())
                       if not isinstance(action, argparse._SubParsersAction))
                for action in parser._actions)
+
+
+def _takes_progress(parser: argparse.ArgumentParser) -> bool:
+    """Say whether `parser` takes `--progress`. Returns the answer."""
+    return any("--progress" in action.option_strings for action in parser._actions)
+
+
+def offers_progress(commands: dict[str, argparse.ArgumentParser]) -> bool:
+    """Say whether scan, audit or fix write progress events. Takes the top-level commands by name.
+    Returns whether one of them takes `--progress`."""
+    return any(_takes_progress(parser) for name in ("scan", "audit", "fix")
+               if (parser := commands.get(name)) is not None)
 
 
 def _subcommands(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
@@ -64,10 +81,13 @@ def capabilities(commands: dict[str, argparse.ArgumentParser]) -> dict:
     each JSON document's schema version, the features and the platform."""
     documents = {document: version for document, version in SCHEMA_VERSION_OF_EACH_DOCUMENT.items()
                  if prints_json(commands, document)}
+    features = [".".join(command_of(document)) + ".json" for document in documents]
+    if offers_progress(commands):
+        features.append("progress.jsonl")
     return versioned("capabilities", {
         "version": __version__,
         "schema_versions": documents,
-        "features": [".".join(command_of(document)) + ".json" for document in documents],
+        "features": features,
         "platform": {"os": sys.platform, "supported": not sys.platform.startswith("win")},
     })
 

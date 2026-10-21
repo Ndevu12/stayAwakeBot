@@ -12,7 +12,8 @@ import argparse
 import sys
 
 from stayawake.bots.security import service
-from stayawake.cli.argtypes import add_jobs_arg, no_stream_requested
+from stayawake.cli.argtypes import add_jobs_arg, add_progress_arg, no_stream_requested, progress_requested
+from stayawake.utils.progress_events import covering, current
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
 
@@ -80,6 +81,7 @@ def register(sub) -> None:
     # Opt-in output surfaces (terminal-first: none of these is on by default).
     p.add_argument("--json", action="store_true",
                    help="emit machine-readable JSON to stdout (full evidence; progress on stderr)")
+    add_progress_arg(p)
     p.add_argument("--sarif", default=None, metavar="FILE",
                    help="write a SARIF 2.1.0 report to FILE for code-scanning (evidence redacted)")
     p.add_argument("-d", "--reports-dir", default=None, dest="reports_dir", metavar="DIR",
@@ -90,6 +92,12 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
+    return covering("scan", progress_requested(a), lambda: _scan(a),
+                    unfinished=exitcodes.INCOMPLETE)
+
+
+def _scan(a: argparse.Namespace) -> int:
+    current().start()
     positionals = [*a.paths, *a.extra_paths]
     remote = a.remote or bool(a.user) or bool(a.org)
     if a.history and remote:

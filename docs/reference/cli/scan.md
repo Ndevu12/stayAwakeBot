@@ -12,7 +12,7 @@ a scan that could not complete never reports clean. [`saw fix`](fix.md) removes 
 
 ```text
 saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
-         [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
+         [--json] [--progress=jsonl] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
          [--no-advisories] [-x | --external] [--deep] [--require-db]
 ```
 
@@ -24,6 +24,7 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
 | `-r`, `--remote` | Scan GitHub repositories instead of local paths. See [Remote targeting](remote.md). |
 | `--user USER` / `--org ORG` | Scan this GitHub user's / organisation's repositories (repeatable; each implies `--remote`). |
 | `--json` | JSON report to stdout, with full evidence. Pipe it; it writes no file. |
+| `--progress=jsonl` | Progress as one JSON event per line on stderr. The report stays on stdout. See [progress events](index.md#progress-events). |
 | `--sarif FILE` | SARIF 2.1.0 report for GitHub code scanning. Evidence [redacted](sinks.md). |
 | `--alert` | In this pass, open/close a GitHub issue per infected repository and post a Slack summary. Bodies are evidence-free. |
 | `-d`, `--reports-dir DIR` | Also write `latest.json` + `latest.md` into `DIR`. Evidence redacted. |

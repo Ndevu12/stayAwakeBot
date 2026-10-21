@@ -35,7 +35,8 @@ $ saw capabilities --json
     "guard.drift.json",
     "audit.json",
     "hook.status.json",
-    "capabilities.json"
+    "capabilities.json",
+    "progress.jsonl"
   ],
   "platform": {
     "os": "linux",
@@ -48,7 +49,7 @@ $ saw capabilities --json
 | --- | --- |
 | `version` | The installed saw, as `saw --version` prints it. |
 | `schema_versions` | Each JSON document this saw prints, and the schema version it writes. A document is named after the command that prints it: `auth-status` is `saw auth status --json`. |
-| `features` | What this saw can do. `<command>.json` means that command takes `--json`. |
+| `features` | What this saw can do. `<command>.json` means that command takes `--json`. `progress.jsonl` means `saw scan`, `saw audit` and `saw fix` take `--progress=jsonl`. |
 | `platform` | The operating system, and whether saw supports it. |
 
 ## Schema versions

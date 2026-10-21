@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from typing import Iterator, TextIO
 
 from stayawake.utils import env
+from stayawake.utils.progress_events import current
 
 _WORD = re.compile(r"\S+\s*|\s+")
 
@@ -114,12 +115,20 @@ def spinners_held(*, settle: float = _SETTLE_SECONDS, sleep=time.sleep) -> Itera
 
 @contextmanager
 def status(label: str, *, out: TextIO | None = None,
-           enabled: bool | None = None, interval: float = 0.08) -> Iterator[None]:
+           enabled: bool | None = None, interval: float = 0.08,
+           index: int | None = None, of: int | None = None) -> Iterator[None]:
     """Spinner covering a silent compute phase (FS walk, scanning a repo).
 
     Enabled → animate a spinner on `out` (default stderr) and wipe the line on exit, so the
     caller can print the result underneath. Disabled → SILENT (just yields): the result line
-    that follows already conveys completion, so piped/CI output gets no redundant chatter."""
+    that follows already conveys completion, so piped/CI output gets no redundant chatter.
+    When the run asked for progress events, write one step and do not draw the spinner.
+    `index` and `of` say which step this is, when the caller knows."""
+    events = current()
+    if events.enabled:
+        events.step(label, label, index=index, of=of)
+        yield
+        return
     out = out or sys.stderr
     on = _auto_enabled(out) if enabled is None else bool(enabled)
     if not on:

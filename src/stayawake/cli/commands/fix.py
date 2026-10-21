@@ -13,7 +13,8 @@ import argparse
 import sys
 
 from stayawake.bots.security import remediator
-from stayawake.cli.argtypes import add_jobs_arg, no_stream_requested
+from stayawake.cli.argtypes import add_jobs_arg, add_progress_arg, no_stream_requested, progress_requested
+from stayawake.utils.progress_events import covering
 from stayawake.cli.helptext import add_command
 from stayawake.cli.resolve import build_resolver
 from stayawake.utils import exitcodes
@@ -58,6 +59,7 @@ def register(sub) -> None:
                    help="also push the branch and open/update one rolling PR per repo")
     p.add_argument("--json", action="store_true",
                    help="print what each repository's fix did as JSON")
+    add_progress_arg(p)
     p.add_argument("-r", "--remote", action="store_true",
                    help="sweep GitHub repos (clone → fix → PR): ad-hoc --user/--org/owner-repo, "
                         "else configured targets, else your own repos")
@@ -92,6 +94,9 @@ def run(a: argparse.Namespace) -> int:
         if a.json:
             print("saw fix amend does not take --json", file=sys.stderr)
             return exitcodes.INCOMPLETE
+        if progress_requested(a):
+            print("saw fix amend does not take --progress", file=sys.stderr)
+            return exitcodes.INCOMPLETE
         if a.user or a.org:
             print("saw fix amend does not take --user or --org; name each repository with "
                   "--remote owner/name", file=sys.stderr)
@@ -106,9 +111,13 @@ def run(a: argparse.Namespace) -> int:
         print("note: --remove-foreign is deprecated and ignored; a confirmed wholly-foreign file "
               "is removed by default", file=sys.stderr)
     remote = a.remote or bool(a.user) or bool(a.org)
-    return remediator.fix(a.config, pr=a.pr, remote=remote,
-                          paths=None if remote else (positionals or None),
-                          slugs=(positionals or None) if remote else None,
-                          users=a.user or None, orgs=a.org or None, no_stream=no_stream_requested(a),
-                          jobs=a.jobs, branches=a.branch or None,
-                          resolver=None if remote else build_resolver(), json_out=a.json)
+    return covering(
+        "fix", progress_requested(a),
+        lambda: remediator.fix(
+            a.config, pr=a.pr, remote=remote,
+            paths=None if remote else (positionals or None),
+            slugs=(positionals or None) if remote else None,
+            users=a.user or None, orgs=a.org or None, no_stream=no_stream_requested(a),
+            jobs=a.jobs, branches=a.branch or None,
+            resolver=None if remote else build_resolver(), json_out=a.json),
+        unfinished=exitcodes.INCOMPLETE)

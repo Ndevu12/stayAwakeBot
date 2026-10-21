@@ -14,7 +14,8 @@ from stayawake.utils.render import term_width
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.terminal import supports_color
 from stayawake.utils import exitcodes
-from stayawake.cli.argtypes import no_stream_requested
+from stayawake.cli.argtypes import add_progress_arg, no_stream_requested, progress_requested
+from stayawake.utils.progress_events import covering, current
 
 
 def register(sub) -> None:
@@ -42,10 +43,16 @@ def register(sub) -> None:
     p.add_argument("--verify", action="store_true", dest="verify_artifacts",
                    help="also read the files a finding points to, to confirm it (slower)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
+    add_progress_arg(p)
     p.set_defaults(func=run)
 
 
 def run(a: argparse.Namespace) -> int:
+    return covering("audit", progress_requested(a), lambda: _audit(a),
+                    unfinished=exitcodes.INCOMPLETE)
+
+
+def _audit(a: argparse.Namespace) -> int:
     # The parser sets this. A caller that builds the arguments itself, the way the tests do, has
     # no such attribute, and that caller wants the human report.
     as_json = getattr(a, "json", False)
@@ -56,9 +63,10 @@ def run(a: argparse.Namespace) -> int:
               file=sys.stderr if as_json else sys.stdout)
     progress_on = stream_enabled(sys.stderr, force_off=no_stream_requested(a))
     outcomes: list[hygiene.CheckOutcome] = []
-    for label, check in hygiene.audit_checks(a.repo, token, a.branch,
-                                             verify_artifacts=a.verify_artifacts):
-        with status(f"checking {label}…", enabled=progress_on):
+    checks = hygiene.audit_checks(a.repo, token, a.branch, verify_artifacts=a.verify_artifacts)
+    current().start(steps=len(checks))
+    for index, (label, check) in enumerate(checks, 1):
+        with status(f"checking {label}…", enabled=progress_on, index=index, of=len(checks)):
             outcomes.append(hygiene.run_check(label, check))
     issues = [i for o in outcomes for i in o.issues]
     if as_json:

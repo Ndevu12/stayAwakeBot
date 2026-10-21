@@ -13,6 +13,7 @@ from stayawake.utils import env, exitcodes, parallel, prompt
 from stayawake.utils.json_documents import versioned
 from stayawake.lib import git as gitutil
 from stayawake.lib.adapters import github_api
+from stayawake.utils.progress_events import ErrorLines, current
 from stayawake.utils.streaming import Streamer, stream_enabled, status
 from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
@@ -193,6 +194,7 @@ def _run_fix_sweep(items, labels, make_outcome, prog: Streamer, *, jobs,
     if workers == 1:
         outcomes: list[FixOutcome] = []
         for i, item in enumerate(items):
+            current().target(str(labels[i]), index=i + 1, of=len(items))
             prog.line(f"  [{i + 1}/{len(items)}] {labels[i]}")
             outcome = make_outcome(item, spin=prog.enabled)
             prog.line(f"      → {outcome}")
@@ -284,6 +286,7 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
             resolver=asking), display)
 
     labels = [_item_label(_disp(r), b) for r, b in items]
+    current().start(steps=len(items))
     return refused + _run_fix_sweep(items, labels, make_outcome, prog, jobs=jobs, verb="Fixing",
                                     tag=fix_tag)
 
@@ -321,6 +324,7 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
             return _graded_fix(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist, tok,
                                                                spin=spin), slug)
 
+    current().start(steps=len(resolved))
     return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Fixing",
                           tag=fix_tag)
 
@@ -470,7 +474,11 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     opts = _options(settings)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
-    prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
+    events = current()
+    if events.enabled:
+        prog = Streamer(enabled=False, out=ErrorLines(sys.stderr))
+    else:
+        prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
     prog.line(f"Security fix — {now_iso()}")
     prog.line("")
 

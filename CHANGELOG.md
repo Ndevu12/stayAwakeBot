@@ -32,6 +32,10 @@ reader, not the mechanism or the weakness it closed.
   work was saved or could not be saved, that branch or the reason. It says when the fix is only part
   of what was found, when history still holds what was removed, and what the report leaves for you
   to decide.
+- **`saw scan`, `saw audit` and `saw fix` can report progress for a program.** `--progress=jsonl`
+  writes one JSON event per line on stderr: when the run starts, each step or target, and when it
+  finishes. The report on stdout is unchanged, and the human progress stays off stderr.
+  `saw capabilities` lists `progress.jsonl`.
 
 ### Security
 - **`saw scan` reads more of a repository's files.** `saw fix` removes a confirmed payload found in
