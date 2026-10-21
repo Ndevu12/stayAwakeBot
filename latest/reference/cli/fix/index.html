@@ -1949,7 +1949,7 @@ the branches that carried them. Read that page before you run it.</p>
 </tr>
 <tr>
 <td><code>--json</code></td>
-<td>Print what each repository's fix came to as JSON on stdout, one record per repository: <code>repository</code>; <code>remediation</code>, one of <code>pr</code>, <code>fork-pr</code>, <code>patch</code>, <code>issue</code>, <code>prepared</code>, <code>skipped</code> or <code>failed</code>; <code>cause</code>, why it came to less than a pull request, such as <code>actions-may-not-open-pull-requests</code>; and the <code>pull_request</code> number and <code>url</code>. Progress stays on stderr. Not accepted with <code>amend</code>.</td>
+<td>Print what each repository's fix came to as JSON on stdout, one record per repository. <code>remediation</code> is <code>pr</code>, <code>fork-pr</code>, <code>patch</code>, <code>issue</code>, <code>prepared</code>, <code>skipped</code> or <code>failed</code>. <code>cause</code> says why it came to less than a pull request, such as <code>actions-may-not-open-pull-requests</code>, and <code>pull_request</code> and <code>url</code> name the pull request. <code>branch</code> and <code>base</code> name the clean-up branch and the branch it was made from. <code>partial</code> is true when the fix is only part of what was found. <code>removed</code> lists what was removed. <code>uncommitted</code>, when there was uncommitted work, names the branch that holds it, or why it could not be saved. <code>history_holds_payload</code> says whether history still holds what was removed. <code>needs_review</code> lists what the report leaves for you to decide. Progress stays on stderr. Not accepted with <code>amend</code>.</td>
 </tr>
 <tr>
 <td><code>amend</code></td>
