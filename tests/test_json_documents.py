@@ -6,9 +6,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
-import shutil
 import socket
-import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
@@ -17,22 +15,15 @@ from stayawake import cli
 from stayawake.bots.security import remediator
 from stayawake.bots.security.models import ScanReport
 from stayawake.cli.commands import capabilities
-from stayawake.utils import json_documents
+from stayawake.utils import json_documents, scratch
 from stayawake.utils.json_documents import SCHEMA_VERSION_OF_EACH_DOCUMENT, command_of, versioned
 
 _PRINTS_A_LIST_NOT_A_DOCUMENT = {("search",)}
 
 
-def _asks_for_json(action):
-    return ("json" in (action.dest or "")
-            or any("json" in option for option in action.option_strings)
-            or any("json" in str(choice) for choice in (action.choices or ())
-                   if not isinstance(action, argparse._SubParsersAction)))
-
-
 def _commands_that_take_json(parser, path=()):
     found = set()
-    if path and any(_asks_for_json(action) for action in parser._actions):
+    if path and capabilities.asks_for_json(parser):
         found.add(path)
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
@@ -63,13 +54,9 @@ def _fix_with_nothing_to_fix():
 
 
 def _in_an_empty_folder(argv):
-    folder = tempfile.mkdtemp(prefix="json-documents-")
-    try:
-        with mock.patch("stayawake.bots.security.service.run.reports_dir_choice",
-                        return_value=None):
-            return _stdout_of(lambda: cli.main([*argv, "--no-stream", folder]))
-    finally:
-        shutil.rmtree(folder, ignore_errors=True)
+    folder = scratch.new_dir("an empty folder")
+    with mock.patch("stayawake.bots.security.service.run.reports_dir_choice", return_value=None):
+        return _stdout_of(lambda: cli.main([*argv, "--no-stream", str(folder)]))
 
 
 def _drift_with_no_remote_repository():
@@ -107,6 +94,11 @@ def _tree(**commands):
 
 
 class TestEveryJsonDocumentSaysItsSchema(unittest.TestCase):
+    def test_asking_for_json_by_another_name_counts(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--machine", dest="json", action="store_true")
+        self.assertTrue(capabilities.asks_for_json(parser))
+
     def test_every_command_that_prints_json_is_a_versioned_document(self):
         versioned_commands = {tuple(command_of(d)) for d in SCHEMA_VERSION_OF_EACH_DOCUMENT}
         self.assertEqual(_commands_that_take_json(cli.build_parser()),

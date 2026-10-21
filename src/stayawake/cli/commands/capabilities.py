@@ -30,8 +30,24 @@ def register(sub) -> None:
     p.set_defaults(func=lambda a: run(a, sub.choices))
 
 
+def asks_for_json(parser: argparse.ArgumentParser) -> bool:
+    """Say whether `parser` can ask for JSON output. Takes a command's parser. Returns whether one
+    of its options names JSON, by its flag, its destination or one of its choices."""
+    return any("json" in (action.dest or "")
+               or any("json" in option for option in action.option_strings)
+               or any("json" in str(choice) for choice in (action.choices or ())
+                      if not isinstance(action, argparse._SubParsersAction))
+               for action in parser._actions)
+
+
+def _subcommands(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
+    """The subcommands `parser` offers, by name. Returns an empty mapping when it has none."""
+    return next((action.choices for action in parser._actions
+                 if isinstance(action, argparse._SubParsersAction)), {})
+
+
 def prints_json(commands: dict[str, argparse.ArgumentParser], document: str) -> bool:
-    """Say whether the command that prints `document` accepts `--json`.
+    """Say whether the command that prints `document` accepts JSON output.
 
     Takes the top-level commands by name. Returns False when the command does not exist."""
     parser = None
@@ -39,9 +55,8 @@ def prints_json(commands: dict[str, argparse.ArgumentParser], document: str) -> 
         parser = commands.get(word)
         if parser is None:
             return False
-        commands = next((action.choices for action in parser._actions
-                         if isinstance(action, argparse._SubParsersAction)), {})
-    return any("--json" in action.option_strings for action in parser._actions)
+        commands = _subcommands(parser)
+    return parser is not None and asks_for_json(parser)
 
 
 def capabilities(commands: dict[str, argparse.ArgumentParser]) -> dict:
