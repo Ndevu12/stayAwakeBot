@@ -6,7 +6,8 @@ import re
 import sys
 
 from stayawake.lib import git as gitutil
-from stayawake.bots.security.models import Finding, Severity, CONFIRMED, HEURISTIC, REPORT_ONLY
+from stayawake.bots.security.models import (Finding, Severity, CONFIRMED, HEURISTIC, REPORT_ONLY,
+                                            SAW_DIR)
 from stayawake.bots.security.matchers.base import Matcher, build_confirmed_loader_check, globs_ok
 from stayawake.bots.security.matchers.content import matching_signatures
 from stayawake.bots.security.matchers.npm_manifest import lifecycle_scripts
@@ -141,7 +142,8 @@ class GitHistoryMatcher(Matcher):
         payload_merge_sig = next((s for s in by_conf.values() if s.get("confidence") == CONFIRMED
                                   and s.get("remediation") == REPORT_ONLY), None)
         content_sig = build_confirmed_loader_check(all_signatures or signatures)
-        left_out = frozenset(getattr(getattr(target, "opts", None), "exclude_dirs", ()) or ())
+        left_out = (frozenset(getattr(getattr(target, "opts", None), "exclude_dirs", ()) or ())
+                    - {SAW_DIR})
         payload_sig = (_merge_payload_check(all_signatures or signatures, left_out)
                        if payload_merge_sig is not None else None)
         findings: list[Finding] = []

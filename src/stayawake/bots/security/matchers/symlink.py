@@ -11,6 +11,7 @@ from pathlib import Path
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher
+from stayawake.bots.security.targets.base import descended
 from stayawake.bots.security.write_sinks import (CONTROL_EXEC_LABEL, control_exec_sink, sink_label)
 from stayawake.lib.git.query import exec_paths
 
@@ -171,7 +172,7 @@ class SymlinkMatcher(Matcher):
                               runs_from)
                 if f is not None:
                     findings.append(f)
-            dirnames[:] = [d for d in dirnames if d not in exclude]
+            dirnames[:] = descended(dirpath, dirnames, exclude)
             for name in filenames:
                 f = _classify(Path(dirpath) / name, target.root, root, redirect_sig, escape_sig,
                               False, runs_from)
