@@ -122,7 +122,8 @@ class TestAskJsonl(unittest.TestCase):
             decisions=decisions)
         self.assertEqual(answer.action, TAKE_OUT)
         self.assertEqual(answer.chosen, ("lib/other.js", "ok.js"))
-        self.assertEqual(decisions, [{"kind": "delivery", "action": "take-out",
+        self.assertEqual(decisions, [{"kind": "delivery", "commit": "a" * 40,
+                                      "action": "take-out",
                                       "chosen": ["lib/other.js", "ok.js"]}])
         self.assertEqual(asked[0]["event"], "ask")
         body = asked[0]["question"]

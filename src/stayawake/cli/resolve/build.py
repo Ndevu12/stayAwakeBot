@@ -24,8 +24,8 @@ def _remember(decisions, question, answer) -> None:
     if isinstance(question, DeliveryQuestion):
         if not isinstance(answer, DeliveryAnswer) or answer.action == UNANSWERED:
             return
-        decisions.append({"kind": "delivery", "action": answer.action,
-                          "chosen": list(answer.chosen)})
+        decisions.append({"kind": "delivery", "commit": question.commit,
+                          "action": answer.action, "chosen": list(answer.chosen)})
         return
     if isinstance(question, DependencyQuestion):
         if not isinstance(answer, DependencyAnswer) or answer.action == UNANSWERED:
