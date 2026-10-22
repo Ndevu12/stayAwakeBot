@@ -132,7 +132,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-capabilities-and-completion" class="md-skip">
+        <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-serve-mcp-capabilities-and-completion" class="md-skip">
           Skip to content
         </a>
       
@@ -907,6 +907,10 @@
       
         
       
+        
+      
+        
+      
     
     
     
@@ -1337,6 +1341,62 @@
     
   
     saw doctor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="serve/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw serve
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw mcp
   
 
     
@@ -1825,10 +1885,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-capabilities-and-completion" class="md-nav__link">
+  <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-serve-mcp-capabilities-and-completion" class="md-nav__link">
     <span class="md-ellipsis">
       
-        description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor, capabilities and completion.
+        description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor, serve, mcp, capabilities and completion.
       
     </span>
   </a>
@@ -1933,7 +1993,7 @@
 
 
 <hr />
-<h2 id="description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-capabilities-and-completion">description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor, capabilities and completion.<a class="headerlink" href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-capabilities-and-completion" title="Permanent link">&para;</a></h2>
+<h2 id="description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-serve-mcp-capabilities-and-completion">description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor, serve, mcp, capabilities and completion.<a class="headerlink" href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-serve-mcp-capabilities-and-completion" title="Permanent link">&para;</a></h2>
 <h1 id="saw-command-reference"><code>saw</code> command reference<a class="headerlink" href="#saw-command-reference" title="Permanent link">&para;</a></h1>
 <p>Every <code>saw</code> flag is documented here, and only here — the guides link to these pages rather than
 repeating them. <code>saw &lt;command&gt; -h</code> states what that command is for, lists its flags, and ends
@@ -2024,6 +2084,16 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <td>—</td>
 </tr>
 <tr>
+<td><a href="serve/"><code>serve</code></a></td>
+<td>Stay running and answer scan and audit questions</td>
+<td>read-only</td>
+</tr>
+<tr>
+<td><a href="mcp/"><code>mcp</code></a></td>
+<td>Answer an editor's agent</td>
+<td>read-only</td>
+</tr>
+<tr>
 <td><a href="capabilities/"><code>capabilities</code></a></td>
 <td>What this saw supports, for tools that run it</td>
 <td>—</td>
@@ -2089,12 +2159,12 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 </tr>
 <tr>
 <td><code>--stream</code></td>
-<td>every command</td>
+<td>commands that show a report</td>
 <td>Show live progress even when the output is not a terminal. With <code>--json</code>, the document stays on stdout and the steps are separate.</td>
 </tr>
 <tr>
 <td><code>--no-stream</code></td>
-<td>every command</td>
+<td>commands that show a report</td>
 <td>Plain instant lines instead of live progress. This wins over <code>--stream</code>.</td>
 </tr>
 <tr>
