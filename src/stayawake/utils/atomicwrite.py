@@ -18,8 +18,10 @@ AS_A_PLAIN_WRITE = None
 REFUSE_A_LINK = "refuse"
 FOLLOW_A_TRUSTED_LINK = "follow"
 REPLACE_A_LINK = "replace"
-_CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
-_READ = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+_CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | pathsafe.no_follow_flag()
+           | getattr(os, "O_CLOEXEC", 0))
+_READ = (os.O_RDONLY | pathsafe.no_follow_flag() | getattr(os, "O_NONBLOCK", 0)
+         | getattr(os, "O_CLOEXEC", 0))
 
 
 @contextlib.contextmanager
@@ -242,10 +244,12 @@ def _copy_into(origin: int, entry: str, folder: int, name: str) -> bool:
         os.symlink(os.readlink(entry, dir_fd=origin), name, dir_fd=folder)
         return False
     if stat.S_ISDIR(found.st_mode):
-        given = os.open(entry, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=origin)
+        given = os.open(entry, os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag(),
+                        dir_fd=origin)
         try:
             os.mkdir(name, stat.S_IMODE(found.st_mode) | stat.S_IRWXU, dir_fd=folder)
-            inner = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+            inner = os.open(name, os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag(),
+                            dir_fd=folder)
             try:
                 for child in os.listdir(given):
                     _copy_into(given, child, inner, child)

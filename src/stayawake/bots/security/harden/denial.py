@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from stayawake.utils import hostdenial
-from stayawake.utils.pathsafe import trusted_ancestor
+from stayawake.utils.pathsafe import directory_flag, no_follow_flag, trusted_ancestor
 
 from stayawake.bots.security.hygiene import staging_kit
 
@@ -243,7 +243,7 @@ def _held_open(path: Path) -> int | None:
     """Open the folder this run just created at `path` and hold it. Takes the location. Returns the
     descriptor, which the caller closes, or None when it cannot be opened as a folder."""
     try:
-        return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        return os.open(path, os.O_RDONLY | directory_flag() | no_follow_flag())
     except OSError:
         return None
 

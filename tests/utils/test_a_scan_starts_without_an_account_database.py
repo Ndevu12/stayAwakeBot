@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw scan` starts where this system has no account database."""
+"""`saw scan` starts where this system has no account database and no Unix open flags."""
 from __future__ import annotations
 
 import json
@@ -35,7 +35,7 @@ _PROGRAM = textwrap.dedent("""\
         return real(name, globals, locals, fromlist, level)
 
     builtins.__import__ = block
-    for missing in ("getuid", "geteuid"):
+    for missing in ("getuid", "geteuid", "O_NOFOLLOW", "O_DIRECTORY"):
         if hasattr(os, missing):
             delattr(os, missing)
 
