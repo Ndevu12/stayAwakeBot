@@ -14,8 +14,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from xml.sax.saxutils import escape
+
 from stayawake.utils import atomicwrite, env, pathsafe, sessionbus
-from stayawake.utils.systembin import system_binary
+from stayawake.utils.host import saw_runs_here
+from stayawake.utils.systembin import system_binary, windows_system_root
 
 
 LABEL = "com.ndevu.saw.watch"
@@ -27,18 +30,21 @@ PLACED, IN_PLACE, REPLACED, REMOVED, NOTHING_TO_REMOVE = (
 
 
 UNIT = "saw-watch.service"
+_TASK = "saw-watch"
+_WINDOWS_DIRECTORY = r"C:\Windows"
 
 
 def supported() -> bool:
-    """Whether this platform has an implementation here.
-
-    A platform without one says so; it never reports a machine as scheduled.
-    """
-    return sys.platform in ("darwin", "linux")
+    """Tell whether this system can keep the pass running. Returns the answer."""
+    return saw_runs_here()
 
 
 def _linux() -> bool:
     return sys.platform.startswith("linux")
+
+
+def _windows() -> bool:
+    return sys.platform.startswith("win")
 
 
 def record_path() -> Path:
@@ -97,6 +103,8 @@ def item_path() -> Path:
     """Where the item that keeps the pass running is kept, on this platform."""
     if _linux():
         return Path.home() / ".config" / "systemd" / "user" / UNIT
+    if _windows():
+        return Path.home() / "AppData" / "Local" / "saw" / f"{_TASK}.xml"
     return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 
 
@@ -122,6 +130,8 @@ def content(saw: list[str] | None = None) -> str:
     argv = list(saw) if saw else program()
     if _linux():
         return _unit(argv)
+    if _windows():
+        return _task(argv)
     return _plist(argv)
 
 
@@ -142,6 +152,37 @@ def _unit(argv: list[str]) -> str:
         "\n"
         "[Install]\n"
         "WantedBy=default.target\n")
+
+
+def _quoted(text: str) -> str:
+    """Quote one task argument the way the task scheduler reads it. Takes the argument. Returns it."""
+    if text and not any(c in text for c in ' \t"'):
+        return text
+    return '"' + text.replace('"', '\\"') + '"'
+
+
+def _task(argv: list[str]) -> str:
+    """A scheduled task: started at login, and started again if it stops."""
+    command = escape(argv[0])
+    arguments = escape(" ".join(_quoted(part) for part in [*argv[1:], "watch", "run"]))
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
+        "<Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>\n"
+        "<Settings>\n"
+        "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n"
+        "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
+        "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n"
+        "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n"
+        "<RestartOnFailure><Interval>PT10S</Interval><Count>999</Count></RestartOnFailure>\n"
+        "<StartWhenAvailable>true</StartWhenAvailable>\n"
+        "</Settings>\n"
+        "<Actions><Exec>\n"
+        f"<Command>{command}</Command>\n"
+        f"<Arguments>{arguments}</Arguments>\n"
+        f"<WorkingDirectory>{_WINDOWS_DIRECTORY}</WorkingDirectory>\n"
+        "</Exec></Actions>\n"
+        "</Task>\n")
 
 
 def _plist(argv: list[str]) -> str:
@@ -224,11 +265,53 @@ _SERVICE_MANAGERS_BY_ABSOLUTE_PATH = {
 }
 
 
+def manager_candidates() -> tuple[str, ...]:
+    """The service manager's own binaries on this system, as absolute paths. Returns them."""
+    if _windows():
+        return (os.path.join(windows_system_root(), "System32", "schtasks.exe"),)
+    return _SERVICE_MANAGERS_BY_ABSOLUTE_PATH.get("linux" if _linux() else "darwin", ())
+
+
+def every_manager_candidate() -> tuple[str, ...]:
+    """Every service-manager binary this code names, on every system. Returns their paths."""
+    windows = (os.path.join(_WINDOWS_DIRECTORY, "System32", "schtasks.exe"),)
+    return tuple(path for paths in _SERVICE_MANAGERS_BY_ABSOLUTE_PATH.values() for path in paths) + windows
+
+
 def _activator() -> str | None:
     """Find the service manager's own binary. Returns its path, or None when there is no
     trustworthy one."""
-    return system_binary(_SERVICE_MANAGERS_BY_ABSOLUTE_PATH.get("linux" if _linux() else "darwin",
-                                                                ()))
+    return system_binary(manager_candidates())
+
+
+def _account() -> int | None:
+    """The account id the service manager names. Returns it, or None when this system has none."""
+    getuid = getattr(os, "getuid", None)
+    return getuid() if getuid is not None else None
+
+
+def _register_windows(where: Path, binary: str, run) -> bool:
+    """Register the task and start it. Takes the item, the service manager and the runner. Returns
+    whether both were accepted."""
+    raw = pathsafe.read_regular_no_follow(where, _MOST_RECORD_BYTES)
+    if raw is None:
+        return False
+    copy = where.with_name(where.name + ".utf16")
+    try:
+        copy.write_bytes(raw.decode("utf-8").encode("utf-16"))
+        commands = ([binary, "/Create", "/TN", _TASK, "/XML", str(copy), "/F"],
+                    [binary, "/Run", "/TN", _TASK])
+        for argv in commands:
+            if run(argv, capture_output=True, timeout=20, env=_service_env()).returncode != 0:
+                return False
+        return True
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return False
+    finally:
+        try:
+            copy.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _activate(where: Path, run=None, binary=None) -> bool:
@@ -240,11 +323,16 @@ def _activate(where: Path, run=None, binary=None) -> bool:
     binary = binary or _activator()
     if binary is None:
         return False
+    if _windows():
+        return _register_windows(where, binary, run)
     if _linux():
         commands = [[binary, "--user", "daemon-reload"],
                     [binary, "--user", "enable", "--now", UNIT]]
     else:
-        commands = [[binary, "bootstrap", f"gui/{os.getuid()}", str(where)]]
+        account = _account()
+        if account is None:
+            return False
+        commands = [[binary, "bootstrap", f"gui/{account}", str(where)]]
     try:
         for argv in commands:
             if run(argv, capture_output=True, timeout=20, env=_service_env()).returncode != 0:
@@ -260,8 +348,15 @@ def _running(run=None, binary=None) -> bool:
     binary = binary or _activator()
     if binary is None:
         return False
-    argv = ([binary, "--user", "is-active", "--quiet", UNIT] if _linux()
-            else [binary, "print", f"gui/{os.getuid()}/{LABEL}"])
+    if _windows():
+        argv = [binary, "/Query", "/TN", _TASK]
+    elif _linux():
+        argv = [binary, "--user", "is-active", "--quiet", UNIT]
+    else:
+        account = _account()
+        if account is None:
+            return False
+        argv = [binary, "print", f"gui/{account}/{LABEL}"]
     try:
         return run(argv, capture_output=True, timeout=20, env=_service_env()).returncode == 0
     except (OSError, subprocess.SubprocessError):
@@ -279,8 +374,15 @@ def _deactivate(where: Path, run=None, binary=None) -> None:
     binary = binary or _activator()
     if binary is None:
         return
-    argv = ([binary, "--user", "disable", "--now", UNIT] if _linux()
-            else [binary, "bootout", f"gui/{os.getuid()}", str(where)])
+    if _windows():
+        argv = [binary, "/Delete", "/TN", _TASK, "/F"]
+    elif _linux():
+        argv = [binary, "--user", "disable", "--now", UNIT]
+    else:
+        account = _account()
+        if account is None:
+            return
+        argv = [binary, "bootout", f"gui/{account}", str(where)]
     try:
         run(argv, capture_output=True, timeout=20, env=_service_env())
     except (OSError, subprocess.SubprocessError):

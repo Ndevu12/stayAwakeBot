@@ -15,7 +15,7 @@ from unittest import mock
 
 from stayawake.bots.security import schedule, watchack, watchstate, watchstatus
 from stayawake.bots.security.watchstate import CAME_BACK, NOT_CHECKING, NOT_SHOWN, NOT_STOPPED
-from stayawake.utils import exitcodes, sessionbus
+from stayawake.utils import sessionbus
 
 _LINE = watchstate.LINE_FOR
 
@@ -185,13 +185,6 @@ class TestTheServiceManagerIsReachedOnlyThroughTheUsersOwnFolder(unittest.TestCa
             schedule.is_running(run=lambda argv, **k: seen.append(k.get("env"))
                                 or mock.Mock(returncode=0), binary="/usr/bin/systemctl")
         self.assertEqual(seen, [bus])
-
-    def test_a_system_without_it_is_not_available(self):
-        code, text = watchstatus.status_of(supported=lambda: False, record=lambda: {},
-                                           acknowledged=lambda: None, placed_since=lambda: None)
-        self.assertEqual(code, exitcodes.INCOMPLETE)
-        self.assertIn("not available on this system", text)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,6 @@ description: saw harden — put saw's controls in place on this machine, and tak
 Create host-level controls on this machine. It never touches a project's dependency tree — that is
 [`saw fix`](fix.md). A write is reported as in place only after it is read back. An unverifiable
 write is unknown, never success. The result does not claim that one control protects anything else.
-On other systems it says its controls are not available.
 
 ```text
 saw harden [--no-stream]

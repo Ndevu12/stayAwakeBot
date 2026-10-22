@@ -95,10 +95,11 @@ from this command by editing or removing it.
 
 ## Platforms
 
-macOS and Linux. On macOS it is a login item; on Linux, a user service. Either way it starts with
-your session and is started again if it stops, and `saw watch stop` removes it.
+macOS, Linux, and Windows. On macOS it is a login item; on Linux, a user service; on Windows, a
+scheduled task. It starts with your session and is started again if it stops, and `saw watch stop`
+removes it.
 
-Elsewhere the command says it is not available on this system, rather than reporting a machine as watched.
+Elsewhere the command says it could not arrange it, rather than reporting a machine as watched.
 
 ## See also
 

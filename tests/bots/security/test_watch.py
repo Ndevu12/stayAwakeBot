@@ -350,12 +350,6 @@ class TestItSchedulesItselfRatherThanBeingScheduled(unittest.TestCase):
         self.assertEqual(code, exitcodes.INCOMPLETE)
         self.assertIn("could not", text)
 
-    def test_a_system_without_it_is_told_it_is_not_available(self):
-        with mock.patch.object(watch.schedule, "supported", return_value=False):
-            code, text = watch.schedule_it()
-        self.assertEqual(code, exitcodes.INCOMPLETE)
-        self.assertIn("not available on this system", text)
-
     def test_taking_it_back_removes_saws_own_and_leaves_anything_else(self):
         gone = watch.unschedule_it(remove=lambda: schedule.REMOVED)
         never = watch.unschedule_it(remove=lambda: schedule.NOTHING_TO_REMOVE)

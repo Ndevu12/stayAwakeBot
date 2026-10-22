@@ -163,17 +163,27 @@ class TestBothPlatformsAreCoveredNotJustThisOne(unittest.TestCase):
         self.assertIn("<key>KeepAlive</key>", item)
         self.assertIn("<string>run</string>", item)
 
+    def test_windows_gets_a_task_login_keeps_running(self):
+        with self._on("win32"):
+            self.assertEqual(schedule.item_path().name, "saw-watch.xml")
+            item = schedule.content(SAW)
+        self.assertIn("<Command>" + SAW[0] + "</Command>", item)
+        self.assertIn("watch run", item)
+        self.assertIn("<RestartOnFailure><Interval>PT10S</Interval><Count>999</Count></RestartOnFailure>", item)
+        self.assertIn("<WorkingDirectory>C:\\Windows</WorkingDirectory>", item)
+        self.assertNotIn(str(pathlib.Path.home()), item)
+
     def test_each_is_told_to_start_now_in_its_own_words(self):
         seen = []
         run = lambda argv, **k: (seen.append(argv), mock.Mock(returncode=0))[1]
-        for platform, expected in (("linux", "enable"), ("darwin", "bootstrap")):
+        for platform, expected in (("linux", "enable"), ("darwin", "bootstrap"), ("win32", "/Create")):
             with self.subTest(platform=platform), self._on(platform):
                 seen.clear()
                 p = pathlib.Path(tempfile.mkdtemp()) / schedule.item_path().name
                 out = schedule.settle(p, SAW, record=_rec(), running=lambda: False,
                                       activate=lambda w: schedule._activate(w, run=run, binary="/x"))
                 self.assertTrue(out.active)
-                self.assertTrue(any(expected in " ".join(a) for a in seen))
+                self.assertTrue(any(expected in " ".join(a) for a in seen), seen)
 
     def test_a_service_manager_that_will_not_answer_costs_promptness_not_the_control(self):
         # The item is written either way and takes effect at the next login; only "already running"
@@ -190,10 +200,10 @@ class TestBothPlatformsAreCoveredNotJustThisOne(unittest.TestCase):
     def test_the_service_manager_is_never_found_through_PATH(self):
         # On a machine that may already be compromised, a service manager found by PATH is one an
         # attacker can supply.
-        for candidates in schedule._SERVICE_MANAGERS_BY_ABSOLUTE_PATH.values():
-            for c in candidates:
-                with self.subTest(candidate=c):
-                    self.assertTrue(c.startswith("/"))
+        for candidate in schedule.every_manager_candidate():
+            with self.subTest(candidate=candidate):
+                drive = len(candidate) > 2 and candidate[1] == ":" and candidate[2] in "\\/"
+                self.assertTrue(candidate.startswith("/") or drive, candidate)
 
 
 class TestItsOwnRecordIsReachableWithNothingPassed(unittest.TestCase):

@@ -13,7 +13,6 @@ _FROM_LOGIN = "`saw watch` will be in place from your next login. Run `saw watch
 _NOT_CHECKING = "`saw watch` is not in place. Run `saw watch`."
 _WAS_CHANGED = "`saw watch` had been changed on this machine. Run `saw watch` to put it back."
 _CANNOT_TELL = "Whether `saw watch` is in place could not be established."
-_NOT_ON_THIS_SYSTEM = "`saw watch` is not available on this system."
 _STALLED = ("`saw watch` is in place but has not run recently. Run `saw watch stop`, then "
             "`saw watch`.")
 
@@ -65,7 +64,7 @@ def _schedule_status(supported, verdict, running) -> tuple[int, str]:
     """Read whether the scheduled check is in place and held. Takes the schedule's collaborators.
     Returns the exit code and one line."""
     if not supported():
-        return exitcodes.INCOMPLETE, _NOT_ON_THIS_SYSTEM
+        return exitcodes.INCOMPLETE, _CANNOT_TELL
     try:
         state = verdict()
     except Exception:

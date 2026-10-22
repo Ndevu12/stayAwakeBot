@@ -93,6 +93,7 @@ jobs:
         shell: bash
         run: |
           saw --version
+          saw capabilities --json | grep -q '"supported": true'
           dir="$(mktemp -d)"
           printf 'hello\n' > "$dir/readme.txt"
           saw scan "$dir" --json --no-stream --no-advisories

@@ -183,5 +183,29 @@ class TestAProcessStart(unittest.TestCase):
         self.assertIsNone(procsnap.started(pid))
 
 
+class TestAWindowsProcessTable(unittest.TestCase):
+    def test_a_command_line_is_the_arguments_it_was_split_into(self):
+        text = ('[{"ProcessId": 4, "ParentProcessId": 1, "CommandLine": "python -m stayawake", '
+                '"ExecutablePath": "C:\\\\Python\\\\python.exe", "CreationDate": "/Date(10)/", '
+                '"User": "ada"}, {"ProcessId": 5, "CommandLine": null, "User": ""}]')
+        rows = procsnap.rows_from_cim(text, split=lambda line: tuple(line.split()))
+        snap = procsnap._snapshot_of(rows)
+        self.assertTrue(snap.supported)
+        self.assertEqual(snap.processes[0].argv, ("python", "-m", "stayawake"))
+        self.assertEqual(snap.processes[0].identity.ppid, 1)
+        self.assertGreaterEqual(snap.processes[0].identity.uid, 0)
+        self.assertTrue(snap.processes[1].argv_unreadable)
+        self.assertEqual(snap.unreadable, 1)
+
+    def test_a_document_that_is_not_the_table_is_not_a_snapshot(self):
+        self.assertIsNone(procsnap.rows_from_cim("not json"))
+        self.assertFalse(procsnap._snapshot_of(None).supported)
+
+    def test_without_a_splitter_the_command_line_is_not_invented(self):
+        text = '{"ProcessId": 4, "CommandLine": "python -m stayawake", "User": "ada"}'
+        rows = procsnap.rows_from_cim(text, split=lambda line: None)
+        self.assertIsNone(rows[0]["argv"])
+
+
 if __name__ == "__main__":
     unittest.main()

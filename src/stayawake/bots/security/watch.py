@@ -27,7 +27,6 @@ _AT_LOGIN = "`saw watch` will be in place from your next login."
 _ALREADY = "`saw watch` was already in place."
 _PUT_BACK = "`saw watch` had been changed on this machine. It has been put back."
 _NOT_SCHEDULED = "`saw watch` could not be put in place."
-_NOT_ON_THIS_SYSTEM = "`saw watch` is not available on this system."
 _UNSCHEDULED = "`saw watch` has been taken back."
 _WAS_NOT = "`saw watch` was not in place."
 _NOT_OURS = "Something else is there under that name. It has been left alone."
@@ -179,8 +178,6 @@ def _print_safely(report, text: str) -> None:
 
 def schedule_it(*, settle=schedule.settle) -> tuple[int, str]:
     """Ask this machine to keep making the pass. Returns the exit code and one line."""
-    if not schedule.supported():
-        return exitcodes.INCOMPLETE, _NOT_ON_THIS_SYSTEM
     out = settle()
     if out.problem:
         return exitcodes.INCOMPLETE, _NOT_SCHEDULED

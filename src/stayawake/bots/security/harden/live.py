@@ -93,8 +93,12 @@ def _person_running_it() -> int | None:
     told."""
     if not maps_the_hosts_root():
         return None
-    if os.geteuid() != 0:
-        return os.getuid()
+    geteuid = getattr(os, "geteuid", None)
+    getuid = getattr(os, "getuid", None)
+    if geteuid is None or getuid is None:
+        return None
+    if geteuid() != 0:
+        return getuid()
     who = operator.resolve()
     if who is None or who.uid <= 0:
         return None

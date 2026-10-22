@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
+import json
 import os
 import stat
 import subprocess
@@ -10,7 +12,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from stayawake.utils.systembin import system_binary
+from stayawake.utils.systembin import system_binary, windows_system_root
 
 _CTL_KERN = 1
 _KERN_ARGMAX = 8
@@ -254,6 +256,12 @@ def started(pid: int) -> "Start | None":
         return _started_darwin(pid)
     if sys.platform.startswith("linux"):
         return _started_linux(pid)
+    if sys.platform.startswith("win"):
+        row, _state = _windows_row(pid)
+        if row is None:
+            return None
+        name = os.path.basename(row["path"]) if row["path"] else ""
+        return Start(row["start"] * 1_000_000, name, row["ppid"])
     return None
 
 
@@ -263,6 +271,11 @@ def identify(pid: int) -> tuple["Identity | None", str]:
         return _identity_darwin(pid)
     if sys.platform.startswith("linux"):
         return _identity_linux(pid)
+    if sys.platform.startswith("win"):
+        row, state = _windows_row(pid)
+        if row is None:
+            return None, state
+        return _identity_of(row), RUNNING
     return None, UNSUPPORTED
 
 
@@ -299,6 +312,9 @@ def program_path(pid: int) -> str | None:
             return os.readlink(f"/proc/{pid}/exe")
         except OSError:
             return None
+    if sys.platform.startswith("win"):
+        row, _state = _windows_row(pid)
+        return row["path"] if row is not None else None
     try:
         libc = ctypes.CDLL("libproc.dylib", use_errno=True)
     except OSError:
@@ -514,6 +530,9 @@ def parent_map() -> dict[int, int]:
             except (OSError, ValueError, IndexError):
                 continue
         return out
+    if sys.platform.startswith("win"):
+        rows = _powershell_rows()
+        return {row["pid"]: row["ppid"] for row in rows} if rows else {}
     text = _run_ps("-axo", "pid=,ppid=")
     if text is None:
         return {}
@@ -523,6 +542,131 @@ def parent_map() -> dict[int, int]:
         if len(bits) == 2 and bits[0].isdigit() and bits[1].isdigit():
             pairs[int(bits[0])] = int(bits[1])
     return pairs
+
+
+def _account_number(name: str) -> int:
+    """Turn an account name into the number an identity carries. Takes the name. Returns the number,
+    or -1 when there is none."""
+    if not name:
+        return -1
+    return int.from_bytes(hashlib.sha256(name.encode("utf-8")).digest()[:4], "big") or 1
+
+
+def _windows_start(value) -> int:
+    """Read a process start from a CIM value. Takes the value. Returns milliseconds, or 0 when it
+    has none."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    if "/Date(" not in value:
+        return 0
+    digits = value.split("/Date(", 1)[1].split(")", 1)[0].split("+", 1)[0].split("-", 1)[0]
+    return int(digits) if digits.isdigit() else 0
+
+
+def _split_command(line: str) -> tuple[str, ...] | None:
+    """Split a command line the way this system does. Takes the line. Returns the arguments, or
+    None when this system has no splitter."""
+    try:
+        shell = ctypes.WinDLL("shell32", use_last_error=True)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    except (AttributeError, OSError):
+        return None
+    shell.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
+    count = ctypes.c_int()
+    parsed = shell.CommandLineToArgvW(line, ctypes.byref(count))
+    if not parsed or count.value <= 0:
+        return None
+    try:
+        return tuple(parsed[i] for i in range(count.value))
+    finally:
+        kernel.LocalFree(parsed)
+
+
+def rows_from_cim(text: str, split=_split_command) -> list[dict] | None:
+    """Read process rows from a CIM JSON document. Takes the document and the splitter for each
+    command line. Returns the rows, or None when the document is not that JSON."""
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    items = data if isinstance(data, list) else [data]
+    rows = []
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("ProcessId"), int):
+            continue
+        command = item.get("CommandLine")
+        user = item.get("User") if isinstance(item.get("User"), str) else ""
+        rows.append({
+            "pid": item["ProcessId"],
+            "ppid": item["ParentProcessId"] if isinstance(item.get("ParentProcessId"), int) else 0,
+            "argv": split(command) if isinstance(command, str) and command else None,
+            "path": item.get("ExecutablePath") if isinstance(item.get("ExecutablePath"), str) else None,
+            "start": _windows_start(item.get("CreationDate")),
+            "uid": _account_number(user),
+        })
+    return rows
+
+
+_CIM = (
+    "Get-CimInstance Win32_Process | ForEach-Object { "
+    "$user = ''; try { $o = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; "
+    "if ($o.User) { $user = $o.User } } catch {} "
+    "[pscustomobject]@{ProcessId=$_.ProcessId; ParentProcessId=$_.ParentProcessId; "
+    "CommandLine=$_.CommandLine; ExecutablePath=$_.ExecutablePath; "
+    "CreationDate=$_.CreationDate; User=$user} } | ConvertTo-Json -Compress"
+)
+
+
+def _powershell_rows(run=subprocess.run) -> list[dict] | None:
+    """Read this system's processes. Takes the runner. Returns their rows, or None when they cannot
+    be read."""
+    binary = system_binary((
+        os.path.join(windows_system_root(), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),))
+    if binary is None:
+        return None
+    try:
+        done = run([binary, "-NoProfile", "-NonInteractive", "-Command", _CIM],
+                   capture_output=True, text=True, timeout=30, errors="replace")
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0 or not done.stdout.strip():
+        return None
+    return rows_from_cim(done.stdout)
+
+
+def _identity_of(row: dict) -> Identity:
+    """Build an identity from one process row. Takes the row. Returns the identity."""
+    uid = row["uid"]
+    return Identity(pid=row["pid"], ppid=row["ppid"], uid=uid, start_time=row["start"],
+                    held_uids=(uid,) if uid >= 0 else ())
+
+
+def _snapshot_of(rows: list[dict] | None) -> Snapshot:
+    """Build a snapshot from process rows. Takes the rows. Returns the snapshot, unsupported when
+    the rows are absent."""
+    if rows is None:
+        return Snapshot(supported=False)
+    snap = Snapshot()
+    for row in rows:
+        who = _identity_of(row)
+        if row["argv"] is None:
+            snap.unreadable += 1
+            snap.processes.append(Process(pid=row["pid"], argv_unreadable=True, identity=who))
+        else:
+            snap.processes.append(Process(pid=row["pid"], argv=tuple(row["argv"]), identity=who))
+    return snap
+
+
+def _windows_row(pid: int) -> tuple[dict | None, str]:
+    """Read one Windows process. Takes the pid. Returns the row and RUNNING, or None and GONE or
+    UNSUPPORTED."""
+    rows = _powershell_rows()
+    if rows is None:
+        return None, UNSUPPORTED
+    found = next((row for row in rows if row["pid"] == pid), None)
+    return (found, RUNNING) if found is not None else (None, GONE)
 
 
 def snapshot() -> Snapshot:
@@ -536,6 +680,8 @@ def snapshot() -> Snapshot:
         read = lambda pid: _argv_from_procargs2(pid, argmax)   # noqa: E731 — one-line dispatch
     elif sys.platform.startswith("linux"):
         read = _argv_from_proc
+    elif sys.platform.startswith("win"):
+        return _snapshot_of(_powershell_rows())
     else:
         return Snapshot(supported=False)
 
