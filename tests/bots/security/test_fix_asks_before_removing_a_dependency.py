@@ -97,7 +97,8 @@ class TestOnATerminal(_Project):
     def test_each_package_is_asked_about_once_with_where_it_is_declared(self):
         resolver, asked = self.answering(DependencyAnswer(KEEP))
         self.run_fix(resolver)
-        self.assertEqual([DependencyQuestion(BAD, ("4.2.11",), ("package.json",))], asked)
+        self.assertEqual([DependencyQuestion(
+            BAD, ("4.2.11",), ("package.json",), (("package.json", CLEAN_MANIFEST),))], asked)
 
     def test_an_answer_of_another_kind_keeps_it(self):
         resolver, _ = self.answering(DeliveryAnswer(TAKE_OUT, ("package.json",)))

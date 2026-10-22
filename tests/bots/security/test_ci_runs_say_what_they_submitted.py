@@ -128,7 +128,7 @@ class TestWhatEachFixCameTo(unittest.TestCase):
         self.assertEqual(record, {"repository": "o/r", "remediation": "pr", "cause": "",
                                   "pull_request": 4, "url": "u", "partial": False, "branch": "",
                                   "base": "", "removed": [], "history_holds_payload": False,
-                                  "needs_review": []})
+                                  "needs_review": [], "decisions": []})
 
     def test_a_repository_with_nothing_to_fix_is_skipped(self):
         for state in (BaseState.NOTHING_TO_FIX, BaseState.SUSPICIOUS_ONLY):
@@ -268,10 +268,11 @@ class TestSawFixJson(unittest.TestCase):
             {"repository": "o/r", "remediation": "failed",
              "cause": "actions-may-not-open-pull-requests", "pull_request": None, "url": "",
              "partial": False, "branch": "security/x", "base": "", "removed": [],
-             "history_holds_payload": False, "needs_review": []},
+             "history_holds_payload": False, "needs_review": [], "decisions": []},
             {"repository": "o/s", "remediation": "failed", "cause": "error",
              "pull_request": None, "url": "", "partial": False, "branch": "", "base": "",
-             "removed": [], "history_holds_payload": False, "needs_review": []}])
+             "removed": [], "history_holds_payload": False, "needs_review": [],
+             "decisions": []}])
         self.assertIn("Processed 2 repositories", err)
 
     def test_nothing_to_fix_still_prints_a_report(self):
