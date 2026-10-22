@@ -10,11 +10,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator
 
-from stayawake.bots.security.models import SAW_DIR
+from stayawake.bots.security.models import ROLLBACK_DIR, SAW_DIR
 
 INSTALLED_DIR = "node_modules"
-_NOT_WALKED = frozenset({".git", SAW_DIR, ".hg", ".svn"})
+_NOT_WALKED = frozenset({".git", ".hg", ".svn"})
+_ROLLBACK_NAME = ROLLBACK_DIR.rsplit("/", 1)[-1]
 _MAX_DEPTH = 8
+
+
+def in_kept_copies(path: Path) -> bool:
+    """Return whether `path` is the folder an older fix keeps, or is inside it."""
+    parts = path.parts
+    for index in range(len(parts) - 1):
+        if parts[index] == SAW_DIR and parts[index + 1] == _ROLLBACK_NAME:
+            return True
+    return False
 
 
 def _is_real_directory(path: Path) -> bool:
@@ -33,6 +43,8 @@ def installed_trees(root: Path, unreadable: list[Path] | None = None) -> list[Pa
     following a link out of the walk.
     """
     found: list[Path] = []
+    if in_kept_copies(root):
+        return found
     stack = [root]
     while stack:
         here = stack.pop()
@@ -45,7 +57,8 @@ def installed_trees(root: Path, unreadable: list[Path] | None = None) -> list[Pa
         for entry in entries:
             if entry.name == INSTALLED_DIR:
                 found.append(entry)
-            elif entry.name not in _NOT_WALKED and _is_real_directory(entry):
+            elif (entry.name not in _NOT_WALKED and _is_real_directory(entry)
+                  and not in_kept_copies(entry)):
                 stack.append(entry)
     return sorted(found, key=lambda p: len(p.parts), reverse=True)
 

@@ -138,6 +138,14 @@ class TestACopyTheHistoryProves(_Repository):
         result = live.clean_checkout(self.repo, ScanOptions(), SIGS, [])
         self.assertEqual([copy], result.copies_removed)
         self.assertFalse((self.repo / copy).exists())
+
+    def test_agreeing_to_a_dependency_still_removes_a_proven_copy(self):
+        copy = self.kept_by_an_older_fix()
+        result = live.clean_checkout(
+            self.repo, ScanOptions(), SIGS, [],
+            choose_dependencies=lambda findings: {"evil-pkg"})
+        self.assertEqual([copy], result.copies_removed)
+        self.assertFalse((self.repo / copy).exists())
         _, detail = checkout_of(result)
         self.assertTrue(any("removed 1 file(s) an older `saw fix` kept as copies" in n
                             for n in detail.notes), detail.notes)

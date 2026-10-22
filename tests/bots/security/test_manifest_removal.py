@@ -108,6 +108,25 @@ class TestItWritesTheRepository(unittest.TestCase):
         done = manifest.drop_dependencies(root, {"evil-pkg"})
         self.assertEqual(["package.json", "packages/web/package.json"], done)
 
+    def test_it_rewrites_a_manifest_in_saws_folder_you_agreed_to(self):
+        root = _repo()
+        hidden = root / ".saw" / "app"
+        hidden.mkdir(parents=True)
+        (hidden / "package.json").write_text(MANIFEST, encoding="utf-8")
+        done = manifest.drop_dependencies(
+            root, {"evil-pkg"}, {".saw/app/package.json": {"evil-pkg"}})
+        self.assertEqual([".saw/app/package.json"], done)
+        self.assertIn("evil-pkg", (root / "package.json").read_text())
+        self.assertNotIn('"evil-pkg"', (hidden / "package.json").read_text())
+
+    def test_a_manifest_among_copies_an_older_fix_kept_is_left_alone(self):
+        root = _repo()
+        kept = root / ".saw" / "rollback"
+        kept.mkdir(parents=True)
+        (kept / "package.json").write_text(MANIFEST, encoding="utf-8")
+        self.assertEqual(["package.json"], manifest.drop_dependencies(root, {"evil-pkg"}))
+        self.assertIn("evil-pkg", (kept / "package.json").read_text())
+
     def test_it_does_not_walk_into_an_installed_tree(self):
         root = _repo()
         vendored = root / "node_modules" / "left-pad"
