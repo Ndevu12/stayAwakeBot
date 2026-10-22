@@ -221,12 +221,6 @@ stayawake-health-check --config config/urls.yml
 - [Security policy](SECURITY.md) — how to report a security issue privately
 - [Code of conduct](CODE_OF_CONDUCT.md) — what taking part here commits you to
 
-## Sponsor
-
-saw is open source. To sponsor the work, email
-**[saw@ndevuspace.com](mailto:saw@ndevuspace.com?subject=Supporting%20saw)** — the same address
-handles commercial licensing.
-
 ## License
 
 stayAwakeBot is **dual-licensed**:
@@ -235,6 +229,6 @@ stayAwakeBot is **dual-licensed**:
   modify it and convey it or offer it over a network (e.g. as a hosted service), you must release
   your corresponding source under the AGPL too.
 - **[Commercial license](COMMERCIAL-LICENSE.md)** — a paid, proprietary-use option for closed-source
-  or proprietary-SaaS use without the AGPL's source-disclosure obligations. For terms, contact
-  **saw@ndevuspace.com**.
+  or proprietary-SaaS use without the AGPL's source-disclosure obligations. For terms, contact the
+  author named in that notice.
 

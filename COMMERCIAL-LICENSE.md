@@ -28,10 +28,9 @@ AGPL-3.0 do **not** require a commercial license.
 ## How to obtain a commercial license
 
 The commercial license is granted by the author under a **separate written agreement** (a one-time
-or negotiated fee applies). To request terms and a quote, contact:
+or negotiated fee applies). To request terms and a quote, contact the author:
 
 - **Author / licensor:** Jean Paul Elisa NIYOKWIZERWA
-- **Contact:** saw@ndevuspace.com
 
 Please include your company, the product or service, and how you intend to use stayAwakeBot.
 

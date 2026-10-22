@@ -22,6 +22,10 @@ reader, not the mechanism or the weakness it closed.
   repositories, or `--remote`, are not asked either way. `saw capabilities` lists `fix.ask.json`.
   The `saw fix --json` record includes the choices that were made.
 
+### Changed
+- **The README no longer has a sponsor section.** The commercial-license contact names the author and
+  does not show an email address.
+
 ### Fixed
 - **A package installed in saw's folder is included with the others.** When you agree, `saw fix` also
   takes a known-malicious package out of a `package.json` there. A copy an older `saw fix` kept is
