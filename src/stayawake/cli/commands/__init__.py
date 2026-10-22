@@ -9,7 +9,7 @@ The list order controls help-display order.
 from __future__ import annotations
 
 from . import (audit, auth, capabilities, completion, db, discard, doctor, fix, guard, harden, hook,
-               intro, scan, search, watch)
+               intro, mcp, scan, search, serve, watch)
 
 REGISTRARS = [scan, fix, discard, audit, harden, watch, guard, hook, auth, search, intro, db, doctor,
-              capabilities, completion]
+              serve, mcp, capabilities, completion]

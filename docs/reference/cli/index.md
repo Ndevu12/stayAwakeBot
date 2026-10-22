@@ -1,5 +1,5 @@
 ---
-description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor, capabilities and completion.
+description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor, serve, mcp, capabilities and completion.
 ---
 
 # `saw` command reference
@@ -34,6 +34,8 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | [`search`](search.md) | Find the command you want | — |
 | [`intro`](intro.md) | Tour (also the bare-`saw` welcome) | — |
 | [`doctor`](doctor.md) | Check the install and the GitHub credential | — |
+| [`serve`](serve.md) | Stay running and answer scan and audit questions | read-only |
+| [`mcp`](mcp.md) | Answer an editor's agent | read-only |
 | [`capabilities`](capabilities.md) | What this saw supports, for tools that run it | — |
 | [`completion`](completion.md) | Print a shell-completion script | — |
 
@@ -56,8 +58,8 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 | `--progress=jsonl` | `scan`, `audit`, `fix` | One JSON event per line on stderr, so a program can draw its own progress. The report stays on stdout. The human progress stays off stderr. See [Progress events](#progress-events). Not accepted with `fix amend`. |
 | `-q`, `--quiet` | `doctor`, `search` | Only the essentials. |
 | `-f`, `--fail` | `audit`, `guard check` | Fail the run on a warning-level issue. **`saw scan` has no `--fail`** — the last line of the report is the verdict unconditionally. |
-| `--stream` | every command | Show live progress even when the output is not a terminal. With `--json`, the document stays on stdout and the steps are separate. |
-| `--no-stream` | every command | Plain instant lines instead of live progress. This wins over `--stream`. |
+| `--stream` | commands that show a report | Show live progress even when the output is not a terminal. With `--json`, the document stays on stdout and the steps are separate. |
+| `--no-stream` | commands that show a report | Plain instant lines instead of live progress. This wins over `--stream`. |
 | `-j`, `--jobs N` | `scan`, `fix`, `guard check`/`setup`/`drift` | Work on up to N repositories at once. Default `auto` (one repo sequential, several use one worker per core); `-j 1` forces sequential. On `scan` it also splits one large repository across workers. |
 
 ## Progress events

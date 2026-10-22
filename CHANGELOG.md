@@ -14,6 +14,12 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **An editor can ask saw without starting it for every question.** `saw serve --stdio` stays
+  running and answers a scan, a scan of named files, a verdict, and an audit, with the same JSON
+  as `saw scan --json` and `saw audit --json`. A later question about a folder that has not changed
+  reuses that result. `saw mcp` is what an editor's agent connects to. Neither command changes
+  files. A question that does not finish, or a session that cannot start, is not verified.
+  `saw capabilities` lists `serve` and `mcp`.
 - **Live progress can be turned on when saw's output is not a terminal.** `--stream` and
   `STAYAWAKE_STREAM=1` show each step as it runs. `--no-stream` and `STAYAWAKE_NO_STREAM` still turn
   it off, and they win. With `--json`, the document stays on stdout and the steps stay out of it.

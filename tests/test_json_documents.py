@@ -145,7 +145,7 @@ class TestCapabilities(unittest.TestCase):
         self.assertEqual(printed["schema_versions"], SCHEMA_VERSION_OF_EACH_DOCUMENT)
         self.assertEqual(printed["features"],
                          [".".join(command_of(d)) + ".json" for d in SCHEMA_VERSION_OF_EACH_DOCUMENT]
-                         + ["progress.jsonl", "stream"])
+                         + ["progress.jsonl", "stream", "serve", "mcp"])
         self.assertTrue({"scan.json", "fix.json"} <= set(printed["features"]))
         self.assertEqual(printed["version"], cli.__version__)
 

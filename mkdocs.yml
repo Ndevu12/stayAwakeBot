@@ -142,6 +142,8 @@ nav:
           - reference/cli/search.md
           - reference/cli/intro.md
           - reference/cli/doctor.md
+          - reference/cli/serve.md
+          - reference/cli/mcp.md
           - reference/cli/capabilities.md
           - reference/cli/completion.md
           - reference/cli/remote.md

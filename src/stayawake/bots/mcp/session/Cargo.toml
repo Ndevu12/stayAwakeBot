@@ -1,0 +1,25 @@
+[package]
+name = "saw-mcp"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+[lib]
+name = "saw_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "saw-mcp"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "3.6.0", features = ["server", "transport-io", "schemars"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+
+[dev-dependencies]
+rmcp = { version = "3.6.0", features = ["client", "transport-child-process"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "process"] }
