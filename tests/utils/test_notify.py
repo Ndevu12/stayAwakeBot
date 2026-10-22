@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from stayawake.utils import notify
-from stayawake.utils.systembin import system_binary
+from stayawake.utils.systembin import in_windows_system_directory, system_binary
 from tests.support import samples
 
 
@@ -113,8 +113,24 @@ class TestLinux(unittest.TestCase):
 
 class TestNothingIsSentWhereNothingIsSupported(unittest.TestCase):
     def test_other_platforms_send_nothing(self):
-        self.assertIsInstance(notify.platform_notifier("win32"), notify.NoNotifier)
+        self.assertIsInstance(notify.platform_notifier("haiku"), notify.NoNotifier)
         self.assertEqual(notify.NoNotifier().send("t", "b").state, notify.UNAVAILABLE)
+
+    def test_windows_hands_the_text_to_the_shell_beside_the_command(self):
+        seen = {}
+
+        def run(argv, **kwargs):
+            seen["argv"] = argv
+            seen["env"] = kwargs.get("env")
+            return mock.Mock(returncode=0)
+
+        binary = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+        delivery = notify.WindowsNotifier(run=run, binary=binary).send("title", "body text")
+        self.assertEqual(delivery.state, notify.UNCONFIRMED)
+        self.assertNotIn("body text", " ".join(seen["argv"]))
+        self.assertEqual(seen["env"]["SAW_NOTIFY_BODY"], "body text")
+        self.assertEqual(seen["argv"][0], binary)
+        self.assertIsInstance(notify.platform_notifier("win32"), notify.WindowsNotifier)
 
 
 class TestSystemBinary(unittest.TestCase):
@@ -133,6 +149,14 @@ class TestSystemBinary(unittest.TestCase):
     def test_a_relative_name_is_never_looked_up(self):
         self.assertIsNone(system_binary(["osascript"], stat=self._st(),
                                         access=lambda p, m: True))
+
+    def test_a_windows_system_file_is_inside_the_system_directory(self):
+        self.assertTrue(in_windows_system_directory(r"C:\Windows\System32\schtasks.exe", r"C:\Windows"))
+        self.assertTrue(in_windows_system_directory(
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", r"C:\Windows"))
+        self.assertFalse(in_windows_system_directory(
+            r"C:\Windows\System32\..\Temp\schtasks.exe", r"C:\Windows"))
+        self.assertFalse(in_windows_system_directory(r"C:\Users\me\schtasks.exe", r"C:\Windows"))
 
     def test_a_directory_is_not_a_program(self):
         self.assertIsNone(system_binary(["/usr/bin"], stat=self._st(mode=stat.S_IFDIR | 0o755),

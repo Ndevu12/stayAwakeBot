@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.bots.security.hygiene.staging_kit import HELD_ASIDE_MARK, held_aside
-from stayawake.utils import atomicwrite, hostdenial
+from stayawake.utils import atomicwrite, hostdenial, pathsafe
 
 __all__ = ["HELD_ASIDE_MARK", "Moved", "Seen", "held_aside", "move_aside", "put_back", "put_back_this", "seen_at"]
 
@@ -77,9 +77,9 @@ def hold(path: Path) -> Held | None:
     if seen is None:
         return None
     if seen.kind == stat.S_IFDIR:
-        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        flags = os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag()
     elif seen.kind == stat.S_IFREG:
-        flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+        flags = os.O_RDONLY | pathsafe.no_follow_flag() | getattr(os, "O_NONBLOCK", 0)
     else:
         return Held(seen)
     try:

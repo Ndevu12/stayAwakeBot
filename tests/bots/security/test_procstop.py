@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest import mock
 
 from stayawake.utils import procstop
 from stayawake.utils.procsnap import Identity, identify
@@ -171,6 +172,16 @@ class TestAZombieIsNeverRunningOnEitherPlatform(unittest.TestCase):
             proc.wait(timeout=5)
         except Exception:
             pass
+
+
+class TestEndingDoesNotInventASignal(unittest.TestCase):
+    def test_this_system_ends_with_its_kill_signal(self):
+        self.assertEqual(procstop._end_signal(), signal.SIGKILL)
+
+    def test_a_system_that_cannot_stop_a_process_says_so(self):
+        who = Identity(pid=1, ppid=0, uid=1, start_time=1)
+        with mock.patch.object(procstop, "_still", return_value=(procstop.RUNNING, None)):
+            self.assertEqual(procstop._suspend(who), procstop.REFUSED)
 
 
 if __name__ == "__main__":

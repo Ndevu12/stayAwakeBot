@@ -8,7 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from stayawake.utils import operator
+from stayawake.utils import operator, winlock
+from stayawake.utils.host import saw_runs_here
 
 _UF_IMMUTABLE = getattr(stat, "UF_IMMUTABLE", 0x00000002)
 
@@ -32,12 +33,24 @@ def _attr_tool(name: str) -> str | None:
 
 
 def privileged() -> bool:
+    """Tell whether this process is the machine's administrator. Returns the answer."""
     geteuid = getattr(os, "geteuid", None)
-    return geteuid is not None and geteuid() == 0
+    if geteuid is not None:
+        return geteuid() == 0
+    return winlock.administrator()
 
 
 def platform_supported() -> bool:
-    return sys.platform in ("darwin", "linux")
+    """Tell whether a denial can be placed on this system. Returns the answer."""
+    return saw_runs_here()
+
+
+def give_to_root(path: Path) -> bool:
+    """Make the machine's administrator the owner of `path`. Takes the path. Returns whether a
+    read-back shows that owner."""
+    if not sys.platform.startswith("win"):
+        return False
+    return winlock.give_to_administrators(path)
 
 
 def lock_needs_privilege() -> bool:
@@ -77,6 +90,9 @@ def immutable(path: Path) -> bool:
         if not flags or not all(c.isalpha() or c == "-" for c in flags):
             return False
         return "i" in flags
+    if sys.platform.startswith("win"):
+        sid = winlock.current_sid()
+        return sid is not None and winlock.write_denied(path, sid)
     return False
 
 
@@ -108,6 +124,8 @@ def held_by(path: Path) -> str | None:
         return None
     if not (immutable(path) and empty_dir(path)):
         return None
+    if sys.platform.startswith("win"):
+        return winlock.grade(winlock.owner_sid(path), winlock.current_sid())
     if st.st_uid == 0:
         return ROOT_HELD
     if st.st_uid == operator.acting_uid():
@@ -174,6 +192,9 @@ def clear_immutable(path: Path) -> bool:
         except (OSError, subprocess.SubprocessError):
             return False
         return r.returncode == 0 and not immutable(path)
+    if sys.platform.startswith("win"):
+        sid = winlock.current_sid()
+        return sid is not None and winlock.allow_writes(path, sid)
     return False
 
 
@@ -201,4 +222,7 @@ def set_immutable(path: Path) -> bool:
         except (OSError, subprocess.SubprocessError):
             return False
         return r.returncode == 0 and immutable(path)
+    if sys.platform.startswith("win"):
+        sid = winlock.current_sid()
+        return sid is not None and winlock.deny_writes(path, sid)
     return False

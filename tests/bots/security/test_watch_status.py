@@ -186,6 +186,5 @@ class TestTheServiceManagerIsReachedOnlyThroughTheUsersOwnFolder(unittest.TestCa
                                 or mock.Mock(returncode=0), binary="/usr/bin/systemctl")
         self.assertEqual(seen, [bus])
 
-
 if __name__ == "__main__":
     unittest.main()

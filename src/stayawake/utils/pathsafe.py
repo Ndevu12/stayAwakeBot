@@ -35,7 +35,7 @@ def read_regular_no_follow(path: Path, limit: int, *, same_as: os.stat_result | 
     file. Takes the path, the most bytes to accept and, when given, the file first found there. Returns
     the bytes, or None when the path is not a regular file, is larger than `limit`, is not the file
     first found there, or cannot be read."""
-    return _read_regular(path, limit, getattr(os, "O_NOFOLLOW", 0), same_as)
+    return _read_regular(path, limit, no_follow_flag(), same_as)
 
 
 def read_regular_following(path: Path, limit: int) -> bytes | None:
@@ -232,7 +232,17 @@ def every_file_arrived(source: Path, destination: Path) -> bool:
     return not unread
 
 
-_FOLDER_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+def no_follow_flag() -> int:
+    """Return the open flag that refuses a link at the final name, or 0 when this system has none."""
+    return getattr(os, "O_NOFOLLOW", 0)
+
+
+def directory_flag() -> int:
+    """Return the open flag that requires a folder, or 0 when this system has none."""
+    return getattr(os, "O_DIRECTORY", 0)
+
+
+_FOLDER_FLAGS = os.O_RDONLY | directory_flag() | getattr(os, "O_CLOEXEC", 0)
 _SEARCH_ONLY = getattr(os, "O_SEARCH", 0) or getattr(os, "O_PATH", 0)
 _MAX_LINKS = 40
 
@@ -243,7 +253,8 @@ class RedirectedPath(OSError):
 
 def trusted_link_owners() -> set[int]:
     """Name who may own a link a write follows: root, and the user writing. Returns their ids."""
-    return {0, os.geteuid()}
+    geteuid = getattr(os, "geteuid", None)
+    return {0} if geteuid is None else {0, geteuid()}
 
 
 def _placed_by_trusted(link: os.stat_result, holder: os.stat_result, owners: set[int]) -> bool:
@@ -263,7 +274,7 @@ def _open_dir(name: str, dir_fd: int | None, extra: int) -> int:
     except PermissionError:
         if not _SEARCH_ONLY:
             raise
-        return os.open(name, _SEARCH_ONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+        return os.open(name, _SEARCH_ONLY | directory_flag() | getattr(os, "O_CLOEXEC", 0)
                        | extra, dir_fd=dir_fd)
 
 
@@ -271,7 +282,7 @@ def _enter(name: str, holder: int, seen: os.stat_result) -> int:
     """Open a folder inside an open folder without following a link. Takes its name, the folder and
     what a look at the name found. Returns the descriptor. Raises `RedirectedPath` when what opened is
     not the folder that was looked at."""
-    entered = _open_dir(name, holder, os.O_NOFOLLOW)
+    entered = _open_dir(name, holder, no_follow_flag())
     found = os.fstat(entered)
     if not stat.S_ISDIR(found.st_mode) or (found.st_dev, found.st_ino) != (seen.st_dev, seen.st_ino):
         os.close(entered)

@@ -171,7 +171,7 @@ class TestCapabilities(unittest.TestCase):
             self.assertIn("features", _printed(["capabilities", "--json"]))
 
     def test_it_says_whether_saw_supports_the_platform(self):
-        for platform, supported in (("linux", True), ("darwin", True), ("win32", False)):
+        for platform, supported in (("linux", True), ("darwin", True), ("win32", True)):
             with self.subTest(platform=platform), mock.patch("sys.platform", platform):
                 self.assertEqual(capabilities.capabilities({})["platform"],
                                  {"os": platform, "supported": supported})

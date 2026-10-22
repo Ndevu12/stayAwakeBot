@@ -10,6 +10,7 @@ from stayawake.cli._meta import __version__
 from stayawake.cli.argtypes import no_stream_requested
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
+from stayawake.utils.host import saw_runs_here
 from stayawake.utils.json_documents import SCHEMA_VERSION_OF_EACH_DOCUMENT, command_of, versioned
 from stayawake.utils.streaming import say
 
@@ -88,7 +89,7 @@ def capabilities(commands: dict[str, argparse.ArgumentParser]) -> dict:
         "version": __version__,
         "schema_versions": documents,
         "features": features,
-        "platform": {"os": sys.platform, "supported": not sys.platform.startswith("win")},
+        "platform": {"os": sys.platform, "supported": saw_runs_here()},
     })
 
 

@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from stayawake.utils import hostdenial
-from stayawake.utils.pathsafe import trusted_ancestor
+from stayawake.utils.pathsafe import directory_flag, no_follow_flag, trusted_ancestor
 
 from stayawake.bots.security.hygiene import staging_kit
 
@@ -141,7 +141,7 @@ def _take_ownership(path: Path) -> PathOutcome:
     if not hostdenial.clear_immutable(path):
         return _unknown(path, "could not be raised to root")
     try:
-        os.chown(path, 0, 0, follow_symlinks=False)
+        _chown(path, 0, 0)
     except (OSError, NotImplementedError):
         return _lock_back_over_nothing(path, owner_before, "could not be raised to root")
     if not _sealed_over_nothing(path):
@@ -185,7 +185,7 @@ def _hand_back(path: Path, owner: int, failure: str | None = None) -> PathOutcom
     """
     try:
         os.chmod(path, 0o700, follow_symlinks=False)
-        os.chown(path, owner, -1, follow_symlinks=False)
+        _chown(path, owner, -1)
     except (OSError, NotImplementedError):
         pass
     locked = hostdenial.immutable(path)
@@ -243,7 +243,7 @@ def _held_open(path: Path) -> int | None:
     """Open the folder this run just created at `path` and hold it. Takes the location. Returns the
     descriptor, which the caller closes, or None when it cannot be opened as a folder."""
     try:
-        return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        return os.open(path, os.O_RDONLY | directory_flag() | no_follow_flag())
     except OSError:
         return None
 
@@ -259,6 +259,15 @@ def _reachable_by(path: Path, owner: int) -> bool:
     except OSError:
         return False
     return st.st_uid == owner and bool(st.st_mode & stat.S_IWUSR)
+
+
+def _chown(path: Path, uid: int, gid: int) -> None:
+    """Give `path` to `uid`. Takes the path and the account. Raises OSError when it cannot."""
+    try:
+        os.chown(path, uid, gid, follow_symlinks=False)
+    except AttributeError:
+        if uid != 0 or not hostdenial.give_to_root(path):
+            raise OSError(0, "could not be given to an administrator")
 
 
 def _owner_of(path: Path) -> int:
@@ -384,7 +393,7 @@ def _seal(path: Path, made: int | None, may_move: bool) -> PathOutcome:
     try:
         os.chmod(path, 0o555, follow_symlinks=False)
         if hostdenial.privileged():
-            os.chown(path, 0, 0, follow_symlinks=False)
+            _chown(path, 0, 0)
     except (OSError, NotImplementedError):
         return _hand_back_what_was_made(path, owner_before, "could not be written", made)[0]
     if not _still_empty_dir(path):

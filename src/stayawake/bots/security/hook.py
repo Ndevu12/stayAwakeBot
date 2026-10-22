@@ -753,7 +753,8 @@ def _hooks_folder_problem(folder: str) -> str | None:
         return "is a link"
     if not _stat.S_ISDIR(found.st_mode):
         return "is not a folder"
-    if found.st_uid != os.geteuid():
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is not None and found.st_uid != geteuid():
         return "is not yours"
     if found.st_mode & 0o022:
         return "can be written by others"

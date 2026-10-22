@@ -117,7 +117,8 @@ def _remove_on_one_device(folder: int, name: str, device: int, mounts: frozenset
     if found.st_dev != device or here in mounts:
         return False
     try:
-        inner = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+        inner = os.open(name, os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag(),
+                        dir_fd=folder)
     except OSError:
         return False
     try:
@@ -152,7 +153,8 @@ def _manifest_at(folder: int, name: str) -> dict | None:
     and the manifest's name. Returns what it holds, or None when it is not a bounded regular file of
     JSON; raises OSError when it is there and cannot be read."""
     try:
-        opened = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=folder)
+        opened = os.open(name, os.O_RDONLY | pathsafe.no_follow_flag() | getattr(os, "O_NONBLOCK", 0),
+                         dir_fd=folder)
     except FileNotFoundError:
         return None
     try:
@@ -198,7 +200,7 @@ def remove(path: Path, capture_dir: Path, *, named_for: Path | None = None,
     was done; whatever could not be deleted is left under the name it was renamed to."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     try:
-        held = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        held = os.open(path, os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag())
     except OSError:
         return Removal()
     try:

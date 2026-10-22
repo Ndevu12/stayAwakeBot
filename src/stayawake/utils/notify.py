@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from stayawake.utils import textsafe
 from stayawake.utils.sessionbus import session_bus_env
-from stayawake.utils.systembin import system_binary
+from stayawake.utils.systembin import system_binary, windows_system_root
 
 SENT, UNCONFIRMED, FAILED, UNAVAILABLE = "sent", "unconfirmed", "failed", "unavailable"
 APP_NAME = "saw"
@@ -70,7 +70,7 @@ class FreedesktopNotifier:
     """Raise a notification on Linux through the session bus's notification service."""
 
     def __init__(self, run=None, binary: str | None = None, runtime_dir: str | None = None,
-                 lstat=os.lstat, uid=os.getuid):
+                 lstat=os.lstat, uid=None):
         self._run = run
         self._binary = binary
         self._runtime_dir = runtime_dir
@@ -120,6 +120,48 @@ def _notification_id(answer: str) -> int:
     return int(parts[1][:10]) if ok else 0
 
 
+_TOAST = (
+    "$n = New-Object System.Windows.Forms.NotifyIcon; "
+    "$n.Icon = [System.Drawing.SystemIcons]::Information; "
+    "$n.Visible = $true; "
+    "$n.ShowBalloonTip(10000, $env:SAW_NOTIFY_TITLE, $env:SAW_NOTIFY_BODY, "
+    "[System.Windows.Forms.ToolTipIcon]::Info); "
+    "Start-Sleep -Seconds 2; $n.Dispose()"
+)
+
+
+def _powershell() -> str | None:
+    """Find the system's PowerShell. Returns its path, or None when it is not there."""
+    root = windows_system_root()
+    return system_binary((os.path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),))
+
+
+class WindowsNotifier:
+    """Raise a notification on Windows through the system's own shell."""
+
+    def __init__(self, run=None, binary: str | None = None):
+        self._run = run
+        self._binary = binary
+
+    def send(self, title: str, body: str, *, urgent: bool = False, replaces: int = 0) -> Delivery:
+        """Raise one notification. Takes the title, the body, whether it is urgent and the id it
+        replaces. Returns an unconfirmed delivery when the shell accepted it, else failed or
+        unavailable."""
+        binary = self._binary or _powershell()
+        if binary is None:
+            return Delivery(UNAVAILABLE, replaces)
+        env = {"SAW_NOTIFY_TITLE": _clean(title), "SAW_NOTIFY_BODY": _clean(body),
+               "SystemRoot": windows_system_root()}
+        argv = [binary, "-NoProfile", "-NonInteractive", "-STA", "-Command",
+                "Add-Type -AssemblyName System.Windows.Forms; " + _TOAST]
+        try:
+            done = (self._run or subprocess.run)(argv, capture_output=True, timeout=TIMEOUT_SECONDS,
+                                                 env=env)
+            return Delivery(UNCONFIRMED if done.returncode == 0 else FAILED, replaces)
+        except Exception:
+            return Delivery(FAILED, replaces)
+
+
 def platform_notifier(platform: str | None = None):
     """Choose the notifier for this operating system. Takes an optional platform name. Returns the
     notifier, or one that sends nothing where none is supported."""
@@ -128,4 +170,6 @@ def platform_notifier(platform: str | None = None):
         return OsascriptNotifier()
     if platform.startswith("linux"):
         return FreedesktopNotifier()
+    if platform.startswith("win"):
+        return WindowsNotifier()
     return NoNotifier()

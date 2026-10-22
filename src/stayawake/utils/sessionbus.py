@@ -6,13 +6,21 @@ import os
 import stat
 
 
-def user_manager_env(*, uid=os.getuid, lstat=os.lstat, runtime_dir: str | None = None,
+def _account_id():
+    """The id of the account this is running as. Returns it, or None when this system has none."""
+    getuid = getattr(os, "getuid", None)
+    return getuid() if getuid is not None else None
+
+
+def user_manager_env(*, uid=None, lstat=os.lstat, runtime_dir: str | None = None,
                      environ=os.environ) -> dict:
     """Build the environment the user's service manager is reached with. Takes the user id, the
     stat call, an optional runtime folder and the caller's environment. Returns the user's runtime
     folder — `/run/user/<uid>`, else the caller's — when it is a folder this user owns, with the
     session bus added when that is this user's own socket; else nothing."""
-    user = uid()
+    user = uid() if uid is not None else _account_id()
+    if user is None:
+        return {}
     for runtime in (runtime_dir or f"/run/user/{user}", environ.get("XDG_RUNTIME_DIR")):
         if runtime and _owned_folder(runtime, user, lstat):
             bus = session_bus_env(uid=lambda: user, lstat=lstat, runtime_dir=runtime) or {}
@@ -30,11 +38,13 @@ def _owned_folder(path: str, user: int, lstat) -> bool:
     return stat.S_ISDIR(info.st_mode) and info.st_uid == user
 
 
-def session_bus_env(*, uid=os.getuid, lstat=os.lstat, runtime_dir: str | None = None) -> dict | None:
+def session_bus_env(*, uid=None, lstat=os.lstat, runtime_dir: str | None = None) -> dict | None:
     """Build the environment a program needs to reach this user's session bus. Takes the user id,
     the stat call and an optional runtime folder. Returns the two variables, or None when the bus
     socket is missing or is not a socket this user owns."""
-    user = uid()
+    user = uid() if uid is not None else _account_id()
+    if user is None:
+        return None
     runtime = runtime_dir or f"/run/user/{user}"
     socket_path = f"{runtime}/bus"
     try:

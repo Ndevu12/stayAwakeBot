@@ -2,6 +2,7 @@
 """Freeze a process, end it, and prove it ended."""
 from __future__ import annotations
 
+import ctypes
 import os
 import signal
 import time
@@ -55,19 +56,73 @@ def _send(known: Identity, sig: int) -> str:
     return SIGNALLED
 
 
+def _end_signal():
+    """The signal that ends a process on this system. Returns it."""
+    return getattr(signal, "SIGKILL", signal.SIGTERM)
+
+
+def _suspend(known: Identity) -> str:
+    """Stop a process on a system without a stop signal. Takes its identity. Returns what that did."""
+    verdict, _who = _still(known)
+    if verdict != RUNNING:
+        return verdict
+    try:
+        ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    except (AttributeError, OSError):
+        return REFUSED
+    handle = kernel.OpenProcess(0x0800, False, known.pid)
+    if not handle:
+        return NEEDS_PRIVILEGE if ctypes.get_last_error() == 5 else REFUSED
+    try:
+        if ntdll.NtSuspendProcess(handle) != 0:
+            return REFUSED
+    finally:
+        kernel.CloseHandle(handle)
+    return SIGNALLED
+
+
+def _resume(known: Identity) -> str:
+    """Let a stopped process run on a system without a continue signal. Takes its identity. Returns
+    what that did."""
+    verdict, _who = _still(known)
+    if verdict != RUNNING:
+        return verdict
+    try:
+        ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    except (AttributeError, OSError):
+        return REFUSED
+    handle = kernel.OpenProcess(0x0800, False, known.pid)
+    if not handle:
+        return REFUSED
+    try:
+        if ntdll.NtResumeProcess(handle) != 0:
+            return REFUSED
+    finally:
+        kernel.CloseHandle(handle)
+    return SIGNALLED
+
+
 def freeze(known: Identity) -> str:
     """Stop the process running, without ending it."""
-    return _send(known, signal.SIGSTOP)
+    sig = getattr(signal, "SIGSTOP", None)
+    if sig is None:
+        return _suspend(known)
+    return _send(known, sig)
 
 
 def resume(known: Identity) -> str:
     """Let a frozen process run again."""
-    return _send(known, signal.SIGCONT)
+    sig = getattr(signal, "SIGCONT", None)
+    if sig is None:
+        return _resume(known)
+    return _send(known, sig)
 
 
 def end(known: Identity) -> str:
     """End the process."""
-    return _send(known, signal.SIGKILL)
+    return _send(known, _end_signal())
 
 
 def has_ended(known: Identity, *, settle: float = _SETTLE_SECONDS,
