@@ -134,6 +134,23 @@ def manifests(root: Path) -> list[Path]:
     return found
 
 
+def proposed_text(root: Path, relative: str, names: set[str]) -> str | None:
+    """The manifest text after removing `names`, computed without writing.
+
+    Takes the repository root, the manifest's path relative to it, and the package names. Returns
+    the new text, or None when the manifest cannot be rewritten exactly."""
+    path = root / relative
+    if not names or not is_safe_write_target(path, root):
+        return None
+    try:
+        if path.stat().st_size > _MAX_MANIFEST_BYTES or path.stat().st_nlink > 1:
+            return None
+        text = path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return drop_from_manifest(text, names)
+
+
 def drop_dependencies(root: Path, names: set[str],
                       within: dict[str, set[str]] | None = None) -> list[str]:
     """Remove packages from the manifests under `root`.

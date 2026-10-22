@@ -257,6 +257,19 @@ class TestWhatIsPutToTheOperator(unittest.TestCase):
         self.assertEqual(1, len(asked))
         self.assertEqual((), choose.kept())
 
+    def test_the_question_carries_the_manifest_removing_the_package_would_leave(self):
+        self._manifest("evil", "left-pad")
+        asked = []
+
+        def resolve(question):
+            asked.append(question)
+            return DependencyAnswer(KEEP)
+
+        Chooser(resolve, self.root)([_finding("evil")])
+        proposed = dict(asked[0].proposed)
+        self.assertIn("left-pad", proposed["package.json"])
+        self.assertNotIn('"evil"', proposed["package.json"])
+
 
 if __name__ == "__main__":
     unittest.main()

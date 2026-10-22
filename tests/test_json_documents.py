@@ -142,10 +142,11 @@ class TestCapabilities(unittest.TestCase):
     def test_it_names_every_document_saw_prints_and_its_feature(self):
         printed = _printed(["capabilities", "--json"])
         self.assertEqual(printed["schema_version"], SCHEMA_VERSION_OF_EACH_DOCUMENT["capabilities"])
-        self.assertEqual(printed["schema_versions"], SCHEMA_VERSION_OF_EACH_DOCUMENT)
+        self.assertEqual(printed["schema_versions"],
+                         {**SCHEMA_VERSION_OF_EACH_DOCUMENT, "fix-ask": 1})
         self.assertEqual(printed["features"],
                          [".".join(command_of(d)) + ".json" for d in SCHEMA_VERSION_OF_EACH_DOCUMENT]
-                         + ["progress.jsonl", "stream", "serve", "mcp"])
+                         + ["progress.jsonl", "fix.ask.json", "stream", "serve", "mcp"])
         self.assertTrue({"scan.json", "fix.json"} <= set(printed["features"]))
         self.assertEqual(printed["version"], cli.__version__)
 

@@ -457,7 +457,8 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
         paths: list[str] | None = None, users: list[str] | None = None,
         orgs: list[str] | None = None, slugs: list[str] | None = None,
         no_stream: bool = False, jobs: int | None = None,
-        branches: list[str] | None = None, resolver=None, json_out: bool = False) -> int:
+        branches: list[str] | None = None, resolver=None, json_out: bool = False,
+        decisions: list | None = None) -> int:
     """`saw fix`: prepare a `security/auto-clean` branch per infected repo (no push). With
     `pr=True` (`--pr`) also push + open/update one rolling PR each; with `remote=True`
     (`--remote`) sweep GitHub targets resolved by the ladder (ad-hoc `users`/`orgs`/
@@ -488,8 +489,9 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
                 else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr, jobs=jobs,
                                 branches=branches, resolver=resolver))
     if json_out:
-        print(json.dumps(versioned("fix", {"results": [remediation_record(o.repository, o.verdict)
-                                                       for o in outcomes]}), indent=2))
+        made = decisions if len(outcomes) == 1 else None
+        print(json.dumps(versioned("fix", {"results": [
+            remediation_record(o.repository, o.verdict, made) for o in outcomes]}), indent=2))
     if not outcomes:
         return 0
     prog.line(fix_tally(outcomes))

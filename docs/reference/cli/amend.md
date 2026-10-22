@@ -25,7 +25,7 @@ or submodule it could not read in full are named. Once the remote has moved, you
 copy of the remote branches is refreshed to match it; if it cannot be, the run says so.
 
 ```text
-saw fix amend [TARGETS...]
+saw fix amend [TARGETS...] [--ask=jsonl]
 saw fix amend --remote OWNER/REPO [OWNER/REPO...]
 ```
 
@@ -34,6 +34,7 @@ saw fix amend --remote OWNER/REPO [OWNER/REPO...]
 | `TARGETS...` | Repositories to amend: each one you name, or the repository you are in when none is named. A folder that holds repositories is not amended, and neither are configured targets. A named path that does not exist is an error, not a wider sweep. |
 | `--remote` | Clone the named GitHub repositories and amend them. Slugs only; with none named, nothing is changed. |
 | `-c FILE` / `-j N` / `--no-stream` | As for [`saw scan`](scan.md). |
+| `--ask=jsonl` | Let a program answer the questions a terminal asks, for one local repository. Questions and answers are the same JSON objects as for [`saw fix`](fix.md). A file question is asked here and is not asked by `saw fix`. `--remote` and several repositories are not asked. |
 
 `--pr`, `--branch`, `--user` and `--org` are not accepted. There is no account-wide form: name each
 repository.
@@ -88,9 +89,13 @@ saw never removes those by itself.
 - **Your answers are kept.** A file you keep is not asked about again, by `saw fix amend` or
   `saw fix`. A file you take out, here or in `saw fix`, is removed by later runs too, without asking
   again.
-- **Anywhere else** — no terminal, CI, several repositories, `--remote` — none of them is removed. The
-  run names them, is not called done, and remembers them, so running `saw fix amend` in that
-  repository on a terminal later asks about them.
+- **With `--ask=jsonl`, for one repository,** a program answers instead of a person. The questions
+  are the same ones a terminal is asked, including a file saw could not decide. See
+  [`saw fix`](fix.md).
+- **Anywhere else** — no terminal and no `--ask=jsonl`, CI without `--ask=jsonl`, several
+  repositories, `--remote` — none of them is removed. The run names them, is not called done, and
+  remembers them, so running `saw fix amend` in that repository on a terminal later asks about
+  them. Several repositories and `--remote` are not asked even with `--ask=jsonl`.
 - **When the malware is in the repository's first commit,** saw names that commit for you to review.
 - **Everything a merge brought in with the malware is taken out with it.** When a copy of one of
   those files is still on another branch, tag or stash, the run names it for you to review; a copy

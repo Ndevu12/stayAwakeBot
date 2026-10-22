@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
+# The questions `saw fix --ask=jsonl` writes. A caller treats a newer version as unsupported.
+FIX_ASK_SCHEMA_VERSION = 1
+
 SCHEMA_VERSION_OF_EACH_DOCUMENT = {
     "scan": 1,
     "fix": 1,

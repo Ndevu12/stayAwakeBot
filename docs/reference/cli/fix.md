@@ -77,8 +77,14 @@ other files with no finding of their own, saw never removes them by itself.
   payload is; your earlier commits keep it until `saw fix amend` rewrites them, and the run says
   where it is still stored. A file you keep is not asked about again. Your answers are kept for
   both commands.
-- **Anywhere else** — no terminal, CI, several repositories, `--remote` — the run removes none of
-  them, names them, and is not called done or clean.
+- **With `--ask=jsonl`, for one repository,** a program answers instead of a person. saw writes
+  each question as one JSON object on stderr and reads one JSON answer from stdin, including when
+  those streams are pipes. `--json`, `--no-stream` and `--progress=jsonl` still do what they do;
+  a progress line and a question are different objects, and `--no-stream` does not turn the
+  questions off. `saw capabilities` lists this as `fix.ask.json`, schema `fix-ask` version 1.
+- **Anywhere else** — no terminal and no `--ask=jsonl`, CI without `--ask=jsonl`, several
+  repositories, `--remote` — the run removes none of them, names them, and is not called done or
+  clean. Several repositories and `--remote` are not asked even with `--ask=jsonl`.
 
 `fix` cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one `git show` puts it
@@ -93,13 +99,14 @@ the branches that carried them. Read that page before you run it.
 See [the safety envelope](../../explanation/safety-envelope.md) for what `fix` will and will not touch.
 
 ```text
-saw fix [TARGETS...] [--pr] [--json] [--progress=jsonl] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--stream] [--no-stream]
+saw fix [TARGETS...] [--pr] [--json] [--progress=jsonl] [--ask=jsonl] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--stream] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
 | `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `-j` / `--no-stream` | As for [`saw scan`](scan.md). A missing *explicit* `--config` path is a clear error, never a crash. |
 | `--pr`, `--open-pr` | Also push the branch and open/update one rolling, de-duplicated PR per repository. Needs a credential with repo + PR write; the API is pre-flighted before any push. Not accepted with `amend`. |
-| `--json` | Print what each repository's fix came to as JSON on stdout, one record per repository. `remediation` is `pr`, `fork-pr`, `patch`, `issue`, `prepared`, `skipped` or `failed`. `cause` says why it came to less than a pull request, such as `actions-may-not-open-pull-requests`, and `pull_request` and `url` name the pull request. `branch` and `base` name the clean-up branch and the branch it was made from. `partial` is true when the fix is only part of what was found. `removed` lists what was removed. `uncommitted`, when there was uncommitted work, names the branch that holds it, or why it could not be saved. `history_holds_payload` says whether history still holds what was removed. `needs_review` lists what the report leaves for you to decide. Progress stays on stderr. Not accepted with `amend`. |
+| `--json` | Print what each repository's fix came to as JSON on stdout, one record per repository. `remediation` is `pr`, `fork-pr`, `patch`, `issue`, `prepared`, `skipped` or `failed`. `cause` says why it came to less than a pull request, such as `actions-may-not-open-pull-requests`, and `pull_request` and `url` name the pull request. `branch` and `base` name the clean-up branch and the branch it was made from. `partial` is true when the fix is only part of what was found. `removed` lists what was removed. `uncommitted`, when there was uncommitted work, names the branch that holds it, or why it could not be saved. `history_holds_payload` says whether history still holds what was removed. `needs_review` lists what the report leaves for you to decide. `decisions` lists the choices that were made, in order: the question kind, the path or the package name, and the action. A delivery choice includes the paths taken out. Progress stays on stderr. Not accepted with `amend`. |
+| `--ask=jsonl` | Let a program answer the questions a terminal asks, for one local repository. Each question is one JSON object on stderr, and each answer is one JSON object on stdin. The object carries `schema_version` 1, an `id`, and `kind` (`delivery` or `package` on `saw fix`; `saw fix amend` also asks `file`). Commit and blob ids are full. A delivery answer is `keep`, or `take-out` with `chosen` paths from that question. A package answer is `keep` or `take-out`; a manifest's `proposed` text is included only when saw can rewrite that file exactly, and the file is not written until the answer is `take-out`. A file answer is `remove`, `keep`, `restore` when a clean version was offered, or `supply` with a `path` saw reads. A wrong id, an action that question does not allow, an empty `chosen`, a path that was not offered, or a `supply` path saw cannot read is not an answer: the question is repeated up to three times, then given up. End of input gives up at once. Giving up keeps a file and leaves a delivery or a package unanswered. The question does not contain the file's bytes. Not used for several repositories or `--remote`. |
 | `--progress=jsonl` | Progress as one JSON event per line on stderr. The report stays on stdout, and the human progress stays off stderr. See [progress events](index.md#progress-events). Not accepted with `amend`. |
 | `amend` | Replace past commits that still carry the payload and force-update each branch they sat on — see [`saw fix amend`](amend.md). Not accepted with `--pr`, `--branch`, `--user` or `--org`. |

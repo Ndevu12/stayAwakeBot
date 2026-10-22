@@ -216,7 +216,7 @@ class TestAFixRunRecordsItsSubmission(unittest.TestCase):
                          {"repository": "owner/repo", "remediation": "pr", "cause": "",
                           "pull_request": 99, "url": "u", "partial": False,
                           "branch": "security/auto-clean-main", "base": "main", "removed": [],
-                          "history_holds_payload": False,
+                          "history_holds_payload": False, "decisions": [],
                           "needs_review": [
                               "your checkout is not clean — 1 confirmed file(s) are still in it; "
                               "the installed tree was left, because your uncommitted work could "
