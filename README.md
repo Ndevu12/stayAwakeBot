@@ -147,7 +147,7 @@ jobs:
 
       - uses: Ndevu12/SAW_GUARD@7d3ef571f0094c223902fcfc500838abc46e1d7b
         with:
-          version: '0.14.0'
+          version: '0.15.0'
           pr-comment: true
           upload-sarif: true
 ```
@@ -166,7 +166,7 @@ published `stayawakebot` scanner from PyPI.
 **Pin every action by commit SHA**, including this one: a tag can be moved to point at different code
 after you have reviewed it, a SHA cannot. Here `7d3ef571…` is SAW Guard v0.2.0 and `3d3c42e5…` is
 `actions/checkout` v7.0.1. In production pin `version:` as well: it selects the `stayawakebot`
-release from PyPI, 0.14.0 here, and otherwise tracks whatever is latest at run time.
+release from PyPI, 0.15.0 here, and otherwise tracks whatever is latest at run time.
 
 Other inputs: `config-file` to supply your own allowlist, `fail-on` to choose the verdict that fails
 the build (default `infected`), and `upload-sarif` to send findings to code scanning.
@@ -221,12 +221,6 @@ stayawake-health-check --config config/urls.yml
 - [Security policy](SECURITY.md) — how to report a security issue privately
 - [Code of conduct](CODE_OF_CONDUCT.md) — what taking part here commits you to
 
-## Sponsor
-
-saw is open source. To sponsor the work, email
-**[saw@ndevuspace.com](mailto:saw@ndevuspace.com?subject=Supporting%20saw)** — the same address
-handles commercial licensing.
-
 ## License
 
 stayAwakeBot is **dual-licensed**:
@@ -235,6 +229,6 @@ stayAwakeBot is **dual-licensed**:
   modify it and convey it or offer it over a network (e.g. as a hosted service), you must release
   your corresponding source under the AGPL too.
 - **[Commercial license](COMMERCIAL-LICENSE.md)** — a paid, proprietary-use option for closed-source
-  or proprietary-SaaS use without the AGPL's source-disclosure obligations. For terms, contact
-  **saw@ndevuspace.com**.
+  or proprietary-SaaS use without the AGPL's source-disclosure obligations. For terms,
+  [contact](mailto:saw@ndevuspace.com).
 

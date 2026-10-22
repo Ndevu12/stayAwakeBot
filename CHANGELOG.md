@@ -13,12 +13,18 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-22
+
 ### Added
 - **A program can answer the questions a terminal asks during `saw fix`.** `--ask=jsonl` on
   `saw fix` and `saw fix amend` writes each question as one JSON object on stderr and reads one
   answer from stdin. Without it, a terminal is asked as before and a pipe is not. Several
   repositories, or `--remote`, are not asked either way. `saw capabilities` lists `fix.ask.json`.
   The `saw fix --json` record includes the choices that were made.
+
+### Changed
+- **The README no longer has a sponsor section.** The commercial-license contact is a mailto link
+  labeled Contact.
 
 ### Fixed
 - **A package installed in saw's folder is included with the others.** When you agree, `saw fix` also
@@ -1835,7 +1841,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.3...v0.13.0
