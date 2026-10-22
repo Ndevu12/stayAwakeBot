@@ -5,7 +5,7 @@ description: saw capabilities — what the installed saw supports, for an editor
 # `saw capabilities`
 
 ```text
-saw capabilities [--json] [--no-stream]
+saw capabilities [--json] [--stream] [--no-stream]
 ```
 
 Prints the installed saw's version, the schema version of each JSON document it prints, and the
@@ -36,7 +36,8 @@ $ saw capabilities --json
     "audit.json",
     "hook.status.json",
     "capabilities.json",
-    "progress.jsonl"
+    "progress.jsonl",
+    "stream"
   ],
   "platform": {
     "os": "linux",

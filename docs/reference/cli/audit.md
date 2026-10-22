@@ -11,7 +11,7 @@ audit does and does not
 mean](../../how-to/audit-a-machine.md#what-a-clean-audit-does-and-does-not-mean).
 
 ```text
-saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--json] [--progress=jsonl] [--no-stream]
+saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--json] [--progress=jsonl] [--stream] [--no-stream]
 ```
 
 | Option | Description |

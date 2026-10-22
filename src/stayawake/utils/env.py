@@ -29,6 +29,7 @@ TERM = "TERM"
 COLORTERM = "COLORTERM"
 PAGER = "PAGER"
 NO_STREAM = ("STAYAWAKE_NO_STREAM", "NO_STREAM")
+STREAM = "STAYAWAKE_STREAM"
 
 
 def get(name: str, default: str | None = None) -> str | None:
@@ -114,8 +115,14 @@ def is_ci() -> bool:
 
 
 def stream_disabled() -> bool:
-    """Live streaming is off when any NO_STREAM variable is set."""
+    """Say whether live output was asked off. Returns True when a NO_STREAM variable is set."""
     return any_set(NO_STREAM)
+
+
+def stream_forced() -> bool:
+    """Say whether STAYAWAKE_STREAM asks for live output. Returns False when it is unset or an
+    explicit off word."""
+    return _truthy(get(STREAM))
 
 
 def hook_disabled() -> bool:

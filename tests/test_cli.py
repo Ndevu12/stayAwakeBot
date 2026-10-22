@@ -339,10 +339,16 @@ class TestNoStreamIsStandard(unittest.TestCase):
                    and not any(a.dest == "no_stream" for a in p._actions)]
         self.assertEqual(missing, [])
 
+    def test_a_command_that_streams_can_be_asked_to(self):
+        missing = [path for path, p in self._commands()
+                   if getattr(p, "saw_streams", False)
+                   and not any("--stream" in a.option_strings for a in p._actions)]
+        self.assertEqual(missing, [])
+
     def test_a_command_that_does_not_stream_has_no_flag_to_offer(self):
         spurious = [path for path, p in self._commands()
                     if hasattr(p, "saw_streams") and not p.saw_streams
-                    and any(a.dest == "no_stream" for a in p._actions)]
+                    and any(a.dest in ("no_stream", "force_stream") for a in p._actions)]
         self.assertEqual(spurious, [])
 
     def test_the_flag_survives_being_given_before_a_subcommand(self):
@@ -354,6 +360,11 @@ class TestNoStreamIsStandard(unittest.TestCase):
                      ["watch", "--no-stream"], ["auth", "--no-stream", "status"]):
             self.assertTrue(no_stream_requested(p.parse_args(argv)), argv)
         self.assertFalse(no_stream_requested(p.parse_args(["watch", "status"])))
+        from stayawake.cli.argtypes import stream_requested
+        for argv in (["watch", "--stream", "status"], ["watch", "status", "--stream"],
+                     ["audit", "--stream"]):
+            self.assertTrue(stream_requested(p.parse_args(argv)), argv)
+        self.assertFalse(stream_requested(p.parse_args(["watch", "status"])))
 
 
 class TestDiscard(unittest.TestCase):

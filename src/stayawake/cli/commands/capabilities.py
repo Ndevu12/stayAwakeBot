@@ -51,6 +51,13 @@ def _takes_progress(parser: argparse.ArgumentParser) -> bool:
     return any("--progress" in action.option_strings for action in parser._actions)
 
 
+def offers_stream(commands: dict[str, argparse.ArgumentParser]) -> bool:
+    """Say whether a command shows live progress when its output is not a terminal. Takes the
+    top-level commands by name. Returns whether one of them takes `--stream`."""
+    return any("--stream" in action.option_strings
+               for parser in commands.values() for action in parser._actions)
+
+
 def offers_progress(commands: dict[str, argparse.ArgumentParser]) -> bool:
     """Say whether scan, audit or fix write progress events. Takes the top-level commands by name.
     Returns whether one of them takes `--progress`."""
@@ -85,6 +92,8 @@ def capabilities(commands: dict[str, argparse.ArgumentParser]) -> dict:
     features = [".".join(command_of(document)) + ".json" for document in documents]
     if offers_progress(commands):
         features.append("progress.jsonl")
+    if offers_stream(commands):
+        features.append("stream")
     return versioned("capabilities", {
         "version": __version__,
         "schema_versions": documents,

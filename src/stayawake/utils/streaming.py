@@ -2,6 +2,7 @@
 """Typewriter-style streaming writer for human-facing CLI output."""
 from __future__ import annotations
 
+import contextvars
 import itertools
 import re
 import sys
@@ -14,30 +15,33 @@ from stayawake.utils import env
 from stayawake.utils.progress_events import current
 
 _WORD = re.compile(r"\S+\s*|\s+")
+_LIVE = contextvars.ContextVar("saw_live_output", default=False)
 
 
-def _disabled_by_env() -> bool:
-    return env.stream_disabled()
+def ask_for_live_output(on: bool) -> None:
+    """Remember whether this run asked for live output. Takes whether it did. Returns nothing."""
+    _LIVE.set(bool(on))
 
 
-def _auto_enabled(out: TextIO) -> bool:
-    """Animate only on a real TTY and only when not disabled by env."""
-    if _disabled_by_env():
+def stream_enabled(out: TextIO | None = None, *, force_off: bool = False,
+                   force_on: bool = False) -> bool:
+    """Say whether this run shows live output. Takes the stream, and whether it was asked off or on.
+    Returns False when it was asked off, which wins, including by the environment. Returns True when
+    it was asked on, or when the stream is a terminal."""
+    if force_off or env.stream_disabled():
         return False
+    if force_on or _LIVE.get() or env.stream_forced():
+        return True
+    target = out or sys.stdout
     try:
-        return bool(out.isatty())
+        return bool(target.isatty())
     except Exception:
         return False
 
 
-def stream_enabled(out: TextIO | None = None, *, force_off: bool = False) -> bool:
-    """One decision point for a caller: animate iff a TTY, not env-disabled, not forced off
-    (e.g. a --no-stream flag). Callers pass this to both Streamer and status so the whole
-    command animates or stays plain together — deterministic, and silent when stdout is
-    captured (pipes, CI, tests)."""
-    if force_off:
-        return False
-    return _auto_enabled(out or sys.stdout)
+def _auto_enabled(out: TextIO) -> bool:
+    """Say whether `out` shows live output on its own. Takes the stream. Returns the answer."""
+    return stream_enabled(out)
 
 
 class Streamer:

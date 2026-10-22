@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **Live progress can be turned on when saw's output is not a terminal.** `--stream` and
+  `STAYAWAKE_STREAM=1` show each step as it runs. `--no-stream` and `STAYAWAKE_NO_STREAM` still turn
+  it off, and they win. With `--json`, the document stays on stdout and the steps stay out of it.
+  `saw capabilities` lists `stream`.
 - **`saw capabilities` says what the installed saw supports.** `saw capabilities --json` lists its
   version, the schema version of each JSON document it prints, and its features, so an editor
   extension or script can check for a feature instead of comparing version numbers.
