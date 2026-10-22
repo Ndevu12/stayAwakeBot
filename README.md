@@ -230,5 +230,5 @@ stayAwakeBot is **dual-licensed**:
   your corresponding source under the AGPL too.
 - **[Commercial license](COMMERCIAL-LICENSE.md)** — a paid, proprietary-use option for closed-source
   or proprietary-SaaS use without the AGPL's source-disclosure obligations. For terms, contact
-  **saw()ndevuspace[]com**.
+  **[saw@ndevuspace.com](mailto:saw@ndevuspace.com)**.
 

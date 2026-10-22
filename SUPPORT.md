@@ -41,4 +41,4 @@ own config — see [configuration](https://saw-docs.ndevuspace.com/latest/refere
 must name a signature, so it never silences whatever lands on that path next.
 
 This is a small project. Issues get read; there is no support SLA, and no commercial-support
-channel beyond the [commercial licence](COMMERCIAL-LICENSE.md) contact, **saw()ndevuspace[]com**.
+channel beyond the [commercial licence](COMMERCIAL-LICENSE.md) contact, **[saw@ndevuspace.com](mailto:saw@ndevuspace.com)**.
