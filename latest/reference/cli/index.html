@@ -2088,9 +2088,14 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <td>Fail the run on a warning-level issue. <strong><code>saw scan</code> has no <code>--fail</code></strong> — the last line of the report is the verdict unconditionally.</td>
 </tr>
 <tr>
+<td><code>--stream</code></td>
+<td>every command</td>
+<td>Show live progress even when the output is not a terminal. With <code>--json</code>, the document stays on stdout and the steps are separate.</td>
+</tr>
+<tr>
 <td><code>--no-stream</code></td>
 <td>every command</td>
-<td>Plain instant lines instead of live progress.</td>
+<td>Plain instant lines instead of live progress. This wins over <code>--stream</code>.</td>
 </tr>
 <tr>
 <td><code>-j</code>, <code>--jobs N</code></td>
@@ -2154,8 +2159,12 @@ stderr. A program should ignore an event it does not recognise, so a later saw c
 <td>Default reports directory; <code>-d</code> overrides it.</td>
 </tr>
 <tr>
+<td><code>STAYAWAKE_STREAM=1</code></td>
+<td>As <code>--stream</code>. <code>0</code>, <code>false</code>, <code>no</code> or <code>off</code> does not ask.</td>
+</tr>
+<tr>
 <td><code>STAYAWAKE_NO_STREAM=1</code></td>
-<td>As <code>--no-stream</code>.</td>
+<td>As <code>--no-stream</code>. This wins over <code>STAYAWAKE_STREAM</code>.</td>
 </tr>
 <tr>
 <td><code>SAW_HOOK_DISABLED=1</code></td>
