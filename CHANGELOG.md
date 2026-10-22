@@ -23,7 +23,8 @@ reader, not the mechanism or the weakness it closed.
   The `saw fix --json` record includes the choices that were made.
 
 ### Changed
-- **The README no longer has a sponsor section.** The commercial-license contact is a mailto link.
+- **The README no longer has a sponsor section.** The commercial-license contact is a mailto link
+  labeled Contact.
 
 ### Fixed
 - **A package installed in saw's folder is included with the others.** When you agree, `saw fix` also
