@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **A program can answer the questions a terminal asks during `saw fix`.** `--ask=jsonl` on
+  `saw fix` and `saw fix amend` writes each question as one JSON object on stderr and reads one
+  answer from stdin. Without it, a terminal is asked as before and a pipe is not. Several
+  repositories, or `--remote`, are not asked either way. `saw capabilities` lists `fix.ask.json`.
+  The `saw fix --json` record includes the choices that were made.
+
 ### Fixed
 - **A package installed in saw's folder is included with the others.** When you agree, `saw fix` also
   takes a known-malicious package out of a `package.json` there. A copy an older `saw fix` kept is

@@ -56,6 +56,20 @@ def add_progress_arg(parser: argparse.ArgumentParser) -> None:
                              "(start, step, target, done); the human progress stays off stderr")
 
 
+def add_ask_arg(parser: argparse.ArgumentParser) -> None:
+    """Register `--ask=jsonl`. Takes the parser. A program then answers the questions a terminal
+    would ask: one JSON object per line, questions on stderr and answers on stdin."""
+    parser.add_argument("--ask", choices=("jsonl",), default=None,
+                        help="let a program answer the questions a terminal asks, one JSON object "
+                             "per line (questions on stderr, answers on stdin)")
+
+
+def ask_mode(a: argparse.Namespace) -> str | None:
+    """The ask channel this run requested. Takes the parsed namespace. Returns `jsonl`, or None
+    when the flag was not given."""
+    return getattr(a, "ask", None)
+
+
 def progress_requested(a: argparse.Namespace) -> bool:
     """Whether this run was asked for progress events. Takes the parsed namespace. Returns False
     when the flag was not given."""

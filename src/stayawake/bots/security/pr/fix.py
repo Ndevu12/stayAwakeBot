@@ -312,7 +312,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         manual_reviews: dict = {}
         suggested: list = []
         merge_clean: dict = {}
-        choose_dependencies = dependency_questions.Chooser(resolver)
+        choose_dependencies = dependency_questions.Chooser(resolver, wt)
         checkout = live.clean_checkout(
             repo, opts, signatures, allowlist,
             scan=scan_target,

@@ -97,7 +97,8 @@ class TestOnATerminal(_Project):
     def test_each_package_is_asked_about_once_with_where_it_is_declared(self):
         resolver, asked = self.answering(DependencyAnswer(KEEP))
         self.run_fix(resolver)
-        self.assertEqual([DependencyQuestion(BAD, ("4.2.11",), ("package.json",))], asked)
+        self.assertEqual([DependencyQuestion(
+            BAD, ("4.2.11",), ("package.json",), (("package.json", CLEAN_MANIFEST),))], asked)
 
     def test_an_answer_of_another_kind_keeps_it(self):
         resolver, _ = self.answering(DeliveryAnswer(TAKE_OUT, ("package.json",)))
@@ -256,6 +257,19 @@ class TestWhatIsPutToTheOperator(unittest.TestCase):
         self.assertEqual({"evil"}, choose([_finding("evil")]))
         self.assertEqual(1, len(asked))
         self.assertEqual((), choose.kept())
+
+    def test_the_question_carries_the_manifest_removing_the_package_would_leave(self):
+        self._manifest("evil", "left-pad")
+        asked = []
+
+        def resolve(question):
+            asked.append(question)
+            return DependencyAnswer(KEEP)
+
+        Chooser(resolve, self.root)([_finding("evil")])
+        proposed = dict(asked[0].proposed)
+        self.assertIn("left-pad", proposed["package.json"])
+        self.assertNotIn('"evil"', proposed["package.json"])
 
 
 if __name__ == "__main__":

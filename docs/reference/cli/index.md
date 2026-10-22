@@ -56,6 +56,7 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 | --- | --- | --- |
 | `--json` | `scan`, `fix`, `audit`, `hook status`, `hook install`, `hook repair`, `auth status`, `doctor`, `guard drift`, `search`, `capabilities` | Machine-readable output on stdout. Each document carries a [`schema_version`](capabilities.md#schema-versions). |
 | `--progress=jsonl` | `scan`, `audit`, `fix` | One JSON event per line on stderr, so a program can draw its own progress. The report stays on stdout. The human progress stays off stderr. See [Progress events](#progress-events). Not accepted with `fix amend`. |
+| `--ask=jsonl` | `fix` | Let a program answer the questions a terminal asks during `saw fix` and `saw fix amend`. One JSON object per line: questions on stderr, answers on stdin. See [`saw fix`](fix.md). Not used for several repositories or `--remote`. |
 | `-q`, `--quiet` | `doctor`, `search` | Only the essentials. |
 | `-f`, `--fail` | `audit`, `guard check` | Fail the run on a warning-level issue. **`saw scan` has no `--fail`** — the last line of the report is the verdict unconditionally. |
 | `--stream` | commands that show a report | Show live progress even when the output is not a terminal. With `--json`, the document stays on stdout and the steps are separate. |

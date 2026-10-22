@@ -13,7 +13,8 @@ import argparse
 import sys
 
 from stayawake.bots.security import remediator
-from stayawake.cli.argtypes import add_jobs_arg, add_progress_arg, no_stream_requested, progress_requested
+from stayawake.cli.argtypes import (add_ask_arg, add_jobs_arg, add_progress_arg, ask_mode,
+                                   no_stream_requested, progress_requested)
 from stayawake.utils.progress_events import covering
 from stayawake.cli.helptext import add_command
 from stayawake.cli.resolve import build_resolver
@@ -60,6 +61,7 @@ def register(sub) -> None:
     p.add_argument("--json", action="store_true",
                    help="print what each repository's fix did as JSON")
     add_progress_arg(p)
+    add_ask_arg(p)
     p.add_argument("-r", "--remote", action="store_true",
                    help="sweep GitHub repos (clone → fix → PR): ad-hoc --user/--org/owner-repo, "
                         "else configured targets, else your own repos")
@@ -83,6 +85,7 @@ def register(sub) -> None:
 
 def run(a: argparse.Namespace) -> int:
     """Run `saw fix` or `saw fix amend`. Takes the parsed arguments. Returns the command's status."""
+    decisions: list = []
     positionals = [*a.paths, *a.extra_paths]
     if positionals[:1] == ["amend"]:
         if a.pr:
@@ -106,7 +109,8 @@ def run(a: argparse.Namespace) -> int:
                                 remote=a.remote,
                                 slugs=(rest or None) if a.remote else None,
                                 no_stream=no_stream_requested(a), jobs=a.jobs,
-                                resolver=build_resolver())
+                                resolver=None if a.remote else build_resolver(
+                                    ask=ask_mode(a), decisions=decisions))
     if a.remove_foreign:
         print("note: --remove-foreign is deprecated and ignored; a confirmed wholly-foreign file "
               "is removed by default", file=sys.stderr)
@@ -119,5 +123,6 @@ def run(a: argparse.Namespace) -> int:
             slugs=(positionals or None) if remote else None,
             users=a.user or None, orgs=a.org or None, no_stream=no_stream_requested(a),
             jobs=a.jobs, branches=a.branch or None,
-            resolver=None if remote else build_resolver(), json_out=a.json),
+            resolver=None if remote else build_resolver(ask=ask_mode(a), decisions=decisions),
+            json_out=a.json, decisions=decisions),
         unfinished=exitcodes.INCOMPLETE)

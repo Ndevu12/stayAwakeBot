@@ -400,15 +400,18 @@ def _left_for_review(verdict: "FixVerdict") -> list[str]:
     return [_shown(item, 4000) for item in items if item.strip()]
 
 
-def remediation_record(repository: str, verdict: "FixVerdict | None") -> dict:
+def remediation_record(repository: str, verdict: "FixVerdict | None",
+                       decisions: list | None = None) -> dict:
     """Describe what one repository's fix did, for a machine to read. Takes the repository and its
-    verdict, or None when the run stopped before reaching one. Returns the record: `remediation`
-    (pr, fork-pr, patch, issue, prepared, skipped or failed), its `cause`, the pull request, the
-    branches, what was removed, and what is left for the operator."""
+    verdict, or None when the run stopped before reaching one, and the choices the operator made.
+    Returns the record: `remediation` (pr, fork-pr, patch, issue, prepared, skipped or failed), its
+    `cause`, the pull request, the branches, what was removed, what is left for the operator, and
+    those choices."""
     if verdict is None:
         return {"repository": repository, "remediation": "failed", "cause": "error",
                 "pull_request": None, "url": "", "partial": False, "branch": "", "base": "",
-                "removed": [], "history_holds_payload": False, "needs_review": []}
+                "removed": [], "history_holds_payload": False, "needs_review": [],
+                "decisions": list(decisions or [])}
     fix = verdict.base_fix
     if fix.remediation:
         remediation, cause = fix.remediation, fix.cause
@@ -424,7 +427,8 @@ def remediation_record(repository: str, verdict: "FixVerdict | None") -> dict:
               "branch": _shown(fix.branch, 120), "base": _shown(fix.base, 120),
               "removed": [_shown(path, 200) for path in verdict.removed],
               "history_holds_payload": bool(verdict.history.holds or verdict.arrivals.taken_out_held),
-              "needs_review": _left_for_review(verdict)}
+              "needs_review": _left_for_review(verdict),
+              "decisions": list(decisions or [])}
     saved = _uncommitted(verdict.preserved)
     if saved is not None:
         record["uncommitted"] = saved

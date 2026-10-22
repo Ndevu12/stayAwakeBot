@@ -26,10 +26,12 @@ class UncertainItem:
     `preview` is the file's own bytes (the caller renders them safely). `introduced_by` is the short
     id of the commit that added this file beside a payload, or "" when saw tied it to none;
     `arrived_with_removed` are the confirmed paths from that same commit saw is already removing;
-    `origin_unread` is True when git could not read what a commit added. `restore_candidate` is the
+    `origin_unread` is True when git could not read what a commit added.     `restore_candidate` is the
     `(mode, oid)` of an earlier clean version saw can put back, or None when it found none;
     `restore_source` is the short id of the commit that version comes from. `keep_content` is True
     when the operator may keep the file with a clean version (restore or supply), not only remove it.
+    `commit` is the full id `introduced_by` abbreviates, and `restore_commit` the full id
+    `restore_source` abbreviates, each "" when there is none.
     """
 
     path: str
@@ -44,6 +46,8 @@ class UncertainItem:
     restore_source: str = ""
     keep_content: bool = False
     origin_unread: bool = False
+    commit: str = ""
+    restore_commit: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,12 +118,14 @@ class DependencyQuestion:
     """One known-malicious package the project declares.
 
     `name` is the package, `versions` the versions found, and `declared_in` every file that
-    declares it.
+    declares it. `proposed` pairs a manifest path with the text removing the package would leave,
+    and only for a manifest that can be rewritten exactly.
     """
 
     name: str
     versions: tuple[str, ...]
     declared_in: tuple[str, ...]
+    proposed: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

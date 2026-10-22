@@ -11,7 +11,8 @@ from stayawake.cli.argtypes import no_stream_requested
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
 from stayawake.utils.host import saw_runs_here
-from stayawake.utils.json_documents import SCHEMA_VERSION_OF_EACH_DOCUMENT, command_of, versioned
+from stayawake.utils.json_documents import (FIX_ASK_SCHEMA_VERSION,
+                                            SCHEMA_VERSION_OF_EACH_DOCUMENT, command_of, versioned)
 from stayawake.utils.streaming import say
 
 
@@ -58,6 +59,13 @@ def offers_stream(commands: dict[str, argparse.ArgumentParser]) -> bool:
                for parser in commands.values() for action in parser._actions)
 
 
+def offers_ask(commands: dict[str, argparse.ArgumentParser]) -> bool:
+    """Say whether `saw fix` lets a program answer its questions. Takes the top-level commands by
+    name. Returns whether `fix` takes `--ask`."""
+    parser = commands.get("fix")
+    return parser is not None and any("--ask" in action.option_strings for action in parser._actions)
+
+
 def offers_progress(commands: dict[str, argparse.ArgumentParser]) -> bool:
     """Say whether scan, audit or fix write progress events. Takes the top-level commands by name.
     Returns whether one of them takes `--progress`."""
@@ -92,6 +100,9 @@ def capabilities(commands: dict[str, argparse.ArgumentParser]) -> dict:
     features = [".".join(command_of(document)) + ".json" for document in documents]
     if offers_progress(commands):
         features.append("progress.jsonl")
+    if offers_ask(commands):
+        documents["fix-ask"] = FIX_ASK_SCHEMA_VERSION
+        features.append("fix.ask.json")
     if offers_stream(commands):
         features.append("stream")
     features.extend(name for name in ("serve", "mcp") if name in commands)

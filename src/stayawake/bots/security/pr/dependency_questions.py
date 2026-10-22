@@ -3,6 +3,8 @@
 manifests. Nothing is removed without a yes."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from stayawake.bots.security.dependencies.remediation import (MALICIOUS, DependencyAction,
                                                               dependency_actions)
 from stayawake.bots.security.pr.resolve import TAKE_OUT, DependencyAnswer, DependencyQuestion
@@ -13,8 +15,9 @@ class Chooser:
     """The known-malicious packages a run removes from the project's manifests: each one asked
     about once, and removed only on the operator's yes."""
 
-    def __init__(self, resolver=None):
+    def __init__(self, resolver=None, root: Path | None = None):
         self._resolver = resolver
+        self._root = root
         self._answers: dict[str, bool] = {}
         self._actions: dict[str, dict[str, DependencyAction]] = {}
 
@@ -24,7 +27,7 @@ class Chooser:
         declared = manifest.declared_malicious(findings)
         for name, (versions, paths) in declared.items():
             if name not in self._answers:
-                self._answers[name] = self._said_yes(DependencyQuestion(name, versions, paths))
+                self._answers[name] = self._said_yes(self._question(name, versions, paths))
             mine = [f for f in findings if getattr(f, "package_name", None) == name
                     and getattr(f, "dependency_state", None) == MALICIOUS]
             for action in dependency_actions(mine).malicious:
@@ -36,6 +39,17 @@ class Chooser:
         command to remove it."""
         return tuple(action for name, actions in sorted(self._actions.items())
                      if not self._answers.get(name) for action in actions.values())
+
+    def _question(self, name: str, versions, paths) -> DependencyQuestion:
+        """Build one package question, with the rewritten manifest text where it can be computed.
+        Takes the package name, the versions and the manifests. Returns the question."""
+        proposed = []
+        if self._root is not None:
+            for path in paths:
+                text = manifest.proposed_text(self._root, path, {name})
+                if text is not None:
+                    proposed.append((path, text))
+        return DependencyQuestion(name, versions, paths, tuple(proposed))
 
     def _said_yes(self, question: DependencyQuestion) -> bool:
         """Put one question to the operator. Takes the question. Returns True only on a yes."""

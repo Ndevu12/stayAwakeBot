@@ -39,9 +39,9 @@ def _question(can_restore: bool, can_supply: bool) -> str:
     return ", ".join(parts) + ", or press Enter to keep > "
 
 
-def _read_supplied(stdin: TextIO | None, stderr: TextIO | None) -> bytes | None:
-    """Read a path from the operator and return that file's bytes, or None if it cannot be read."""
-    path = prompt.ask_line("  path to the replacement file > ", stdin=stdin, stderr=stderr)
+def read_supplied_file(path: str) -> bytes | None:
+    """Read the replacement file at `path`. Takes the path. Returns its bytes, or None when the
+    path is empty or cannot be read."""
     if not path or not path.strip():
         return None
     try:
@@ -49,6 +49,14 @@ def _read_supplied(stdin: TextIO | None, stderr: TextIO | None) -> bytes | None:
             return handle.read()
     except OSError:
         return None
+
+
+def _read_supplied(stdin: TextIO | None, stderr: TextIO | None) -> bytes | None:
+    """Read a path from the operator and return that file's bytes, or None if it cannot be read."""
+    path = prompt.ask_line("  path to the replacement file > ", stdin=stdin, stderr=stderr)
+    if path is None:
+        return None
+    return read_supplied_file(path)
 
 
 def ask_resolution(item: UncertainItem, *, stdin: TextIO | None = None,

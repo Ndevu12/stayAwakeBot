@@ -49,13 +49,22 @@ def _origin_line(item: UncertainItem) -> str:
     return "origin:  no commit ties it to the malware — treat with caution"
 
 
+def content_withheld(item: UncertainItem) -> bool:
+    """Say whether the terminal refuses to print this file's bytes. Takes the item. Returns the
+    answer."""
+    if item.category in _OPAQUE_CATEGORIES:
+        return True
+    raw = item.preview[:_READ_CAP]
+    return not raw or _is_binary(raw)
+
+
 def _body(item: UncertainItem) -> list[str]:
     """The file content as safe, gutter-prefixed lines, or a note when saw withholds it."""
     if item.category in _OPAQUE_CATEGORIES:
         return ["  saw is not printing the contents — judge this from the finding above, not the bytes"]
-    raw = item.preview[:_READ_CAP]
-    if not raw or _is_binary(raw):
+    if content_withheld(item):
         return [f"  binary or unreadable content ({len(item.preview)} bytes) — saw is not printing it"]
+    raw = item.preview[:_READ_CAP]
     lines = raw.decode("utf-8", errors="replace").split("\n")
     out = [f"  {i:>3}│ {textsafe.plain(ln, limit=_WIDTH)}"
            for i, ln in enumerate(lines[:_MAX_LINES], 1)]

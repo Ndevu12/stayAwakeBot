@@ -867,11 +867,11 @@ def _register_operator_removal(repo: Path, path: str, remove: dict, remove_shas:
     return _register_purge(repo, path, purge, purge_shas, survives, purge_holders)
 
 
-def _clean_ancestor(repo: Path, path: str, survives) -> tuple[tuple[str, str], str] | None:
+def _clean_ancestor(repo: Path, path: str, survives) -> tuple[tuple[str, str], str, str] | None:
     """Search `path`'s first-parent history, newest first, for the closest earlier version that
     differs from HEAD and carries no payload. Takes the repo, the path, and the `survives` oracle.
-    Returns that version's tree entry with the short id of the commit it came from, or None when the
-    history holds no such version."""
+    Returns that version's tree entry, the short id of the commit it came from, and the full id, or
+    None when the history holds no such version."""
     head = _stored_entry(repo, "HEAD", path)
     head_oid = head[1] if head else None
     for sha in delivery.history_of(repo, path, first_parent=True) or ():
@@ -879,7 +879,7 @@ def _clean_ancestor(repo: Path, path: str, survives) -> tuple[tuple[str, str], s
         if not answered or entry is None or entry[1] == head_oid:
             continue
         if not survives(sha, path):
-            return entry, sha[:12]
+            return entry, sha[:12], sha
     return None
 
 
@@ -952,12 +952,13 @@ def _unhandled_items(repo: Path, scan, unhandled: set[str], survives=None, *,
                 preview=gitutil.blob(repo, entry[1]) or b"",
                 confirmed=True, keep_content=True,
                 restore_candidate=(restorable[0] if restorable else None),
-                restore_source=(restorable[1] if restorable else "")))
+                restore_source=(restorable[1] if restorable else ""),
+                restore_commit=(restorable[2] if restorable else "")))
     return out
 
 
 def _path_items(repo: Path, paths, treeish: str, introduced_by: str = "", *,
-                unread: list[str]) -> list:
+                unread: list[str], commit: str = "") -> list:
     """Build the operator's list for the files a commit injected, each offered for removal. Takes the
     repo, the paths, the treeish to read them from, and the short id of the merge that introduced
     them. Returns one `UncertainItem` per path present at `treeish`; a path git could not read is
@@ -973,7 +974,7 @@ def _path_items(repo: Path, paths, treeish: str, introduced_by: str = "", *,
                 path=path, category="evil-merge", signature_id="",
                 description="injected by a merge saw could not model",
                 preview=gitutil.blob(repo, entry[1]) or b"",
-                introduced_by=introduced_by, confirmed=True))
+                introduced_by=introduced_by, confirmed=True, commit=commit))
     return out
 
 
@@ -1004,8 +1005,8 @@ def _uncertain_items(repo: Path, scan, taken: set[str],
                 signature_id=getattr(f, "signature_id", "") or "",
                 description=getattr(f, "description", "") or "",
                 preview=gitutil.blob(repo, entry[1]) or b"",
-                introduced_by=came.commit[:12], arrived_with_removed=came.payloads,
-                origin_unread=came.unread))
+                introduced_by=came.commit[:12], commit=came.commit,
+                arrived_with_removed=came.payloads, origin_unread=came.unread))
     return out
 
 
@@ -1856,7 +1857,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                            if _stored_entry(repo, sha, p) is not None]
                 if not present:
                     continue
-                for item in _path_items(repo, present, sha, sha[:12], unread=unread):
+                for item in _path_items(repo, present, sha, sha[:12], unread=unread, commit=sha):
                     asked.add(item.path)
                     try:
                         answer = resolver(item)
@@ -1881,7 +1882,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         for sha in blocked_infected:
             with _naming_unread(unread):
                 present = [p for p in infected[sha] if _stored_entry(repo, sha, p) is not None]
-                for item in _path_items(repo, present, sha, sha[:12], unread=unread):
+                for item in _path_items(repo, present, sha, sha[:12], unread=unread, commit=sha):
                     asked.add(item.path)
                     try:
                         answer = resolver(item)
