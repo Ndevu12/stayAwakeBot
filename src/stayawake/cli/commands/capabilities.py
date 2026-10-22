@@ -94,6 +94,7 @@ def capabilities(commands: dict[str, argparse.ArgumentParser]) -> dict:
         features.append("progress.jsonl")
     if offers_stream(commands):
         features.append("stream")
+    features.extend(name for name in ("serve", "mcp") if name in commands)
     return versioned("capabilities", {
         "version": __version__,
         "schema_versions": documents,

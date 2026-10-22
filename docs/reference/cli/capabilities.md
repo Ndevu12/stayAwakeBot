@@ -37,7 +37,9 @@ $ saw capabilities --json
     "hook.status.json",
     "capabilities.json",
     "progress.jsonl",
-    "stream"
+    "stream",
+    "serve",
+    "mcp"
   ],
   "platform": {
     "os": "linux",
@@ -50,7 +52,7 @@ $ saw capabilities --json
 | --- | --- |
 | `version` | The installed saw, as `saw --version` prints it. |
 | `schema_versions` | Each JSON document this saw prints, and the schema version it writes. A document is named after the command that prints it: `auth-status` is `saw auth status --json`. |
-| `features` | What this saw can do. `<command>.json` means that command takes `--json`. `progress.jsonl` means `saw scan`, `saw audit` and `saw fix` take `--progress=jsonl`. |
+| `features` | What this saw can do. `<command>.json` means that command takes `--json`. `progress.jsonl` means `saw scan`, `saw audit` and `saw fix` take `--progress=jsonl`. `serve` and `mcp` mean an editor can keep one saw open and an agent can ask it. |
 | `platform` | The operating system, and whether saw supports it. |
 
 ## Schema versions
