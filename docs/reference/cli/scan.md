@@ -5,8 +5,9 @@ description: saw scan — hunt for supply-chain worms across repositories. Read-
 # `saw scan`
 
 Hunt for supply-chain worms across repositories or directories. Read-only. A scan of a few targets
-prints its whole report to stdout, naming each finding by what it is and where, with a short preview
-of what was found; a large scan prints the summary and writes the full report for you (see below).
+prints its whole report to stdout, naming each finding by what it is and where it sits, including
+the line when it is one entry, with a short preview of what was found; a large scan prints the
+summary and writes the full report for you (see below).
 `--json` carries the full evidence. Progress goes to stderr. The last line is the verdict, and
 a scan that could not complete never reports clean. [`saw fix`](fix.md) removes what it finds.
 

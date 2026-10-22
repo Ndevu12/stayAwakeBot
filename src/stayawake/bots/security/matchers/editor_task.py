@@ -81,6 +81,22 @@ def command_lines(task: dict, task_file: dict) -> list[str]:
     return lines
 
 
+def command_texts(scope: dict) -> list[str]:
+    """Return the command strings one part of a task file writes, including each platform block.
+
+    Takes that part. Returns the strings, or an empty list when it writes none.
+    """
+    if not isinstance(scope, dict):
+        return []
+    found = []
+    command = command_text(scope.get("command"))
+    if command:
+        found.append(command)
+    for platform in _EDITOR_PLATFORMS:
+        found.extend(command_texts(scope.get(platform)))
+    return found
+
+
 def runs_when_the_folder_opens(task: dict) -> bool:
     """Tell whether the editor runs a task when its folder opens. Takes the task. Returns the answer."""
     run_options = task.get("runOptions")
