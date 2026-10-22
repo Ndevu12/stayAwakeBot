@@ -2148,6 +2148,11 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <td>One JSON event per line on stderr, so a program can draw its own progress. The report stays on stdout. The human progress stays off stderr. See <a href="#progress-events">Progress events</a>. Not accepted with <code>fix amend</code>.</td>
 </tr>
 <tr>
+<td><code>--ask=jsonl</code></td>
+<td><code>fix</code></td>
+<td>Let a program answer the questions a terminal asks during <code>saw fix</code> and <code>saw fix amend</code>. One JSON object per line: questions on stderr, answers on stdin. See <a href="fix/"><code>saw fix</code></a>. Not used for several repositories or <code>--remote</code>.</td>
+</tr>
+<tr>
 <td><code>-q</code>, <code>--quiet</code></td>
 <td><code>doctor</code>, <code>search</code></td>
 <td>Only the essentials.</td>

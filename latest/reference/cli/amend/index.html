@@ -2088,7 +2088,7 @@ commits are read the same way. A confirmed copy still in the rewritten history s
 named. A file left for you to recover, a copy on a branch or tag amend does not rewrite, and a file
 or submodule it could not read in full are named. Once the remote has moved, your clone's
 copy of the remote branches is refreshed to match it; if it cannot be, the run says so.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix amend [TARGETS...]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix amend [TARGETS...] [--ask=jsonl]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw fix amend --remote OWNER/REPO [OWNER/REPO...]
 </code></pre></div>
 <table>
@@ -2110,6 +2110,10 @@ copy of the remote branches is refreshed to match it; if it cannot be, the run s
 <tr>
 <td><code>-c FILE</code> / <code>-j N</code> / <code>--no-stream</code></td>
 <td>As for <a href="../scan/"><code>saw scan</code></a>.</td>
+</tr>
+<tr>
+<td><code>--ask=jsonl</code></td>
+<td>Let a program answer the questions a terminal asks, for one local repository. Questions and answers are the same JSON objects as for <a href="../fix/"><code>saw fix</code></a>. A file question is asked here and is not asked by <code>saw fix</code>. <code>--remote</code> and several repositories are not asked.</td>
 </tr>
 </tbody>
 </table>
@@ -2158,9 +2162,13 @@ saw never removes those by itself.</p>
 <li><strong>Your answers are kept.</strong> A file you keep is not asked about again, by <code>saw fix amend</code> or
   <code>saw fix</code>. A file you take out, here or in <code>saw fix</code>, is removed by later runs too, without asking
   again.</li>
-<li><strong>Anywhere else</strong> — no terminal, CI, several repositories, <code>--remote</code> — none of them is removed. The
-  run names them, is not called done, and remembers them, so running <code>saw fix amend</code> in that
-  repository on a terminal later asks about them.</li>
+<li><strong>With <code>--ask=jsonl</code>, for one repository,</strong> a program answers instead of a person. The questions
+  are the same ones a terminal is asked, including a file saw could not decide. See
+  <a href="../fix/"><code>saw fix</code></a>.</li>
+<li><strong>Anywhere else</strong> — no terminal and no <code>--ask=jsonl</code>, CI without <code>--ask=jsonl</code>, several
+  repositories, <code>--remote</code> — none of them is removed. The run names them, is not called done, and
+  remembers them, so running <code>saw fix amend</code> in that repository on a terminal later asks about
+  them. Several repositories and <code>--remote</code> are not asked even with <code>--ask=jsonl</code>.</li>
 <li><strong>When the malware is in the repository's first commit,</strong> saw names that commit for you to review.</li>
 <li><strong>Everything a merge brought in with the malware is taken out with it.</strong> When a copy of one of
   those files is still on another branch, tag or stash, the run names it for you to review; a copy

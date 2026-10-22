@@ -1977,8 +1977,14 @@ other files with no finding of their own, saw never removes them by itself.</p>
   payload is; your earlier commits keep it until <code>saw fix amend</code> rewrites them, and the run says
   where it is still stored. A file you keep is not asked about again. Your answers are kept for
   both commands.</li>
-<li><strong>Anywhere else</strong> — no terminal, CI, several repositories, <code>--remote</code> — the run removes none of
-  them, names them, and is not called done or clean.</li>
+<li><strong>With <code>--ask=jsonl</code>, for one repository,</strong> a program answers instead of a person. saw writes
+  each question as one ask event on stderr and reads one JSON answer from stdin, including when
+  those streams are pipes. <code>--json</code>, <code>--no-stream</code> and <code>--progress=jsonl</code> still do what they do;
+  a progress line is not an ask event, and <code>--no-stream</code> does not turn the
+  questions off. <code>saw capabilities</code> lists this as <code>fix.ask.json</code>, schema <code>fix-ask</code> version 1.</li>
+<li><strong>Anywhere else</strong> — no terminal and no <code>--ask=jsonl</code>, CI without <code>--ask=jsonl</code>, several
+  repositories, <code>--remote</code> — the run removes none of them, names them, and is not called done or
+  clean. Several repositories and <code>--remote</code> are not asked even with <code>--ask=jsonl</code>.</li>
 </ul>
 <p><code>fix</code> cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one <code>git show</code> puts it
@@ -1989,7 +1995,7 @@ collection — deliberate work, not something <code>fix</code> decides for you. 
 <p><a href="../amend/"><code>saw fix amend</code></a> is a different act: it amends the infected commits and force-updates
 the branches that carried them. Read that page before you run it.</p>
 <p>See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code> will and will not touch.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix [TARGETS...] [--pr] [--json] [--progress=jsonl] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--stream] [--no-stream]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix [TARGETS...] [--pr] [--json] [--progress=jsonl] [--ask=jsonl] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--stream] [--no-stream]
 </code></pre></div>
 <table>
 <thead>
@@ -2009,7 +2015,11 @@ the branches that carried them. Read that page before you run it.</p>
 </tr>
 <tr>
 <td><code>--json</code></td>
-<td>Print what each repository's fix came to as JSON on stdout, one record per repository. <code>remediation</code> is <code>pr</code>, <code>fork-pr</code>, <code>patch</code>, <code>issue</code>, <code>prepared</code>, <code>skipped</code> or <code>failed</code>. <code>cause</code> says why it came to less than a pull request, such as <code>actions-may-not-open-pull-requests</code>, and <code>pull_request</code> and <code>url</code> name the pull request. <code>branch</code> and <code>base</code> name the clean-up branch and the branch it was made from. <code>partial</code> is true when the fix is only part of what was found. <code>removed</code> lists what was removed. <code>uncommitted</code>, when there was uncommitted work, names the branch that holds it, or why it could not be saved. <code>history_holds_payload</code> says whether history still holds what was removed. <code>needs_review</code> lists what the report leaves for you to decide. Progress stays on stderr. Not accepted with <code>amend</code>.</td>
+<td>Print what each repository's fix came to as JSON on stdout, one record per repository. <code>remediation</code> is <code>pr</code>, <code>fork-pr</code>, <code>patch</code>, <code>issue</code>, <code>prepared</code>, <code>skipped</code> or <code>failed</code>. <code>cause</code> says why it came to less than a pull request, such as <code>actions-may-not-open-pull-requests</code>, and <code>pull_request</code> and <code>url</code> name the pull request. <code>branch</code> and <code>base</code> name the clean-up branch and the branch it was made from. <code>partial</code> is true when the fix is only part of what was found. <code>removed</code> lists what was removed. <code>uncommitted</code>, when there was uncommitted work, names the branch that holds it, or why it could not be saved. <code>history_holds_payload</code> says whether history still holds what was removed. <code>needs_review</code> lists what the report leaves for you to decide. <code>decisions</code> lists the choices that were made, in order: the question kind, the path or the package name, and the action. A delivery choice includes the commit and the paths taken out. Progress stays on stderr. Not accepted with <code>amend</code>.</td>
+</tr>
+<tr>
+<td><code>--ask=jsonl</code></td>
+<td>Let a program answer the questions a terminal asks, for one local repository. Each question is one JSON object on stderr, and each answer is one JSON object on stdin. The line is an ask event: <code>event</code> is <code>ask</code>, with <code>schema_version</code> 1 and an <code>id</code>. The question sits in <code>question</code>, and its <code>kind</code> is <code>delivery</code> or <code>package</code> on <code>saw fix</code>; <code>saw fix amend</code> also asks <code>file</code>. A progress line's <code>event</code> is <code>start</code>, <code>step</code>, <code>target</code>, or <code>done</code>. Commit and blob ids are full. A delivery answer is <code>keep</code>, or <code>take-out</code> with <code>chosen</code> paths from that question. A package answer is <code>keep</code> or <code>take-out</code>; a manifest's <code>proposed</code> text is included only when saw can rewrite that file exactly, and the file is not written until the answer is <code>take-out</code>. A file answer is <code>remove</code>, <code>keep</code>, <code>restore</code> when a clean version was offered, or <code>supply</code> with a <code>path</code> saw reads. A wrong id, an action that question does not allow, an empty <code>chosen</code>, a path that was not offered, or a <code>supply</code> path saw cannot read is not an answer: the question is repeated up to three times, then given up. End of input gives up at once. Giving up keeps a file and leaves a delivery or a package unanswered. The question does not contain the file's bytes. Not used for several repositories or <code>--remote</code>.</td>
 </tr>
 <tr>
 <td><code>--progress=jsonl</code></td>
