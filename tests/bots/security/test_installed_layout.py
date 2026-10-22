@@ -80,6 +80,10 @@ class TestEveryLayoutTheEcosystemProduces(unittest.TestCase):
         _pkg(self.root / "tools" / "scripts" / layout.INSTALLED_DIR / "buried", "buried")
         self.assertEqual(_names(self.root), ["buried"])
 
+    def test_a_tree_in_saws_folder_is_found(self):
+        _pkg(self.root / ".saw" / layout.INSTALLED_DIR / "hidden", "hidden")
+        self.assertEqual(_names(self.root), ["hidden"])
+
     def test_a_package_is_read_once_however_many_names_reach_it(self):
         real = _pkg(self.nm / ".pnpm" / "left-pad@1.0.0" / layout.INSTALLED_DIR / "left-pad",
                     "left-pad")

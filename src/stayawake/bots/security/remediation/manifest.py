@@ -8,12 +8,11 @@ from pathlib import Path
 
 from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.jsonc import load_jsonc
-from stayawake.bots.security.models import SAW_DIR
 from stayawake.utils.pathsafe import is_safe_write_target
 
 MANIFEST = "package.json"
 _DEP_FIELDS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
-_NOT_WALKED = frozenset({".git", "node_modules", SAW_DIR, ".venv"})
+_NOT_WALKED = frozenset({".git", "node_modules", ".venv"})
 _TRAILING_COMMA = re.compile(r",(\s*[}\]])")
 _MAX_MANIFEST_BYTES = 2_000_000
 
