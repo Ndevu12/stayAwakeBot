@@ -13,7 +13,8 @@ from stayawake.cli import commands
 from stayawake.cli._banner import render_welcome
 from stayawake.cli._meta import __version__
 from stayawake.cli.helptext import CommandHelpFormatter, examples_block
-from stayawake.utils import exitcodes, scratch, textsafe
+from stayawake.cli.argtypes import stream_requested
+from stayawake.utils import exitcodes, scratch, streaming, textsafe
 from stayawake.utils.terminal import color_level
 
 
@@ -95,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         return exitcodes.CLEAN
     if args.command != "watch":
         _say_watcher_notice()
+    streaming.ask_for_live_output(stream_requested(args))
     try:
         return args.func(args)
     except Exception as exc:                      # noqa: BLE001 — the last line before a traceback
@@ -102,4 +104,5 @@ def main(argv: list[str] | None = None) -> int:
               f"{textsafe.plain(f'{type(exc).__name__}: {exc}', limit=300)}", file=sys.stderr)
         return exitcodes.DID_NOT_RUN
     finally:
+        streaming.ask_for_live_output(False)
         _clear_scratch()

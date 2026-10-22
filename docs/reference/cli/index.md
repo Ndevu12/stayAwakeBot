@@ -56,7 +56,8 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 | `--progress=jsonl` | `scan`, `audit`, `fix` | One JSON event per line on stderr, so a program can draw its own progress. The report stays on stdout. The human progress stays off stderr. See [Progress events](#progress-events). Not accepted with `fix amend`. |
 | `-q`, `--quiet` | `doctor`, `search` | Only the essentials. |
 | `-f`, `--fail` | `audit`, `guard check` | Fail the run on a warning-level issue. **`saw scan` has no `--fail`** — the last line of the report is the verdict unconditionally. |
-| `--no-stream` | every command | Plain instant lines instead of live progress. |
+| `--stream` | every command | Show live progress even when the output is not a terminal. With `--json`, the document stays on stdout and the steps are separate. |
+| `--no-stream` | every command | Plain instant lines instead of live progress. This wins over `--stream`. |
 | `-j`, `--jobs N` | `scan`, `fix`, `guard check`/`setup`/`drift` | Work on up to N repositories at once. Default `auto` (one repo sequential, several use one worker per core); `-j 1` forces sequential. On `scan` it also splits one large repository across workers. |
 
 ## Progress events
@@ -84,7 +85,8 @@ Accepted anywhere the full verb is: `scan` → `s`, `sc`; `audit` → `au`;
 | `GH_SECURITY_TOKEN`, `GITHUB_TOKEN`, `GH_APP_*` | Credentials — see [credentials](credentials.md). |
 | `SLACK_WEBHOOK_URL`, `GITHUB_REPOSITORY` | Where `--alert` posts. |
 | `STAYAWAKE_REPORTS_DIR` | Default reports directory; `-d` overrides it. |
-| `STAYAWAKE_NO_STREAM=1` | As `--no-stream`. |
+| `STAYAWAKE_STREAM=1` | As `--stream`. `0`, `false`, `no` or `off` does not ask. |
+| `STAYAWAKE_NO_STREAM=1` | As `--no-stream`. This wins over `STAYAWAKE_STREAM`. |
 | `SAW_HOOK_DISABLED=1` | Skip the clone/pull hook for one command. |
 | `SAW_HOOK_TIMEOUT` | Wall-clock budget for a hook scan (default 60s). |
 | `NO_COLOR`, `CLICOLOR_FORCE` | Force colour off / on. |

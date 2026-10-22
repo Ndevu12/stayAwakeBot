@@ -93,7 +93,7 @@ the branches that carried them. Read that page before you run it.
 See [the safety envelope](../../explanation/safety-envelope.md) for what `fix` will and will not touch.
 
 ```text
-saw fix [TARGETS...] [--pr] [--json] [--progress=jsonl] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
+saw fix [TARGETS...] [--pr] [--json] [--progress=jsonl] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--stream] [--no-stream]
 ```
 
 | Option | Description |

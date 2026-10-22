@@ -22,20 +22,30 @@ def jobs(value: str) -> int | None:
 
 
 def add_no_stream_arg(parser: argparse.ArgumentParser) -> None:
-    """Register the shared `--no-stream` flag — same flag, dest, help and default everywhere.
+    """Register `--stream` and `--no-stream` — same flags, destinations, help and defaults everywhere.
 
-    The default is SUPPRESS rather than False so a subcommand that also carries the flag does not
-    overwrite a value its parent already set; read it with `no_stream()`, never off the namespace.
+    The default is SUPPRESS rather than False so a subcommand that also carries a flag does not
+    overwrite a value its parent already set. Read them with `stream_requested` and
+    `no_stream_requested`, never off the namespace.
     """
+    parser.add_argument("--stream", action="store_true", dest="force_stream",
+                        default=argparse.SUPPRESS,
+                        help="show live progress even when the output is not a terminal")
     parser.add_argument("--no-stream", action="store_true", dest="no_stream",
                         default=argparse.SUPPRESS,
-                        help="disable live progress/typewriter output (plain, instant lines)")
+                        help="plain instant lines; wins over --stream")
 
 
 def no_stream_requested(a: argparse.Namespace) -> bool:
-    """Whether this run was asked for plain, instant output. Takes the parsed namespace, returns
+    """Whether this run was asked for plain, instant output. Takes the parsed namespace. Returns
     False when the flag was given at no level."""
     return bool(getattr(a, "no_stream", False))
+
+
+def stream_requested(a: argparse.Namespace) -> bool:
+    """Whether this run asked for live output. Takes the parsed namespace. Returns False when the
+    flag was given at no level."""
+    return bool(getattr(a, "force_stream", False))
 
 
 def add_progress_arg(parser: argparse.ArgumentParser) -> None:
