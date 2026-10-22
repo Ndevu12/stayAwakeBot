@@ -119,6 +119,14 @@ class TestItWritesTheRepository(unittest.TestCase):
         self.assertIn("evil-pkg", (root / "package.json").read_text())
         self.assertNotIn('"evil-pkg"', (hidden / "package.json").read_text())
 
+    def test_a_manifest_among_copies_an_older_fix_kept_is_left_alone(self):
+        root = _repo()
+        kept = root / ".saw" / "rollback"
+        kept.mkdir(parents=True)
+        (kept / "package.json").write_text(MANIFEST, encoding="utf-8")
+        self.assertEqual(["package.json"], manifest.drop_dependencies(root, {"evil-pkg"}))
+        self.assertIn("evil-pkg", (kept / "package.json").read_text())
+
     def test_it_does_not_walk_into_an_installed_tree(self):
         root = _repo()
         vendored = root / "node_modules" / "left-pad"

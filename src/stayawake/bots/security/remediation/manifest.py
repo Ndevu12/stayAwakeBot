@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 
+from stayawake.bots.security.dependencies.layout import in_kept_copies
 from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.jsonc import load_jsonc
 from stayawake.utils.pathsafe import is_safe_write_target
@@ -113,6 +114,8 @@ def _declares(path: Path, names: set[str]) -> bool:
 def manifests(root: Path) -> list[Path]:
     """Takes a repository root. Returns every manifest saw may rewrite, deepest last."""
     found: list[Path] = []
+    if in_kept_copies(root):
+        return found
     stack = [root]
     while stack:
         here = stack.pop()
@@ -124,7 +127,7 @@ def manifests(root: Path) -> list[Path]:
             if entry.is_symlink():
                 continue
             if entry.is_dir():
-                if entry.name not in _NOT_WALKED:
+                if entry.name not in _NOT_WALKED and not in_kept_copies(entry):
                     stack.append(entry)
             elif entry.name == MANIFEST:
                 found.append(entry)

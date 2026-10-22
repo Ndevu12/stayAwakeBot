@@ -15,8 +15,8 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 - **A package installed in saw's folder is included with the others.** When you agree, `saw fix` also
-  takes a known-malicious package out of a `package.json` there. A copy an older `saw fix` left is
-  still removed once its fix is committed.
+  takes a known-malicious package out of a `package.json` there. A copy an older `saw fix` kept is
+  not treated as one of those packages, and it is still removed once its fix is committed.
 
 ## [0.14.0] - 2026-10-22
 

@@ -84,6 +84,10 @@ class TestEveryLayoutTheEcosystemProduces(unittest.TestCase):
         _pkg(self.root / ".saw" / layout.INSTALLED_DIR / "hidden", "hidden")
         self.assertEqual(_names(self.root), ["hidden"])
 
+    def test_a_tree_among_copies_an_older_fix_kept_is_not_found(self):
+        _pkg(self.root / ".saw" / "rollback" / layout.INSTALLED_DIR / "kept", "kept")
+        self.assertEqual(_names(self.root), [])
+
     def test_a_package_is_read_once_however_many_names_reach_it(self):
         real = _pkg(self.nm / ".pnpm" / "left-pad@1.0.0" / layout.INSTALLED_DIR / "left-pad",
                     "left-pad")
