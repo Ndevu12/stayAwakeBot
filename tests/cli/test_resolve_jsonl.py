@@ -102,11 +102,14 @@ class TestAskJsonl(unittest.TestCase):
         answer, asked, text = _run(_package(), [{"action": "keep"}], env={"CI": "true"})
         self.assertEqual(answer.action, KEEP)
         self.assertNotIn("press Enter", text)
+        self.assertEqual(asked[0]["event"], "ask")
         self.assertEqual(asked[0]["schema_version"], FIX_ASK_SCHEMA_VERSION)
-        self.assertEqual(asked[0]["kind"], "package")
-        self.assertNotIn("event", asked[0])
-        self.assertEqual(asked[0]["manifests"][0]["proposed"], '{\n  "dependencies": {}\n}\n')
-        self.assertNotIn("proposed", asked[0]["manifests"][1])
+        self.assertNotIn(asked[0]["event"], ("start", "step", "target", "done"))
+        question = asked[0]["question"]
+        self.assertEqual(question["kind"], "package")
+        self.assertNotIn("schema_version", question)
+        self.assertEqual(question["manifests"][0]["proposed"], '{\n  "dependencies": {}\n}\n')
+        self.assertNotIn("proposed", question["manifests"][1])
 
     def test_a_delivery_answer_takes_out_only_offered_paths(self):
         decisions: list = []
@@ -121,7 +124,8 @@ class TestAskJsonl(unittest.TestCase):
         self.assertEqual(answer.chosen, ("lib/other.js", "ok.js"))
         self.assertEqual(decisions, [{"kind": "delivery", "action": "take-out",
                                       "chosen": ["lib/other.js", "ok.js"]}])
-        body = asked[0]
+        self.assertEqual(asked[0]["event"], "ask")
+        body = asked[0]["question"]
         self.assertEqual(body["commit"], "a" * 40)
         self.assertEqual(body["known_as"], ["d" * 40])
         self.assertNotIn(body["commit"], body["known_as"])
@@ -168,7 +172,8 @@ class TestAskJsonl(unittest.TestCase):
         answer, asked, text = _run(item, [], decisions=decisions)
         self.assertEqual(answer.action, KEEP)
         self.assertEqual(decisions, [{"kind": "file", "path": "util.js", "action": "keep"}])
-        body = asked[0]
+        self.assertEqual(asked[0]["event"], "ask")
+        body = asked[0]["question"]
         self.assertEqual(body["kind"], "file")
         self.assertEqual(body["introduced_by"], "e" * 40)
         self.assertEqual(body["sha256"], hashlib.sha256(item.preview).hexdigest())
@@ -188,9 +193,10 @@ class TestAskJsonl(unittest.TestCase):
             answer, asked, _ = _run(item, [{"action": "supply", "path": str(path)}])
         self.assertEqual(answer.action, SUPPLY)
         self.assertEqual(answer.supply, b"export const ok = 1;\n")
-        self.assertEqual(asked[0]["restore"], {"commit": "f" * 40, "blob": blob})
-        self.assertIs(asked[0]["withheld"], False)
-        self.assertIs(asked[0]["supply"], True)
+        self.assertEqual(asked[0]["event"], "ask")
+        self.assertEqual(asked[0]["question"]["restore"], {"commit": "f" * 40, "blob": blob})
+        self.assertIs(asked[0]["question"]["withheld"], False)
+        self.assertIs(asked[0]["question"]["supply"], True)
 
     def test_restore_and_supply_are_refused_when_they_were_not_offered(self):
         answer, _, _ = _run(_file(), [{"action": "restore"},

@@ -28,6 +28,12 @@ def _emit(stderr: TextIO, payload: dict) -> None:
     stderr.flush()
 
 
+def _event(question_id: str, question: dict) -> dict:
+    """One ask event. Takes the question id and the question. Returns the line a caller reads."""
+    return {"event": "ask", "schema_version": FIX_ASK_SCHEMA_VERSION,
+            "id": question_id, "question": question}
+
+
 def _object(line: str, expected: str) -> dict | None:
     """Read one answer line. Takes the line and the question id. Returns the object when it names
     that id and an action, or None when it is not an answer."""
@@ -61,11 +67,9 @@ def _read(stdin: TextIO, stderr: TextIO, payload: dict,
     return None
 
 
-def _file_payload(item: UncertainItem, question_id: str) -> dict:
-    """One file question. Takes the item and its id. Returns the object, without the file's bytes."""
+def _file_question(item: UncertainItem) -> dict:
+    """One file question. Takes the item. Returns the question, without the file's bytes."""
     payload = {
-        "schema_version": FIX_ASK_SCHEMA_VERSION,
-        "id": question_id,
         "kind": "file",
         "path": item.path,
         "category": item.category,
@@ -87,7 +91,7 @@ def _file_payload(item: UncertainItem, question_id: str) -> dict:
 
 def _ask_file(item: UncertainItem, stdin: TextIO, stderr: TextIO) -> Resolution:
     """Ask about one file. Takes the item and the streams. Returns the resolution; giving up keeps it."""
-    payload = _file_payload(item, uuid.uuid4().hex)
+    payload = _event(uuid.uuid4().hex, _file_question(item))
 
     def accept(obj: dict) -> dict | None:
         action = obj["action"]
@@ -114,8 +118,8 @@ def _ask_file(item: UncertainItem, stdin: TextIO, stderr: TextIO) -> Resolution:
     return Resolution(KEEP)
 
 
-def _delivery_payload(question: DeliveryQuestion, question_id: str) -> dict:
-    """One delivery question. Takes the question and its id. Returns the object."""
+def _delivery_question(question: DeliveryQuestion) -> dict:
+    """One delivery question. Takes the question. Returns the object a caller reads inside the event."""
     counts = dict(question.named_by)
     files = []
     for arrived in question.files:
@@ -124,8 +128,6 @@ def _delivery_payload(question: DeliveryQuestion, question_id: str) -> dict:
             entry["named_by"] = counts[arrived.path]
         files.append(entry)
     return {
-        "schema_version": FIX_ASK_SCHEMA_VERSION,
-        "id": question_id,
         "kind": "delivery",
         "commit": question.commit,
         "known_as": list(question.known_as),
@@ -142,7 +144,7 @@ def _ask_delivery(question: DeliveryQuestion, stdin: TextIO, stderr: TextIO) -> 
     """Ask about one delivery. Takes the question and the streams. Returns the answer; giving up
     leaves it unanswered."""
     offered = {arrived.path for arrived in question.files}
-    payload = _delivery_payload(question, uuid.uuid4().hex)
+    payload = _event(uuid.uuid4().hex, _delivery_question(question))
 
     def accept(obj: dict) -> dict | None:
         if obj["action"] == KEEP:
@@ -161,8 +163,8 @@ def _ask_delivery(question: DeliveryQuestion, stdin: TextIO, stderr: TextIO) -> 
     return DeliveryAnswer(TAKE_OUT, tuple(dict.fromkeys(answer["chosen"])))
 
 
-def _package_payload(question: DependencyQuestion, question_id: str) -> dict:
-    """One package question. Takes the question and its id. Returns the object."""
+def _package_question(question: DependencyQuestion) -> dict:
+    """One package question. Takes the question. Returns the object a caller reads inside the event."""
     proposed = dict(question.proposed)
     manifests = []
     for path in question.declared_in:
@@ -171,8 +173,6 @@ def _package_payload(question: DependencyQuestion, question_id: str) -> dict:
             entry["proposed"] = proposed[path]
         manifests.append(entry)
     return {
-        "schema_version": FIX_ASK_SCHEMA_VERSION,
-        "id": question_id,
         "kind": "package",
         "name": question.name,
         "versions": list(question.versions),
@@ -183,7 +183,7 @@ def _package_payload(question: DependencyQuestion, question_id: str) -> dict:
 def _ask_package(question: DependencyQuestion, stdin: TextIO, stderr: TextIO) -> DependencyAnswer:
     """Ask about one package. Takes the question and the streams. Returns the answer; giving up
     leaves it unanswered."""
-    payload = _package_payload(question, uuid.uuid4().hex)
+    payload = _event(uuid.uuid4().hex, _package_question(question))
 
     def accept(obj: dict) -> dict | None:
         if obj["action"] in (KEEP, TAKE_OUT):
