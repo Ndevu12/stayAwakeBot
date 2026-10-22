@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-22
+
 ### Added
 - **An editor can ask saw without starting it for every question.** `saw serve --stdio` stays
   running and answers a scan, a scan of named files, a verdict, and an audit, with the same JSON
@@ -61,7 +63,7 @@ reader, not the mechanism or the weakness it closed.
   is named as well as a local one, such as `origin/feature`, with `saw fix amend` to take it out,
   so a fresh clone or a CI checkout no longer leaves the other branches unnamed.
 - **The README's SAW Guard example pins the current release.** It pins SAW Guard v0.2.0 by its
-  commit SHA, and the text beside it names scanner 0.13.1, the version the example installs.
+  commit SHA, and the text beside it names scanner 0.14.0, the version the example installs.
 - **A payload the repository's history still stores has its own heading.** `saw scan --history`
   shows it under **Stored in history**, apart from the notes on what the scan covered, and names it
   as `stored_payload` in `--json`; the verdict is unchanged. When a path keeps more versions than
@@ -1819,7 +1821,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.12.2...v0.12.3
