@@ -23,8 +23,8 @@ reader, not the mechanism or the weakness it closed.
   The `saw fix --json` record includes the choices that were made.
 
 ### Changed
-- **The README no longer has a sponsor section.** The commercial-license contact names the author and
-  does not show an email address.
+- **The README no longer has a sponsor section.** The commercial-license contact is
+  `saw()ndevuspace[]com`.
 
 ### Fixed
 - **A package installed in saw's folder is included with the others.** When you agree, `saw fix` also
