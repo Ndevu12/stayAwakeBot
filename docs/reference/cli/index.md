@@ -16,6 +16,8 @@ saw <command> [options] [TARGETS...]
 Bare `saw` prints the welcome screen; `saw -h` lists the commands. `stayawake` is an identical long
 alias, for scripts where a three-letter name might clash on `PATH`.
 
+On Windows, `saw scan` runs. `saw watch` and `saw harden` say they are not available on this system.
+
 | Command | What it does | Writes? |
 | --- | --- | --- |
 | [`scan`](scan.md) | Hunt for supply-chain worms and report | read-only |

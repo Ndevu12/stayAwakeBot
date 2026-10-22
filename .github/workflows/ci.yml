@@ -77,3 +77,22 @@ jobs:
             python -m tests.support.shard verify shares/tests-"$version"-share-*/share-*.json || status=1
           done
           exit $status
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          python-version: '3.12'
+
+      - name: Scan a folder
+        shell: bash
+        run: |
+          saw --version
+          dir="$(mktemp -d)"
+          printf 'hello\n' > "$dir/readme.txt"
+          saw scan "$dir" --json --no-stream --no-advisories

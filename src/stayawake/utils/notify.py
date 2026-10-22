@@ -70,7 +70,7 @@ class FreedesktopNotifier:
     """Raise a notification on Linux through the session bus's notification service."""
 
     def __init__(self, run=None, binary: str | None = None, runtime_dir: str | None = None,
-                 lstat=os.lstat, uid=os.getuid):
+                 lstat=os.lstat, uid=None):
         self._run = run
         self._binary = binary
         self._runtime_dir = runtime_dir

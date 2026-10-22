@@ -67,6 +67,8 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` reads every version another checkout of the repository keeps.** When it looks
   for the earlier versions of a file a merge swept, it reads every stash entry and what each checkout
   holds, as `saw scan --history` does, and when it cannot list one of them it says so for review.
+- **`saw` runs on Windows.** `saw scan` reports a folder there. `saw watch` and `saw harden` say
+  they are not available on this system.
 
 ## [0.13.1] - 2026-10-20
 

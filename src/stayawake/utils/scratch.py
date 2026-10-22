@@ -49,7 +49,7 @@ def _write_record(where: Path) -> None:
         (where / RECORD).write_text(json.dumps({
             "version": 1,
             "pid": os.getpid(),
-            "uid": os.getuid(),
+            "uid": os.getuid() if hasattr(os, "getuid") else None,
             "tmp_root": tempfile.gettempdir(),
         }, indent=2) + "\n", encoding="utf-8")
     except OSError:

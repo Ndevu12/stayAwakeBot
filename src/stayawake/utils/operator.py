@@ -14,9 +14,13 @@ privilege at all.
 from __future__ import annotations
 
 import os
-import pwd
 from dataclasses import dataclass
 from pathlib import Path
+
+try:
+    import pwd
+except ImportError:
+    pwd = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +82,8 @@ def _account_named_by_uid(env):
     `str.isdigit` is true for characters `int` refuses (`'²'`), and catching only `KeyError` took
     that `ValueError` out through `acting_uid` into every caller.
     """
+    if pwd is None:
+        return None
     for var in _ESCALATION_UIDS:
         uid = env.get(var)
         if not uid:
@@ -90,6 +96,8 @@ def _account_named_by_uid(env):
 
 
 def _account_named_by_name(env):
+    if pwd is None:
+        return None
     for var in _ESCALATION_NAMES:
         name = env.get(var)
         if not name:

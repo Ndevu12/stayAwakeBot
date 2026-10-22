@@ -243,7 +243,8 @@ class RedirectedPath(OSError):
 
 def trusted_link_owners() -> set[int]:
     """Name who may own a link a write follows: root, and the user writing. Returns their ids."""
-    return {0, os.geteuid()}
+    geteuid = getattr(os, "geteuid", None)
+    return {0} if geteuid is None else {0, geteuid()}
 
 
 def _placed_by_trusted(link: os.stat_result, holder: os.stat_result, owners: set[int]) -> bool:

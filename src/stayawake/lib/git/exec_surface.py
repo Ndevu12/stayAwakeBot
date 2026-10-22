@@ -260,7 +260,10 @@ def _plain_git_dir(start: Path) -> Path | None:
             git_dir = top
         if git_dir is None or not _is_git_dir(git_dir):
             return None
-        return git_dir if os.stat(git_dir).st_uid == os.getuid() else None
+        getuid = getattr(os, "getuid", None)
+        if getuid is None:
+            return None
+        return git_dir if os.stat(git_dir).st_uid == getuid() else None
     except (OSError, ValueError):
         return None
 

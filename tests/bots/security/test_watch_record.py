@@ -111,6 +111,12 @@ class TestStateFilesAreReadSafely(unittest.TestCase):
             self.assertEqual(watchack.acknowledgement_path().parent,
                              watchrecord.record_path().parent)
 
+    def test_without_a_password_database_the_folder_is_the_home_folder(self):
+        with mock.patch.object(watchrecord, "pwd", None), \
+             mock.patch.object(watchrecord.operator, "resolve", return_value=None):
+            self.assertEqual(watchrecord.shared_folder(),
+                             Path.home() / ".local" / "state" / "saw")
+
 
 class TestHardenSettlesOnlyWhatItCounted(unittest.TestCase):
     def test_an_acknowledgement_is_written_apart_from_the_record_and_read_back(self):

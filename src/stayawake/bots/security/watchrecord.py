@@ -6,10 +6,14 @@ from __future__ import annotations
 import json
 import math
 import os
-import pwd
 import re
 import secrets
 from pathlib import Path
+
+try:
+    import pwd
+except ImportError:
+    pwd = None
 
 from stayawake.utils import atomicwrite, operator, pathsafe
 
@@ -30,17 +34,25 @@ def shared_folder() -> Path:
     who = operator.resolve()
     if who is not None and who.raised:
         return who.home / ".local" / "state" / "saw"
-    try:
-        home = Path(pwd.getpwuid(os.getuid()).pw_dir)
-    except (KeyError, OSError):
-        home = Path.home()
-    return home / ".local" / "state" / "saw"
+    return _home_of_this_account() / ".local" / "state" / "saw"
+
+
+def _home_of_this_account() -> Path:
+    """The home folder of the account saw is running as. Returns it."""
+    getuid = getattr(os, "getuid", None)
+    if pwd is not None and getuid is not None:
+        try:
+            return Path(pwd.getpwuid(getuid()).pw_dir)
+        except (KeyError, OSError):
+            pass
+    return Path.home()
 
 
 def running_as_root() -> bool:
     """Tell whether saw runs as root, as it does through `sudo` and similar tools. Returns the
     answer."""
-    return os.geteuid() == 0
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid is not None and geteuid() == 0
 
 
 def owned_by_another_account(where: Path) -> bool:
