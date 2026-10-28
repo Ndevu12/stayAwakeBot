@@ -38,7 +38,8 @@ class InstalledPackageAuditMatcher(Matcher):
         truncated: list = []
         findings: list[Finding] = []
         for tree in self._trees:
-            groups = (list(tree.installations(target)) if hasattr(tree, "installations")
+            declared = getattr(type(tree), "installations", None)
+            groups = (list(tree.installations(target)) if callable(declared)
                       else [(None, None, list(tree.read(target)))])
             for owner, folder, installed in groups:
                 locked = (self._locked(tree.ecosystem, _lock_root(target, owner, folder))
