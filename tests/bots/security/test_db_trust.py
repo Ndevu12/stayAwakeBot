@@ -15,7 +15,7 @@ from pathlib import Path
 from stayawake.bots.security.dependencies import db
 from stayawake.bots.security.dependencies.purl import Purl
 from stayawake.cli.commands import db as db_cmd
-from tests.bots.security._osv_fixtures import mal_record, osv_zip
+from tests.bots.security._osv_fixtures import mal_record, osv_zip, vuln_record
 
 
 def _build(cache, members):
@@ -28,6 +28,7 @@ class TestSnapshot(unittest.TestCase):
     def test_manifest_has_snapshot_and_timestamp(self):
         m = _build(Path(tempfile.mkdtemp()), {"MAL.json": mal_record("evil", ["1.0.0"])})
         self.assertEqual(m["schema"], 2)
+        self.assertEqual(m["filter"], 1)
         self.assertTrue(m["snapshot"])
         self.assertTrue(m["generated_at"])
 
@@ -38,6 +39,52 @@ class TestSnapshot(unittest.TestCase):
         c = _build(Path(tempfile.mkdtemp()), {"MAL.json": mal_record("evil", ["2.0.0"])})["snapshot"]
         self.assertEqual(a, b)
         self.assertNotEqual(a, c)
+
+
+class TestADatabaseFromBeforeThisVersion(unittest.TestCase):
+    def _old(self):
+        cache = Path(tempfile.mkdtemp())
+        _build(cache, {"MAL.json": mal_record("oldpkg", ["2.0.0"], rid="MAL-2024-9"),
+                       "CVE.json": vuln_record("leftpad", ["1.0.0"])})
+        manifest = cache / "manifest.json"
+        data = json.loads(manifest.read_text())
+        del data["filter"]
+        manifest.write_text(json.dumps(data))
+        db._CORPUS_MEMO.clear()
+        return cache
+
+    def test_it_does_not_call_a_package_known_malicious(self):
+        cache = self._old()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            corpus = db.load_corpus(cache)
+        self.assertIsNotNone(corpus)
+        self.assertIsNone(corpus.malicious_match(Purl("npm", "oldpkg", "2.0.0")))
+        self.assertTrue(corpus.vulnerability_matches(Purl("npm", "leftpad", "1.0.0")))
+        self.assertIn("predates this version", err.getvalue())
+        self.assertTrue(db.cache_status(cache)["present"])
+        self.assertFalse(db.cache_status(cache)["malware_current"])
+
+    def test_status_says_so(self):
+        cache = self._old()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = db_cmd.run_status(argparse.Namespace(
+                cache_dir=str(cache), require_snapshot=None, max_age_days=None))
+        self.assertEqual(rc, 2)
+        self.assertIn("predates this saw", out.getvalue())
+        self.assertIn("saw db update", err.getvalue())
+
+    def test_the_inline_seed_still_matches(self):
+        from stayawake.bots.security.dependencies import AdvisoryStore
+        cache = self._old()
+        sig = {"id": "malicious-dependency", "corpus": True, "known_bad": ["html-to-gutenberg@4.2.11"]}
+        with redirect_stderr(io.StringIO()):
+            store = AdvisoryStore.default([sig], cache_dir=cache)
+            seeded = store.advisory_for(Purl("npm", "html-to-gutenberg", "4.2.11"))
+            stale = store.advisory_for(Purl("npm", "oldpkg", "2.0.0"))
+        self.assertIsNotNone(seeded)
+        self.assertIsNone(stale)
 
 
 class TestCacheStatus(unittest.TestCase):

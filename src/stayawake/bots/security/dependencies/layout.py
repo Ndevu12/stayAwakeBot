@@ -63,6 +63,24 @@ def installed_trees(root: Path, unreadable: list[Path] | None = None) -> list[Pa
     return sorted(found, key=lambda p: len(p.parts), reverse=True)
 
 
+def linked_outside(path: Path, root: Path) -> Path | None:
+    """Return the real directory when `path` is a symlink that leaves `root`.
+
+    Takes the path and the root. Returns that directory, or None when `path` is not a link, the
+    link stays inside `root`, or the link cannot be resolved.
+    """
+    try:
+        if not path.is_symlink():
+            return None
+        real = path.resolve(strict=True)
+        real.relative_to(root.resolve())
+    except ValueError:
+        return real
+    except (OSError, RuntimeError):
+        return None
+    return None
+
+
 def package_dirs(tree: Path, depth: int = 0) -> Iterator[Path]:
     """Every package directory inside one installed tree, whatever the layout.
 

@@ -125,6 +125,8 @@ def run_status(a: argparse.Namespace) -> int:
              + (f"  ({age} day(s) ago)" if age is not None else ""),
              f"  integrity  {integrity}",
              f"  totals     {s['total_malicious']} malicious · {s['total_vulnerabilities']} vulnerabilities",
+             *(["  known-malicious  not used — this database predates this saw; run `saw db update`"]
+               if schema_ok and not s.get("malware_current", True) else []),
              *(f"    {eco:<10} {c['malicious']:>7} malicious · {c['vulnerabilities']:>7} vulnerabilities"
                for eco, c in s["ecosystems"].items())]
     say("\n".join(lines), no_stream=no_stream)
@@ -134,6 +136,10 @@ def run_status(a: argparse.Namespace) -> int:
         # Unusable cache (falls back to the inline seed), but NOT a security incident.
         print(f"✗ advisory DB is an older format (schema {s['schema']}) — run `saw db update`.",
               file=sys.stderr)
+        rc = 2
+    elif schema_ok and not s.get("malware_current", True):
+        print("✗ this advisory database predates this saw, so it is not used to call a package "
+              "known-malicious. Run `saw db update`.", file=sys.stderr)
         rc = 2
     elif not s["integrity_ok"]:
         print("✗ integrity check failed — the cache was corrupted or tampered.", file=sys.stderr)

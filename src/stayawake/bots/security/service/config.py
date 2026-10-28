@@ -91,6 +91,10 @@ def _require_db_or_error() -> int | None:
         print(f"saw scan --require-db: advisory DB is an older format (schema {st.get('schema')}) "
               "— run `saw db update`.", file=sys.stderr)
         return 2
+    if not st.get("malware_current", True):
+        print("saw scan --require-db: this advisory database predates this saw, so it is not used "
+              "to call a package known-malicious — run `saw db update`.", file=sys.stderr)
+        return 2
     if not st.get("integrity_ok"):
         print("saw scan --require-db: advisory DB integrity check FAILED "
               f"({', '.join(st.get('mismatches', []))}) — run `saw db update`.", file=sys.stderr)

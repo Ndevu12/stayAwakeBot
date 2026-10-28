@@ -18,5 +18,8 @@ saw db status [--cache-dir DIR] [--require-snapshot DIGEST] [--max-age-days N] [
 | `--require-snapshot DIGEST` | `status` fails unless the snapshot equals `DIGEST` — pin it for reproducible CI. |
 | `--max-age-days N` | `status` fails if the corpus is older than `N` days. Unknown age counts as stale. |
 
+A database saved by an older saw is not used to call a package known-malicious until `saw db update`.
+`saw db status` says so.
+
 After an update, [`saw hook`](hook.md) and the pre-push check read again what they had already
 checked, so a newly listed package is reported the next time it is pushed or checked out.

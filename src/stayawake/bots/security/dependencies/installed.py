@@ -92,6 +92,32 @@ class InstalledTree:
         yield
 
 
+def _project_of(real_tree: Path) -> Path:
+    """Return the project an install outside the target belongs to. Takes the real install
+    directory. Returns the nearest directory at or above it that contains `.git`, or its parent
+    when there is none."""
+    start = real_tree.parent
+    for directory in (start, *start.parents):
+        try:
+            if (directory / ".git").exists():
+                return directory
+        except OSError:
+            break
+        if directory.parent == directory:
+            break
+    return start
+
+
+def _folder_of(project: Path, real_tree: Path) -> str:
+    """Return the folder of `project` that holds `real_tree`. Takes both. Returns `.` when the
+    install sits at the top of the project, or when that folder cannot be named."""
+    try:
+        relative = real_tree.parent.resolve().relative_to(project.resolve()).as_posix()
+    except (OSError, ValueError):
+        return "."
+    return "." if relative in ("", ".") else relative
+
+
 def _is_regular(path: str) -> bool:
     """True only for a REGULAR file (following a symlink to its target). False for a FIFO/socket/device
     — a blocking `open()` on one would HANG the scan forever with no writer — or when the path
@@ -149,14 +175,31 @@ class NpmInstalledTree(InstalledTree):
     installed_dir = layout.INSTALLED_DIR
 
     def read(self, target) -> Iterator[InstalledPackage]:
+        for _owner, _folder, packages in self.installations(target):
+            yield from packages
+
+    def installations(self, target) -> Iterator[tuple[Path | None, str | None, list[InstalledPackage]]]:
+        """Each installed tree as the project it belongs to, the folder of that project it sits in,
+        and its packages.
+
+        Takes the scan target. Yields `(None, None, packages)` when the tree lives inside the
+        target. Yields the other project, the folder of that project, and the packages when the
+        tree is a link to an install outside the target.
+        """
         seen: set[str] = set()
         for tree in layout.installed_trees(target.scan_root):
+            real = layout.linked_outside(tree, target.scan_root)
+            owner = _project_of(real) if real is not None else None
+            folder = _folder_of(owner, real) if owner is not None and real is not None else None
+            packages: list[InstalledPackage] = []
             for pkg_dir in layout.package_dirs(tree):
                 key = str(pkg_dir)
                 if key in seen:
                     continue
                 seen.add(key)
-                yield from self._pkg(str(pkg_dir), target.root)
+                packages.extend(self._pkg(str(pkg_dir), target.root))
+            if packages:
+                yield owner, folder, packages
 
     def _pkg(self, pkg_dir: str, repo_root: Path) -> Iterator[InstalledPackage]:
         manifest = os.path.join(pkg_dir, "package.json")
