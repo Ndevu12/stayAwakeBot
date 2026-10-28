@@ -129,10 +129,46 @@ class TestInstalledPackageAudit(unittest.TestCase):
         (pkg / "package.json").write_text(json.dumps({"name": "undici", "version": "9.9.9"}))
         work = Path(tempfile.mkdtemp())
         (work / "node_modules").symlink_to(owner / "node_modules", target_is_directory=True)
+        (work / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/undici": {"version": "9.9.9"}}}))
         findings = _scan(Target(work, str(work), ScanOptions()))
         self.assertEqual([f.signature_id for f in findings], ["ghost-package"])
-        self.assertIn("9.9.9", findings[0].evidence)
-        self.assertIn("7.30.0", findings[0].evidence)
+        self.assertIn(f"the lockfile in {owner.resolve()} lists undici at 7.30.0", findings[0].evidence)
+
+    def test_a_yarn_lockfile_of_the_linked_install_is_the_one_compared(self):
+        owner = Path(tempfile.mkdtemp())
+        (owner / ".git").mkdir()
+        (owner / "yarn.lock").write_text(
+            'undici@^7.30.0:\n  version "7.30.0"\n'
+            'markdown-it@^14.3.2:\n  version "14.3.2"\n', encoding="utf-8")
+        for name, version in (("undici", "7.30.0"), ("markdown-it", "14.3.2")):
+            pkg = owner / "node_modules" / name
+            pkg.mkdir(parents=True)
+            (pkg / "package.json").write_text(json.dumps({"name": name, "version": version}))
+        work = Path(tempfile.mkdtemp())
+        (work / "yarn.lock").write_text(
+            'undici@^7.30.1:\n  version "7.30.1"\n'
+            'markdown-it@^14.3.3:\n  version "14.3.3"\n', encoding="utf-8")
+        (work / "node_modules").symlink_to(owner / "node_modules", target_is_directory=True)
+        findings = _scan(Target(work, str(work), ScanOptions()))
+        self.assertFalse([f for f in findings if f.signature_id == "ghost-package"])
+
+    def test_a_nested_link_uses_the_lockfile_above_that_install(self):
+        owner = Path(tempfile.mkdtemp())
+        (owner / ".git").mkdir()
+        (owner / "yarn.lock").write_text('undici@^7.30.0:\n  version "7.30.0"\n', encoding="utf-8")
+        pkg = owner / "apps" / "web" / "node_modules" / "undici"
+        pkg.mkdir(parents=True)
+        (pkg / "package.json").write_text(json.dumps({"name": "undici", "version": "7.30.0"}))
+        work = Path(tempfile.mkdtemp())
+        (work / "yarn.lock").write_text('undici@^7.30.1:\n  version "7.30.1"\n', encoding="utf-8")
+        nested = work / "apps" / "web"
+        nested.mkdir(parents=True)
+        (nested / "node_modules").symlink_to(owner / "apps" / "web" / "node_modules",
+                                             target_is_directory=True)
+        findings = _scan(Target(work, str(work), ScanOptions()))
+        self.assertFalse([f for f in findings if f.signature_id == "ghost-package"])
 
     def test_a_known_malicious_package_in_a_linked_install_is_still_reported(self):
         owner = Path(tempfile.mkdtemp())

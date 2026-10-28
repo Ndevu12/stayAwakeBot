@@ -55,7 +55,7 @@ class InstalledPackageAuditMatcher(Matcher):
                         findings.append(_malicious(advisory, pkg))
                     elif tree.ghost_reconcilable and comparable and not locked.lists(pkg, where):
                         findings.append(_ghost(by_id.get("ghost-package"), pkg,
-                                               locked.versions_of(pkg, where)))
+                                               locked.versions_of(pkg, where), owner))
                     if hook_patterns and pkg.hooks:
                         findings.append(_lifecycle_hook(hook_sig, hook_patterns, pkg))
                     if entry_check is not None:
@@ -206,15 +206,16 @@ def _malicious(advisory, pkg) -> Finding:
         reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 
-def _ghost(sig, pkg, listed_at: set | None = None) -> Finding | None:
+def _ghost(sig, pkg, listed_at: set | None = None, place: Path | None = None) -> Finding | None:
     if sig is None:
         return None
+    lockfile = "the lockfile" if place is None else f"the lockfile in {place}"
     if listed_at:
         shown = ", ".join(sorted(v for v in listed_at if v))
-        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed, but the lockfile lists {pkg.name} "
+        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed, but {lockfile} lists {pkg.name} "
                     f"at {shown} — a postinstall may have swapped it")
     else:
-        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed but absent from the lockfile — "
+        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed but absent from {lockfile} — "
                     f"a postinstall may have dropped it off-lockfile")
     return Finding(
         signature_id=sig["id"], category=sig["category"],
