@@ -108,8 +108,7 @@ class _Lockfiles:
         return set().union(*found) if found else None
 
 
-_OWNER_FILES = ("package.json", "package-lock.json", "npm-shrinkwrap.json",
-                "yarn.lock", "pnpm-lock.yaml")
+_OWNER_FILES = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
 
 
 class _LockRoot:

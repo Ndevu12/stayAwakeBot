@@ -136,6 +136,26 @@ class TestInstalledPackageAudit(unittest.TestCase):
         self.assertEqual([f.signature_id for f in findings], ["ghost-package"])
         self.assertIn(f"the lockfile in {owner.resolve()} lists undici at 7.30.0", findings[0].evidence)
 
+    def test_a_pin_in_package_json_does_not_hide_a_different_lockfile_version(self):
+        owner = Path(tempfile.mkdtemp())
+        (owner / ".git").mkdir()
+        (owner / "package.json").write_text(json.dumps(
+            {"name": "app", "dependencies": {"undici": "9.9.9"}}))
+        (owner / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/undici": {"version": "7.30.0"}}}))
+        pkg = owner / "node_modules" / "undici"
+        pkg.mkdir(parents=True)
+        (pkg / "package.json").write_text(json.dumps({"name": "undici", "version": "9.9.9"}))
+        work = Path(tempfile.mkdtemp())
+        (work / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/undici": {"version": "7.30.0"}}}))
+        (work / "node_modules").symlink_to(owner / "node_modules", target_is_directory=True)
+        findings = _scan(Target(work, str(work), ScanOptions()))
+        self.assertEqual([f.signature_id for f in findings], ["ghost-package"])
+        self.assertIn("lists undici at 7.30.0", findings[0].evidence)
+
     def test_a_yarn_lockfile_of_the_linked_install_is_the_one_compared(self):
         owner = Path(tempfile.mkdtemp())
         (owner / ".git").mkdir()

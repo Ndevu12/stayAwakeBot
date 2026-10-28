@@ -17,7 +17,8 @@ reader, not the mechanism or the weakness it closed.
 - **A linked `node_modules`, or a package directory that is a link to another install, is compared
   with the lockfile of the install it points at.** A scan no longer reports each package there as
   swapped against this folder's lockfile. When a package does not match, the finding names the
-  folder that lockfile is in.
+  folder that lockfile is in. A version named in `package.json` is still reported when that
+  lockfile lists another.
 - **An advisory its publisher withdrew is not reported from a database saved by an older saw.** A
   package that database still lists as known-malicious is still reported. `saw db status` says the
   database predates this saw. `saw db update` replaces it.
