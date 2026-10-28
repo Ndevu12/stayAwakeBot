@@ -14,11 +14,13 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
-- **A linked `node_modules` is compared with the lockfile of the install it points at.** A scan no
-  longer reports each package there as swapped against this folder's lockfile. When a package does
-  not match, the finding names the folder that lockfile is in.
-- **An advisory database saved by an older saw is not used to call a package known-malicious.**
-  `saw db status` says so. `saw db update` replaces it.
+- **A linked `node_modules`, or a package directory that is a link to another install, is compared
+  with the lockfile of the install it points at.** A scan no longer reports each package there as
+  swapped against this folder's lockfile. When a package does not match, the finding names the
+  folder that lockfile is in.
+- **An advisory its publisher withdrew is not reported from a database saved by an older saw.** A
+  package that database still lists as known-malicious is still reported. `saw db status` says the
+  database predates this saw. `saw db update` replaces it.
 
 ## [0.15.0] - 2026-10-22
 

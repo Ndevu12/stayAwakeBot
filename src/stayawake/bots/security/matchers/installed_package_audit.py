@@ -44,18 +44,19 @@ class InstalledPackageAuditMatcher(Matcher):
             for owner, folder, installed in groups:
                 locked = (self._locked(tree.ecosystem, _lock_root(target, owner, folder))
                           if (installed and tree.ghost_reconcilable) else _Lockfiles({}))
-                comparable = owner is None or bool(locked.listed)
-                if owner is not None and installed and not comparable:
-                    _note_uncompared(target, owner)
+                place = owner
+                if owner is not None and installed and tree.ghost_reconcilable and not locked.listed:
+                    locked = self._locked(tree.ecosystem, target)
+                    place = None
                 for pkg in installed:
                     where = folder if folder is not None else tree.install_folder(pkg.path)
                     advisory = (store.advisory_for(Purl(tree.ecosystem, pkg.name, pkg.version))
                                 if (pkg.version and not store.is_empty()) else None)
                     if advisory is not None:
                         findings.append(_malicious(advisory, pkg))
-                    elif tree.ghost_reconcilable and comparable and not locked.lists(pkg, where):
+                    elif tree.ghost_reconcilable and not locked.lists(pkg, where):
                         findings.append(_ghost(by_id.get("ghost-package"), pkg,
-                                               locked.versions_of(pkg, where), owner))
+                                               locked.versions_of(pkg, where), place))
                     if hook_patterns and pkg.hooks:
                         findings.append(_lifecycle_hook(hook_sig, hook_patterns, pkg))
                     if entry_check is not None:
@@ -170,18 +171,6 @@ def _directories_up_to(start: Path, stop: Path) -> list[Path]:
         if here == stop or here.parent == here:
             return found
         here = here.parent
-
-
-def _note_uncompared(target, owner: Path) -> None:
-    """Record that a linked install had no lockfile to compare. Takes the target and the other
-    project. Returns nothing."""
-    notes = getattr(target, "coverage_notes", None)
-    if notes is None:
-        return
-    note = (f"node_modules is a link into {owner}, which has no lockfile, so the packages there "
-            f"were not compared with one.")
-    if note not in notes:
-        notes.append(note)
 
 
 def _at_or_above(folder: str, here: str) -> bool:

@@ -141,18 +141,22 @@ class TestInstalledPackageAudit(unittest.TestCase):
         (owner / ".git").mkdir()
         (owner / "yarn.lock").write_text(
             'undici@^7.30.0:\n  version "7.30.0"\n'
-            'markdown-it@^14.3.2:\n  version "14.3.2"\n', encoding="utf-8")
-        for name, version in (("undici", "7.30.0"), ("markdown-it", "14.3.2")):
+            'markdown-it@^14.3.2:\n  version "14.3.2"\n'
+            'rolldown@^1.1.5:\n  version "1.1.5"\n', encoding="utf-8")
+        for name, version in (("undici", "7.30.0"), ("markdown-it", "14.3.2"), ("rolldown", "1.1.5")):
             pkg = owner / "node_modules" / name
             pkg.mkdir(parents=True)
             (pkg / "package.json").write_text(json.dumps({"name": name, "version": version}))
         work = Path(tempfile.mkdtemp())
         (work / "yarn.lock").write_text(
             'undici@^7.30.1:\n  version "7.30.1"\n'
-            'markdown-it@^14.3.3:\n  version "14.3.3"\n', encoding="utf-8")
+            'markdown-it@^14.3.3:\n  version "14.3.3"\n'
+            'rolldown@^1.2.15:\n  version "1.2.15"\n', encoding="utf-8")
         (work / "node_modules").symlink_to(owner / "node_modules", target_is_directory=True)
         findings = _scan(Target(work, str(work), ScanOptions()))
         self.assertFalse([f for f in findings if f.signature_id == "ghost-package"])
+        owner_findings = _scan(Target(owner, str(owner), ScanOptions()))
+        self.assertFalse([f for f in owner_findings if f.signature_id == "ghost-package"])
 
     def test_a_nested_link_uses_the_lockfile_above_that_install(self):
         owner = Path(tempfile.mkdtemp())
@@ -184,6 +188,21 @@ class TestInstalledPackageAudit(unittest.TestCase):
         findings = _scan(Target(work, str(work), ScanOptions()), malicious={"evil@9.9.9"})
         self.assertEqual([f.signature_id for f in findings], ["malicious-installed-package"])
 
+    def test_a_known_malicious_linked_package_directory_is_still_reported(self):
+        owner = Path(tempfile.mkdtemp())
+        (owner / ".git").mkdir()
+        (owner / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/evil": {"version": "9.9.9"}}}))
+        real = owner / "node_modules" / "evil"
+        real.mkdir(parents=True)
+        (real / "package.json").write_text(json.dumps({"name": "evil", "version": "9.9.9"}))
+        work = Path(tempfile.mkdtemp())
+        (work / "node_modules").mkdir()
+        (work / "node_modules" / "evil").symlink_to(real, target_is_directory=True)
+        findings = _scan(Target(work, str(work), ScanOptions()), malicious={"evil@9.9.9"})
+        self.assertEqual([f.signature_id for f in findings], ["malicious-installed-package"])
+
     def test_a_link_inside_the_folder_is_compared_with_this_lockfile(self):
         d = Path(tempfile.mkdtemp())
         (d / "package-lock.json").write_text(json.dumps({
@@ -195,18 +214,92 @@ class TestInstalledPackageAudit(unittest.TestCase):
         findings = _scan(Target(d, str(d), ScanOptions()))
         self.assertEqual([f.signature_id for f in findings], ["ghost-package"])
 
-    def test_a_linked_install_with_no_lockfile_is_not_a_per_package_swap(self):
+    def test_a_linked_package_directory_is_compared_with_its_own_lockfile(self):
+        owner = Path(tempfile.mkdtemp())
+        (owner / ".git").mkdir()
+        (owner / "yarn.lock").write_text('undici@^7.30.0:\n  version "7.30.0"\n', encoding="utf-8")
+        real = owner / "node_modules" / "undici"
+        real.mkdir(parents=True)
+        (real / "package.json").write_text(json.dumps({"name": "undici", "version": "7.30.0"}))
+        work = Path(tempfile.mkdtemp())
+        (work / "yarn.lock").write_text(
+            'undici@^7.30.1:\n  version "7.30.1"\nextra@^1.0.0:\n  version "1.0.0"\n',
+            encoding="utf-8")
+        linked = work / "node_modules"
+        linked.mkdir()
+        (linked / "undici").symlink_to(real, target_is_directory=True)
+        extra = linked / "extra"
+        extra.mkdir()
+        (extra / "package.json").write_text(json.dumps({"name": "extra", "version": "9.9.9"}))
+        findings = _scan(Target(work, str(work), ScanOptions()))
+        ghosts = [f for f in findings if f.signature_id == "ghost-package"]
+        self.assertEqual([f.path for f in ghosts], ["node_modules/extra/package.json"])
+
+    def test_a_linked_scoped_package_directory_is_compared_with_its_own_lockfile(self):
+        owner = Path(tempfile.mkdtemp())
+        (owner / ".git").mkdir()
+        (owner / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/@scope/pkg": {"version": "1.0.0"}}}))
+        real = owner / "node_modules" / "@scope" / "pkg"
+        real.mkdir(parents=True)
+        (real / "package.json").write_text(json.dumps({"name": "@scope/pkg", "version": "1.0.0"}))
+        work = Path(tempfile.mkdtemp())
+        (work / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/@scope/pkg": {"version": "2.0.0"}}}))
+        (work / "node_modules" / "@scope").mkdir(parents=True)
+        (work / "node_modules" / "@scope" / "pkg").symlink_to(real, target_is_directory=True)
+        findings = _scan(Target(work, str(work), ScanOptions()))
+        self.assertFalse([f for f in findings if f.signature_id == "ghost-package"])
+
+    def test_a_linked_package_directory_at_another_version_is_still_reported(self):
+        owner = Path(tempfile.mkdtemp())
+        (owner / ".git").mkdir()
+        (owner / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/undici": {"version": "7.30.0"}}}))
+        real = owner / "node_modules" / "undici"
+        real.mkdir(parents=True)
+        (real / "package.json").write_text(json.dumps({"name": "undici", "version": "9.9.9"}))
+        work = Path(tempfile.mkdtemp())
+        (work / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/undici": {"version": "9.9.9"}}}))
+        (work / "node_modules").mkdir()
+        (work / "node_modules" / "undici").symlink_to(real, target_is_directory=True)
+        findings = _scan(Target(work, str(work), ScanOptions()))
+        self.assertEqual([f.signature_id for f in findings], ["ghost-package"])
+        self.assertIn(f"the lockfile in {owner.resolve()} lists undici at 7.30.0", findings[0].evidence)
+
+    def test_a_linked_install_with_no_lockfile_is_still_compared_with_this_folder(self):
         owner = Path(tempfile.mkdtemp())
         (owner / ".git").mkdir()
         pkg = owner / "node_modules" / "undici"
         pkg.mkdir(parents=True)
         (pkg / "package.json").write_text(json.dumps({"name": "undici", "version": "7.30.0"}))
         work = Path(tempfile.mkdtemp())
+        (work / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/undici": {"version": "7.30.1"}}}))
         (work / "node_modules").symlink_to(owner / "node_modules", target_is_directory=True)
-        target = Target(work, str(work), ScanOptions())
-        findings = _scan(target)
+        findings = _scan(Target(work, str(work), ScanOptions()))
+        self.assertEqual([f.signature_id for f in findings], ["ghost-package"])
+        self.assertIn("the lockfile lists undici at 7.30.1", findings[0].evidence)
+
+    def test_a_linked_install_with_no_lockfile_matches_when_this_folder_lists_it(self):
+        owner = Path(tempfile.mkdtemp())
+        (owner / ".git").mkdir()
+        pkg = owner / "node_modules" / "undici"
+        pkg.mkdir(parents=True)
+        (pkg / "package.json").write_text(json.dumps({"name": "undici", "version": "7.30.0"}))
+        work = Path(tempfile.mkdtemp())
+        (work / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/undici": {"version": "7.30.0"}}}))
+        (work / "node_modules").symlink_to(owner / "node_modules", target_is_directory=True)
+        findings = _scan(Target(work, str(work), ScanOptions()))
         self.assertFalse([f for f in findings if f.signature_id == "ghost-package"])
-        self.assertTrue(any("no lockfile" in note for note in target.coverage_notes))
 
 
 def _venv(installed, venv=".venv", info="dist-info") -> Path:

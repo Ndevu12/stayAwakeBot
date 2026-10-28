@@ -14,8 +14,9 @@ saw db update -e npm -e pypi      # just these
 saw db status                     # fingerprint, age, per-ecosystem counts, integrity
 ```
 
-A database saved by an older saw is not used to call a package known-malicious. `saw db status`
-says so. `saw db update` replaces it.
+An advisory its publisher withdrew is not reported from a database saved by an older saw. A package
+that database still lists as known-malicious is still reported. `saw db status` says the database
+predates this saw. `saw db update` replaces it.
 
 Advisories are reported alongside findings but **never change the verdict** — a CVE
 in a dependency is not an infection. Quiet them for one run with `saw scan --no-advisories`.

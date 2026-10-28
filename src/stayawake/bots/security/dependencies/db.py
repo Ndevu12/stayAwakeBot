@@ -21,6 +21,8 @@ from stayawake.utils.timeutil import now_iso
 
 _SCHEMA = 2
 _FILTER = 1
+# Advisories this saw does not report, including from a database saved before it knew that.
+_NOT_REPORTED = frozenset({"MAL-2026-5187"})
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
 _OSV_BUCKETS = PURL_TO_OSV
 
@@ -293,9 +295,9 @@ def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None
         return None
     corpus = AdvisoryCorpus.from_records(_stream_records(cache_dir, manifest))
     if not _malware_current(manifest):
-        corpus.malware_usable = False
-        print("⚠️  saw: this advisory database predates this version, so it is not used to call a "
-              "package known-malicious. Run `saw db update`.", file=sys.stderr)
+        print("⚠️  saw: this advisory database predates this saw. An advisory its publisher withdrew "
+              "is not reported from it. Other known-malicious packages in it still are. "
+              "Run `saw db update`.", file=sys.stderr)
     return corpus
 
 
@@ -370,6 +372,10 @@ def _affected_from_json(a: dict[str, Any]) -> OsvAffected | None:
 
 def _record_from_json(raw: dict[str, Any]) -> OsvRecord | None:
     if not isinstance(raw, dict):
+        return None
+    rid = str(raw.get("id", ""))
+    aliases = raw.get("aliases") or []
+    if rid in _NOT_REPORTED or any(str(alias) in _NOT_REPORTED for alias in aliases):
         return None
     affected = tuple(x for x in (_affected_from_json(a) for a in (raw.get("affected", []) or []))
                      if x is not None)

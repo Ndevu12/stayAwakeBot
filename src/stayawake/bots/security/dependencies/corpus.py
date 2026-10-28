@@ -38,7 +38,6 @@ class AdvisoryCorpus:
                  bounded: dict[tuple[str, str], list[tuple[OsvAffected, OsvRecord]]]):
         self._whole = whole
         self._bounded = bounded
-        self.malware_usable = True
 
     @classmethod
     def from_records(cls, records: Iterable[OsvRecord]) -> "AdvisoryCorpus":
@@ -64,9 +63,7 @@ class AdvisoryCorpus:
 
     def malicious_match(self, purl) -> OsvRecord | None:
         """The first MALWARE advisory affecting `purl.version` (drives the verdict → INFECTED).
-        Returns None when this database is not used for that."""
-        if not self.malware_usable:
-            return None
+        Returns None when none does."""
         eco = _eco(purl.type)
         key = (eco, purl.name)
         for rec in self._whole.get(key, ()):

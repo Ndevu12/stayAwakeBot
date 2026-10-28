@@ -81,6 +81,32 @@ def linked_outside(path: Path, root: Path) -> Path | None:
     return None
 
 
+def outside_package_links(tree: Path, root: Path) -> Iterator[Path]:
+    """Package directories under `tree` that are links to an install outside `root`.
+
+    Takes the install tree and the scan root. Yields each such directory at the top of the tree,
+    including one under a scope. A link that stays inside `root` is not yielded.
+    """
+    try:
+        entries = list(tree.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name.startswith("."):
+            continue
+        if entry.name.startswith("@"):
+            try:
+                children = list(entry.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                if linked_outside(child, root) is not None:
+                    yield child
+            continue
+        if linked_outside(entry, root) is not None:
+            yield entry
+
+
 def package_dirs(tree: Path, depth: int = 0) -> Iterator[Path]:
     """Every package directory inside one installed tree, whatever the layout.
 
