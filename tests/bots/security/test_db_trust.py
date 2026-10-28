@@ -12,10 +12,13 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from stayawake.bots.security.dependencies import db
+from stayawake.bots.security.dependencies import AdvisoryStore, db
 from stayawake.bots.security.dependencies.purl import Purl
+from stayawake.bots.security.matchers.dependency_audit import DependencyAuditMatcher
+from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
+from stayawake.bots.security.targets.base import ScanOptions, Target
 from stayawake.cli.commands import db as db_cmd
-from tests.bots.security._osv_fixtures import mal_record, osv_zip
+from tests.bots.security._osv_fixtures import mal_record, osv_zip, vuln_record
 
 
 def _build(cache, members):
@@ -28,6 +31,7 @@ class TestSnapshot(unittest.TestCase):
     def test_manifest_has_snapshot_and_timestamp(self):
         m = _build(Path(tempfile.mkdtemp()), {"MAL.json": mal_record("evil", ["1.0.0"])})
         self.assertEqual(m["schema"], 2)
+        self.assertEqual(m["filter"], 1)
         self.assertTrue(m["snapshot"])
         self.assertTrue(m["generated_at"])
 
@@ -38,6 +42,93 @@ class TestSnapshot(unittest.TestCase):
         c = _build(Path(tempfile.mkdtemp()), {"MAL.json": mal_record("evil", ["2.0.0"])})["snapshot"]
         self.assertEqual(a, b)
         self.assertNotEqual(a, c)
+
+
+class TestADatabaseFromBeforeThisVersion(unittest.TestCase):
+    def _old(self):
+        cache = Path(tempfile.mkdtemp())
+        _build(cache, {
+            "MAL.json": mal_record("oldpkg", ["2.0.0"], rid="MAL-2024-9"),
+            "MAL-withdrawn.json": mal_record("retired", ["1.0.0"], rid="MAL-2026-5187",
+                                             aliases=["GHSA-x96m-c5fj-q75c"]),
+            "CVE.json": vuln_record("leftpad", ["1.0.0"]),
+        })
+        manifest = cache / "manifest.json"
+        data = json.loads(manifest.read_text())
+        del data["filter"]
+        manifest.write_text(json.dumps(data))
+        db._CORPUS_MEMO.clear()
+        return cache
+
+    def test_a_withdrawn_advisory_is_not_reported_and_another_package_still_is(self):
+        cache = self._old()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            corpus = db.load_corpus(cache)
+        self.assertIsNotNone(corpus)
+        self.assertIsNotNone(corpus.malicious_match(Purl("npm", "oldpkg", "2.0.0")))
+        self.assertIsNone(corpus.malicious_match(Purl("npm", "retired", "1.0.0")))
+        self.assertTrue(corpus.vulnerability_matches(Purl("npm", "leftpad", "1.0.0")))
+        self.assertIn("predates this saw", err.getvalue())
+        self.assertIn("still are", err.getvalue())
+        self.assertTrue(db.cache_status(cache)["present"])
+        self.assertFalse(db.cache_status(cache)["malware_current"])
+
+    def test_status_says_so(self):
+        cache = self._old()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = db_cmd.run_status(argparse.Namespace(
+                cache_dir=str(cache), require_snapshot=None, max_age_days=None))
+        self.assertEqual(rc, 2)
+        self.assertIn("predates this saw", out.getvalue())
+        self.assertIn("saw db update", err.getvalue())
+
+    def test_the_inline_seed_still_matches(self):
+        from stayawake.bots.security.dependencies import AdvisoryStore
+        cache = self._old()
+        sig = {"id": "malicious-dependency", "corpus": True, "known_bad": ["html-to-gutenberg@4.2.11"]}
+        with redirect_stderr(io.StringIO()):
+            store = AdvisoryStore.default([sig], cache_dir=cache)
+            seeded = store.advisory_for(Purl("npm", "html-to-gutenberg", "4.2.11"))
+            kept = store.advisory_for(Purl("npm", "oldpkg", "2.0.0"))
+            withdrawn = store.advisory_for(Purl("npm", "retired", "1.0.0"))
+        self.assertIsNotNone(seeded)
+        self.assertIsNotNone(kept)
+        self.assertIsNone(withdrawn)
+
+    def test_a_withdrawn_advisory_is_absent_from_the_declared_files_and_the_install(self):
+        cache = self._old()
+        root = Path(tempfile.mkdtemp())
+        (root / "package.json").write_text(json.dumps({
+            "name": "app", "dependencies": {"retired": "1.0.0", "oldpkg": "2.0.0"}}))
+        (root / "yarn.lock").write_text(
+            'retired@1.0.0:\n  version "1.0.0"\noldpkg@2.0.0:\n  version "2.0.0"\n',
+            encoding="utf-8")
+        for name, version in (("retired", "1.0.0"), ("oldpkg", "2.0.0")):
+            pkg = root / "node_modules" / name
+            pkg.mkdir(parents=True)
+            (pkg / "package.json").write_text(json.dumps({"name": name, "version": version}))
+        sigs = [
+            {"id": "malicious-dependency", "category": "supply-chain-dep", "severity": "critical",
+             "description": "known malicious", "corpus": True},
+            {"id": "malicious-installed-package", "category": "supply-chain-dep",
+             "severity": "critical", "description": "installed", "corpus": True},
+        ]
+
+        def factory(found):
+            return AdvisoryStore.default(found, cache_dir=cache)
+
+        target = Target(root, str(root), ScanOptions())
+        with redirect_stderr(io.StringIO()):
+            declared = DependencyAuditMatcher(store_factory=factory).scan(target, sigs)
+            installed = InstalledPackageAuditMatcher(store_factory=factory).scan(target, sigs)
+        live = [f for f in declared if "oldpkg@2.0.0" in f.evidence]
+        self.assertTrue(any(f.path.endswith("package.json") for f in live))
+        self.assertTrue(any(f.path.endswith("yarn.lock") for f in live))
+        self.assertFalse(any("retired" in f.evidence for f in declared))
+        self.assertTrue(any(f.path == "node_modules/oldpkg/package.json" for f in installed))
+        self.assertFalse(any("retired" in f.path for f in installed))
 
 
 class TestCacheStatus(unittest.TestCase):

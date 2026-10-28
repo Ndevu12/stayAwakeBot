@@ -92,6 +92,41 @@ class InstalledTree:
         yield
 
 
+def _project_of(real_tree: Path) -> Path:
+    """Return the project an install outside the target belongs to. Takes the real install
+    directory. Returns the nearest directory at or above it that contains `.git`, or its parent
+    when there is none."""
+    start = real_tree.parent
+    for directory in (start, *start.parents):
+        try:
+            if (directory / ".git").exists():
+                return directory
+        except OSError:
+            break
+        if directory.parent == directory:
+            break
+    return start
+
+
+def _holding_install(package: Path) -> Path:
+    """Return the install directory that holds `package`. Takes the package's real directory.
+    Returns that install directory."""
+    parent = package.parent
+    if parent.name.startswith("@"):
+        parent = parent.parent
+    return parent
+
+
+def _folder_of(project: Path, real_tree: Path) -> str:
+    """Return the folder of `project` that holds `real_tree`. Takes both. Returns `.` when the
+    install sits at the top of the project, or when that folder cannot be named."""
+    try:
+        relative = real_tree.parent.resolve().relative_to(project.resolve()).as_posix()
+    except (OSError, ValueError):
+        return "."
+    return "." if relative in ("", ".") else relative
+
+
 def _is_regular(path: str) -> bool:
     """True only for a REGULAR file (following a symlink to its target). False for a FIFO/socket/device
     — a blocking `open()` on one would HANG the scan forever with no writer — or when the path
@@ -149,14 +184,52 @@ class NpmInstalledTree(InstalledTree):
     installed_dir = layout.INSTALLED_DIR
 
     def read(self, target) -> Iterator[InstalledPackage]:
+        for _owner, _folder, packages in self.installations(target):
+            yield from packages
+
+    def installations(self, target) -> Iterator[tuple[Path | None, str | None, list[InstalledPackage]]]:
+        """Each installed tree as the project it belongs to, the folder of that project it sits in,
+        and its packages.
+
+        Takes the scan target. Yields `(None, None, packages)` when the tree lives inside the
+        target. Yields the other project, the folder of that project, and the packages when the
+        tree, or a package directory in it, is a link to an install outside the target.
+        """
         seen: set[str] = set()
         for tree in layout.installed_trees(target.scan_root):
-            for pkg_dir in layout.package_dirs(tree):
-                key = str(pkg_dir)
-                if key in seen:
-                    continue
-                seen.add(key)
-                yield from self._pkg(str(pkg_dir), target.root)
+            real = layout.linked_outside(tree, target.scan_root)
+            if real is not None:
+                owner = _project_of(real)
+                folder = _folder_of(owner, real)
+                packages = self._packages(layout.package_dirs(tree), seen, target.root)
+                if packages:
+                    yield owner, folder, packages
+                continue
+            packages = self._packages(layout.package_dirs(tree), seen, target.root)
+            if packages:
+                yield None, None, packages
+            grouped: dict[tuple[Path, str], list[InstalledPackage]] = {}
+            for link in layout.outside_package_links(tree, target.scan_root):
+                install = _holding_install(link.resolve())
+                owner = _project_of(install)
+                folder = _folder_of(owner, install)
+                grouped.setdefault((owner, folder), []).extend(
+                    self._packages([link], seen, target.root))
+            for (owner, folder), linked in grouped.items():
+                if linked:
+                    yield owner, folder, linked
+
+    def _packages(self, dirs, seen: set[str], repo_root: Path) -> list[InstalledPackage]:
+        """Read the packages in `dirs` that have not been seen. Takes the directories, the paths
+        already read, and the repository root. Returns the packages."""
+        packages: list[InstalledPackage] = []
+        for pkg_dir in dirs:
+            key = str(pkg_dir)
+            if key in seen:
+                continue
+            seen.add(key)
+            packages.extend(self._pkg(str(pkg_dir), repo_root))
+        return packages
 
     def _pkg(self, pkg_dir: str, repo_root: Path) -> Iterator[InstalledPackage]:
         manifest = os.path.join(pkg_dir, "package.json")

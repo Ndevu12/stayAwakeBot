@@ -62,7 +62,8 @@ class AdvisoryCorpus:
         return None
 
     def malicious_match(self, purl) -> OsvRecord | None:
-        """The first MALWARE advisory affecting `purl.version` (drives the verdict → INFECTED)."""
+        """The first MALWARE advisory affecting `purl.version` (drives the verdict → INFECTED).
+        Returns None when none does."""
         eco = _eco(purl.type)
         key = (eco, purl.name)
         for rec in self._whole.get(key, ()):

@@ -20,6 +20,9 @@ from stayawake.bots.security.dependencies.osv import (
 from stayawake.utils.timeutil import now_iso
 
 _SCHEMA = 2
+_FILTER = 1
+# Advisories this saw does not report, including from a database saved before it knew that.
+_NOT_REPORTED = frozenset({"MAL-2026-5187"})
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
 _OSV_BUCKETS = PURL_TO_OSV
 
@@ -136,6 +139,7 @@ def write_manifest(cache_dir: str | Path | None, results: list[dict[str, Any]]) 
                 # perturb the fingerprint.
                 "snapshot": snapshot_digest(ecosystems),
                 "generated_at": now_iso(),
+                "filter": _FILTER,
                 "ecosystems": ecosystems}
     with atomicwrite.staged(_manifest_path(cache_dir), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK) as fh:
         fh.write(json.dumps(manifest, sort_keys=True, indent=2))
@@ -250,6 +254,14 @@ def _schema_compatible(manifest: dict[str, Any]) -> bool:
     return manifest.get("schema") == _SCHEMA
 
 
+def _malware_current(manifest: dict[str, Any]) -> bool:
+    """Tell whether a scan may call a package known-malicious from this database.
+
+    Takes the manifest. Returns False when the database predates this saw.
+    """
+    return manifest.get("filter") == _FILTER
+
+
 def snapshot_in_use(cache_dir: str | Path | None = None) -> str:
     """Name the advisory database a scan reads. Takes the cache location, the default one when
     None. Returns its snapshot, or "" when there is no database that can be read."""
@@ -281,7 +293,12 @@ def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None
               f"this saw expects {_SCHEMA}) — using the inline seed. Run `saw db update` to rebuild.",
               file=sys.stderr)
         return None
-    return AdvisoryCorpus.from_records(_stream_records(cache_dir, manifest))
+    corpus = AdvisoryCorpus.from_records(_stream_records(cache_dir, manifest))
+    if not _malware_current(manifest):
+        print("⚠️  saw: this advisory database predates this saw. An advisory its publisher withdrew "
+              "is not reported from it. Other known-malicious packages in it still are. "
+              "Run `saw db update`.", file=sys.stderr)
+    return corpus
 
 
 # ── health / trust (saw db status, scan --require-db) ────────────────────────────────────
@@ -315,6 +332,7 @@ def cache_status(cache_dir: str | Path | None = None) -> dict[str, Any]:
         "cache_dir": str(cache_dir),
         "schema": manifest.get("schema"),
         "schema_compatible": schema_compatible,
+        "malware_current": schema_compatible and _malware_current(manifest),
         "snapshot": manifest.get("snapshot"),
         "generated_at": manifest.get("generated_at"),
         "age_days": _age_days(manifest.get("generated_at")),
@@ -354,6 +372,10 @@ def _affected_from_json(a: dict[str, Any]) -> OsvAffected | None:
 
 def _record_from_json(raw: dict[str, Any]) -> OsvRecord | None:
     if not isinstance(raw, dict):
+        return None
+    rid = str(raw.get("id", ""))
+    aliases = raw.get("aliases") or []
+    if rid in _NOT_REPORTED or any(str(alias) in _NOT_REPORTED for alias in aliases):
         return None
     affected = tuple(x for x in (_affected_from_json(a) for a in (raw.get("affected", []) or []))
                      if x is not None)

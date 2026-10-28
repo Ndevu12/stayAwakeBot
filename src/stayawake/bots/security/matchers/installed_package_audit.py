@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, build_corroborated_loader_check
@@ -38,22 +38,30 @@ class InstalledPackageAuditMatcher(Matcher):
         truncated: list = []
         findings: list[Finding] = []
         for tree in self._trees:
-            installed = list(tree.read(target))
-            locked = (self._locked(tree.ecosystem, target)
-                      if (installed and tree.ghost_reconcilable) else _Lockfiles({}))
-            for pkg in installed:
-                advisory = (store.advisory_for(Purl(tree.ecosystem, pkg.name, pkg.version))
-                            if (pkg.version and not store.is_empty()) else None)
-                if advisory is not None:
-                    findings.append(_malicious(advisory, pkg))
-                elif tree.ghost_reconcilable and not locked.lists(pkg, tree.install_folder(pkg.path)):
-                    findings.append(_ghost(by_id.get("ghost-package"), pkg,
-                                           locked.versions_of(pkg, tree.install_folder(pkg.path))))
-                if hook_patterns and pkg.hooks:
-                    findings.append(_lifecycle_hook(hook_sig, hook_patterns, pkg))
-                if entry_check is not None:
-                    findings.append(_loader_sweep(entry_sig, entry_check, target, tree, pkg,
-                                                  deep, budget, truncated))
+            declared = getattr(type(tree), "installations", None)
+            groups = (list(tree.installations(target)) if callable(declared)
+                      else [(None, None, list(tree.read(target)))])
+            for owner, folder, installed in groups:
+                locked = (self._locked(tree.ecosystem, _lock_root(target, owner, folder))
+                          if (installed and tree.ghost_reconcilable) else _Lockfiles({}))
+                place = owner
+                if owner is not None and installed and tree.ghost_reconcilable and not locked.listed:
+                    locked = self._locked(tree.ecosystem, target)
+                    place = None
+                for pkg in installed:
+                    where = folder if folder is not None else tree.install_folder(pkg.path)
+                    advisory = (store.advisory_for(Purl(tree.ecosystem, pkg.name, pkg.version))
+                                if (pkg.version and not store.is_empty()) else None)
+                    if advisory is not None:
+                        findings.append(_malicious(advisory, pkg))
+                    elif tree.ghost_reconcilable and not locked.lists(pkg, where):
+                        findings.append(_ghost(by_id.get("ghost-package"), pkg,
+                                               locked.versions_of(pkg, where), place))
+                    if hook_patterns and pkg.hooks:
+                        findings.append(_lifecycle_hook(hook_sig, hook_patterns, pkg))
+                    if entry_check is not None:
+                        findings.append(_loader_sweep(entry_sig, entry_check, target, tree, pkg,
+                                                      deep, budget, truncated))
             if tamper_sig is not None:                # RECORD sha256 integrity (Python provides it)
                 for t in tree.tampered(target):
                     findings.append(_tampered(tamper_sig, t))
@@ -100,6 +108,70 @@ class _Lockfiles:
         return set().union(*found) if found else None
 
 
+_OWNER_FILES = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
+
+
+class _LockRoot:
+    """The lockfiles of the project a linked install belongs to, and nothing else."""
+
+    def __init__(self, root: Path, files: tuple[str, ...]):
+        self.root = root
+        self._files = files
+
+    def iter_files(self):
+        yield from self._files
+
+    def read_bytes(self, rel: str, limit: int | None = None):
+        path = self.root / rel
+        try:
+            if path.is_symlink() or not path.is_file():
+                return None
+            data = path.read_bytes()
+        except OSError:
+            return None
+        return data if limit is None else data[:limit]
+
+    def read_text(self, rel: str):
+        raw = self.read_bytes(rel)
+        return None if raw is None else raw.decode("utf-8", errors="replace")
+
+
+def _lock_root(target, owner: Path | None, folder: str | None):
+    """Return where a tree's lockfiles are read from. Takes the scan target, and the other project
+    and folder when the install is a link to that project. Returns the target itself when the
+    install lives here, otherwise just that project's lockfiles."""
+    if owner is None:
+        return target
+    files = []
+    for directory in _directories_up_to(owner / folder if folder and folder != "." else owner, owner):
+        try:
+            prefix = directory.resolve().relative_to(owner.resolve()).as_posix()
+        except (OSError, ValueError):
+            continue
+        prefix = "" if prefix in ("", ".") else prefix
+        for name in _OWNER_FILES:
+            path = directory / name
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+            except OSError:
+                continue
+            files.append(name if not prefix else f"{prefix}/{name}")
+    return _LockRoot(owner, tuple(files))
+
+
+def _directories_up_to(start: Path, stop: Path) -> list[Path]:
+    """Return `start` and each parent up to and including `stop`. Takes both. Returns them from
+    `start` upward. Stops at the filesystem root when `stop` is not reached."""
+    found = []
+    here = start
+    while True:
+        found.append(here)
+        if here == stop or here.parent == here:
+            return found
+        here = here.parent
+
+
 def _at_or_above(folder: str, here: str) -> bool:
     """Tell whether a folder is a package's install folder or one of the folders above it. Takes
     both, relative to the target. Returns the answer."""
@@ -122,15 +194,16 @@ def _malicious(advisory, pkg) -> Finding:
         reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 
-def _ghost(sig, pkg, listed_at: set | None = None) -> Finding | None:
+def _ghost(sig, pkg, listed_at: set | None = None, place: Path | None = None) -> Finding | None:
     if sig is None:
         return None
+    lockfile = "the lockfile" if place is None else f"the lockfile in {place}"
     if listed_at:
         shown = ", ".join(sorted(v for v in listed_at if v))
-        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed, but the lockfile lists {pkg.name} "
+        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed, but {lockfile} lists {pkg.name} "
                     f"at {shown} — a postinstall may have swapped it")
     else:
-        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed but absent from the lockfile — "
+        evidence = (f"{pkg.name}@{pkg.version or '?'} is installed but absent from {lockfile} — "
                     f"a postinstall may have dropped it off-lockfile")
     return Finding(
         signature_id=sig["id"], category=sig["category"],

@@ -69,7 +69,7 @@ def register(sub) -> None:
                         "earlier commits. Reported as coverage; never changes the verdict, "
                         "because nothing stored there runs on clone or on build.")
     p.add_argument("--require-db", action="store_true", dest="require_db",
-                   help="fail (exit 2) if the advisory DB is absent or fails its integrity check, "
+                   help="fail (exit 2) if the advisory DB is absent, predates this saw, or fails its integrity check, "
                         "instead of falling back to the inline malware seed — for CI gates that must "
                         "not silently lose coverage. Default is fail-open (degrade to the seed).")
     add_jobs_arg(p, help="scan up to N targets concurrently (a multi-repo sweep). Default AUTO: one "
