@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw audit` reads the Windows start-up surface.** What the machine starts at sign-in, at boot, on
+  a schedule, as a service and on a system event is graded like a launch agent or a systemd unit,
+  and one that cannot be read is unknown. Not every Windows start-up place is read yet, so the
+  audit says so and does not call rotating credentials safe on that ground.
 - **`saw guard setup` gates more than one long-lived branch.** `-b dev -b main` installs one
   workflow that scans pushes to both, identical on each branch, so promoting `dev` to `main` does not
   conflict on it.

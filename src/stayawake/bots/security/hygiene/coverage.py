@@ -100,9 +100,9 @@ def check_persistence_coverage() -> list[HygieneIssue]:
         return [HygieneIssue(
             id=SURFACE_NOT_IMPLEMENTED_ID,
             severity="unknown",
-            title="No start-up surface is examined on this platform",
-            detail="Nothing here enumerates where this platform starts programs, so no check "
-                   "looked at it and no result covers it.",
+            title="Not every start-up place is examined on this platform",
+            detail="Some of the places this platform starts programs from are read, not all of "
+                   "them, so no result covers the rest.",
             remediation="Inspect the start-up surface yourself, and do not rotate credentials "
                         f"until you have — {_WIPER_NOTE}.",
         )]

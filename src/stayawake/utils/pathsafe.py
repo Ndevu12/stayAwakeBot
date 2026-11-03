@@ -4,8 +4,28 @@ refer to one real object."""
 from __future__ import annotations
 
 import os
+import re
 import stat
 from pathlib import Path
+
+_WINDOWS_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|%[A-Za-z_][A-Za-z0-9_()]*%|\\\\|\\SystemRoot\\)")
+_WINDOWS_VARIABLE = re.compile(r"%([A-Za-z_][A-Za-z0-9_()]*)%")
+
+
+def is_windows_path(path: str) -> bool:
+    """Tell whether a path is written the Windows way: a drive, a `%VARIABLE%`, a share or
+    `\\SystemRoot`. Takes the path. Returns the answer."""
+    return bool(_WINDOWS_PATH.match(path or ""))
+
+
+def comparable(path: str) -> str:
+    """Put a path in the form its folders are compared in. Takes the path. Returns a Windows path
+    in lower case with forward slashes and its `%VARIABLES%` expanded where they are set, and any
+    other path normalised with `~` expanded."""
+    if not is_windows_path(path):
+        return os.path.normpath(os.path.expanduser(path))
+    expanded = _WINDOWS_VARIABLE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), path)
+    return expanded.replace("\\", "/").lower()
 
 
 def is_regular_file(path: Path) -> bool:

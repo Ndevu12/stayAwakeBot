@@ -1612,7 +1612,7 @@ class TestPlatformBoundaryIsDisclosed(unittest.TestCase):
         # The one gap that must stay on the TERMINAL: a Windows user reading "no findings" has to
         # know nothing was enumerated, not that nothing was there.
         note = self._note("win32")
-        self.assertIn("start-up entries are not checked on this platform.", note)
+        self.assertIn("start-up entries are not all checked on this platform.", note)
         self.assertNotIn("read the host persistence surface and", note)
 
     def test_on_posix_it_says_what_it_covers_and_names_no_place_it_reads(self):

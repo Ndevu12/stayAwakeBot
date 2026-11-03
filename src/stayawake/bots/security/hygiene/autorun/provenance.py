@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.bots.security import hookscript, schedule
+from stayawake.utils import pathsafe
 
 _PROBE_TIMEOUT = 5
 
@@ -18,6 +19,11 @@ _TRUSTED_PREFIXES = (
 )
 _UNTRUSTED_ROOTS = ("/tmp/", "/var/tmp/", "/private/tmp/", "/dev/shm/")
 _UNTRUSTED_COMPONENTS = ("node_modules", ".npm", ".cache", ".claude", ".npm-global", ".cursor")
+_WINDOWS_TRUSTED = ("c:/windows/", "c:/program files/", "c:/program files (x86)/", "%systemroot%/",
+                    "%windir%/", "%programfiles%/", "%programfiles(x86)%/", "/systemroot/", "system32/")
+_WINDOWS_UNTRUSTED_ROOTS = ("%temp%/", "%tmp%/", "%localappdata%/temp/", "%public%/",
+                            "c:/windows/temp/", "c:/users/public/")
+_WINDOWS_UNTRUSTED_COMPONENTS = ("appdata/local/temp", "downloads", "$recycle.bin")
 
 
 @dataclass
@@ -47,6 +53,24 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess | None:
 
 def _norm(exec_path: str) -> str:
     return os.path.normpath(os.path.expanduser(exec_path))
+
+
+def classify_path(exec_path: str) -> str:
+    """Grade where a program lives: trusted, untrusted or unknown. Takes the path. Returns the
+    class; a Windows path is graded against the Windows folders, a folder any program can write
+    to before a trusted one it sits inside."""
+    if pathsafe.is_windows_path(exec_path):
+        return _classify_windows_path(pathsafe.comparable(exec_path))
+    return _classify_path(exec_path)
+
+
+def _classify_windows_path(low: str) -> str:
+    if low.startswith(_WINDOWS_UNTRUSTED_ROOTS) or any(
+            f"/{c}/" in low or low.endswith(f"/{c}") for c in _WINDOWS_UNTRUSTED_COMPONENTS):
+        return "untrusted"
+    if low.startswith(_WINDOWS_TRUSTED):
+        return "trusted"
+    return "unknown"
 
 
 def _classify_path(exec_path: str) -> str:
@@ -109,7 +133,7 @@ def attribute(entry) -> Attribution:
     exec_path = entry.exec_path
     if not exec_path:                       # a config that references no executable — nothing to run
         return Attribution(exec_class="unknown")
-    exec_class = _classify_path(exec_path)
+    exec_class = classify_path(exec_path)
     if entry.location == hookscript.LOCATION and hookscript.is_installed(entry.script):
         return Attribution(exec_class=exec_class, owner="saw")
     if exec_class != "untrusted" and schedule.is_ours(entry.path):
