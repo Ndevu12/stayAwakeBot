@@ -63,7 +63,8 @@ def _in_an_empty_folder(argv):
 def _audit_with_nothing_to_report():
     with mock.patch("stayawake.cli.commands.audit.hygiene.audit_checks", return_value=[]), \
          mock.patch("stayawake.bots.security.hygiene.document.live_process_scope_note",
-                    return_value=""):
+                    return_value=""), \
+         mock.patch("stayawake.cli.commands.audit._corrections", return_value=[]):
         cli.main(["audit", "--json", "--no-stream"])
 
 

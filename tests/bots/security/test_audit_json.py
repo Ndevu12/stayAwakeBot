@@ -111,6 +111,7 @@ class TestTheCommandPrintsIt(unittest.TestCase):
                         side_effect=outcomes), \
              mock.patch("stayawake.bots.security.hygiene.document.live_process_scope_note",
                         return_value=""), \
+             mock.patch("stayawake.cli.commands.audit._corrections", return_value=[]), \
              redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
             code = cli.main(argv)
         return code, out.getvalue()

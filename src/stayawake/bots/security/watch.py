@@ -162,12 +162,13 @@ def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes
                 tell(kinds)
             except Exception:
                 _print_safely(report, _NOT_TOLD)
-        try:
-            written = (correct if correct is not None else _correct_editors)()
-        except Exception:
-            written = ""
-        if written:
-            _print_safely(report, written)
+        if correct is not None:
+            try:
+                written = correct()
+            except Exception:
+                written = ""
+            if written:
+                _print_safely(report, written)
         made += 1
         if passes is None or made < passes:
             sleep(between)
@@ -175,13 +176,9 @@ def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes
 
 
 def _correct_editors() -> str:
-    """Correct editor settings when that was asked for. Returns the lines that say what was written.
-    Nothing, when it was not asked for."""
+    """Correct the editor settings on this machine. Returns the lines that say what was written."""
     from stayawake.bots.security.harden import settings as editorsettings
-    if not editorsettings.wanted():
-        return ""
-    return "\n".join(editorsettings.lines_of(
-        editorsettings.settle(strict=editorsettings.strict_wanted())))
+    return "\n".join(editorsettings.lines_of(editorsettings.settle()))
 
 
 def _print_safely(report, text: str) -> None:

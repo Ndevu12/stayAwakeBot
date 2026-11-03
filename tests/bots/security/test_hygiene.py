@@ -1561,6 +1561,7 @@ class TestScanScopeHonesty(unittest.TestCase):
                 with mock.patch("stayawake.bots.security.hygiene.audit_checks",
                                 return_value=[("probe", lambda: list(issues))]), \
                      mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None)), \
+                     mock.patch("stayawake.cli.commands.audit._corrections", return_value=[]), \
                      redirect_stdout(buf):
                     rc = cli.main(["audit", "--no-stream"])
                 out = buf.getvalue()

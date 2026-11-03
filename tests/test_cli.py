@@ -390,6 +390,7 @@ class TestAudit(unittest.TestCase):
              mock.patch("stayawake.bots.security.hygiene.audit_checks",
                         return_value=probes_that_find_nothing(findings)), \
              mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None)), \
+             mock.patch("stayawake.cli.commands.audit._corrections", return_value=[]), \
              redirect_stdout(io.StringIO()):
             return cli.main(argv)
 
@@ -402,10 +403,11 @@ class TestAudit(unittest.TestCase):
         self.assertEqual(self._audit(["audit", "-f"], {"cached credentials": [warning]}), 1,
                          READS_THE_REAL_HOST)
 
+    @mock.patch("stayawake.cli.commands.audit._corrections", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
     @mock.patch("stayawake.bots.security.hygiene.audit_checks", return_value=[])
     @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
-    def test_cli_delegates_to_hygiene_audit_checks(self, _tok, m_checks, _render):
+    def test_cli_delegates_to_hygiene_audit_checks(self, _tok, m_checks, _render, _corrections):
         # Regression: `saw audit` must get its checks from hygiene.audit_checks() (the single
         # composition site) — NOT hand-assemble a subset, which is how the runner-persistence probe
         # was once silently dropped from the CLI. Locks the delegation + that branch is forwarded.

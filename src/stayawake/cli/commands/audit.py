@@ -24,8 +24,7 @@ def register(sub) -> None:
         help="hygiene + branch-protection audit",
         description=(
             "Audit this machine's security posture, and optionally a repository's branch "
-            "protection. Read-only, unless you asked `saw hook install --harden-editors` to keep "
-            "editor settings corrected: then those are corrected first and each write is reported. "
+            "protection. It corrects the editor settings on this machine and reports each write. "
             "Every run ends with a rotation-safety verdict: rotating a "
             "credential is safe only once no persistence is found and the whole start-up "
             "surface was read."),
@@ -55,11 +54,9 @@ def run(a: argparse.Namespace) -> int:
 
 
 def _corrections() -> list[str]:
-    """The editor settings written because that was asked for. Returns one line per write."""
+    """The editor settings this run corrected. Returns one line per write."""
     from stayawake.bots.security.harden import settings as editorsettings
-    if not editorsettings.wanted():
-        return []
-    return editorsettings.lines_of(editorsettings.settle(strict=editorsettings.strict_wanted()))
+    return editorsettings.lines_of(editorsettings.settle())
 
 
 def _audit(a: argparse.Namespace) -> int:

@@ -650,8 +650,7 @@ def _repositories_named_by(patterns: list[str]) -> tuple[list[Path], list[str], 
 
 def install(config_path: str | None = None, *, no_stream: bool = False,
             repositories: list[str] | None = None, standing_in: bool = False,
-            as_json: bool = False, harden_editors: bool = False,
-            strict: bool = False) -> int:
+            as_json: bool = False) -> int:
     """Install the scan-on-clone hooks globally, give them to repositories that already exist, and
     report what happened. Takes the operator config, the paths or globs naming existing
     repositories, and whether the repository the command runs in counts when none are named.
@@ -700,23 +699,7 @@ def install(config_path: str | None = None, *, no_stream: bool = False,
     print(_paint("  remove: saw hook uninstall", "dim", out), file=out)
     _warn_hookspath(out)
     _advise_git_update(out)
-    if harden_editors or strict:
-        _correct_editors(out, strict=strict)
     return 0 if settled else 3
-
-
-def _correct_editors(out, *, strict: bool) -> None:
-    """Correct editor settings and remember to keep doing so. Takes where to print and whether the
-    strict corrections are included."""
-    from stayawake.bots.security.harden import settings as editorsettings
-    if not editorsettings.choose(strict=strict):
-        print(_paint("  Editor settings could not be set to stay corrected. Run `saw harden`.",
-                     "warn", out), file=out)
-        return
-    for line in editorsettings.lines_of(editorsettings.settle(strict=strict)):
-        print(_paint("  " + line, "warn" if line.startswith("Could not") else "ok", out), file=out)
-    print(_paint("  editor settings stay corrected. `saw harden --take-back` stops that.",
-                 "dim", out), file=out)
 
 
 def _shown(path: str) -> str:

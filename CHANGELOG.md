@@ -29,6 +29,9 @@ reader, not the mechanism or the weakness it closed.
   --take-back` stops the correcting. `--strict`, on `saw harden` and on that install, turns the
   agent auto-approve list off and sets the trust prompt to always ask, including for an empty
   window. A profile is corrected with the editor it belongs to.
+- **Editor settings are corrected whenever this machine is checked.** `saw audit` and `saw watch`
+  correct them and say what they wrote, as `saw harden` does. A scan of a repository does not
+  change them. A profile is corrected with the editor it belongs to.
 - **An editor that does not say automatic tasks are off is reported as a warning.**
 
 ### Fixed

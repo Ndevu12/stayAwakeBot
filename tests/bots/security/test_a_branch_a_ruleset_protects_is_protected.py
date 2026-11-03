@@ -175,6 +175,7 @@ def _saw_audit(classic, rules, cause, *argv, slug="o/r", token="tok"):
             mock.patch("stayawake.lib.auth.resolve_token", return_value=(token, None)), \
             mock.patch("stayawake.bots.security.hygiene.audit_checks",
                        return_value=[("branch protection", lambda: hygiene.check_branch_protection(slug, token))]), \
+            mock.patch("stayawake.cli.commands.audit._corrections", return_value=[]), \
             contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
         code = cli.main(["audit", "--repo", slug, "--no-stream", *argv])
     return code, out.getvalue()
@@ -263,6 +264,7 @@ class TestEveryResultNotKnownIsShown(unittest.TestCase):
         with mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None)), \
                 mock.patch("stayawake.bots.security.hygiene.audit_checks",
                            return_value=[("credentials", lambda: [unread])]), \
+                mock.patch("stayawake.cli.commands.audit._corrections", return_value=[]), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(["audit", "--no-stream", "-f"]), 0)
 

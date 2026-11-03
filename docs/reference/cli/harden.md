@@ -9,7 +9,7 @@ Create host-level controls on this machine. It never touches a project's depende
 write is unknown, never success. The result does not claim that one control protects anything else.
 
 ```text
-saw harden [--strict] [--no-stream]
+saw harden [--no-stream]
 sudo saw harden
 saw harden --take-back [--no-stream]
 ```

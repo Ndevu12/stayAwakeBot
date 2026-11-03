@@ -124,11 +124,6 @@ def blanket_autoapprove(text: str) -> bool:
     return _autoapprove_is_blanket_true(text)
 
 
-def autoapprove_object(text: str) -> str | None:
-    """The auto-approve value as written, when it is an object. None otherwise."""
-    return _autoapprove_block(text)
-
-
 def risky_autoapprove_entries(text: str) -> list[str]:
     """Name the auto-approved entries whose command is risky. Takes the settings text. Returns
     each entry's own key. An entry set to false is not included."""

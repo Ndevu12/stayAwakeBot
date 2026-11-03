@@ -100,6 +100,7 @@ class TestAuditProgress(unittest.TestCase):
         with mock.patch.object(hygiene, "audit_checks", return_value=checks), \
              mock.patch.object(hygiene, "run_check", side_effect=outcome), \
              mock.patch("stayawake.cli.commands.audit.auth.resolve_token", return_value=(None, None)), \
+             mock.patch("stayawake.cli.commands.audit._corrections", return_value=[]), \
              redirect_stdout(out), redirect_stderr(err):
             rc = audit.run(args)
         return rc, out.getvalue(), err.getvalue()

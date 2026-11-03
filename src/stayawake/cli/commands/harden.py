@@ -23,13 +23,9 @@ def register(sub) -> None:
             ("saw harden", "create the controls, then read them back"),
             ("sudo saw harden", "the same, reaching what needs privilege"),
             ("saw harden --take-back", "remove the controls it placed"),
-            ("saw harden --strict", "also turn the agent auto-approve list off"),
         ])
     p.add_argument("--take-back", action="store_true",
                    help="remove the controls this command placed, and nothing else")
-    p.add_argument("--strict", action="store_true",
-                   help="also turn the agent auto-approve list off, and set the trust prompt "
-                        "to always ask")
     p.set_defaults(func=run)
 
 
@@ -44,7 +40,7 @@ def run(a: argparse.Namespace) -> int:
     no_stream = no_stream_requested(a)
     counted = _watcher_counted()
     with busy(label, no_stream=no_stream):
-        code, text = harden.take_back() if a.take_back else harden.run(strict=a.strict)
+        code, text = harden.take_back() if a.take_back else harden.run()
     say(text, no_stream=no_stream)
     if harden.dealt_with_live_code(code) and not a.take_back:
         line = _after_protecting(counted)
