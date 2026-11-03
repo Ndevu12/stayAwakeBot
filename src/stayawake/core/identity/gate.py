@@ -29,7 +29,7 @@ def require(intent: Intent, *, session: Session | None = None,
         return Decision(
             allowed=False, intent=intent, missing=needed,
             reason=auth.no_credential_hint(what_it_does(intent)),
-            upgrades=upgrades_for_missing(needed, source=None),
+            upgrades=(),
             session_source=None, session_actor=None,
         )
 
@@ -68,7 +68,7 @@ def _not_live_decision(intent: Intent, sess: Session, needed: frozenset[Capabili
     *without* a repo context, the App/token works; this repo simply isn't reachable (not in
     the App installation, private without access, wrong remote, …).
     """
-    who = sess.actor or sess.source or "this credential"
+    who = sess.actor or sess.source or "This GitHub sign-in"
     if repo_slug and "/" in repo_slug and _credential_live_globally(sess.token):
         return Decision(
             allowed=False, intent=intent, missing=frozenset(),
@@ -78,12 +78,12 @@ def _not_live_decision(intent: Intent, sess: Session, needed: frozenset[Capabili
         )
     return Decision(
         allowed=False, intent=intent, missing=needed,
-        reason=("GitHub API unreachable or the token was rejected — nothing started. "
-                "Check connectivity/TLS and that the token can reach the repository."),
+        reason=("GitHub could not be reached, or it did not accept your sign-in — nothing started. "
+                "Check your connection, then sign in again."),
         upgrades=(UpgradePath(
             kind="login",
-            detail="re-authenticate or fix the token",
-            command="gh auth status   # or check GH_SECURITY_TOKEN / GH_APP_*",
+            detail="sign in again",
+            command="gh auth login   # or saw auth app register",
         ),),
         session_source=sess.source, session_actor=sess.actor,
     )
@@ -106,13 +106,11 @@ def _repo_unreachable_reason(who: str, repo_slug: str, sess: Session) -> str:
         return (
             f"{who} cannot access {repo_slug} — the StayAwakeBot App is not installed on '{owner}' "
             f"(or is installed there with 'Only select repositories' that excludes this repo). A "
-            f"GitHub App is per-account, so each account/org needs its own installation. This is NOT "
-            f"missing write scopes."
+            f"GitHub App is per-account, so each account/org needs its own installation."
         )
     return (
-        f"{who} cannot access {repo_slug} — the credential is live but GitHub rejected "
-        f"access to that repository (private without permission, SSO, or a bad remote). "
-        f"This is NOT missing write scopes."
+        f"{who} cannot access {repo_slug} — you are signed in, but GitHub refused access to "
+        f"that repository (private without permission, SSO, or a bad remote)."
     )
 
 
@@ -135,8 +133,8 @@ def _repo_unreachable_upgrades(sess: Session, repo_slug: str) -> tuple[UpgradePa
     return (
         UpgradePath(
             kind="login",
-            detail=f"grant this credential access to {repo_slug} (or fix the remote)",
-            command="gh auth status   # or check GH_SECURITY_TOKEN",
+            detail=f"sign in with an account that can reach {repo_slug} (or fix the remote)",
+            command="gh auth login   # or saw auth app register",
         ),
     )
 
@@ -155,11 +153,10 @@ def _app_install_command(owner: str) -> str:
 
 
 def _deny_reason(intent: Intent, missing: frozenset[Capability], sess: Session) -> str:
-    who = sess.actor or sess.source or "this credential"
+    who = sess.actor or sess.source or "This GitHub sign-in"
     if Capability.WORKFLOWS_WRITE in missing:
         return (
-            f"{who} cannot open a guard/workflow PR: GitHub requires the `workflow` scope "
-            f"(classic) or Workflows: Read and write (fine-grained / GitHub App) to create or "
-            f"update `.github/workflows/*`. This is NOT missing repo write access."
+            f"{who} cannot open a pull request that changes workflow files: sign in with access "
+            f"to workflow files. Write access to the repository is not the problem."
         )
     return f"{who} cannot be used for {what_it_does(intent)}."

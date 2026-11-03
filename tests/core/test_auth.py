@@ -162,7 +162,7 @@ class TestHint(unittest.TestCase):
         with mock.patch.object(auth, "gh_installed", return_value=False):
             h = auth.no_credential_hint("cloning private repos")
             self.assertIn("install the github cli", h.lower())
-            self.assertIn("cloning private repos", h)
+            self.assertIn("Cloning private repos", h)
 
     def test_hint_when_gh_present_says_login(self):
         with mock.patch.object(auth, "gh_installed", return_value=True):
@@ -173,3 +173,13 @@ class TestHint(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNoCredentialNamesBothWaysToSignIn(unittest.TestCase):
+    def test_it_names_saws_own_sign_in_and_gh(self):
+        from stayawake.lib import auth as authmod
+        for installed in (True, False):
+            with mock.patch.object(authmod, "gh_installed", return_value=installed):
+                hint = authmod.no_credential_hint("a remote scan")
+            self.assertIn("saw auth app register", hint)
+            self.assertIn("gh auth login", hint)

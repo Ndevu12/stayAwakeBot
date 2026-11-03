@@ -22,9 +22,13 @@ class TestNoCredential(unittest.TestCase):
         self.message = _refused(Intent.AMEND_REFS,
                                 Session(token=None, source=None, kind="none", live=False))
 
-    def test_it_says_what_saw_was_doing_and_what_the_credential_must_do(self):
-        self.assertIn("No GitHub credential for replacing infected commits on GitHub.", self.message)
-        self.assertIn("It needs a credential that can push to the repository.", self.message)
+    def test_it_says_what_saw_was_doing_and_to_sign_in(self):
+        self.assertIn("Replacing infected commits on GitHub needs you signed in to GitHub", self.message)
+        self.assertIn("Sign in with an account that can push to the repository.", self.message)
+
+    def test_it_uses_no_credential_words(self):
+        for word in ("credential", "token", "scope"):
+            self.assertNotIn(word, self.message.lower())
 
     def test_it_names_each_command_to_run_once(self):
         self.assertEqual(self.message.count("gh auth login"), 1)
@@ -42,7 +46,7 @@ class TestACredentialThatCannotDoIt(unittest.TestCase):
                           scopes=frozenset({"read:org"}))
         message = _refused(Intent.OPEN_FIX_PR, session)
         self.assertIn("me cannot be used for opening fix pull requests.", message)
-        self.assertIn("It needs a credential that can push to the repository and open pull requests.",
+        self.assertIn("Sign in with an account that can push to the repository and open pull requests.",
                       message)
         self.assertNotIn("open_fix_pr", message)
         self.assertNotIn("pull_requests_write", message)

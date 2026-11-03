@@ -32,11 +32,11 @@ class Decision:
     def message(self) -> str:
         """Human-facing multi-line summary for CLI stderr / progress lines."""
         if self.allowed:
-            who = self.session_actor or self.session_source or "credential"
+            who = self.session_actor or self.session_source or "This GitHub sign-in"
             return f"{who} can be used for {what_it_does(self.intent)}"
-        lines = [self.reason or f"This credential cannot be used for {what_it_does(self.intent)}."]
+        lines = [self.reason or f"This GitHub sign-in cannot be used for {what_it_does(self.intent)}."]
         if self.missing:
-            lines.append(f"It needs a credential that can {_in_a_list(self.missing)}.")
+            lines.append(f"Sign in with an account that can {_in_a_list(self.missing)}.")
         for u in self.upgrades:
             if u.command:
                 lines.append(f"  → {u.detail}: `{u.command}`" if u.detail else f"  → `{u.command}`")
@@ -61,7 +61,7 @@ def upgrades_for_missing(missing: frozenset[Capability], *, source: str | None) 
     if source in (None,):
         paths.append(UpgradePath(
             kind="register_app",
-            detail="or use a saw GitHub App",
+            detail="or give saw its own sign-in",
             command="saw auth app register",
         ))
         return tuple(paths)
@@ -70,43 +70,43 @@ def upgrades_for_missing(missing: frozenset[Capability], *, source: str | None) 
         if source == "gh":
             paths.append(UpgradePath(
                 kind="refresh_gh",
-                detail="GitHub rejects workflow-file pushes without the `workflow` scope",
+                detail="sign in again with access to workflow files",
                 scopes=scopes,
                 command=f"gh auth refresh -h github.com -s {','.join(scopes)}",
             ))
         paths.append(UpgradePath(
             kind="register_app",
-            detail="or register a StayAwakeBot GitHub App with Workflows: write (recommended for fleet)",
+            detail="or give saw its own sign-in, with access to workflow files",
             command="saw auth app register",
         ))
         if source != "gh":
             paths.append(UpgradePath(
                 kind="pat_scopes",
-                detail="classic PAT needs `workflow`; fine-grained needs Workflows: Read and write",
+                detail="sign in with access to workflow files",
                 scopes=("workflow",),
             ))
     elif need_write and source == "gh":
         paths.append(UpgradePath(
             kind="refresh_gh",
-            detail="token needs repo write + pull-request access",
+            detail="sign in again with access to push and open pull requests",
             scopes=("repo",),
             command="gh auth refresh -h github.com -s repo",
         ))
     elif need_write:
         paths.append(UpgradePath(
             kind="pat_scopes",
-            detail="grant Contents + Pull requests: Read and write (or classic `repo`)",
+            detail="sign in with an account that can push and open pull requests",
             scopes=("repo",),
         ))
         paths.append(UpgradePath(
             kind="register_app",
-            detail="or use a StayAwakeBot GitHub App installation with those permissions",
+            detail="or give saw its own sign-in with that access",
             command="saw auth app register",
         ))
     if not paths:
         paths.append(UpgradePath(
             kind="register_app",
-            detail="register a StayAwakeBot GitHub App with the required permissions",
+            detail="give saw its own sign-in with the access it needs",
             command="saw auth app register",
         ))
     return tuple(paths)

@@ -44,7 +44,7 @@ class TestGate(unittest.TestCase):
         sess = Session(token="t", source="gh", kind="user", live=False)
         d = require(Intent.OPEN_FIX_PR, session=sess)
         self.assertFalse(d.allowed)
-        self.assertIn("unreachable", d.message.lower())
+        self.assertIn("could not be reached", d.message.lower())
         self.assertIn(Capability.CONTENTS_WRITE, d.missing)
 
     def test_app_live_but_repo_unreachable_does_not_fake_missing_scopes(self):
@@ -65,7 +65,7 @@ class TestGate(unittest.TestCase):
         self.assertEqual(d.missing, frozenset())
         self.assertNotIn("missing:", d.message)
         self.assertIn("justdeploy", d.message)
-        self.assertIn("NOT missing write scopes", d.message)
+        self.assertIn("the StayAwakeBot App is not installed on 'Ndevu12'", d.message)
         # Multi-account: a GitHub App is per-account, so the unblock is installing it on the repo's
         # OWNER (not tweaking the personal installation's settings).
         self.assertIn("Ndevu12", d.message)                       # names the owner that lacks the App
@@ -78,7 +78,7 @@ class TestGate(unittest.TestCase):
             d = require(Intent.OPEN_GUARD_PR, session=sess, repo_slug="o/r")
         self.assertFalse(d.allowed)
         self.assertIn(Capability.WORKFLOWS_WRITE, d.missing)
-        self.assertIn("unreachable", d.message.lower())
+        self.assertIn("could not be reached", d.message.lower())
 
     def test_repo_without_workflow_allows_fix_denies_guard(self):
         caps = capabilities_from_oauth_scopes({"repo"})
@@ -128,7 +128,7 @@ class TestClassify(unittest.TestCase):
                        "remote: Invalid username or password."):
             f = classify_push_stderr(stderr)
             self.assertEqual(f.reason, "auth", stderr)
-            self.assertIn("token", push_failure_message(f).lower())
+            self.assertIn("sign in again", push_failure_message(f).lower())
 
     def test_bare_403_is_forbidden_not_auth(self):
         f = classify_push_stderr("remote: Permission denied (403).")
