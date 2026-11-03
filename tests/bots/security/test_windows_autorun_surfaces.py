@@ -162,7 +162,7 @@ class TestNothingChangesElsewhere(unittest.TestCase):
         self.assertEqual([], windows.command_shapes(entry))
 
     def test_a_posix_path_is_classified_as_before(self):
-        self.assertEqual("trusted", provenance._classify_path("/usr/bin/true"))
+        self.assertEqual("trusted", provenance.classify_path("/usr/bin/true"))
 
     def test_the_command_line_is_split_as_windows_reads_it(self):
         self.assertEqual([r"C:\Program Files\A\a.exe", "-x"],
@@ -180,6 +180,22 @@ class TestTheAuditRunsItOnWindows(unittest.TestCase):
             skipped = hygiene.run_check("shell startup files", lambda: [])
         self.assertNotEqual(hygiene.NOT_IMPLEMENTED, ran.state)
         self.assertEqual(hygiene.NOT_IMPLEMENTED, skipped.state)
+
+
+class TestTheSharedPathUtilitiesReadWindowsPaths(unittest.TestCase):
+    def test_a_windows_path_is_recognised(self):
+        from stayawake.utils import pathsafe
+        for path in (r"C:\x.exe", "%TEMP%\\a.bat", r"\\server\share\a", r"\SystemRoot\x"):
+            self.assertTrue(pathsafe.is_windows_path(path), path)
+        self.assertFalse(pathsafe.is_windows_path("/usr/bin/env"))
+
+    def test_it_is_compared_in_lower_case_with_forward_slashes(self):
+        from stayawake.utils import pathsafe
+        self.assertEqual("c:/users/public/x.exe", pathsafe.comparable(r"C:\Users\Public\x.exe"))
+
+    def test_a_temporary_folder_inside_windows_is_not_trusted(self):
+        self.assertEqual("untrusted", provenance.classify_path(r"C:\Windows\Temp\x.exe"))
+        self.assertEqual("trusted", provenance.classify_path(r"C:\Windows\System32\svchost.exe"))
 
 
 if __name__ == "__main__":

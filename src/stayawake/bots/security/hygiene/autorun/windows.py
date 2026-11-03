@@ -19,6 +19,8 @@ from pathlib import Path
 
 from stayawake.utils import pathsafe
 
+from . import provenance
+
 RUN_KEY = "windows-run-key"
 STARTUP_FOLDER = "windows-startup-folder"
 SCHEDULED_TASK = "windows-scheduled-task"
@@ -84,9 +86,8 @@ def entries(unread: list, *, registry=None, environ=None, run=None) -> list:
 
 # ── command lines ─────────────────────────────────────────────────────────────────────────────
 
-_QUOTED_FIRST = re.compile(r'^\s*"([^"]+)"\s*(.*)$', re.S)
-_EXECUTABLE_FIRST = re.compile(r"^\s*(.+?\.(?:exe|com|bat|cmd|ps1|vbs|vbe|js|jse|wsf|hta|scr|lnk))"
-                               r"(?=\s|$)\s*(.*)$", re.I | re.S)
+_EXTENSIONS = (".exe", ".com", ".bat", ".cmd", ".ps1", ".vbs", ".vbe", ".js", ".jse", ".wsf",
+               ".hta", ".scr", ".lnk")
 
 
 def split_command(command: str) -> list[str]:
@@ -96,11 +97,13 @@ def split_command(command: str) -> list[str]:
     command = (command or "").strip()
     if not command:
         return []
-    match = _QUOTED_FIRST.match(command) or _EXECUTABLE_FIRST.match(command)
-    if match:
-        program, rest = match.group(1), match.group(2)
+    if command.startswith('"'):
+        end = command.find('"', 1)
+        program, rest = (command[1:end], command[end + 1:]) if end > 0 else (command[1:], "")
     else:
-        program, _, rest = command.partition(" ")
+        words = command.split(" ")
+        cut = next((i for i, word in enumerate(words) if word.lower().endswith(_EXTENSIONS)), 0)
+        program, rest = " ".join(words[:cut + 1]), " ".join(words[cut + 1:])
     try:
         args = shlex.split(rest, posix=False) if rest.strip() else []
     except ValueError:
@@ -184,7 +187,7 @@ def startup_entries(folders: list[Path], unread: list, make) -> list:
             raw = raw[:_MAX_READ]
             if path.suffix.lower() == ".lnk":
                 strings = _shortcut_strings(raw)
-                target = next((s for s in strings if _EXECUTABLE_FIRST.match(s)), "")
+                target = next((s for s in strings if s.lower().endswith(_EXTENSIONS)), "")
                 argv = split_command(" ".join([target, *[s for s in strings if s != target][:3]]))
                 body = "\n".join(strings)
             else:
@@ -303,35 +306,6 @@ def wmi_entries(run, unread: list, make) -> list:
 
 # ── what the grading needs to know about Windows ──────────────────────────────────────────────
 
-_TRUSTED_ROOTS = ("c:/windows/", "c:/program files/", "c:/program files (x86)/",
-                  "%systemroot%/", "%windir%/", "%programfiles%/", "%programfiles(x86)%/",
-                  "/systemroot/", "system32/")
-_USER_WRITABLE = ("/appdata/local/temp/", "/windows/temp/", "%temp%/", "%tmp%/", "/users/public/",
-                  "/downloads/", "/$recycle.bin/", "%localappdata%/temp/")
-
-
-def is_windows_path(path: str) -> bool:
-    """Tell whether a path is written the Windows way. Takes the path. Returns the answer."""
-    return bool(re.match(r"^(?:[A-Za-z]:[\\/]|%\w+%|\\\\|\\SystemRoot\\)", path or ""))
-
-
-def classify_path(path: str) -> str:
-    """Grade where a Windows program lives: trusted, untrusted or unknown. Takes the path. Returns
-    the class."""
-    low = _expanded(path).replace("\\", "/").lower()
-    if any(part in low for part in _USER_WRITABLE):
-        return "untrusted"
-    if low.startswith(_TRUSTED_ROOTS):
-        return "trusted"
-    return "unknown"
-
-
-def in_user_writable_folder(path: str) -> bool:
-    """Tell whether a Windows path is in a folder any program the user runs can write to, such as a
-    temporary folder. Takes the path. Returns the answer."""
-    return classify_path(path) == "untrusted"
-
-
 _SHAPES = (
     (re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*\s[-/]e(?:nc?|ncodedcommand|ncoded|c)?\s+"
                 r"[A-Za-z0-9+/=]{16,}", re.I), "runs an encoded PowerShell command"),
@@ -364,16 +338,13 @@ def command_shapes(entry) -> list[str]:
     if entry.location == WMI_CONSUMER and entry.script.strip():
         reasons.append("runs a script through a WMI event subscription")
     words = entry.argv[1:] if entry.argv and _RUNNERS.search(entry.argv[0]) else entry.argv[:1]
-    if any(is_windows_path(w.strip("\"'")) and in_user_writable_folder(w.strip("\"'")) for w in words):
+    if any(pathsafe.is_windows_path(w.strip("\"'"))
+           and provenance.classify_path(w.strip("\"'")) == "untrusted" for w in words):
         reasons.append("runs code from a folder any program can write to")
     return list(dict.fromkeys(reasons))
 
 
 # ── readers ───────────────────────────────────────────────────────────────────────────────────
-
-def _expanded(path: str) -> str:
-    return os.path.expandvars(path) if applies() else path
-
 
 def _text(raw: bytes) -> str:
     for bom, codec in ((codecs.BOM_UTF16_LE, "utf-16"), (codecs.BOM_UTF16_BE, "utf-16"),
@@ -448,5 +419,4 @@ class _Registry:
 
 _registry = _Registry()
 
-__all__ = ["LOCATIONS", "applies", "entries", "split_command", "parse_task", "classify_path",
-           "is_windows_path", "in_user_writable_folder", "command_shapes"]
+__all__ = ["LOCATIONS", "applies", "entries", "split_command", "parse_task", "command_shapes"]
