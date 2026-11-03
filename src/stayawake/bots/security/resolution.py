@@ -116,7 +116,7 @@ def discover_local_repos(patterns: list[str], opts: ScanOptions,
         if not os.path.lexists(root):
             continue
         for dirpath, dirnames, _ in os.walk(root, onerror=_unwalkable):
-            if is_a_repository(Path(dirpath)):
+            if _holds_git(Path(dirpath)) or is_a_repository(Path(dirpath)):
                 rp = Path(dirpath).resolve()
                 if str(rp) not in seen:
                     seen.add(str(rp))
