@@ -144,8 +144,7 @@ class TestTheAuditCommandSaysWhenItScanned(unittest.TestCase):
                                   no_stream=True)
         with mock.patch.object(audit.hygiene, "audit_checks", return_value=[]), \
                 mock.patch.object(audit.hygiene, "render", side_effect=rendering), \
-                mock.patch.object(audit.auth, "resolve_token", return_value=(None, None)), \
-                mock.patch.object(audit, "_corrections", return_value=[]):
+                mock.patch.object(audit.auth, "resolve_token", return_value=(None, None)):
             audit.run(args)
         return seen
 

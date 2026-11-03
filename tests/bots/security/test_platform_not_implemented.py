@@ -98,7 +98,6 @@ class TestTheRunSaysItAndGates(unittest.TestCase):
         with mock.patch("stayawake.bots.security.hygiene.audit_checks",
                         return_value=[("persistence surface coverage", lambda: [gap])]), \
              mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None)), \
-             mock.patch("stayawake.cli.commands.audit._corrections", return_value=[]), \
              redirect_stdout(buf):
             from stayawake import cli
             rc = cli.main(["audit", "--no-stream"])

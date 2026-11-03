@@ -681,12 +681,21 @@ class TestVSCode(unittest.TestCase):
         self.assertIn("editor-autotasks-on", ids)
 
     def test_autotasks_off_is_clean(self):
-        p = self._settings('{ "task.allowAutomaticTasks": "off" }')
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"security.workspace.trust.startupPrompt": "always", '
+                           '"security.workspace.trust.emptyWindow": false }')
         self.assertEqual(hygiene.check_editors(p), [])
+
+    def test_a_trust_prompt_that_does_not_always_ask_is_a_warning(self):
+        p = self._settings('{ "task.allowAutomaticTasks": "off" }')
+        issues = hygiene.check_editors(p)
+        self.assertEqual(sorted(i.id for i in issues),
+                         ["editor-empty-window-trusted", "editor-trust-not-asked"])
+        self.assertEqual({i.severity for i in issues}, {"warning"})
 
     def test_missing_setting_is_a_warning(self):
         p = self._settings('{ "editor.fontSize": 13 }')
-        issues = hygiene.check_editors(p)
+        issues = [i for i in hygiene.check_editors(p) if i.id.startswith("editor-autotasks")]
         self.assertEqual([i.id for i in issues], ["editor-autotasks-default"])
         self.assertEqual(issues[0].severity, "warning")
 
@@ -1561,7 +1570,6 @@ class TestScanScopeHonesty(unittest.TestCase):
                 with mock.patch("stayawake.bots.security.hygiene.audit_checks",
                                 return_value=[("probe", lambda: list(issues))]), \
                      mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None)), \
-                     mock.patch("stayawake.cli.commands.audit._corrections", return_value=[]), \
                      redirect_stdout(buf):
                     rc = cli.main(["audit", "--no-stream"])
                 out = buf.getvalue()

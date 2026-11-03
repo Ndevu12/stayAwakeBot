@@ -18,8 +18,7 @@ saw watch stop [--no-stream]
 It is deliberately narrower than [`saw harden`](harden.md). Harden runs with you present: it ends
 everything it grades, and it can ask for privilege to reach what it otherwise could not. This one is
 built to run with nobody watching, so it holds a higher bar before it ends anything, and it leaves
-the rest for you. Each pass also corrects the editor settings `saw harden` would, and reports each
-write.
+the rest for you. Each pass also runs `saw harden`, and reports what it put in place.
 
 ## What it will and will not end
 

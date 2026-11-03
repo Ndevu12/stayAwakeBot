@@ -23,15 +23,12 @@ reader, not the mechanism or the weakness it closed.
   starts with is one saw treats as risky** (`yarn dev`, `yarn lint`). `bun`, `bunx`, `deno`,
   `make`, `mvn`, `gradle`, `go`, `cargo`, `pip`, `uv`, `docker`, `kubectl`, and `supabase` are
   treated as risky. An approval you set for a command that is not risky is left as it is.
-- **Editor settings can be kept corrected after one request.** `saw hook install --harden-editors`
-  corrects them, and from then on `saw audit` and `saw watch` correct an editor setting they would
-  report and say what they wrote. A scan of a repository does not change them. `saw harden
-  --take-back` stops the correcting. `--strict`, on `saw harden` and on that install, turns the
-  agent auto-approve list off and sets the trust prompt to always ask, including for an empty
-  window. A profile is corrected with the editor it belongs to.
-- **Editor settings are corrected whenever this machine is checked.** `saw audit` and `saw watch`
-  correct them and say what they wrote, as `saw harden` does. A scan of a repository does not
-  change them. A profile is corrected with the editor it belongs to.
+- **`saw harden` hardens every editor and its profiles fully.** Every command an agent may run
+  without asking is turned off, the editor asks whether to trust a folder every time it opens one,
+  and a window with no folder open is not trusted. `saw watch` runs `saw harden` on every pass, so
+  these stay in place. `saw harden --take-back --ide` gives back only the editor settings, and
+  `saw watch` leaves them until `saw harden` runs again. `saw audit` reports these settings and
+  changes nothing.
 - **An editor that does not say automatic tasks are off is reported as a warning.**
 
 ### Fixed

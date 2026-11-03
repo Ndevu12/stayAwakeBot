@@ -43,11 +43,12 @@ def run(a: argparse.Namespace) -> int:
     label = "taking saw's controls back…" if a.take_back else "putting saw's controls in place…"
     no_stream = no_stream_requested(a)
     counted = _watcher_counted()
-    if a.ide and not a.take_back:
+    ide = getattr(a, "ide", False)
+    if ide and not a.take_back:
         say("--ide goes with --take-back: `saw harden --take-back --ide`.", no_stream=no_stream)
         return 2
     with busy(label, no_stream=no_stream):
-        code, text = (harden.take_back_ide() if a.take_back and a.ide
+        code, text = (harden.take_back_ide() if a.take_back and ide
                       else harden.take_back() if a.take_back else harden.run())
     say(text, no_stream=no_stream)
     if harden.dealt_with_live_code(code) and not a.take_back:
