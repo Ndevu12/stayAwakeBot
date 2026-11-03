@@ -20,6 +20,8 @@ from stayawake.bots.security.dependencies.osv import (
 from stayawake.utils.timeutil import now_iso
 
 _SCHEMA = 2
+_FILTER = 1
+_WITHDRAWN_BUT_KEPT_BY_AN_OLDER_DATABASE = frozenset({"MAL-2026-5187"})
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
 _OSV_BUCKETS = PURL_TO_OSV
 
@@ -136,6 +138,7 @@ def write_manifest(cache_dir: str | Path | None, results: list[dict[str, Any]]) 
                 # perturb the fingerprint.
                 "snapshot": snapshot_digest(ecosystems),
                 "generated_at": now_iso(),
+                "filter": _FILTER,
                 "ecosystems": ecosystems}
     with atomicwrite.staged(_manifest_path(cache_dir), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK) as fh:
         fh.write(json.dumps(manifest, sort_keys=True, indent=2))
@@ -216,7 +219,12 @@ def _stream_records(cache_dir: Path, manifest: dict[str, Any]):
 
     Integrity gate: a records file is trusted only if its content hash matches the manifest. A
     mismatch means the cache was corrupted or tampered after `db update` — we skip it (falling back
-    to the always-shipped inline seed) and warn loudly, never silently trusting bad data."""
+    to the always-shipped inline seed) and warn loudly, never silently trusting bad data.
+
+    A database saved by an older saw still holds advisories their publisher withdrew; the ones
+    this saw knows of are left out of it."""
+    left_out = (frozenset() if _saved_by_this_saw(manifest)
+                else _WITHDRAWN_BUT_KEPT_BY_AN_OLDER_DATABASE)
     for eco, meta in _ecosystems(manifest).items():
         path = _records_path(cache_dir, eco)
         expected = meta.get("sha256")
@@ -238,8 +246,14 @@ def _stream_records(cache_dir: Path, manifest: dict[str, Any]):
                 except json.JSONDecodeError:
                     continue
                 rec = _record_from_json(raw)
-                if rec is not None:
+                if rec is not None and not _named_in(rec, left_out):
                     yield rec
+
+
+def _named_in(rec: OsvRecord, ids: frozenset[str]) -> bool:
+    """Tell whether an advisory is one of `ids`, by its own id or an alias. Takes the record and the
+    ids. Returns the answer."""
+    return rec.id in ids or any(alias in ids for alias in rec.aliases)
 
 
 def _schema_compatible(manifest: dict[str, Any]) -> bool:
@@ -248,6 +262,12 @@ def _schema_compatible(manifest: dict[str, Any]) -> bool:
     schema mismatch is a benign *version skew* — NOT tampering — and must be diagnosed as such:
     the byte-level integrity gate would spuriously fire, crying "tampered" at every ecosystem."""
     return manifest.get("schema") == _SCHEMA
+
+
+def _saved_by_this_saw(manifest: dict[str, Any]) -> bool:
+    """Tell whether a database was saved by a saw that leaves out what this one does, withdrawn
+    advisories among them. Takes the manifest. Returns False for a database an older saw saved."""
+    return manifest.get("filter") == _FILTER
 
 
 def snapshot_in_use(cache_dir: str | Path | None = None) -> str:
@@ -281,7 +301,11 @@ def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None
               f"this saw expects {_SCHEMA}) — using the inline seed. Run `saw db update` to rebuild.",
               file=sys.stderr)
         return None
-    return AdvisoryCorpus.from_records(_stream_records(cache_dir, manifest))
+    corpus = AdvisoryCorpus.from_records(_stream_records(cache_dir, manifest))
+    if not _saved_by_this_saw(manifest):
+        print("⚠️  saw: this advisory database was saved by an older saw, so it can still "
+              "report an advisory its publisher withdrew. Run `saw db update`.", file=sys.stderr)
+    return corpus
 
 
 # ── health / trust (saw db status, scan --require-db) ────────────────────────────────────
@@ -315,6 +339,7 @@ def cache_status(cache_dir: str | Path | None = None) -> dict[str, Any]:
         "cache_dir": str(cache_dir),
         "schema": manifest.get("schema"),
         "schema_compatible": schema_compatible,
+        "saved_by_this_saw": schema_compatible and _saved_by_this_saw(manifest),
         "snapshot": manifest.get("snapshot"),
         "generated_at": manifest.get("generated_at"),
         "age_days": _age_days(manifest.get("generated_at")),

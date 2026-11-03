@@ -14,6 +14,10 @@ saw db update -e npm -e pypi      # just these
 saw db status                     # fingerprint, age, per-ecosystem counts, integrity
 ```
 
+A database saved by an older saw can still report an advisory its publisher withdrew. A scan says
+so, and so does `saw db status`; `saw db update` rebuilds the database. MAL-2026-5187 is not
+reported from it, and every other known-malicious package in it still is.
+
 Advisories are reported alongside findings but **never change the verdict** — a CVE
 in a dependency is not an infection. Quiet them for one run with `saw scan --no-advisories`.
 

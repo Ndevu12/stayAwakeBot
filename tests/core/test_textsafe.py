@@ -8,7 +8,9 @@ GitHub Actions log-injection work.
 """
 from __future__ import annotations
 
+import os
 import unittest
+from unittest import mock
 
 from stayawake.utils import textsafe
 
@@ -58,6 +60,18 @@ class TestPlain(unittest.TestCase):
 
     def test_bounded(self):
         self.assertLessEqual(len(textsafe.plain("y" * 5000, limit=40)), 40)
+
+
+class TestHomeShown(unittest.TestCase):
+    def test_a_path_in_the_home_folder_starts_with_a_tilde(self):
+        with mock.patch.dict(os.environ, {"HOME": "/home/someone"}):
+            self.assertEqual("~/dev/app", textsafe.home_shown("/home/someone/dev/app"))
+            self.assertEqual("~", textsafe.home_shown("/home/someone"))
+
+    def test_a_path_elsewhere_is_shown_as_it_is(self):
+        with mock.patch.dict(os.environ, {"HOME": "/home/someone"}):
+            self.assertEqual("/home/someoneelse/app", textsafe.home_shown("/home/someoneelse/app"))
+            self.assertEqual("/srv/app", textsafe.home_shown("/srv/app"))
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ Actions log.
 """
 from __future__ import annotations
 
+import os
 import unicodedata
 
 
@@ -40,6 +41,13 @@ def table_cell(s: str, limit: int = 300) -> str:
     """An untrusted value inside a Markdown TABLE cell. `code` is not enough there: GFM splits a row
     on `|` even within a code span, so one crafted path silently shifts every column after it."""
     return code(s, limit).replace("|", "\\|")
+
+
+def home_shown(path, limit: int = 4096) -> str:
+    """Show a path with the home folder as ~. Takes the path. Returns it as plain text."""
+    home = os.path.expanduser("~").rstrip(os.sep)
+    shown = plain(str(path), limit=limit)
+    return "~" + shown[len(home):] if shown == home or shown.startswith(home + os.sep) else shown
 
 
 def plain(s: str, limit: int = 300) -> str:

@@ -814,11 +814,11 @@ class TestStoredContentIsNotJudgedByTheCheckout(unittest.TestCase):
 
     def test_a_checkout_target_still_reads_installed_packages(self):
         with tempfile.TemporaryDirectory() as d, LocalRepoTarget(d, "x", ScanOptions()) as target:
-            tree = mock.Mock(read=mock.Mock(return_value=iter(())), ghost_reconcilable=False)
+            tree = mock.Mock(installations=mock.Mock(return_value=iter(())), ghost_reconcilable=False)
             matcher = InstalledPackageAuditMatcher()
             with mock.patch.object(matcher, "_trees", [tree]):
                 matcher.scan(target, [])
-            tree.read.assert_called_once()
+            tree.installations.assert_called_once()
 
 
 class TestTheBudget(unittest.TestCase):
