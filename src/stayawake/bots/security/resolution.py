@@ -15,9 +15,8 @@ from stayawake.bots.security.write_sinks import sink_label
 from stayawake.lib import auth
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.owned import own, disown
-from stayawake.lib.git.exec_surface import links_to_no_git_directory
+from stayawake.lib.git.exec_surface import is_git_directory, links_to_no_git_directory
 from stayawake.lib.git.query import is_bare_repository
-from stayawake.bots.security.targets.bare import looks_like_a_git_directory
 from stayawake.lib.adapters import github_api
 from stayawake.utils import scratch
 from stayawake.bots.security.targets import ScanOptions
@@ -45,12 +44,12 @@ def _holds_git(p: Path) -> bool:
 
 
 def is_a_repository(p: Path) -> bool:
-    """Whether this directory is a repository. Takes the folder. Returns True when it holds a
-    `.git` that names a git directory, or when git takes the directory itself as a bare
-    repository."""
+    """Tell whether a directory is a repository. Takes the folder. Returns True when it holds a
+    `.git` that names a git directory, or when the directory itself is a git directory that git
+    takes as bare."""
     if _holds_git(p) and not links_to_no_git_directory(p):
         return True
-    if not looks_like_a_git_directory(p):
+    if not is_git_directory(p):
         return False
     # No answer is not "a directory". Reading it that way would skip the files it holds.
     return is_bare_repository(p) is not False

@@ -63,10 +63,10 @@ class TestABareRepositoryIsScanned(GitSandbox):
 
     def test_a_git_directory_git_cannot_answer_is_not_clean(self):
         folder = self.owned(self.root / "broken.git")
-        folder.mkdir()
-        (folder / "HEAD").write_text("not a ref\n", encoding="utf-8")
+        (folder / "refs" / "heads").mkdir(parents=True)
         (folder / "objects").mkdir()
-        (folder / "refs").mkdir()
+        (folder / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (folder / "refs" / "heads" / "main").write_text("a" * 40 + "\n", encoding="utf-8")
         report = _report(folder)
         self.assertIn("ERROR", report)
         self.assertNotIn("not a repository", report)

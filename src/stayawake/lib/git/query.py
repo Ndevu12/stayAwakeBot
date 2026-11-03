@@ -43,8 +43,8 @@ def is_git_repo(repo: str | Path) -> bool:
 
 
 def is_bare_repository(repo: str | Path) -> bool | None:
-    """Whether git takes this directory as a bare repository. Takes the directory. Returns True or
-    False when git answered, None when it did not."""
+    """Tell whether git takes a directory as a bare repository. Takes the directory. Returns True
+    or False when git answered, None when it did not."""
     answered = answer(repo, ["rev-parse", "--is-bare-repository"])
     if answered is None:
         return None
@@ -69,6 +69,15 @@ def default_branch(repo: str | Path) -> str:
     no origin / it isn't resolvable — so `saw fix` still has a base branch to build on offline."""
     out = stdout(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"]).strip()
     return out.rsplit("/", 1)[-1] if out else "main"
+
+
+def holds_a_commit(repo: str | Path) -> bool | None:
+    """Tell whether a repository holds any commit. Takes the repo. Returns True or False when git
+    answered, None when it did not."""
+    res = own_view(repo, ["rev-list", "--max-count=1", "--all"])
+    if res is None or res.returncode != 0:
+        return None
+    return bool((res.stdout or "").strip())
 
 
 def names_a_commit(repo: str | Path, ref: str) -> bool:
@@ -559,6 +568,7 @@ def changed_paths(repo: str | Path, base: str, target: str,
 
 
 TREE_MODE = "040000"
+SYMLINK_MODE = "120000"
 GITLINK_MODE = "160000"
 
 

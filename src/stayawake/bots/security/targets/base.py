@@ -7,7 +7,6 @@ through, so local and cloned repositories look the same to every matcher.
 from __future__ import annotations
 
 import copy
-import io
 import os
 import re
 import stat as _stat
@@ -85,6 +84,17 @@ def stream_runs_of_text(read: Callable[[int], bytes], size: int,
             yield line_offset, "\n".join(runs)
 
 
+def text_of(raw: bytes, ext: str) -> str | None:
+    """Decode file bytes the way a scan reads text. Takes the bytes and the extension. Returns the
+    text, or None when the file is a binary."""
+    if b"\x00" in raw[:8192]:
+        if ext in SOURCE_EXTS:
+            raw = raw.replace(b"\x00", b"")
+        else:
+            return None
+    return raw.decode("utf-8", errors="replace")
+
+
 def is_source_path(rel: str) -> bool:
     """Tell whether the content checks read a path as source. Takes the path. Returns True when its
     extension is a source extension."""
@@ -121,8 +131,6 @@ class Target:
         self.include_only = include_only
         self.within = within
         self._walk_cache: list[str] | None = None
-        self._through_git: bool | None = None
-        self._held: dict[str, str] | None = None
         self.read_errors: list[str] = []
         self.coverage_notes: list[str] = []
         self.pruned_dirs: set[str] = set()
@@ -148,107 +156,9 @@ class Target:
         confined to one directory of a repository keeps the root and moves only this."""
         return self.root / self.within if self.within else self.root
 
-    def _reads_through_git(self) -> bool:
-        """Whether this target's files are read from the repository rather than a work tree."""
-        if getattr(self, "names_one_file", False):
-            return False
-        if self._through_git is None:
-            from stayawake.bots.security.targets.bare import looks_like_a_git_directory
-            from stayawake.lib.git.query import is_bare_repository
-            self._through_git = (looks_like_a_git_directory(self.root)
-                                 and is_bare_repository(self.root) is not False)
-        return self._through_git
-
-    def _held_files(self) -> dict[str, str]:
-        """The files HEAD holds, path to object id. An unreadable list is empty, and recorded."""
-        if self._held is None:
-            from stayawake.bots.security.targets.bare import files_held
-            files, error = files_held(self.root, self.opts.exclude_dirs)
-            if error:
-                self.read_errors.append(error)
-            self._held = files
-        return self._held
-
-    def _held_bytes(self, rel: str, limit: int | None, *, whole: bool = False) -> bytes | None:
-        """The bytes HEAD holds at `rel`. Takes the path, a read limit, and whether a file over
-        the size cap is still read. Returns the bytes, or None when the path is absent, skipped
-        for size, or could not be read."""
-        oid = self._held_files().get(rel)
-        if oid is None:
-            return None
-        from stayawake.bots.security.targets.bare import object_size
-        from stayawake.lib.git.objects import blob
-        size = object_size(self.root, oid)
-        if size is None:
-            self.read_errors.append(f"{rel}: the file could not be read")
-            return None
-        if not whole and limit is None and size > self.opts.max_file_bytes:
-            return None
-        data = blob(self.root, oid)
-        if data is None:
-            self.read_errors.append(f"{rel}: the file could not be read")
-            return None
-        return data[:limit] if limit else data
-
-    def _held_text(self, rel: str) -> str | None:
-        """The text HEAD holds at `rel`, under the same size and binary rules as a work tree."""
-        ext = _ext(rel)
-        oid = self._held_files().get(rel)
-        if oid is None:
-            return None
-        from stayawake.bots.security.targets.bare import object_size
-        size = object_size(self.root, oid)
-        if size is None:
-            self.read_errors.append(f"{rel}: the file could not be read")
-            return None
-        if size > self.opts.max_file_bytes and ext not in SOURCE_EXTS:
-            return None
-        raw = self._held_bytes(rel, None, whole=True)
-        if raw is None:
-            return None
-        if size > self.opts.max_file_bytes:
-            half = max(1, self.opts.max_file_bytes // 2)
-            raw = raw[:half] + TRUNCATION_MARKER + raw[-half:]
-        if b"\x00" in raw[:8192]:
-            if ext in SOURCE_EXTS:
-                raw = raw.replace(b"\x00", b"")
-            else:
-                return None
-        return raw.decode("utf-8", errors="replace")
-
-    def _held_windows(self, rel: str) -> Iterator[tuple[int, str]]:
-        """Windows over the bytes HEAD holds at `rel`, matching `read_source_windows`."""
-        ext = _ext(rel)
-        oid = self._held_files().get(rel)
-        if oid is None:
-            return
-        from stayawake.bots.security.targets.bare import object_size
-        size = object_size(self.root, oid)
-        if size is None:
-            self.read_errors.append(f"{rel}: the file could not be read")
-            return
-        if size <= self.opts.max_file_bytes:
-            text = self._held_text(rel) if ext in SOURCE_EXTS else self._nonsource_scan_text(rel)
-            if text is not None:
-                yield (0, text)
-            return
-        raw = self._held_bytes(rel, None, whole=True)
-        if raw is None:
-            return
-        was_read = self.content_was_read(ext, raw[:self.BINARY_SNIFF_BYTES])
-        walk = stream_windows if was_read else stream_runs_of_text
-        yield from walk(io.BytesIO(raw).read, size, self.opts.max_file_bytes)
-
     def iter_files(self) -> Iterator[str]:
         if self.include_only is not None:       # a pre-discovered file-chunk — no re-walk
             yield from self.include_only
-            return
-        if self._reads_through_git():
-            if self._walk_cache is None:
-                prefix = f"{self.within.strip('/')}/" if self.within else ""
-                self._walk_cache = [rel for rel in self._held_files()
-                                    if not prefix or rel == prefix[:-1] or rel.startswith(prefix)]
-            yield from self._walk_cache
             return
         if self._walk_cache is None:            # walk once, memoize (byte-identical replay after)
             cache: list[str] = []
@@ -322,8 +232,6 @@ class Target:
         return True
 
     def read_bytes(self, rel: str, limit: int | None = None) -> bytes | None:
-        if self._reads_through_git():
-            return self._held_bytes(rel, limit)
         p = self.root / rel
         try:
             st = os.lstat(p)
@@ -391,8 +299,6 @@ class Target:
         return True
 
     def read_text(self, rel: str) -> str | None:
-        if self._reads_through_git():
-            return self._held_text(rel)
         p = self.root / rel
         ext = _ext(rel)
         try:
@@ -413,12 +319,7 @@ class Target:
             raw = self.read_bytes(rel)
             if raw is None:
                 return None
-        if b"\x00" in raw[:8192]:
-            if ext in SOURCE_EXTS:
-                raw = raw.replace(b"\x00", b"")
-            else:
-                return None                       # real binary asset
-        return raw.decode("utf-8", errors="replace")
+        return text_of(raw, ext)
 
     def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
         """Read a file for the confirmed content checks. Takes the path. Yields
@@ -426,9 +327,6 @@ class Target:
         non-source file, when the file fits in `max_file_bytes`; otherwise overlapping windows over
         every byte, keeping only the runs of text of a binary file. `line_offset` counts the
         newlines before the window."""
-        if self._reads_through_git():
-            yield from self._held_windows(rel)
-            return
         p = self.root / rel
         ext = _ext(rel)
         try:
