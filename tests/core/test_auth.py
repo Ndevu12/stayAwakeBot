@@ -162,7 +162,7 @@ class TestHint(unittest.TestCase):
         with mock.patch.object(auth, "gh_installed", return_value=False):
             h = auth.no_credential_hint("cloning private repos")
             self.assertIn("install the github cli", h.lower())
-            self.assertIn("cloning private repos", h)
+            self.assertIn("Cloning private repos", h)
 
     def test_hint_when_gh_present_says_login(self):
         with mock.patch.object(auth, "gh_installed", return_value=True):

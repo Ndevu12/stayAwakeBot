@@ -103,7 +103,7 @@ def what_the_remote_said(stderr: str | None) -> str:
 def push_failure_message(failure: PushFailure) -> str:
     """One-line operator guidance for a classified push failure."""
     if failure.reason == "workflow_scope":
-        return ("rejected: credential lacks Workflows permission — run "
+        return ("rejected: your sign-in cannot change workflow files — run "
                 "`gh auth refresh -h github.com -s repo,workflow` or `saw auth app register`")
     if failure.reason == "signed_commits":
         return "rejected: branch requires signed commits — re-sign the branch, then retry"
@@ -117,5 +117,5 @@ def push_failure_message(failure: PushFailure) -> str:
     if failure.reason == "network":
         return "rejected: network/TLS failure talking to GitHub"
     if failure.reason == "auth":
-        return "rejected: authentication failed — check the token"
+        return "rejected: GitHub did not accept your sign-in — sign in again"
     return "rejected: push failed (see git stderr)"
