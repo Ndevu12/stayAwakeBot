@@ -16,7 +16,7 @@ from stayawake.lib.git import remote as gitremote
 from stayawake.lib.git.history_tips import history_tips
 from stayawake.lib.git.objects import (batch_objects, blob_text, link_targets, own_env, own_view,
                                        own_view_fed)
-from stayawake.lib.git.run import run, stdout, stdout_bytes, stdout_bytes_fed
+from stayawake.lib.git.run import answer, run, stdout, stdout_bytes, stdout_bytes_fed
 
 
 def composed_path(path: str, *, fold: bool) -> str:
@@ -42,6 +42,15 @@ def is_git_repo(repo: str | Path) -> bool:
     return stdout(repo, ["rev-parse", "--is-inside-work-tree"]).strip() == "true"
 
 
+def is_bare_repository(repo: str | Path) -> bool | None:
+    """Tell whether git takes a directory as a bare repository. Takes the directory. Returns True
+    or False when git answered, None when it did not."""
+    answered = answer(repo, ["rev-parse", "--is-bare-repository"])
+    if answered is None:
+        return None
+    return answered.strip() == "true"
+
+
 def slug_from_url(url: str) -> str | None:
     """Parse 'owner/name' from a GitHub SSH or HTTPS remote URL (pure — no git call).
     Returns None for a non-GitHub URL, so callers can tell 'not GitHub' from a parse error."""
@@ -60,6 +69,15 @@ def default_branch(repo: str | Path) -> str:
     no origin / it isn't resolvable — so `saw fix` still has a base branch to build on offline."""
     out = stdout(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"]).strip()
     return out.rsplit("/", 1)[-1] if out else "main"
+
+
+def holds_a_commit(repo: str | Path) -> bool | None:
+    """Tell whether a repository holds any commit. Takes the repo. Returns True or False when git
+    answered, None when it did not."""
+    res = own_view(repo, ["rev-list", "--max-count=1", "--all"])
+    if res is None or res.returncode != 0:
+        return None
+    return bool((res.stdout or "").strip())
 
 
 def names_a_commit(repo: str | Path, ref: str) -> bool:
@@ -550,6 +568,7 @@ def changed_paths(repo: str | Path, base: str, target: str,
 
 
 TREE_MODE = "040000"
+SYMLINK_MODE = "120000"
 GITLINK_MODE = "160000"
 
 
