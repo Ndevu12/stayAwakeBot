@@ -140,15 +140,10 @@ def act_token(base_token: str | None, source: str | None,
 
 
 def no_credential_hint(action: str = "this operation") -> str:
-    """Actionable, gh-aware guidance to print when a required credential is missing.
-
-    Names the single token a user configures (GH_SECURITY_TOKEN); the automatic Actions
-    GITHUB_TOKEN isn't something to set up, so we don't tell people to."""
-    var = ENV_VARS[0]
+    """Say how to sign in to GitHub so saw can do `action`. Takes the action. Returns the line,
+    naming the GitHub CLI's install page when it is not installed."""
     if not gh_installed():
-        return (f"No GitHub credential for {action}. Run `saw auth app register` to give saw its "
-                f"own, or install the GitHub CLI (https://cli.github.com) and run "
-                f"`gh auth login`, or set {var} to a token with the required scope.")
-    return (f"No GitHub credential for {action}. Run `saw auth app register` to give saw its own, "
-            f"or `gh auth login` (check with `gh auth status`), or set {var} to a token with "
-            f"the required scope.")
+        return (f"Sign in to GitHub so saw can do {action}: run `saw auth app register`, or "
+                f"install the GitHub CLI (https://cli.github.com) and run `gh auth login`.")
+    return (f"Sign in to GitHub so saw can do {action}: run `saw auth app register` or "
+            f"`gh auth login`.")
