@@ -31,8 +31,8 @@ itself.
 
 It also turns off dangerous command auto-approval for chat and agent tools. A blanket "approve
 everything", a pattern that matches every command, and each risky command named in the audit are
-set to off. Commands you allowed that are not dangerous are left exactly as they are, so what you
-chose deliberately keeps working.
+set to off, including an approval that names arguments (`yarn dev`). Commands you allowed that are
+not dangerous are left exactly as they are, so what you chose deliberately keeps working.
 
 It does the same for the coding agents on this machine. Claude Code, the Cursor agent and Codex
 each keep a list of what they may run without asking; a risky entry is taken out, and an agent whose

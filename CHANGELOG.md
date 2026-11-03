@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Security
+- **`saw harden` turns off an auto-approved command that names arguments when the command it
+  starts with is one saw treats as risky** (`yarn dev`, `yarn lint`). `bun`, `bunx`, `deno`,
+  `make`, `mvn`, `gradle`, `go`, `cargo`, `pip`, `uv`, `docker`, `kubectl`, and `supabase` are
+  treated as risky. An approval you set for a command that is not risky is left as it is.
+
 ### Fixed
 - **`saw guard setup --remote` no longer opens a keychain prompt.** saw's own GitHub clones do not ask
   your credential helpers, so they neither prompt nor store saw's token in your keychain.
