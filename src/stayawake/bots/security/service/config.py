@@ -91,8 +91,8 @@ def _require_db_or_error() -> int | None:
         print(f"saw scan --require-db: advisory DB is an older format (schema {st.get('schema')}) "
               "— run `saw db update`.", file=sys.stderr)
         return 2
-    if not st.get("malware_current", True):
-        print("saw scan --require-db: this advisory database predates this saw — "
+    if not st.get("saved_by_this_saw", True):
+        print("saw scan --require-db: this advisory database was saved by an older saw — "
               "run `saw db update`.", file=sys.stderr)
         return 2
     if not st.get("integrity_ok"):

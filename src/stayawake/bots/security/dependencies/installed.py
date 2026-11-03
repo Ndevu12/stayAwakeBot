@@ -56,9 +56,10 @@ class TamperedFile:
 
 
 class InstalledTree:
-    """Read one ecosystem's PROJECT-LOCAL installed tree. Yields NOTHING when the tree is absent (e.g. a
-    remote clone with no install) — the lockfile audit stays the coverage there. Never follows symlinks
-    (workspace/local links are benign, and following them risks loops / repo escape)."""
+    """Read one ecosystem's PROJECT-LOCAL installed tree. Yields NOTHING when the tree is absent
+    (e.g. a remote clone with no install) — the lockfile audit stays the coverage there. Follows
+    a symlink only where the install, or a package in it, is a link to an install outside the
+    target, and reads that install as the other project's."""
     ecosystem: str = ""
     _MAX_DEPTH = 8
     ghost_reconcilable: bool = True
@@ -66,6 +67,12 @@ class InstalledTree:
 
     def read(self, target) -> Iterator[InstalledPackage]:
         raise NotImplementedError
+
+    def installations(self, target
+                      ) -> Iterator[tuple[Path | None, str | None, list[InstalledPackage]]]:
+        """Group the installed packages by the project each install belongs to. Takes the scan
+        target. Yields `(None, None, packages)` for the packages this tree reads."""
+        yield None, None, list(self.read(target))
 
     def install_folder(self, path: str) -> str:
         """Name the folder an installed package belongs to: the one holding the install directory

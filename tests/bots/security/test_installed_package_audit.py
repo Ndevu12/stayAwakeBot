@@ -118,6 +118,23 @@ class TestInstalledPackageAudit(unittest.TestCase):
         findings = _scan(Target(work, str(work), ScanOptions()))
         self.assertFalse([f for f in findings if f.signature_id == "ghost-package"])
 
+    def test_the_lockfile_of_a_linked_install_in_the_home_folder_is_named_from_it(self):
+        home = Path(tempfile.mkdtemp()).resolve()
+        owner = home / "dev" / "app"
+        (owner / ".git").mkdir(parents=True)
+        (owner / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {"": {"name": "app"}, "node_modules/undici": {"version": "7.30.0"}}}))
+        pkg = owner / "node_modules" / "undici"
+        pkg.mkdir(parents=True)
+        (pkg / "package.json").write_text(json.dumps({"name": "undici", "version": "9.9.9"}))
+        work = Path(tempfile.mkdtemp())
+        (work / "node_modules").symlink_to(owner / "node_modules", target_is_directory=True)
+        (work / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": {}}))
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            findings = _scan(Target(work, str(work), ScanOptions()))
+        self.assertIn("the lockfile in ~/dev/app lists undici at 7.30.0", findings[0].evidence)
+
     def test_a_linked_install_at_another_version_is_still_reported(self):
         owner = Path(tempfile.mkdtemp())
         (owner / ".git").mkdir()

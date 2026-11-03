@@ -69,10 +69,10 @@ class TestADatabaseFromBeforeThisVersion(unittest.TestCase):
         self.assertIsNotNone(corpus.malicious_match(Purl("npm", "oldpkg", "2.0.0")))
         self.assertIsNone(corpus.malicious_match(Purl("npm", "retired", "1.0.0")))
         self.assertTrue(corpus.vulnerability_matches(Purl("npm", "leftpad", "1.0.0")))
-        self.assertIn("predates this saw", err.getvalue())
-        self.assertIn("still are", err.getvalue())
+        self.assertIn("saved by an older saw", err.getvalue())
+        self.assertIn("saw db update", err.getvalue())
         self.assertTrue(db.cache_status(cache)["present"])
-        self.assertFalse(db.cache_status(cache)["malware_current"])
+        self.assertFalse(db.cache_status(cache)["saved_by_this_saw"])
 
     def test_status_says_so(self):
         cache = self._old()
@@ -81,7 +81,7 @@ class TestADatabaseFromBeforeThisVersion(unittest.TestCase):
             rc = db_cmd.run_status(argparse.Namespace(
                 cache_dir=str(cache), require_snapshot=None, max_age_days=None))
         self.assertEqual(rc, 2)
-        self.assertIn("predates this saw", out.getvalue())
+        self.assertIn("saved by an older saw", out.getvalue())
         self.assertIn("saw db update", err.getvalue())
 
     def test_the_inline_seed_still_matches(self):
@@ -129,6 +129,20 @@ class TestADatabaseFromBeforeThisVersion(unittest.TestCase):
         self.assertFalse(any("retired" in f.evidence for f in declared))
         self.assertTrue(any(f.path == "node_modules/oldpkg/package.json" for f in installed))
         self.assertFalse(any("retired" in f.path for f in installed))
+
+
+class TestADatabaseThisSawSaved(unittest.TestCase):
+    def test_an_advisory_its_feed_carries_is_reported_whatever_its_id(self):
+        cache = Path(tempfile.mkdtemp())
+        _build(cache, {"MAL.json": mal_record("retired", ["1.0.0"], rid="MAL-2026-5187",
+                                              aliases=["GHSA-x96m-c5fj-q75c"])})
+        db._CORPUS_MEMO.clear()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            corpus = db.load_corpus(cache)
+        self.assertEqual("MAL-2026-5187", corpus.malicious_match(Purl("npm", "retired", "1.0.0")).id)
+        self.assertTrue(db.cache_status(cache)["saved_by_this_saw"])
+        self.assertNotIn("older saw", err.getvalue())
 
 
 class TestCacheStatus(unittest.TestCase):

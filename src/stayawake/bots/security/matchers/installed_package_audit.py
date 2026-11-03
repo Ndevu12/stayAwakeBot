@@ -12,6 +12,7 @@ from stayawake.bots.security.dependencies import RESOLVERS, AdvisoryStore
 from stayawake.bots.security.dependencies.installed import INSTALLED_TREES
 from stayawake.bots.security.dependencies.purl import Purl
 from stayawake.bots.security.dependencies.remediation import advisory_reference, malware_fix
+from stayawake.utils import textsafe
 
 
 class InstalledPackageAuditMatcher(Matcher):
@@ -38,10 +39,7 @@ class InstalledPackageAuditMatcher(Matcher):
         truncated: list = []
         findings: list[Finding] = []
         for tree in self._trees:
-            declared = getattr(type(tree), "installations", None)
-            groups = (list(tree.installations(target)) if callable(declared)
-                      else [(None, None, list(tree.read(target)))])
-            for owner, folder, installed in groups:
+            for owner, folder, installed in tree.installations(target):
                 locked = (self._locked(tree.ecosystem, _lock_root(target, owner, folder))
                           if (installed and tree.ghost_reconcilable) else _Lockfiles({}))
                 place = owner
@@ -197,7 +195,7 @@ def _malicious(advisory, pkg) -> Finding:
 def _ghost(sig, pkg, listed_at: set | None = None, place: Path | None = None) -> Finding | None:
     if sig is None:
         return None
-    lockfile = "the lockfile" if place is None else f"the lockfile in {place}"
+    lockfile = "the lockfile" if place is None else f"the lockfile in {textsafe.home_shown(place)}"
     if listed_at:
         shown = ", ".join(sorted(v for v in listed_at if v))
         evidence = (f"{pkg.name}@{pkg.version or '?'} is installed, but {lockfile} lists {pkg.name} "

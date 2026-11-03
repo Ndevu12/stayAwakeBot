@@ -21,8 +21,7 @@ from stayawake.utils.timeutil import now_iso
 
 _SCHEMA = 2
 _FILTER = 1
-# Advisories this saw does not report, including from a database saved before it knew that.
-_NOT_REPORTED = frozenset({"MAL-2026-5187"})
+_WITHDRAWN_BUT_KEPT_BY_AN_OLDER_DATABASE = frozenset({"MAL-2026-5187"})
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
 _OSV_BUCKETS = PURL_TO_OSV
 
@@ -220,7 +219,12 @@ def _stream_records(cache_dir: Path, manifest: dict[str, Any]):
 
     Integrity gate: a records file is trusted only if its content hash matches the manifest. A
     mismatch means the cache was corrupted or tampered after `db update` — we skip it (falling back
-    to the always-shipped inline seed) and warn loudly, never silently trusting bad data."""
+    to the always-shipped inline seed) and warn loudly, never silently trusting bad data.
+
+    A database saved by an older saw still holds advisories their publisher withdrew; the ones
+    this saw knows of are left out of it."""
+    left_out = (frozenset() if _saved_by_this_saw(manifest)
+                else _WITHDRAWN_BUT_KEPT_BY_AN_OLDER_DATABASE)
     for eco, meta in _ecosystems(manifest).items():
         path = _records_path(cache_dir, eco)
         expected = meta.get("sha256")
@@ -242,8 +246,14 @@ def _stream_records(cache_dir: Path, manifest: dict[str, Any]):
                 except json.JSONDecodeError:
                     continue
                 rec = _record_from_json(raw)
-                if rec is not None:
+                if rec is not None and not _named_in(rec, left_out):
                     yield rec
+
+
+def _named_in(rec: OsvRecord, ids: frozenset[str]) -> bool:
+    """Tell whether an advisory is one of `ids`, by its own id or an alias. Takes the record and the
+    ids. Returns the answer."""
+    return rec.id in ids or any(alias in ids for alias in rec.aliases)
 
 
 def _schema_compatible(manifest: dict[str, Any]) -> bool:
@@ -254,11 +264,9 @@ def _schema_compatible(manifest: dict[str, Any]) -> bool:
     return manifest.get("schema") == _SCHEMA
 
 
-def _malware_current(manifest: dict[str, Any]) -> bool:
-    """Tell whether a scan may call a package known-malicious from this database.
-
-    Takes the manifest. Returns False when the database predates this saw.
-    """
+def _saved_by_this_saw(manifest: dict[str, Any]) -> bool:
+    """Tell whether a database was saved by a saw that leaves out what this one does, withdrawn
+    advisories among them. Takes the manifest. Returns False for a database an older saw saved."""
     return manifest.get("filter") == _FILTER
 
 
@@ -294,10 +302,9 @@ def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None
               file=sys.stderr)
         return None
     corpus = AdvisoryCorpus.from_records(_stream_records(cache_dir, manifest))
-    if not _malware_current(manifest):
-        print("⚠️  saw: this advisory database predates this saw. An advisory its publisher withdrew "
-              "is not reported from it. Other known-malicious packages in it still are. "
-              "Run `saw db update`.", file=sys.stderr)
+    if not _saved_by_this_saw(manifest):
+        print("⚠️  saw: this advisory database was saved by an older saw, so it can still "
+              "report an advisory its publisher withdrew. Run `saw db update`.", file=sys.stderr)
     return corpus
 
 
@@ -332,7 +339,7 @@ def cache_status(cache_dir: str | Path | None = None) -> dict[str, Any]:
         "cache_dir": str(cache_dir),
         "schema": manifest.get("schema"),
         "schema_compatible": schema_compatible,
-        "malware_current": schema_compatible and _malware_current(manifest),
+        "saved_by_this_saw": schema_compatible and _saved_by_this_saw(manifest),
         "snapshot": manifest.get("snapshot"),
         "generated_at": manifest.get("generated_at"),
         "age_days": _age_days(manifest.get("generated_at")),
@@ -372,10 +379,6 @@ def _affected_from_json(a: dict[str, Any]) -> OsvAffected | None:
 
 def _record_from_json(raw: dict[str, Any]) -> OsvRecord | None:
     if not isinstance(raw, dict):
-        return None
-    rid = str(raw.get("id", ""))
-    aliases = raw.get("aliases") or []
-    if rid in _NOT_REPORTED or any(str(alias) in _NOT_REPORTED for alias in aliases):
         return None
     affected = tuple(x for x in (_affected_from_json(a) for a in (raw.get("affected", []) or []))
                      if x is not None)

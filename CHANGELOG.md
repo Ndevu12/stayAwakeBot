@@ -19,9 +19,10 @@ reader, not the mechanism or the weakness it closed.
   swapped against this folder's lockfile. When a package does not match, the finding names the
   folder that lockfile is in. A version named in `package.json` is still reported when that
   lockfile lists another.
-- **An advisory its publisher withdrew is not reported from a database saved by an older saw.** A
-  package that database still lists as known-malicious is still reported. `saw db status` says the
-  database predates this saw. `saw db update` replaces it.
+- **MAL-2026-5187, which its publisher withdrew, is no longer reported from an advisory database
+  saved by an older saw.** Every other known-malicious package in that database still is. A scan
+  and `saw db status` say when the database was saved by an older saw, which can still report an
+  advisory its publisher withdrew; `saw db update` rebuilds it.
 
 ## [0.15.0] - 2026-10-22
 
