@@ -23,6 +23,13 @@ reader, not the mechanism or the weakness it closed.
   starts with is one saw treats as risky** (`yarn dev`, `yarn lint`). `bun`, `bunx`, `deno`,
   `make`, `mvn`, `gradle`, `go`, `cargo`, `pip`, `uv`, `docker`, `kubectl`, and `supabase` are
   treated as risky. An approval you set for a command that is not risky is left as it is.
+- **`saw harden` hardens every editor and its profiles fully.** Every command an agent may run
+  without asking is turned off, the editor asks whether to trust a folder every time it opens one,
+  and a window with no folder open is not trusted. `saw watch` runs `saw harden` on every pass, so
+  these stay in place. `saw harden --take-back --ide` gives back only the editor settings, and
+  `saw watch` leaves them until `saw harden` runs again. `saw audit` reports these settings and
+  changes nothing.
+- **An editor that does not say automatic tasks are off is reported as a warning.**
 
 ### Fixed
 - **`saw guard setup --remote` no longer opens a keychain prompt.** saw's own GitHub clones do not ask

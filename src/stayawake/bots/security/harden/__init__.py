@@ -134,6 +134,24 @@ _WHAT_TO_DO_WITH_WHAT_IS_LEFT = {
 _COULD_NOT_TAKE_BACK = "Some of it could not be taken back. Run `saw harden --take-back` again."
 
 
+def take_back_ide(*, give_back=editorsettings.give_back) -> tuple[int, str]:
+    """Give the editor controls back, and only those. Takes the editor step. Returns the exit code
+    and the lines to print; `saw watch` leaves the editors alone until `saw harden` runs again."""
+    try:
+        back = give_back()
+    except Exception:
+        back = None
+    if back is None or back.unreadable_record:
+        return 3, _EDITORS_NOT_LOOKED_UP
+    if back.failed:
+        return 3, _EDITORS_NOT_BACK
+    lines = ["The editor settings saw changed are back as they were. `saw watch` leaves them until "
+             "you run `saw harden` again."]
+    if back.kept:
+        lines.extend(["", _EDITORS_KEPT])
+    return 0, "\n".join(lines)
+
+
 def take_back(*, folders=_global_folders, remove=remove_one,
               supported=hostdenial.platform_supported,
               unschedule=schedule.take_back,
@@ -268,7 +286,7 @@ def run(*, live=check_live_processes, folders=_global_folders,
         altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs,
         stop=end_live_code, settle_hooks=hook.settle_hooks,
         schedule_pass=schedule.settle,
-        editor_pass=editorsettings.settle,
+        editor_pass=editorsettings.put_in_place,
         agent_pass=agentapprovals.settle) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 

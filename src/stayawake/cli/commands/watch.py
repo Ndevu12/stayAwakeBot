@@ -99,4 +99,4 @@ def run_internal(a: argparse.Namespace) -> int:
     tell = watchteller.teller(notifier_for_this_machine(), load=watchrecord.load,
                               save=watchrecord.save, clock=time.time, local=time.localtime,
                               acknowledged=watchack.load_acknowledgement)
-    return watch.keep_going(tell=tell)
+    return watch.keep_going(tell=tell, correct=watch.run_harden)

@@ -46,6 +46,19 @@ class TestEveryEditorIsFoundNotJustTheFirst(unittest.TestCase):
         found = editors.installed([self.base])
         self.assertEqual([e.name for e in found.editors], ["SomeNewFork"])
 
+    def test_a_profile_of_an_editor_is_found_with_it(self):
+        settings = _editor_at(self.base, "Code", '{"task.allowAutomaticTasks": "off"}')
+        profile = settings.parent / "profiles" / "abc"
+        profile.mkdir(parents=True)
+        (profile / "profile.json").write_text('{"name": "Work"}', encoding="utf-8")
+        (profile / "settings.json").write_text("{}", encoding="utf-8")
+        found = editors.installed([self.base])
+        self.assertEqual([e.name for e in found.editors], ["VS Code", "VS Code (Work)"])
+        issues = [i for i in editor.check_editors(find=lambda: found)
+                  if i.id.startswith("editor-autotasks")]
+        self.assertEqual([i.severity for i in issues], ["warning"])
+        self.assertIn("Work", issues[0].title)
+
     def test_a_directory_that_is_not_one_of_these_is_left_alone(self):
         # `User/settings.json` alone is not enough: an unrelated application with that shape would
         # be graded against keys it has never heard of, and — through harden — written to. Three
@@ -125,8 +138,9 @@ class TestEveryEditorIsGradedNotJustOne(unittest.TestCase):
         _editor_at(base, "Cursor", "{}")
         found = editors.installed([base])
         issues = editor.check_editors(find=lambda: found)
-        self.assertEqual([i.id for i in issues], ["editor-autotasks-default"])
-        self.assertIn("Cursor", issues[0].title)
+        autotasks = [i for i in issues if i.id.startswith("editor-autotasks")]
+        self.assertEqual([i.id for i in autotasks], ["editor-autotasks-default"])
+        self.assertIn("Cursor", autotasks[0].title)
 
     def test_the_finding_names_which_editor_it_is_about(self):
         base = pathlib.Path(tempfile.mkdtemp())
@@ -194,8 +208,8 @@ class TestCorrectingWritesOnlyWhatItKnows(unittest.TestCase):
         table = load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"]
         for key in ("npx", "supabase", "yarn lint", "yarn dev", "ssh", "sed", "awk", "bun dev"):
             self.assertIs(table[key], False, key)
-        self.assertIs(table["uniq"], True)
-        self.assertIs(table["git add"], True)
+        self.assertIs(table["uniq"], False)
+        self.assertIs(table["git add"], False)
 
     def test_an_approval_that_runs_a_risky_command_after_another_is_turned_off(self):
         body = ('{"task.allowAutomaticTasks": "off", "chat.tools.terminal.autoApprove": {'
@@ -204,17 +218,15 @@ class TestCorrectingWritesOnlyWhatItKnows(unittest.TestCase):
         self._settle()
         table = load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"]
         self.assertIs(table["cd app && npx vite"], False)
-        self.assertIs(table["git status"], True)
+        self.assertIs(table["git status"], False)
 
-    def test_and_the_commands_that_are_not_dangerous_are_left_alone(self):
-        # Turning the whole table off is not what was asked for, and it costs a prompt on every
-        # command the operator deliberately allowed.
+    def test_every_command_an_agent_may_run_without_asking_is_turned_off(self):
         body = ('{"chat.tools.terminal.autoApprove": {"npx": true, "ls": true, '
-                '"git status": true}}')
+                '"git status": true, "rm": false}}')
         path = _editor_at(self.base, "Code", body)
         self._settle()
         table = load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"]
-        self.assertEqual(table, {"npx": False, "ls": True, "git status": True})
+        self.assertEqual(table, {"npx": False, "ls": False, "git status": False, "rm": False})
 
     def test_approving_every_command_is_turned_off_outright(self):
         path = _editor_at(self.base, "Code", '{"chat.tools.terminal.autoApprove": true}')
@@ -252,7 +264,8 @@ class TestCorrectingWritesOnlyWhatItKnows(unittest.TestCase):
 
     def test_an_editor_already_correct_is_not_rewritten(self):
         body = ('{"task.allowAutomaticTasks": "off", "security.workspace.trust.enabled": true, '
-                '"security.workspace.trust.untrustedFiles": "prompt"}')
+                '"security.workspace.trust.untrustedFiles": "prompt", '
+                '"security.workspace.trust.startupPrompt": "always", "security.workspace.trust.emptyWindow": false}')
         path = _editor_at(self.base, "Code", body)
         before = path.read_text()
         out = self._settle()
@@ -278,7 +291,7 @@ class TestWhatWasChangedCanBePutBack(unittest.TestCase):
         self.record = self.base / "record.json"
 
     def test_a_value_that_was_there_before_is_restored(self):
-        path = _editor_at(self.base, "Code", '{"task.allowAutomaticTasks": "on"}')
+        path = _editor_at(self.base, "Code", '{"task.allowAutomaticTasks": "on", "security.workspace.trust.startupPrompt": "always", "security.workspace.trust.emptyWindow": false}')
         found = editors.installed([self.base])
         editorsettings.settle(find=lambda: found, record=self.record)
         self.assertIn('"off"', path.read_text())
