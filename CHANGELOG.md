@@ -34,9 +34,6 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - **When saw has no GitHub credential, it names both ways to give it one:** `saw auth app
   register`, saw's own, or `gh auth login`. saw never reads the credential git stores.
-- **A machine whose git already holds a github.com token can `saw scan --remote` and `saw fix --pr`
-  with that same sign-in.** saw uses it when no other credential is configured. An App that cannot
-  see one repository no longer hides a repository that token can reach.
 - **`saw guard setup --remote` no longer opens a keychain prompt.** saw's own GitHub clones do not ask
   your credential helpers, so they neither prompt nor store saw's token in your keychain.
 - **`saw guard setup` and `saw guard check` find the latest SAW Guard release** when the credential
