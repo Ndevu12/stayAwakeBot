@@ -16,6 +16,8 @@ from stayawake.lib import auth
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.owned import own, disown
 from stayawake.lib.git.exec_surface import links_to_no_git_directory
+from stayawake.lib.git.query import is_bare_repository
+from stayawake.bots.security.targets.bare import looks_like_a_git_directory
 from stayawake.lib.adapters import github_api
 from stayawake.utils import scratch
 from stayawake.bots.security.targets import ScanOptions
@@ -43,9 +45,15 @@ def _holds_git(p: Path) -> bool:
 
 
 def is_a_repository(p: Path) -> bool:
-    """Whether git would take `p` as a repository. Takes the folder. Returns True when it holds a
-    `.git`, unless that `.git` is a link file naming a git directory that is not there."""
-    return _holds_git(p) and not links_to_no_git_directory(p)
+    """Whether this directory is a repository. Takes the folder. Returns True when it holds a
+    `.git` that names a git directory, or when git takes the directory itself as a bare
+    repository."""
+    if _holds_git(p) and not links_to_no_git_directory(p):
+        return True
+    if not looks_like_a_git_directory(p):
+        return False
+    # No answer is not "a directory". Reading it that way would skip the files it holds.
+    return is_bare_repository(p) is not False
 
 
 def bare_run_targets(configured: list[str]) -> list[str]:
@@ -109,7 +117,7 @@ def discover_local_repos(patterns: list[str], opts: ScanOptions,
         if not os.path.lexists(root):
             continue
         for dirpath, dirnames, _ in os.walk(root, onerror=_unwalkable):
-            if _holds_git(Path(dirpath)):
+            if is_a_repository(Path(dirpath)):
                 rp = Path(dirpath).resolve()
                 if str(rp) not in seen:
                     seen.add(str(rp))

@@ -24,6 +24,10 @@ reader, not the mechanism or the weakness it closed.
   and `saw db status` say when the database was saved by an older saw, which can still report an
   advisory its publisher withdrew; `saw db update` rebuilds it.
 
+### Security
+- A scan of a repository that has no working tree reads the files that repository holds. One that
+  cannot be read is not reported clean.
+
 ## [0.15.0] - 2026-10-22
 
 ### Added

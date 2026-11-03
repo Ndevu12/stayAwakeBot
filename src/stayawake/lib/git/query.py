@@ -16,7 +16,7 @@ from stayawake.lib.git import remote as gitremote
 from stayawake.lib.git.history_tips import history_tips
 from stayawake.lib.git.objects import (batch_objects, blob_text, link_targets, own_env, own_view,
                                        own_view_fed)
-from stayawake.lib.git.run import run, stdout, stdout_bytes, stdout_bytes_fed
+from stayawake.lib.git.run import answer, run, stdout, stdout_bytes, stdout_bytes_fed
 
 
 def composed_path(path: str, *, fold: bool) -> str:
@@ -40,6 +40,15 @@ def path_key(repo: str | Path):
 
 def is_git_repo(repo: str | Path) -> bool:
     return stdout(repo, ["rev-parse", "--is-inside-work-tree"]).strip() == "true"
+
+
+def is_bare_repository(repo: str | Path) -> bool | None:
+    """Whether git takes this directory as a bare repository. Takes the directory. Returns True or
+    False when git answered, None when it did not."""
+    answered = answer(repo, ["rev-parse", "--is-bare-repository"])
+    if answered is None:
+        return None
+    return answered.strip() == "true"
 
 
 def slug_from_url(url: str) -> str | None:
