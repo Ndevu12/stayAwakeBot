@@ -197,6 +197,15 @@ class TestCorrectingWritesOnlyWhatItKnows(unittest.TestCase):
         self.assertIs(table["uniq"], True)
         self.assertIs(table["git add"], True)
 
+    def test_an_approval_that_runs_a_risky_command_after_another_is_turned_off(self):
+        body = ('{"task.allowAutomaticTasks": "off", "chat.tools.terminal.autoApprove": {'
+                '"cd app && npx vite": true, "git status": true}}')
+        path = _editor_at(self.base, "Code", body)
+        self._settle()
+        table = load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"]
+        self.assertIs(table["cd app && npx vite"], False)
+        self.assertIs(table["git status"], True)
+
     def test_and_the_commands_that_are_not_dangerous_are_left_alone(self):
         # Turning the whole table off is not what was asked for, and it costs a prompt on every
         # command the operator deliberately allowed.

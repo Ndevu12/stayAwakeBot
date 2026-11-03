@@ -134,7 +134,7 @@ def risky_autoapprove_entries(text: str) -> list[str]:
     approved = re.compile(r'"([^"]*)"\s*:\s*(?:true\b|\{[^{}]*"approve"\s*:\s*true)')
     for match in approved.finditer(block):
         key = match.group(1)
-        if riskycommands.named_in(key) and key not in found:
+        if riskycommands.named_anywhere(key) and key not in found:
             found.append(key)
     return found
 
