@@ -305,8 +305,7 @@ class TestResolveTokenIntegration(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True), \
              mock.patch.object(github_app, "installation_token",
                                side_effect=github_app.GithubAppError("boom")), \
-             mock.patch.object(auth, "gh_token", return_value=None), \
-             mock.patch.object(auth, "git_token", return_value=None):
+             mock.patch.object(auth, "gh_token", return_value=None):
             self.assertEqual(auth.resolve_token(), (None, None))
 
     def test_non_apperror_from_app_never_crashes_resolution(self):

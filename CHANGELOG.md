@@ -20,6 +20,8 @@ reader, not the mechanism or the weakness it closed.
   treated as risky. An approval you set for a command that is not risky is left as it is.
 
 ### Fixed
+- **When saw has no GitHub credential, it names both ways to give it one:** `saw auth app
+  register`, saw's own, or `gh auth login`. saw never reads the credential git stores.
 - **A machine whose git already holds a github.com token can `saw scan --remote` and `saw fix --pr`
   with that same sign-in.** saw uses it when no other credential is configured. An App that cannot
   see one repository no longer hides a repository that token can reach.

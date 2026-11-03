@@ -2,7 +2,6 @@
 """GitHub credential resolution."""
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
@@ -51,28 +50,6 @@ def gh_token(hostname: str = "github.com") -> str | None:
     return None
 
 
-def git_token(hostname: str = "github.com") -> str | None:
-    """The token git already uses for `hostname`, or None. Never raises and never asks.
-
-    This is the credential a `git push` over HTTPS would use. saw does not store another copy of it.
-    """
-    from stayawake.lib.git.run import OPERATOR_CONFIG, run
-    try:
-        proc = run(None, ["credential", "fill"], context=OPERATOR_CONFIG, timeout=_GH_TIMEOUT,
-                   input_text=f"protocol=https\nhost={hostname}\n\n",
-                   env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "",
-                        "GCM_INTERACTIVE": "never"})
-    except Exception:  # noqa: BLE001 — a credential helper must never stop resolution
-        return None
-    if proc is None or proc.returncode != 0:
-        return None
-    for line in (proc.stdout or "").splitlines():
-        if line.startswith("password="):
-            token = line.split("=", 1)[1].strip()
-            return token or None
-    return None
-
-
 def _app_token(repo_slug: str | None = None) -> str | None:
     """A GitHub App installation token, or None if no App is configured. NEVER raises:
     a configured-but-broken App (bad/encrypted key, unreachable API, or any other failure) is
@@ -95,11 +72,11 @@ def _app_token(repo_slug: str | None = None) -> str | None:
 
 def resolve_token(hostname: str = "github.com",
                   *, repo_slug: str | None = None) -> tuple[str | None, str | None]:
-    """Return (token, source). `source` is the env var name, 'github-app', 'gh', 'git', or None.
+    """Return (token, source). `source` is the env var name, 'github-app', 'gh', or None.
 
     Precedence: an explicit env PAT wins (human override) → a GitHub App installation
-    token (automation default) → the gh CLI session → the token git already uses for this host
-    → none. Callers decide whether a missing token is fatal (writes) or fine (public read).
+    token (automation default) → the gh CLI session → none. Callers decide whether a
+    missing token is fatal (writes) or fine (public read).
 
     `repo_slug` ("owner/repo") makes the App path mint the token from the installation that OWNS
     that repo (multi-account). It does NOT affect the env-PAT / gh paths, which are repo-agnostic."""
@@ -112,23 +89,11 @@ def resolve_token(hostname: str = "github.com",
     token = gh_token(hostname)
     if token:
         return token, "gh"
-    token = git_token(hostname)
-    if token:
-        return token, "git"
     return None, None
 
 
 _GH_UNSET = object()
 _gh_fallback_cache: object | str | None = _GH_UNSET
-_git_fallback_cache: object | str | None = _GH_UNSET
-
-
-def _git_fallback(hostname: str = "github.com") -> str | None:
-    """The token git already stores, resolved at most once per process."""
-    global _git_fallback_cache
-    if _git_fallback_cache is _GH_UNSET:
-        _git_fallback_cache = git_token(hostname)
-    return _git_fallback_cache  # type: ignore[return-value]
 
 
 def _gh_fallback(hostname: str = "github.com") -> str | None:
@@ -149,8 +114,9 @@ def act_token(base_token: str | None, source: str | None,
       * A GitHub App is per-account. Upgrade to the installation that OWNS this repo (multi-account),
         so it's acted on with the right account's scoped, revocable token.
       * If the App can't reach the repo (not installed on that owner, or a select-repos install that
-        excludes it), fall back to the gh session, then to the token git already uses. A
-        partially-installed App adds coverage where it is installed and leaves the rest reachable.
+        excludes it), FALL BACK to the operator's gh/PAT session — which already reaches their org
+        repos. So a partially-installed App is ADDITIVE (upgrades coverage where installed) and never
+        REMOVES access the human credential already had.
       * env-PAT / gh sources are repo-agnostic and returned unchanged.
 
     Only when NO credential can reach the repo is `(None, guidance)` returned, so the caller records
@@ -167,7 +133,7 @@ def act_token(base_token: str | None, source: str | None,
         guidance = str(e)
     except Exception as e:  # noqa: BLE001 — one repo's auth hiccup must not abort the sweep
         guidance = str(e)
-    fallback = _gh_fallback(hostname) or _git_fallback(hostname)
+    fallback = _gh_fallback(hostname)
     if fallback:
         return fallback, None
     return None, guidance or f"no configured credential can reach {repo_slug}"
@@ -180,8 +146,9 @@ def no_credential_hint(action: str = "this operation") -> str:
     GITHUB_TOKEN isn't something to set up, so we don't tell people to."""
     var = ENV_VARS[0]
     if not gh_installed():
-        return (f"No GitHub credential for {action}. Either install the GitHub CLI "
-                f"(https://cli.github.com) and run `gh auth login`, or set {var} "
-                f"to a token with the required scope.")
-    return (f"No GitHub credential for {action}. Run `gh auth login` "
-            f"(check with `gh auth status`), or set {var} to a token with the required scope.")
+        return (f"No GitHub credential for {action}. Run `saw auth app register` to give saw its "
+                f"own, or install the GitHub CLI (https://cli.github.com) and run "
+                f"`gh auth login`, or set {var} to a token with the required scope.")
+    return (f"No GitHub credential for {action}. Run `saw auth app register` to give saw its own, "
+            f"or `gh auth login` (check with `gh auth status`), or set {var} to a token with "
+            f"the required scope.")

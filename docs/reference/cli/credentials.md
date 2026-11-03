@@ -11,7 +11,8 @@ error output, or CI logs.
 
 You configure only `GH_SECURITY_TOKEN`. When a token is needed, `saw` resolves one in this order:
 
-1. **`GH_SECURITY_TOKEN`** — the one you set up.
+1. **`GH_SECURITY_TOKEN`** — the one you set up. The only credential that can reach *other*
+   repositories, so the one an org-wide sweep needs.
 2. **`GITHUB_TOKEN`** — minted automatically for every GitHub Actions run; the zero-config fallback
    for same-repo work in CI. It cannot reach other repositories.
 3. A **GitHub App** installation token — minted on demand, scoped to what the App was granted, and
@@ -19,7 +20,6 @@ You configure only `GH_SECURITY_TOKEN`. When a token is needed, `saw` resolves o
    no extra install. Apps install on a personal account as well as an organisation, and the
    installation itself defines which repositories are in scope.
 4. Your **GitHub CLI** session (`gh auth token`) — short-lived and never stored by `saw`.
-5. The token **git already stores** for `github.com` over HTTPS. `saw` does not store a second copy.
 
 Point `saw` at an existing App with `GH_APP_ID` and `GH_APP_PRIVATE_KEY` (or
 `GH_APP_PRIVATE_KEY_PATH`), plus `GH_APP_INSTALLATION_ID` when the App has more than one
