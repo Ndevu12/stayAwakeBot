@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw guard setup` gates more than one long-lived branch.** `-b dev -b main` installs one
+  workflow that scans pushes to both, identical on each branch, so promoting `dev` to `main` does not
+  conflict on it.
+
 ### Security
 - **`saw harden` turns off an auto-approved command that names arguments when the command it
   starts with is one saw treats as risky** (`yarn dev`, `yarn lint`). `bun`, `bunx`, `deno`,

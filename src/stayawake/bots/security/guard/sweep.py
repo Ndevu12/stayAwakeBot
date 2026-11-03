@@ -326,7 +326,7 @@ def _safe_setup(repo, **kw) -> SetupResult:
 
 def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool = False,
                   config_path: str | None = None, ref: str | None = None, dry_run: bool = False,
-                  pr: bool = False, branch: str | None = None, no_stream: bool = False,
+                  pr: bool = False, branch: str | list[str] | None = None, no_stream: bool = False,
                   jobs: int | None = None) -> int:
     """`saw guard setup` across many repos, like `saw fix`. LOCAL by default (discover git repos;
     write/prepare the gate into each working tree, or `--pr` to open a PR each); `remote=True`
