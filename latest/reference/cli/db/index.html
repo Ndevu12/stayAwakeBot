@@ -1944,6 +1944,9 @@
 </tr>
 </tbody>
 </table>
+<p>A database saved by an older saw can still report an advisory its publisher withdrew. A scan says
+so, and so does <code>saw db status</code>; <code>saw db update</code> rebuilds the database. MAL-2026-5187 is not
+reported from it, and every other known-malicious package in it still is.</p>
 <p>After an update, <a href="../hook/"><code>saw hook</code></a> and the pre-push check read again what they had already
 checked, so a newly listed package is reported the next time it is pushed or checked out.</p>
 
