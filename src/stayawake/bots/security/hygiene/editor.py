@@ -50,8 +50,6 @@ SETTING_FOR = {
 EDITORS_NOT_EXAMINED_ID = "editors-not-examined"
 
 
-_RISKY_AUTOAPPROVE = riskycommands.ORDER
-
 _CATCHALL_REGEX_BODIES = {"", ".", ".*", ".+", "^", "$", "^$", "^.*$", "^.*", ".*$", "^.+$", "^.+", ".+$"}
 
 
@@ -127,19 +125,17 @@ def blanket_autoapprove(text: str) -> bool:
 
 
 def risky_autoapprove_entries(text: str) -> list[str]:
-    """Best-effort: risky command names auto-approved via `chat.tools.terminal.autoApprove`. Flags a
-    key CONTAINING a risky name that is approved either directly (`"npx": true`) or via the object form
-    (`"npx": { "approve": true }`). A name set to `false` (a deny) is NOT flagged."""
+    """Name the auto-approved entries whose command is risky. Takes the settings text. Returns
+    each entry's own key. An entry set to false is not included."""
     block = _autoapprove_block(text)
     if block is None:
         return []
     found: list[str] = []
-    for name in _RISKY_AUTOAPPROVE:
-        esc = re.escape(name)
-        direct = rf'"[^"]*\b{esc}\b[^"]*"\s*:\s*true\b'
-        obj = rf'"[^"]*\b{esc}\b[^"]*"\s*:\s*\{{[^{{}}]*"approve"\s*:\s*true'
-        if (re.search(direct, block) or re.search(obj, block)) and name not in found:
-            found.append(name)
+    approved = re.compile(r'"([^"]*)"\s*:\s*(?:true\b|\{[^{}]*"approve"\s*:\s*true)')
+    for match in approved.finditer(block):
+        key = match.group(1)
+        if riskycommands.named_anywhere(key) and key not in found:
+            found.append(key)
     return found
 
 

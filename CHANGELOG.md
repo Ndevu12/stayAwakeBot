@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Security
+- **`saw harden` turns off an auto-approved command that names arguments when the command it
+  starts with is one saw treats as risky** (`yarn dev`, `yarn lint`). `bun`, `bunx`, `deno`,
+  `make`, `mvn`, `gradle`, `go`, `cargo`, `pip`, `uv`, `docker`, `kubectl`, and `supabase` are
+  treated as risky. An approval you set for a command that is not risky is left as it is.
+
 ### Fixed
 - **A linked `node_modules`, or a package directory that is a link to another install, is compared
   with the lockfile of the install it points at.** A scan no longer reports each package there as
