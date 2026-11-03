@@ -12,6 +12,8 @@ reported rather than deleted.
 """
 from __future__ import annotations
 
+import contextlib
+
 import json
 import stat
 from dataclasses import dataclass, field
@@ -113,7 +115,8 @@ def _turn_off_dangerous(text: str, issue_id: str) -> tuple[str, list[Planned], l
                                       f'"{key}" is not somewhere this can write to without guessing')]
         text, edit = result
         return text, [Planned(issue_id, edit, (key,))], []
-    named = editor.catchall_autoapprove_entries(text) + editor.risky_autoapprove_entries(text)
+    named = (editor.approved_autoapprove_keys(text) if issue_id == "editor-autoapprove-commands"
+             else editor.catchall_autoapprove_entries(text) + editor.risky_autoapprove_entries(text))
     if not named:
         return text, [], [Skipped(issue_id, ALREADY,
                                   "no auto-approved command was named when it was read")]
@@ -186,6 +189,21 @@ class Correcting:
 def record_path() -> Path:
     """Where saw records what it changed, so a later run can put it back."""
     return Path(env.xdg_state_home()) / "saw" / "editor-changes.json"
+
+
+def lines_of(correcting: Correcting) -> list[str]:
+    """The sentences for what a pass wrote. Takes the pass. Returns one line per write or failure.
+    An editor already correct is not mentioned."""
+    lines = []
+    for outcome in correcting.outcomes:
+        if outcome.state == CORRECTED:
+            lines.append(f"Corrected in {outcome.name}: {outcome.detail}.")
+        elif outcome.state == NOT_RECORDED:
+            lines.append(f"Corrected in {outcome.name}: {outcome.detail}. "
+                         "The record of that change could not be written.")
+        elif outcome.state == NOT_WRITTEN:
+            lines.append(f"Could not correct {outcome.name}: {outcome.detail}.")
+    return lines
 
 
 def _remember(entries: list[dict], path: Path | None = None) -> bool:
@@ -352,6 +370,37 @@ def _put_back(text: str, at: list[str], was: str) -> str | None:
     else:
         return None
     return None if result is None else result[0]
+
+
+def given_back_path() -> Path:
+    """Where saw notes that the editor controls were given back, so a pass `saw watch` runs leaves
+    them as the operator set them."""
+    return record_path().with_name("editor-controls-given-back")
+
+
+def put_in_place(**kwargs) -> Correcting:
+    """Put the editor controls in place, as `saw harden` does, and stop leaving them given back.
+    Takes what `settle` takes. Returns what it did."""
+    with contextlib.suppress(FileNotFoundError):
+        given_back_path().unlink()
+    return settle(**kwargs)
+
+
+def keep_in_place(**kwargs) -> Correcting:
+    """Put the editor controls back in place, as `saw watch` does, unless the operator gave them
+    back. Takes what `settle` takes. Returns what it did, nothing when they were given back."""
+    if given_back_path().exists():
+        return Correcting()
+    return settle(**kwargs)
+
+
+def give_back(record: Path | None = None, write=None) -> TakingBack:
+    """Take the editor controls back and note it, so `saw watch` leaves them until `saw harden`
+    runs again. Takes what `take_back` takes. Returns what it did."""
+    out = take_back(record, write)
+    if out.done and not atomicwrite.replace(given_back_path(), "given back\n"):
+        out.record_not_updated = True
+    return out
 
 
 def take_back(record: Path | None = None, write=None) -> TakingBack:

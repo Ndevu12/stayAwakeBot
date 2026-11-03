@@ -101,8 +101,9 @@ def register(sub) -> None:
                     help="set up this GitHub org's repos (repeatable; implies --remote)")
     st.add_argument("--ref", default=None, metavar="SHA|TAG",
                     help="pin this gate ref explicitly (offline/deterministic); default: latest release")
-    st.add_argument("-b", "--branch", default=None,
-                    help="default branch to target (default: auto-detect)")
+    st.add_argument("-b", "--branch", action="append", default=None,
+                    help="branch to target (default: auto-detect); repeat it, as `-b dev -b main`, "
+                         "to scan pushes to each, with the pull request opened against the first")
     st.add_argument("--dry-run", action="store_true", dest="dry_run",
                     help="preview the change without writing anything")
     add_jobs_arg(st, help="set up up to N repositories concurrently (a multi-repo sweep). Default "

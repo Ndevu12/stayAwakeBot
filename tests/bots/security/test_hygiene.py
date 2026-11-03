@@ -681,14 +681,23 @@ class TestVSCode(unittest.TestCase):
         self.assertIn("editor-autotasks-on", ids)
 
     def test_autotasks_off_is_clean(self):
-        p = self._settings('{ "task.allowAutomaticTasks": "off" }')
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"security.workspace.trust.startupPrompt": "always", '
+                           '"security.workspace.trust.emptyWindow": false }')
         self.assertEqual(hygiene.check_editors(p), [])
 
-    def test_missing_setting_is_info(self):
-        p = self._settings('{ "editor.fontSize": 13 }')
+    def test_a_trust_prompt_that_does_not_always_ask_is_a_warning(self):
+        p = self._settings('{ "task.allowAutomaticTasks": "off" }')
         issues = hygiene.check_editors(p)
+        self.assertEqual(sorted(i.id for i in issues),
+                         ["editor-empty-window-trusted", "editor-trust-not-asked"])
+        self.assertEqual({i.severity for i in issues}, {"warning"})
+
+    def test_missing_setting_is_a_warning(self):
+        p = self._settings('{ "editor.fontSize": 13 }')
+        issues = [i for i in hygiene.check_editors(p) if i.id.startswith("editor-autotasks")]
         self.assertEqual([i.id for i in issues], ["editor-autotasks-default"])
-        self.assertEqual(issues[0].severity, "info")
+        self.assertEqual(issues[0].severity, "warning")
 
     def test_workspace_trust_disabled_is_warning(self):
         p = self._settings('{ "task.allowAutomaticTasks": "off", '

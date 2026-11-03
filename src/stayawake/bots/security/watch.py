@@ -143,10 +143,11 @@ def _process_identity(item) -> tuple:
 
 
 def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes=None,
-               report=print, tell=None) -> int:
+               report=print, tell=None, correct=None) -> int:
     """Keep making the pass until stopped. Takes the pass, the pause between passes, an optional
-    bound on how many passes to make, where a pass's lines are printed, and an optional `tell`
-    called with each pass's event kinds. Returns the code of the last pass that ran."""
+    bound on how many passes to make, where a pass's lines are printed, an optional `tell`
+    called with each pass's event kinds, and an optional `correct` that returns lines to print.
+    Returns the code of the last pass that ran."""
     code = exitcodes.CLEAN
     made = 0
     while passes is None or made < passes:
@@ -161,10 +162,32 @@ def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes
                 tell(kinds)
             except Exception:
                 _print_safely(report, _NOT_TOLD)
+        if correct is not None:
+            try:
+                written = correct()
+            except Exception as exc:
+                written = f"saw harden could not run ({type(exc).__name__}); run `saw harden`."
+            if written:
+                _print_safely(report, written)
         made += 1
         if passes is None or made < passes:
             sleep(between)
     return code
+
+
+_LAST_HARDEN: list[str] = []
+
+
+def run_harden() -> str:
+    """Run `saw harden` as one pass of the watch, leaving editor controls the operator gave back.
+    Returns what it said when that differs from the pass before, so a standing note prints once."""
+    from stayawake.bots.security import harden
+    from stayawake.bots.security.harden import settings as editorsettings
+    _code, text = harden.run(editor_pass=editorsettings.keep_in_place)
+    if _LAST_HARDEN and _LAST_HARDEN[0] == text:
+        return ""
+    _LAST_HARDEN[:] = [text]
+    return text
 
 
 def _print_safely(report, text: str) -> None:

@@ -13,11 +13,23 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw guard setup` gates more than one long-lived branch.** `-b dev -b main` installs one
+  workflow that scans pushes to both, identical on each branch, so promoting `dev` to `main` does not
+  conflict on it.
+
 ### Security
 - **`saw harden` turns off an auto-approved command that names arguments when the command it
   starts with is one saw treats as risky** (`yarn dev`, `yarn lint`). `bun`, `bunx`, `deno`,
   `make`, `mvn`, `gradle`, `go`, `cargo`, `pip`, `uv`, `docker`, `kubectl`, and `supabase` are
   treated as risky. An approval you set for a command that is not risky is left as it is.
+- **`saw harden` hardens every editor and its profiles fully.** Every command an agent may run
+  without asking is turned off, the editor asks whether to trust a folder every time it opens one,
+  and a window with no folder open is not trusted. `saw watch` runs `saw harden` on every pass, so
+  these stay in place. `saw harden --take-back --ide` gives back only the editor settings, and
+  `saw watch` leaves them until `saw harden` runs again. `saw audit` reports these settings and
+  changes nothing.
+- **An editor that does not say automatic tasks are off is reported as a warning.**
 
 ### Fixed
 - **When saw has no GitHub credential, it names both ways to give it one:** `saw auth app
