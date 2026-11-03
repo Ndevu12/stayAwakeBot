@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw harden` turns off a risky auto-approved command written in more than one word**, such as
+  `"yarn dev"` or `"pnpm start"`, exactly as the editor's settings spell it.
 - **A linked `node_modules`, or a package directory that is a link to another install, is compared
   with the lockfile of the install it points at.** A scan no longer reports each package there as
   swapped against this folder's lockfile. When a package does not match, the finding names the

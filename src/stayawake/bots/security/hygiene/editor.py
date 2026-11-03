@@ -126,21 +126,32 @@ def blanket_autoapprove(text: str) -> bool:
     return _autoapprove_is_blanket_true(text)
 
 
-def risky_autoapprove_entries(text: str) -> list[str]:
-    """Best-effort: risky command names auto-approved via `chat.tools.terminal.autoApprove`. Flags a
-    key CONTAINING a risky name that is approved either directly (`"npx": true`) or via the object form
-    (`"npx": { "approve": true }`). A name set to `false` (a deny) is NOT flagged."""
+def _risky_autoapprove_matches(text: str) -> list[tuple[str, str]]:
+    """Find the approved keys under `chat.tools.terminal.autoApprove` that contain a risky command
+    name, approved directly (`"yarn dev": true`) or through the object form
+    (`"npx": { "approve": true }`). Takes the settings text. Returns `(name, key)` pairs; a key set to
+    `false` (a deny) is not among them."""
     block = _autoapprove_block(text)
     if block is None:
         return []
-    found: list[str] = []
+    found: list[tuple[str, str]] = []
     for name in _RISKY_AUTOAPPROVE:
         esc = re.escape(name)
-        direct = rf'"[^"]*\b{esc}\b[^"]*"\s*:\s*true\b'
-        obj = rf'"[^"]*\b{esc}\b[^"]*"\s*:\s*\{{[^{{}}]*"approve"\s*:\s*true'
-        if (re.search(direct, block) or re.search(obj, block)) and name not in found:
-            found.append(name)
+        approved = rf'"([^"]*\b{esc}\b[^"]*)"\s*:\s*(?:true\b|\{{[^{{}}]*"approve"\s*:\s*true)'
+        found += [(name, m.group(1)) for m in re.finditer(approved, block)]
     return found
+
+
+def risky_autoapprove_entries(text: str) -> list[str]:
+    """Name the risky commands auto-approved via `chat.tools.terminal.autoApprove`. Takes the
+    settings text. Returns each name once."""
+    return list(dict.fromkeys(name for name, _key in _risky_autoapprove_matches(text)))
+
+
+def risky_autoapprove_keys(text: str) -> list[str]:
+    """Name the auto-approved keys that contain a risky command, as the settings spell them, such as
+    `"yarn dev"`. Takes the settings text. Returns each key once."""
+    return list(dict.fromkeys(key for _name, key in _risky_autoapprove_matches(text)))
 
 
 def grade_settings(text: str, name: str, path: Path) -> list[HygieneIssue]:

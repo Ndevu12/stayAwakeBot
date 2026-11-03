@@ -113,7 +113,8 @@ def _turn_off_dangerous(text: str, issue_id: str) -> tuple[str, list[Planned], l
                                       f'"{key}" is not somewhere this can write to without guessing')]
         text, edit = result
         return text, [Planned(issue_id, edit, (key,))], []
-    named = editor.catchall_autoapprove_entries(text) + editor.risky_autoapprove_entries(text)
+    named = list(dict.fromkeys(editor.catchall_autoapprove_entries(text)
+                               + editor.risky_autoapprove_keys(text)))
     if not named:
         return text, [], [Skipped(issue_id, ALREADY,
                                   "no auto-approved command was named when it was read")]
