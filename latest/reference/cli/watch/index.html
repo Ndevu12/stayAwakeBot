@@ -2102,7 +2102,7 @@ until you take it back with <code>saw watch stop</code>.</p>
 <p>It is deliberately narrower than <a href="../harden/"><code>saw harden</code></a>. Harden runs with you present: it ends
 everything it grades, and it can ask for privilege to reach what it otherwise could not. This one is
 built to run with nobody watching, so it holds a higher bar before it ends anything, and it leaves
-the rest for you.</p>
+the rest for you. Each pass also runs <code>saw harden</code>, and reports what it put in place.</p>
 <h2 id="what-it-will-and-will-not-end">What it will and will not end<a class="headerlink" href="#what-it-will-and-will-not-end" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

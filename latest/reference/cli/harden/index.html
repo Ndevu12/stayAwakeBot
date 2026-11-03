@@ -1931,11 +1931,15 @@ that are not in place, or every control in place. Each line after it names the c
 what it reports.</p>
 <p>It corrects the editor settings that let a folder run code when it is opened, in <strong>every</strong> editor of
 the VS Code family on this machine — Cursor, Windsurf, VSCodium and the rest, not only VS Code
-itself.</p>
+itself — and in each profile of those editors.</p>
 <p>It also turns off dangerous command auto-approval for chat and agent tools. A blanket "approve
 everything", a pattern that matches every command, and each risky command named in the audit are
-set to off, including an approval that names arguments (<code>yarn dev</code>). Commands you allowed that are
-not dangerous are left exactly as they are, so what you chose deliberately keeps working.</p>
+set to off, including an approval that names arguments (<code>yarn dev</code>), and so is every other command
+an agent may run without asking. The editor asks whether to trust a folder every time it opens one,
+and a window with no folder open is not trusted.</p>
+<p><code>saw watch</code> runs <code>saw harden</code> on every pass, so these stay in place. <code>saw harden --take-back --ide</code>
+gives back only the editor settings, and <code>saw watch</code> then leaves them until you run <code>saw harden</code>
+again.</p>
 <p>It does the same for the coding agents on this machine. Claude Code, the Cursor agent and Codex
 each keep a list of what they may run without asking; a risky entry is taken out, and an agent whose
 approval step is off is made to ask again. What you allowed that is not risky stays as it is.</p>
