@@ -13,6 +13,9 @@ from stayawake.bots.security.scanner import attach_history_note, run_matchers, s
 from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget, Target
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.resolution import LocalTarget
+from stayawake.bots.security.targets.bare import BareTreeTarget
+from stayawake.lib.git.exec_surface import is_git_directory
+from stayawake.lib.git.query import is_bare_repository
 from stayawake.lib.git.run import one_pass
 
 
@@ -149,10 +152,6 @@ def read_as(scope: LocalTarget, display: str, opts, *,
     `include_only` is passed explicitly because a within-target chunk overrides it: None there
     means the full walk, not the scope's own file list.
     """
-    from stayawake.bots.security.targets.bare import BareTreeTarget
-    from stayawake.lib.git.exec_surface import is_git_directory
-    from stayawake.lib.git.query import is_bare_repository
-
     reader = LocalRepoTarget
     if (not scope.names_one_file and is_git_directory(scope.root)
             and is_bare_repository(scope.root) is not False):

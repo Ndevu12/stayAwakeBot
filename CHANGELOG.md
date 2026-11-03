@@ -26,7 +26,8 @@ reader, not the mechanism or the weakness it closed.
 
 ### Security
 - A scan of a repository that has no working tree reads the files that repository holds. One that
-  cannot be read is not reported clean.
+  cannot be read is not reported clean. A scan of a folder, and a bare `saw scan`, include the bare
+  and mirror clones in it.
 
 ## [0.15.0] - 2026-10-22
 
