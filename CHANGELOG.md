@@ -20,6 +20,12 @@ reader, not the mechanism or the weakness it closed.
   treated as risky. An approval you set for a command that is not risky is left as it is.
 
 ### Fixed
+- **`saw guard setup --remote` no longer opens a keychain prompt.** saw's own GitHub clones do not ask
+  your credential helpers, so they neither prompt nor store saw's token in your keychain.
+- **`saw guard setup` and `saw guard check` find the latest SAW Guard release** when the credential
+  saw holds cannot read it.
+- **`saw guard setup --pr` from a clone that pushes over SSH no longer asks for the `workflow`
+  scope.**
 - **A linked `node_modules`, or a package directory that is a link to another install, is compared
   with the lockfile of the install it points at.** A scan no longer reports each package there as
   swapped against this folder's lockfile. When a package does not match, the finding names the

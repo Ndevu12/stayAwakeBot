@@ -504,6 +504,8 @@ def get_branch_rules(owner: str, repo: str, branch: str, token: str | None) -> A
 def latest_release(owner: str, repo: str, token: str | None = None) -> dict | None:
     """The repo's latest published release object ({tag_name, …}), or None. Quiet."""
     res = request(f"/repos/{owner}/{repo}/releases/latest", token=token, quiet=True)
+    if not isinstance(res, dict) and token:
+        res = request(f"/repos/{owner}/{repo}/releases/latest", token=None, quiet=True)
     return res if isinstance(res, dict) else None
 
 
@@ -511,6 +513,8 @@ def ref_commit_sha(owner: str, repo: str, ref: str, token: str | None = None) ->
     """Resolve a ref ('tags/v0.1.4', 'heads/main', a sha) to its COMMIT sha, dereferencing an
     annotated tag. GET /commits/{ref} follows tags/branches. None on failure. Quiet."""
     res = request(f"/repos/{owner}/{repo}/commits/{ref}", token=token, quiet=True)
+    if not isinstance(res, dict) and token:
+        res = request(f"/repos/{owner}/{repo}/commits/{ref}", token=None, quiet=True)
     return res["sha"] if isinstance(res, dict) and isinstance(res.get("sha"), str) else None
 
 

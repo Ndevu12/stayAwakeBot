@@ -9,6 +9,7 @@ from pathlib import Path
 
 from stayawake.lib.adapters import github_api
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.remote import remote_url
 from stayawake.utils import textsafe
 from stayawake.utils.render import SEVERITY, paint
 from stayawake.utils.streaming import status as spin_status
@@ -266,6 +267,13 @@ def _setup_pr_body(plan: SetupPlan, base: str) -> str:
     ])
 
 
+def _pushes_over_ssh(repo: Path) -> bool:
+    """Tell whether a clone pushes to its origin over SSH, where GitHub does not ask for the
+    `workflow` scope. Takes the clone. Returns the answer, False when the remote cannot be read."""
+    url = remote_url(repo, for_push=True) or ""
+    return url.startswith(("git@", "ssh://"))
+
+
 def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: bool) -> SetupResult:
     """Build the change in a throwaway worktree off the default branch and open/update one rolling
     PR via the shared `proposal` ladder — never a push to the default branch."""
@@ -275,7 +283,8 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
     if not slug:
         return SetupResult(plan=plan, error="no GitHub origin — cannot open a PR (drop --pr to write "
                                             "the file locally, or add a remote)")
-    decision = require(Intent.OPEN_GUARD_PR, repo_slug=slug)
+    over_ssh = _pushes_over_ssh(repo)
+    decision = require(Intent.OPEN_FIX_PR if over_ssh else Intent.OPEN_GUARD_PR, repo_slug=slug)
     if not decision.allowed:
         return SetupResult(plan=plan, slug=slug, error=decision.message)
     if not token:
