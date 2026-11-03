@@ -93,10 +93,12 @@ def resolve_scanner_version(token: str | None = None) -> str | None:
     return version if re.fullmatch(r"\d+\.\d+\.\d+", version) else None
 
 
-def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None = None) -> str:
+def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None = None, *,
+                    push_branches: tuple[str, ...] = ()) -> str:
     """The SAW Guard workflow `saw guard setup` installs.
 
-    Takes the action pin, the default branch to gate, and the scanner version to pin. Returns the
+    Takes the action pin, the default branch to gate, the scanner version to pin, and the branches
+    whose pushes it scans when that is more than the default branch. Returns the
     full workflow text: a `saw-guard` job that scans and reports, a `remediate` job reachable only
     on an infected verdict, and a weekly `pin-drift` job. Described in `docs/reference/cli/guard.md`.
     """
@@ -108,7 +110,7 @@ def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None 
         "on:\n"
         "  pull_request:\n"
         "  push:\n"
-        f"    branches: [{default_branch}]\n"
+        f"    branches: [{', '.join(push_branches or (default_branch,))}]\n"
         "  schedule:\n"
         "    - cron: '0 7 * * 1'\n"
         "  workflow_dispatch:\n"
@@ -191,7 +193,8 @@ _GATE_HOW = {"local-action": "a local scan action", "saw-run": "a direct `saw` s
 
 
 def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
-               read_action=None, scanner: str | None = None) -> SetupPlan:
+               read_action=None, scanner: str | None = None,
+               push_branches: tuple[str, ...] = ()) -> SetupPlan:
     """Decide the minimal change: bump an existing SAW Guard pin, no-op when already at the resolved SHA,
     leave an existing worm gate installed by ANOTHER mechanism alone ('present'), or create the gate
     when the repo is genuinely unguarded — never clobbering a file already at the create path."""
@@ -199,7 +202,8 @@ def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
     if gate is None:
         if SAW_GUARD_FILE in workflows:
             return SetupPlan("conflict", SAW_GUARD_FILE)
-        return SetupPlan("create", SAW_GUARD_FILE, render_workflow(pin, default_branch, scanner),
+        return SetupPlan("create", SAW_GUARD_FILE, render_workflow(pin, default_branch, scanner,
+                                                     push_branches=push_branches),
                          new_ref=pin.sha)
     if gate.mechanism != "saw-guard":
         return SetupPlan("present", gate.workflow,
@@ -207,7 +211,8 @@ def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
     ref = gate.saw_guard
     config = grade_config(ref)
     if config.needs_rewriting and ref.workflow == SAW_GUARD_FILE:
-        return SetupPlan("repair", ref.workflow, render_workflow(pin, default_branch, scanner),
+        return SetupPlan("repair", ref.workflow, render_workflow(pin, default_branch, scanner,
+                                                     push_branches=push_branches),
                          old_ref=ref.ref, new_ref=pin.sha, detail=_degraded_detail(config))
     if ref.pin == "sha" and ref.ref.lower() == pin.sha.lower():
         return SetupPlan("noop", ref.workflow, old_ref=ref.ref, new_ref=pin.sha,
@@ -328,7 +333,7 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
 
 
 def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str | None = None,
-          dry_run: bool = False, pr: bool = False, branch: str | None = None,
+          dry_run: bool = False, pr: bool = False, branch: str | list[str] | None = None,
           spin: bool = False, pin: "Pin | None" = None,
           scanner: str | None = None) -> SetupResult:
     """Install or update the SAW Guard gate on a LOCAL repo. Default: write the change into the working
@@ -347,7 +352,9 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
         return SetupResult(error="couldn't resolve the scanner release to pin — not installing "
                                  "a gate that would take whatever is newest when it runs "
                                  "(offline?)")
-    default_branch = branch or gitutil.default_branch(repo)
+    named = [branch] if isinstance(branch, str) else list(branch or [])
+    default_branch = named[0] if named else gitutil.default_branch(repo)
+    push_branches = tuple(sorted(set(named))) if len(set(named)) > 1 else ()
     if pr:
         gitutil.fetch(repo, "origin", default_branch)
         baseref = (f"origin/{default_branch}" if gitutil.ref_exists(repo, f"origin/{default_branch}")
@@ -357,7 +364,8 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
         reader = _local_action_reader(repo)
     try:
         workflows = _ref_workflows(repo, baseref) if pr else _local_workflows(repo)
-        plan = plan_setup(workflows, default_branch, pin, read_action=reader, scanner=scanner)
+        plan = plan_setup(workflows, default_branch, pin, read_action=reader, scanner=scanner,
+                          push_branches=push_branches)
     except gitutil.Unread as missed:
         return SetupResult(error=f"couldn't read {missed.subject} — not planning the gate without "
                                  "it; run this again")

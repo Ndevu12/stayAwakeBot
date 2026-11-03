@@ -84,7 +84,7 @@ saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O
 | `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `-j` / `--no-stream` | As for [`saw scan`](scan.md). |
 | `--pr`, `--open-pr` | Open/update a rolling `security/guard-setup` PR per repository instead of writing into the working tree. `--remote` always opens a PR. Needs a token with the `workflow` permission. |
 | `--ref SHA\|TAG` | Pin this SAW Guard ref explicitly instead of resolving the latest release — offline and deterministic. A tag is resolved to its immutable SHA. |
-| `-b`, `--branch` | Default branch to target (default: auto-detect). |
+| `-b`, `--branch` | Branch to target (default: auto-detect). Repeat it, as `-b dev -b main`, to scan pushes to each; the workflow is the same on every branch, and the pull request is opened against the first. |
 | `--dry-run` | Print what would be written; write nothing. |
 
 ## `saw guard drift`
