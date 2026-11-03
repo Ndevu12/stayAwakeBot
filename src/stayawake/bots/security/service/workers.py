@@ -10,9 +10,12 @@ from dataclasses import dataclass, field
 
 from stayawake.bots.security.models import Finding, ScanResult
 from stayawake.bots.security.scanner import attach_history_note, run_matchers, scan_target
-from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget
+from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget, Target
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.resolution import LocalTarget
+from stayawake.bots.security.targets.bare import BareTreeTarget
+from stayawake.lib.git.exec_surface import is_git_directory
+from stayawake.lib.git.query import is_bare_repository
 from stayawake.lib.git.run import one_pass
 
 
@@ -143,14 +146,18 @@ def matchers_for_target(signatures: dict, scope: LocalTarget) -> dict:
 
 
 def read_as(scope: LocalTarget, display: str, opts, *,
-            include_only: tuple[str, ...] | None) -> LocalRepoTarget:
+            include_only: tuple[str, ...] | None) -> Target:
     """The reader a scope is scanned through — the one place a scope becomes a Target.
 
     `include_only` is passed explicitly because a within-target chunk overrides it: None there
     means the full walk, not the scope's own file list.
     """
-    target = LocalRepoTarget(str(scope.root), display, opts,
-                             include_only=include_only, within=scope.within)
+    reader = LocalRepoTarget
+    if (not scope.names_one_file and is_git_directory(scope.root)
+            and is_bare_repository(scope.root) is not False):
+        reader = BareTreeTarget
+    target = reader(str(scope.root), display, opts,
+                    include_only=include_only, within=scope.within)
     target.is_repo = scope.is_repo
     target.names_one_file = scope.names_one_file
     return target

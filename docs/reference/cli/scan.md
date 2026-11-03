@@ -4,7 +4,8 @@ description: saw scan — hunt for supply-chain worms across repositories. Read-
 
 # `saw scan`
 
-Hunt for supply-chain worms across repositories or directories. Read-only. A scan of a few targets
+Hunt for supply-chain worms across repositories or directories. Read-only. A repository without a
+working tree is read the same way as one with a checkout. A scan of a few targets
 prints its whole report to stdout, naming each finding by what it is and where it sits, including
 the line when it is one entry, with a short preview of what was found; a large scan prints the
 summary and writes the full report for you (see below).

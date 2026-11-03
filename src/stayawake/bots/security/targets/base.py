@@ -84,6 +84,17 @@ def stream_runs_of_text(read: Callable[[int], bytes], size: int,
             yield line_offset, "\n".join(runs)
 
 
+def text_of(raw: bytes, ext: str) -> str | None:
+    """Decode file bytes the way a scan reads text. Takes the bytes and the extension. Returns the
+    text, or None when the file is a binary."""
+    if b"\x00" in raw[:8192]:
+        if ext in SOURCE_EXTS:
+            raw = raw.replace(b"\x00", b"")
+        else:
+            return None
+    return raw.decode("utf-8", errors="replace")
+
+
 def is_source_path(rel: str) -> bool:
     """Tell whether the content checks read a path as source. Takes the path. Returns True when its
     extension is a source extension."""
@@ -308,12 +319,7 @@ class Target:
             raw = self.read_bytes(rel)
             if raw is None:
                 return None
-        if b"\x00" in raw[:8192]:
-            if ext in SOURCE_EXTS:
-                raw = raw.replace(b"\x00", b"")
-            else:
-                return None                       # real binary asset
-        return raw.decode("utf-8", errors="replace")
+        return text_of(raw, ext)
 
     def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
         """Read a file for the confirmed content checks. Takes the path. Yields
