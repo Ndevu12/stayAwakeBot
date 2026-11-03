@@ -10,6 +10,10 @@ machine](../../how-to/audit-a-machine.md) for what to do with each outcome. Scop
 audit does and does not
 mean](../../how-to/audit-a-machine.md#what-a-clean-audit-does-and-does-not-mean).
 
+On Windows, the start-up surface is read too: what this machine starts at sign-in and at boot,
+on a schedule, as a service and on a system event. Not every start-up place there is read yet, so
+the audit says so and does not call rotating credentials safe on that ground.
+
 ```text
 saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--json] [--progress=jsonl] [--stream] [--no-stream]
 ```

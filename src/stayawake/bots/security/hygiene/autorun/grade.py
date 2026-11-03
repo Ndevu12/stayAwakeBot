@@ -20,6 +20,7 @@ from .. import mechanism
 from ...taint import analyzer
 from ...taint.destructive import detect_destructive
 from .baseline import NEW, CHANGED, RETURNED
+from . import windows
 
 _MAX_REFERENCED = 256 * 1024
 
@@ -455,6 +456,10 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
         elif hookscript.in_managed_dir(entry.path):
             reasons.append(_SAW_HOOK_FOREIGN)
             hit = True
+    windows_shapes = windows.command_shapes(entry)
+    if windows_shapes:
+        reasons.extend(windows_shapes)
+        hit = True
     if analyzer.detect_dropper(text):
         reasons.append("decode→execute dropper")
         hit = True

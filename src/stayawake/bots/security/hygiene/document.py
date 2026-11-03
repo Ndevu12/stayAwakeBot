@@ -66,7 +66,7 @@ def scope_notes(issues: list[HygieneIssue]) -> list[str]:
     ids = {i.id for i in issues}
     parts = []
     if not persistence_surface_is_enumerable():
-        parts.append("start-up entries are not checked on this platform")
+        parts.append("start-up entries are not all checked on this platform")
     elif ids & {SURFACE_UNREADABLE_ID, BLOCKED_SURFACE_ID}:
         parts.append("the start-up entries above were not all read")
     if incident_tier(ids) == TIER_ACTIVE_PERSISTENCE:

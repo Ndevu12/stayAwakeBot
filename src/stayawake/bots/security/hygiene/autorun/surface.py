@@ -15,11 +15,12 @@ from stayawake.utils import pathsafe
 from stayawake.utils.pathsafe import grade
 from stayawake.bots.security import hookscript
 from .. import os_service
+from . import windows
 
 LAUNCH_AGENT = "launch-agent"
 SYSTEMD_USER = "systemd-user"
 STAYS_REMOVED = frozenset({LAUNCH_AGENT, SYSTEMD_USER})
-LOCATIONS = STAYS_REMOVED | {hookscript.LOCATION}
+LOCATIONS = STAYS_REMOVED | {hookscript.LOCATION} | windows.LOCATIONS
 
 
 @dataclass
@@ -507,4 +508,6 @@ def enumerate_entries(listing: dict | None = None) -> tuple[list[AutorunEntry], 
             e = _parse_git_hook(p, support, unread)
             if e is not None:
                 entries.append(e)
+    if windows.applies():
+        entries += windows.entries(unread)
     return entries, unread

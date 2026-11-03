@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.bots.security import hookscript, schedule
+from . import windows
 
 _PROBE_TIMEOUT = 5
 
@@ -50,6 +51,8 @@ def _norm(exec_path: str) -> str:
 
 
 def _classify_path(exec_path: str) -> str:
+    if windows.is_windows_path(exec_path):
+        return windows.classify_path(exec_path)
     p = _norm(exec_path)
     if p.startswith(_TRUSTED_PREFIXES):
         return "trusted"

@@ -76,7 +76,7 @@ _NON_SURFACE_PROBES = frozenset({"cached credentials", "branch protection", "glo
 
 _POSIX_ONLY_PROBES = frozenset({
     "self-hosted runner", "OS-service persistence", "SSH authorized_keys",
-    "shell startup files", "autorun surface", "running processes",
+    "shell startup files", "running processes",
 })
 
 
