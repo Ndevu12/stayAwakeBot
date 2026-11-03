@@ -23,9 +23,13 @@ def register(sub) -> None:
             ("saw harden", "create the controls, then read them back"),
             ("sudo saw harden", "the same, reaching what needs privilege"),
             ("saw harden --take-back", "remove the controls it placed"),
+            ("saw harden --take-back --ide", "give back only the editor controls"),
         ])
     p.add_argument("--take-back", action="store_true",
                    help="remove the controls this command placed, and nothing else")
+    p.add_argument("--ide", action="store_true",
+                   help="with --take-back: give back only the editor controls; `saw watch` leaves "
+                        "them until you run `saw harden` again")
     p.set_defaults(func=run)
 
 
@@ -39,8 +43,12 @@ def run(a: argparse.Namespace) -> int:
     label = "taking saw's controls back…" if a.take_back else "putting saw's controls in place…"
     no_stream = no_stream_requested(a)
     counted = _watcher_counted()
+    if a.ide and not a.take_back:
+        say("--ide goes with --take-back: `saw harden --take-back --ide`.", no_stream=no_stream)
+        return 2
     with busy(label, no_stream=no_stream):
-        code, text = harden.take_back() if a.take_back else harden.run()
+        code, text = (harden.take_back_ide() if a.take_back and a.ide
+                      else harden.take_back() if a.take_back else harden.run())
     say(text, no_stream=no_stream)
     if harden.dealt_with_live_code(code) and not a.take_back:
         line = _after_protecting(counted)

@@ -165,8 +165,8 @@ def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes
         if correct is not None:
             try:
                 written = correct()
-            except Exception:
-                written = ""
+            except Exception as exc:
+                written = f"saw harden could not run ({type(exc).__name__}); run `saw harden`."
             if written:
                 _print_safely(report, written)
         made += 1
@@ -175,10 +175,19 @@ def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes
     return code
 
 
-def _correct_editors() -> str:
-    """Correct the editor settings on this machine. Returns the lines that say what was written."""
+_LAST_HARDEN: list[str] = []
+
+
+def run_harden() -> str:
+    """Run `saw harden` as one pass of the watch, leaving editor controls the operator gave back.
+    Returns what it said when that differs from the pass before, so a standing note prints once."""
+    from stayawake.bots.security import harden
     from stayawake.bots.security.harden import settings as editorsettings
-    return "\n".join(editorsettings.lines_of(editorsettings.settle()))
+    _code, text = harden.run(editor_pass=editorsettings.keep_in_place)
+    if _LAST_HARDEN and _LAST_HARDEN[0] == text:
+        return ""
+    _LAST_HARDEN[:] = [text]
+    return text
 
 
 def _print_safely(report, text: str) -> None:

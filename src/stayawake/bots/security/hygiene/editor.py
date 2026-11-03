@@ -36,6 +36,8 @@ class Setting:
 _AUTOTASKS = Setting("task.allowAutomaticTasks", '"off"')
 _TRUST_ENABLED = Setting("security.workspace.trust.enabled", "true")
 _UNTRUSTED_FILES = Setting("security.workspace.trust.untrustedFiles", '"prompt"')
+_TRUST_STARTUP_PROMPT = Setting("security.workspace.trust.startupPrompt", '"always"')
+_EMPTY_WINDOW_TRUSTED = Setting("security.workspace.trust.emptyWindow", "false")
 AUTO_APPROVE = Setting("chat.tools.terminal.autoApprove", None, turns_off_entries=True)
 
 SETTING_FOR = {
@@ -45,6 +47,9 @@ SETTING_FOR = {
     "editor-untrusted-files-open": _UNTRUSTED_FILES,
     "editor-autoapprove-all": AUTO_APPROVE,
     "editor-autoapprove-risky": AUTO_APPROVE,
+    "editor-autoapprove-commands": AUTO_APPROVE,
+    "editor-trust-not-asked": _TRUST_STARTUP_PROMPT,
+    "editor-empty-window-trusted": _EMPTY_WINDOW_TRUSTED,
 }
 
 EDITORS_NOT_EXAMINED_ID = "editors-not-examined"
@@ -124,6 +129,16 @@ def blanket_autoapprove(text: str) -> bool:
     return _autoapprove_is_blanket_true(text)
 
 
+def approved_autoapprove_keys(text: str) -> list[str]:
+    """Name every command auto-approved under `chat.tools.terminal.autoApprove`, as the settings
+    spell it. Takes the settings text. Returns each key once; a key set to false is not among them."""
+    block = _autoapprove_block(text)
+    if block is None:
+        return []
+    found = re.findall(r'"([^"]*)"\s*:\s*(?:true\b|\{[^{}]*"approve"\s*:\s*true)', block)
+    return list(dict.fromkeys(found))
+
+
 def risky_autoapprove_entries(text: str) -> list[str]:
     """Name the auto-approved entries whose command is risky. Takes the settings text. Returns
     each entry's own key. An entry set to false is not included."""
@@ -196,6 +211,32 @@ def grade_settings(text: str, name: str, path: Path) -> list[HygieneIssue]:
                 detail=f"An AI agent runs {', '.join(risky)} unprompted.",
                 remediation="Run `saw harden`.", reference=_DOCS,
             ))
+        if approved_autoapprove_keys(text):
+            issues.append(HygieneIssue(
+                id="editor-autoapprove-commands",
+                severity="warning",
+                title=f"{name} auto-approves terminal commands for chat/agent tools",
+                detail="An AI agent runs those commands without asking.",
+                remediation="Run `saw harden`.", reference=_DOCS,
+            ))
+
+    if not re.search(r'"security\.workspace\.trust\.startupPrompt"\s*:\s*"always"', text):
+        issues.append(HygieneIssue(
+            id="editor-trust-not-asked",
+            severity="warning",
+            title=f"{name} does not ask whether to trust a folder every time it opens one",
+            detail="A folder trusted once runs its tasks and settings without asking again.",
+            remediation="Run `saw harden`.", reference=_DOCS,
+        ))
+
+    if not re.search(r'"security\.workspace\.trust\.emptyWindow"\s*:\s*false', text):
+        issues.append(HygieneIssue(
+            id="editor-empty-window-trusted",
+            severity="warning",
+            title=f"{name} trusts a window with no folder open",
+            detail="Files opened there run with full trust.",
+            remediation="Run `saw harden`.", reference=_DOCS,
+        ))
     return issues
 
 
