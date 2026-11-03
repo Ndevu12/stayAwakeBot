@@ -137,6 +137,8 @@ def _scan_one_target(scope, display: str, opts, sigs, allowlist, workers: int,
 
 def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: int,
                            progress_on: bool, settings: dict) -> ScanResult:
+    if (refusal := scan_workers.refused(scope, display)) is not None:
+        return refusal
     reader = scan_workers.read_as(scope, display, opts, include_only=scope.include_only)
     files = list(reader.iter_files())
     min_files = int(settings.get("parallel_min_files", WITHIN_TARGET_MIN_FILES) or 0)

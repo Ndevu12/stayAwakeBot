@@ -12,7 +12,7 @@ from stayawake.bots.security.models import Finding, ScanResult
 from stayawake.bots.security.scanner import attach_history_note, run_matchers, scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget
 from stayawake.bots.security.matchers import REGISTRY
-from stayawake.bots.security.resolution import LocalTarget
+from stayawake.bots.security.resolution import LocalTarget, is_a_git_directory
 from stayawake.lib.git.run import one_pass
 
 
@@ -52,6 +52,17 @@ NOTHING_TO_READ = (
     "nothing here could be read, so this target carries no verdict — a gap, not a clean result. "
     "The coverage notes say what was skipped and why"
 )
+
+def refused(scope: LocalTarget, display: str) -> ScanResult | None:
+    """Refuse a target a scan cannot read. Takes the scope and how the target is shown. Returns the
+    result that says so, or None when the target can be scanned."""
+    if scope.names_one_file or not is_a_git_directory(scope.scan_root):
+        return None
+    return ScanResult(target=display, source="local", error=(
+        "this is a git repository with no checked-out files, such as a bare or mirror clone, so it "
+        "carries no verdict — a gap, not a clean result. Clone it and scan the clone: "
+        "`git clone <this path> <folder>`, then `saw scan <folder> --history`"))
+
 
 def _holds_content(p) -> bool:
     """Whether an entry is something a scan can read or grade.
@@ -158,6 +169,8 @@ def read_as(scope: LocalTarget, display: str, opts, *,
 
 def scan_local(job: LocalScanJob) -> WorkerScan:
     scope = job.scope
+    if (refusal := refused(scope, job.display)) is not None:
+        return WorkerScan(refusal)
     buf = io.StringIO()
     with redirect_stdout(buf), redirect_stderr(buf):
         with read_as(scope, job.display, job.opts, include_only=scope.include_only) as target:

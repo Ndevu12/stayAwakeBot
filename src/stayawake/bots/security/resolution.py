@@ -42,6 +42,16 @@ def _holds_git(p: Path) -> bool:
         return False
 
 
+def is_a_git_directory(p: Path) -> bool:
+    """Tell whether a folder is a git directory with no checkout beside it, as a bare or mirror
+    clone is. Takes the folder. Returns the answer, False when it cannot be read."""
+    try:
+        return ((p / "HEAD").is_file() and (p / "objects").is_dir() and (p / "refs").is_dir()
+                and not (p / ".git").exists())
+    except OSError:
+        return False
+
+
 def is_a_repository(p: Path) -> bool:
     """Whether git would take `p` as a repository. Takes the folder. Returns True when it holds a
     `.git`, unless that `.git` is a link file naming a git directory that is not there."""
