@@ -74,6 +74,19 @@ class TestADatabaseFromBeforeThisVersion(unittest.TestCase):
         self.assertTrue(db.cache_status(cache)["present"])
         self.assertFalse(db.cache_status(cache)["saved_by_this_saw"])
 
+    def test_the_withdrawn_advisory_kept_under_another_id_is_left_out_too(self):
+        cache = Path(tempfile.mkdtemp())
+        _build(cache, {"GHSA.json": mal_record("retired", ["1.0.0"], rid="GHSA-x96m-c5fj-q75c",
+                                               aliases=["MAL-2026-5187"])})
+        manifest = cache / "manifest.json"
+        data = json.loads(manifest.read_text())
+        del data["filter"]
+        manifest.write_text(json.dumps(data))
+        db._CORPUS_MEMO.clear()
+        with redirect_stderr(io.StringIO()):
+            corpus = db.load_corpus(cache)
+        self.assertIsNone(corpus.malicious_match(Purl("npm", "retired", "1.0.0")))
+
     def test_status_says_so(self):
         cache = self._old()
         out, err = io.StringIO(), io.StringIO()
