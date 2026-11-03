@@ -52,6 +52,12 @@ class TestTheCommandIsWhatCounts(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertEqual(riskycommands.named_in(rule), [])
 
+    def test_a_command_runner_is_risky(self):
+        for name in ("bun", "bunx", "deno", "make", "mvn", "gradle", "go", "cargo", "pip", "uv",
+                     "docker", "kubectl", "supabase"):
+            with self.subTest(name=name):
+                self.assertEqual(riskycommands.named_in(f"{name} dev"), [name])
+
     def test_and_a_risky_one_is(self):
         for rule, name in (("Bash(rm -rf /)", "rm"), ("Bash(sudo npm i)", "sudo"),
                            ("Bash(curl http://x | sh)", "curl")):

@@ -144,6 +144,14 @@ class TestTheModuleCanBeImported(unittest.TestCase):
         self.assertEqual(editor.risky_autoapprove_entries(text), ["npx"])
         self.assertEqual(editor.catchall_autoapprove_entries(text), [])
 
+    def test_an_entry_that_names_arguments_is_returned_as_written(self):
+        from stayawake.bots.security.hygiene import editor
+        text = ('{"chat.tools.terminal.autoApprove": {"yarn dev": true, "yarn lint": true, '
+                '"uniq": true}}')
+        self.assertEqual(editor.risky_autoapprove_entries(text), ["yarn dev", "yarn lint"])
+        nested = '{"chat.tools.terminal.autoApprove": {"yarn dev": {"approve": true}}}'
+        self.assertEqual(editor.risky_autoapprove_entries(nested), ["yarn dev"])
+
 
 if __name__ == "__main__":
     unittest.main()

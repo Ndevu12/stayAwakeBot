@@ -6,7 +6,9 @@ import re
 
 RISKY = frozenset({"npx", "npm", "pnpm", "yarn", "node", "ssh", "scp", "curl", "wget",
                    "bash", "sh", "zsh", "eval", "sed", "awk", "python", "python3", "rm",
-                   "sudo", "chmod", "chown", "dd", "nc", "openssl", "gh"})
+                   "sudo", "chmod", "chown", "dd", "nc", "openssl", "gh",
+                   "bun", "bunx", "deno", "make", "mvn", "gradle", "go", "cargo", "pip", "uv",
+                   "docker", "kubectl", "supabase"})
 
 ORDER = tuple(sorted(RISKY))
 
