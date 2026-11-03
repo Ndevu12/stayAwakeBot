@@ -46,6 +46,18 @@ class TestEveryEditorIsFoundNotJustTheFirst(unittest.TestCase):
         found = editors.installed([self.base])
         self.assertEqual([e.name for e in found.editors], ["SomeNewFork"])
 
+    def test_a_profile_of_an_editor_is_found_with_it(self):
+        settings = _editor_at(self.base, "Code", '{"task.allowAutomaticTasks": "off"}')
+        profile = settings.parent / "profiles" / "abc"
+        profile.mkdir(parents=True)
+        (profile / "profile.json").write_text('{"name": "Work"}', encoding="utf-8")
+        (profile / "settings.json").write_text("{}", encoding="utf-8")
+        found = editors.installed([self.base])
+        self.assertEqual([e.name for e in found.editors], ["VS Code", "VS Code (Work)"])
+        issues = editor.check_editors(find=lambda: found)
+        self.assertEqual([i.severity for i in issues], ["warning"])
+        self.assertIn("Work", issues[0].title)
+
     def test_a_directory_that_is_not_one_of_these_is_left_alone(self):
         # `User/settings.json` alone is not enough: an unrelated application with that shape would
         # be graded against keys it has never heard of, and — through harden — written to. Three
@@ -215,6 +227,31 @@ class TestCorrectingWritesOnlyWhatItKnows(unittest.TestCase):
         self._settle()
         table = load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"]
         self.assertEqual(table, {"npx": False, "ls": True, "git status": True})
+
+    def test_strict_turns_the_list_off_and_sets_the_trust_prompt(self):
+        body = ('{"task.allowAutomaticTasks": "off", '
+                '"chat.tools.terminal.autoApprove": {"git add": true, "yarn dev": true}}')
+        path = _editor_at(self.base, "Code", body)
+        out = self._settle(strict=True)
+        self.assertEqual([o.state for o in out.outcomes], [editorsettings.CORRECTED])
+        data = load_jsonc(path.read_text())
+        self.assertIs(data["chat.tools.terminal.autoApprove"], False)
+        self.assertEqual(data["security.workspace.trust.startupPrompt"], "always")
+        self.assertIs(data["security.workspace.trust.emptyWindow"], False)
+        with mock.patch.dict("os.environ", {"XDG_STATE_HOME": str(self.base / "state")}):
+            editorsettings.take_back(record=self.record)
+        restored = load_jsonc(path.read_text())
+        self.assertEqual(restored["chat.tools.terminal.autoApprove"],
+                         {"git add": True, "yarn dev": True})
+
+    def test_asking_once_is_what_a_later_pass_corrects(self):
+        with mock.patch.dict("os.environ", {"XDG_STATE_HOME": str(self.base / "state")}):
+            self.assertFalse(editorsettings.wanted())
+            self.assertTrue(editorsettings.choose(strict=False))
+            self.assertTrue(editorsettings.wanted())
+            self.assertFalse(editorsettings.strict_wanted())
+            editorsettings.take_back(record=self.record)
+            self.assertFalse(editorsettings.wanted())
 
     def test_approving_every_command_is_turned_off_outright(self):
         path = _editor_at(self.base, "Code", '{"chat.tools.terminal.autoApprove": true}')

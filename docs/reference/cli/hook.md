@@ -11,7 +11,7 @@ machine. The hooks warn and point at [`saw fix`](fix.md); they never change your
 git command, and never stop a push. See [scan on clone](../../how-to/scan-on-clone.md).
 
 ```text
-saw hook install [PATH...] [-c FILE] [--json] [--no-stream]
+saw hook install [PATH...] [-c FILE] [--harden-editors] [--strict] [--json] [--no-stream]
 saw hook repair [--json] [--no-stream]
 saw hook uninstall [--no-stream]
 saw hook status [--json] [--no-stream]
@@ -26,6 +26,8 @@ saw hook status [--json] [--no-stream]
 | `status` | Whether the hooks are in place and will run. |
 | `--json` | One JSON document on stdout for a program to read. `installed` says whether scan-on-clone is in place. `events` names the git events it covers. `via` lists `template` and `git-settings` for each way the hooks are in place. `disabled_by_env` is true when `SAW_HOOK_DISABLED` is set. `problems` lists each problem in the report, with a stable `code`, the report's sentence, and the command that addresses it. `install` and `repair` add `changed`, the sentences that say what they changed. |
 | `-c`, `--config FILE` | Your config, whose allowlist the hooks scan with. A repository's own config is never read. |
+| `--harden-editors` | Correct editor settings on this machine, and keep correcting them from `saw audit` and `saw watch`. `saw harden --take-back` stops that. A scan of a repository does not change them. |
+| `--strict` | Turn the agent auto-approve list off and set the trust prompt to always ask, including for an empty window. Keeps editor settings corrected, the same as `--harden-editors`. |
 | `--no-stream` | Plain instant lines instead of live progress. Same as `STAYAWAKE_NO_STREAM=1`. |
 
 ## What to expect

@@ -59,19 +59,27 @@ _CORRECTION_BY_ID = {issue_id: setting for issue_id, setting in editor.SETTING_F
 _TURNS_OFF_ENTRIES = {issue_id for issue_id, setting in editor.SETTING_FOR.items()
                       if setting.turns_off_entries}
 
+_STRICT = (
+    editor.Setting("security.workspace.trust.startupPrompt", '"always"'),
+    editor.Setting("security.workspace.trust.emptyWindow", "false"),
+)
+
 _WHY_NOT_WRITTEN: dict[str, str] = {}
 
 
-def plan(text: str, issue_ids) -> tuple[str, list[Planned], list[Skipped]]:
+def plan(text: str, issue_ids, *, strict: bool = False) -> tuple[str, list[Planned], list[Skipped]]:
     """Every edit the findings in `issue_ids` ask for, applied to a copy of `text`.
 
     Returns the corrected text alongside what was planned and what was not. Nothing is written
-    here: the caller decides whether to keep the result.
+    here: the caller decides whether to keep the result. `strict` turns the auto-approve list off
+    and sets the trust prompt, instead of turning off single entries.
     """
     planned: list[Planned] = []
     skipped: list[Skipped] = []
     for issue_id in sorted(issue_ids):
         if issue_id in _TURNS_OFF_ENTRIES:
+            if strict:
+                continue
             text, done, missed = _turn_off_dangerous(text, issue_id)
             planned += done
             skipped += missed
@@ -93,7 +101,62 @@ def plan(text: str, issue_ids) -> tuple[str, list[Planned], list[Skipped]]:
             continue
         text, edit = result
         planned.append(Planned(issue_id, edit, (setting.key,)))
+    if strict:
+        text, done, missed = _apply_strict(text)
+        planned += done
+        skipped += missed
     return text, planned, skipped
+
+
+def _apply_strict(text: str) -> tuple[str, list[Planned], list[Skipped]]:
+    """Turn the auto-approve list off, and set the trust prompt. Takes the settings text. Returns
+    the text, what was planned, and what was not."""
+    planned: list[Planned] = []
+    skipped: list[Skipped] = []
+    text, done, missed = _turn_list_off(text)
+    planned += done
+    skipped += missed
+    for setting in _STRICT:
+        if jsonc.value_at(text, setting.key) == setting.correct:
+            skipped.append(Skipped(setting.key, ALREADY, "already set to that value when it was read"))
+            continue
+        result = jsonc.set_value(text, setting.key, setting.correct)
+        if result is None:
+            skipped.append(Skipped(setting.key, CANNOT_WRITE,
+                                   f'"{setting.key}" is not somewhere this can write to '
+                                   "without guessing"))
+            continue
+        text, edit = result
+        planned.append(Planned(setting.key, edit, (setting.key,)))
+    return text, planned, skipped
+
+
+def _turn_list_off(text: str) -> tuple[str, list[Planned], list[Skipped]]:
+    """Set the auto-approve list to off. An object is replaced by false, and the object is what an
+    undo puts back. Takes the settings text. Returns the text, what was planned, and what was not."""
+    key = editor.AUTO_APPROVE.key
+    issue_id = "editor-autoapprove-risky"
+    block = editor.autoapprove_object(text)
+    if block is not None:
+        removed = jsonc.remove_member(text, key)
+        if removed is None:
+            return text, [], [Skipped(issue_id, CANNOT_WRITE,
+                                      f'"{key}" is not somewhere this can write to without guessing')]
+        text = removed[0]
+        result = jsonc.set_value(text, key, "false")
+        if result is None:
+            return text, [], [Skipped(issue_id, CANNOT_WRITE,
+                                      f'"{key}" is not somewhere this can write to without guessing')]
+        text, _edit = result
+        return text, [Planned(issue_id, jsonc.Edit(key, "false", block), (key,))], []
+    if jsonc.value_at(text, key) == "false":
+        return text, [], [Skipped(issue_id, ALREADY, "already set to that value when it was read")]
+    result = jsonc.set_value(text, key, "false")
+    if result is None:
+        return text, [], [Skipped(issue_id, CANNOT_WRITE,
+                                  f'"{key}" is not somewhere this can write to without guessing')]
+    text, edit = result
+    return text, [Planned(issue_id, edit, (key,))], []
 
 
 def _turn_off_dangerous(text: str, issue_id: str) -> tuple[str, list[Planned], list[Skipped]]:
@@ -188,6 +251,58 @@ def record_path() -> Path:
     return Path(env.xdg_state_home()) / "saw" / "editor-changes.json"
 
 
+def choice_path() -> Path:
+    """Where saw records that editor settings should stay corrected."""
+    return Path(env.xdg_state_home()) / "saw" / "harden-editors"
+
+
+def choose(*, strict: bool) -> bool:
+    """Remember that editor settings should stay corrected. Takes whether the strict corrections
+    are included. Returns whether the choice was written."""
+    where = choice_path()
+    where.parent.mkdir(parents=True, exist_ok=True)
+    return atomicwrite.replace(where, "strict\n" if strict else "on\n")
+
+
+def wanted() -> bool:
+    """Whether editor settings were asked to stay corrected."""
+    try:
+        return choice_path().read_text(encoding="utf-8").strip() in ("on", "strict")
+    except (OSError, ValueError):
+        return False
+
+
+def strict_wanted() -> bool:
+    """Whether the remembered choice includes the strict corrections."""
+    try:
+        return choice_path().read_text(encoding="utf-8").strip() == "strict"
+    except (OSError, ValueError):
+        return False
+
+
+def clear_choice() -> None:
+    """Forget that editor settings should stay corrected."""
+    try:
+        choice_path().unlink()
+    except OSError:
+        pass
+
+
+def lines_of(correcting: Correcting) -> list[str]:
+    """The sentences for what a pass wrote. Takes the pass. Returns one line per write or failure.
+    An editor already correct is not mentioned."""
+    lines = []
+    for outcome in correcting.outcomes:
+        if outcome.state == CORRECTED:
+            lines.append(f"Corrected in {outcome.name}: {outcome.detail}.")
+        elif outcome.state == NOT_RECORDED:
+            lines.append(f"Corrected in {outcome.name}: {outcome.detail}. "
+                         "The record of that change could not be written.")
+        elif outcome.state == NOT_WRITTEN:
+            lines.append(f"Could not correct {outcome.name}: {outcome.detail}.")
+    return lines
+
+
 def _remember(entries: list[dict], path: Path | None = None) -> bool:
     """Add `entries` to the undo record. True if it was written.
 
@@ -262,11 +377,11 @@ def _mode_of(path: Path) -> int:
 
 
 def settle(find=editors.installed, write=None, record: Path | None = None,
-           remember=None) -> Correcting:
+           remember=None, *, strict: bool = False) -> Correcting:
     """Put the known-correct value in every editor on this machine that does not hold it.
 
     Returns one outcome per editor. A setting whose answer is a decision is never written; it stays
-    in the audit for the operator.
+    in the audit for the operator. `strict` turns the auto-approve list off and sets the trust prompt.
     """
     write = write or atomicwrite.replace
     remember = _remember if remember is None else remember
@@ -280,7 +395,7 @@ def settle(find=editors.installed, write=None, record: Path | None = None,
                                               "its settings could not be read"))
             continue
         ids = {i.id for i in editor.grade_settings(text, editor_here.name, editor_here.settings)}
-        corrected, planned, skipped = plan(text, answerable(ids))
+        corrected, planned, skipped = plan(text, answerable(ids), strict=strict)
         refused = [s for s in skipped if s.kind == CANNOT_WRITE]
         if refused:
             out.outcomes.append(EditorOutcome(
@@ -358,8 +473,10 @@ def take_back(record: Path | None = None, write=None) -> TakingBack:
     """Put back every editor setting saw changed that had a value before it.
 
     A key saw ADDED is kept and reported, never deleted: this module does not remove keys, and a
-    setting that is absent is the state the audit reports as a finding.
+    setting that is absent is the state the audit reports as a finding. Forgetting the request to
+    keep correcting is part of taking back: a later pass must not put the corrections back.
     """
+    clear_choice()
     write = write or atomicwrite.replace
     write = write or atomicwrite.replace
     where = record or record_path()

@@ -6,6 +6,7 @@ comes from the layout on disk, so a fork this tool has never been told about is 
 """
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,6 +102,36 @@ def _display_name(candidate: Path) -> str:
     return _DISPLAY_NAMES.get(candidate.name, candidate.name)
 
 
+def _profile_label(directory: Path) -> str:
+    """The name this profile gives itself. The directory's own name when it does not say."""
+    try:
+        data = json.loads((directory / "profile.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return directory.name
+    name = data.get("name") if isinstance(data, dict) else None
+    return name.strip() if isinstance(name, str) and name.strip() else directory.name
+
+
+def _profiles(candidate: Path, parent: str) -> list[Editor]:
+    """The profiles under an editor already recognised. Takes the editor's directory and the name
+    it is called. Returns one editor per profile that holds settings."""
+    root = candidate / "User" / "profiles"
+    found: list[Editor] = []
+    try:
+        children = sorted(path for path in root.iterdir() if path.is_dir())
+    except (FileNotFoundError, OSError):
+        return []
+    for child in children:
+        settings = child / "settings.json"
+        try:
+            if not settings.is_file() or not _within(settings, candidate):
+                continue
+        except OSError:
+            continue
+        found.append(Editor(f"{parent} ({_profile_label(child)})", settings))
+    return found
+
+
 def installed(bases=None) -> Found:
     """Every editor of this family on this machine, in a stable order.
 
@@ -125,7 +156,10 @@ def installed(bases=None) -> Found:
                 unreadable.append(candidate)
                 continue
             if settings is not None:
-                editors.setdefault(str(settings), Editor(_display_name(candidate), settings))
+                name = _display_name(candidate)
+                editors.setdefault(str(settings), Editor(name, settings))
+                for profile in _profiles(candidate, name):
+                    editors.setdefault(str(profile.settings), profile)
                 continue
             # Asked only of something that is not one of these: a name decides what an editor is
             # CALLED, never whether it is examined.

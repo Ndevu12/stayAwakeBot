@@ -684,11 +684,11 @@ class TestVSCode(unittest.TestCase):
         p = self._settings('{ "task.allowAutomaticTasks": "off" }')
         self.assertEqual(hygiene.check_editors(p), [])
 
-    def test_missing_setting_is_info(self):
+    def test_missing_setting_is_a_warning(self):
         p = self._settings('{ "editor.fontSize": 13 }')
         issues = hygiene.check_editors(p)
         self.assertEqual([i.id for i in issues], ["editor-autotasks-default"])
-        self.assertEqual(issues[0].severity, "info")
+        self.assertEqual(issues[0].severity, "warning")
 
     def test_workspace_trust_disabled_is_warning(self):
         p = self._settings('{ "task.allowAutomaticTasks": "off", '

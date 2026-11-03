@@ -43,6 +43,7 @@ def register(sub) -> None:
             ("saw hook install -c ~/security.yml", "scan them against your allowlist"),
             ("saw hook install ~/code", "hooks for every repo under ~/code"),
             ("saw hook install --json", "the same result, for a program to read"),
+            ("saw hook install --harden-editors", "also keep editor settings corrected"),
         ])
     ins.add_argument("paths", nargs="*", metavar="PATH",
                      help="existing repositories, directories or globs to add the hooks to "
@@ -51,6 +52,11 @@ def register(sub) -> None:
                      help="your config, whose allowlist the hooks scan with; a repository's own "
                           "config is never read")
     ins.add_argument("--json", action="store_true", help="machine-readable output")
+    ins.add_argument("--harden-editors", action="store_true",
+                     help="correct editor settings on this machine, and keep correcting them")
+    ins.add_argument("--strict", action="store_true",
+                     help="turn the agent auto-approve list off and set the trust prompt to "
+                          "always ask; keeps editor settings corrected")
     ins.set_defaults(func=run_install)
 
     un = add_command(
@@ -107,7 +113,8 @@ def run_repair(a: argparse.Namespace) -> int:
 def run_install(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
     return hook.install(config_path=a.config, no_stream=no_stream_requested(a),
-                        repositories=a.paths, standing_in=True, as_json=getattr(a, "json", False))
+                        repositories=a.paths, standing_in=True, as_json=getattr(a, "json", False),
+                        harden_editors=a.harden_editors, strict=a.strict)
 
 
 def run_uninstall(a: argparse.Namespace) -> int:

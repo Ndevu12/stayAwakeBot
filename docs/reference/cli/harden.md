@@ -9,7 +9,7 @@ Create host-level controls on this machine. It never touches a project's depende
 write is unknown, never success. The result does not claim that one control protects anything else.
 
 ```text
-saw harden [--no-stream]
+saw harden [--strict] [--no-stream]
 sudo saw harden
 saw harden --take-back [--no-stream]
 ```
@@ -27,12 +27,17 @@ what it reports.
 
 It corrects the editor settings that let a folder run code when it is opened, in **every** editor of
 the VS Code family on this machine — Cursor, Windsurf, VSCodium and the rest, not only VS Code
-itself.
+itself — and in each profile of those editors.
 
 It also turns off dangerous command auto-approval for chat and agent tools. A blanket "approve
 everything", a pattern that matches every command, and each risky command named in the audit are
-set to off, including an approval that names arguments (`yarn dev`). Commands you allowed that are
-not dangerous are left exactly as they are, so what you chose deliberately keeps working.
+set to off, including an approval that names arguments (`yarn dev`), and so is every other command
+an agent may run without asking. The editor asks whether to trust a folder every time it opens one,
+and a window with no folder open is not trusted.
+
+`saw watch` runs `saw harden` on every pass, so these stay in place. `saw harden --take-back --ide`
+gives back only the editor settings, and `saw watch` then leaves them until you run `saw harden`
+again.
 
 It does the same for the coding agents on this machine. Claude Code, the Cursor agent and Codex
 each keep a list of what they may run without asking; a risky entry is taken out, and an agent whose

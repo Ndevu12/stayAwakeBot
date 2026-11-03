@@ -24,7 +24,9 @@ def register(sub) -> None:
         help="hygiene + branch-protection audit",
         description=(
             "Audit this machine's security posture, and optionally a repository's branch "
-            "protection. Read-only. Every run ends with a rotation-safety verdict: rotating a "
+            "protection. Read-only, unless you asked `saw hook install --harden-editors` to keep "
+            "editor settings corrected: then those are corrected first and each write is reported. "
+            "Every run ends with a rotation-safety verdict: rotating a "
             "credential is safe only once no persistence is found and the whole start-up "
             "surface was read."),
         examples=[
@@ -52,6 +54,14 @@ def run(a: argparse.Namespace) -> int:
                     unfinished=exitcodes.INCOMPLETE)
 
 
+def _corrections() -> list[str]:
+    """The editor settings written because that was asked for. Returns one line per write."""
+    from stayawake.bots.security.harden import settings as editorsettings
+    if not editorsettings.wanted():
+        return []
+    return editorsettings.lines_of(editorsettings.settle(strict=editorsettings.strict_wanted()))
+
+
 def _audit(a: argparse.Namespace) -> int:
     # The parser sets this. A caller that builds the arguments itself, the way the tests do, has
     # no such attribute, and that caller wants the human report.
@@ -62,6 +72,10 @@ def _audit(a: argparse.Namespace) -> int:
               " Skipping the branch-protection check.\n",
               file=sys.stderr if as_json else sys.stdout)
     progress_on = stream_enabled(sys.stderr, force_off=no_stream_requested(a))
+    try:
+        corrections = _corrections()
+    except Exception:
+        corrections = ["Editor settings could not be corrected. Run `saw harden`."]
     outcomes: list[hygiene.CheckOutcome] = []
     checks = hygiene.audit_checks(a.repo, token, a.branch, verify_artifacts=a.verify_artifacts)
     current().start(steps=len(checks))
@@ -70,10 +84,15 @@ def _audit(a: argparse.Namespace) -> int:
             outcomes.append(hygiene.run_check(label, check))
     issues = [i for o in outcomes for i in o.issues]
     if as_json:
-        print(json.dumps(versioned("audit", hygiene.as_document(outcomes)), indent=2))
+        document = hygiene.as_document(outcomes)
+        if corrections:
+            document["corrected"] = corrections
+        print(json.dumps(versioned("audit", document), indent=2))
     else:
         report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width(),
                                 content_scanned=a.verify_artifacts)
+        if corrections:
+            report = "\n".join(corrections) + "\n\n" + report
         Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream_requested(a))).line(report)
     # persistence surface that could not be verified withholds the all-clear → exit 3 ("rotation
     # unsafe / not verified"), regardless of -f, because rotating into a live wiper is data-loss. The

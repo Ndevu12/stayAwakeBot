@@ -269,7 +269,7 @@ def run(*, live=check_live_processes, folders=_global_folders,
         stop=end_live_code, settle_hooks=hook.settle_hooks,
         schedule_pass=schedule.settle,
         editor_pass=editorsettings.settle,
-        agent_pass=agentapprovals.settle) -> tuple[int, str]:
+        agent_pass=agentapprovals.settle, strict: bool = False) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
@@ -308,7 +308,7 @@ def run(*, live=check_live_processes, folders=_global_folders,
     except Exception:
         scheduled = None
     try:
-        editors_settled = editor_pass()
+        editors_settled = editorsettings.settle(strict=True) if strict else editor_pass()
     except Exception:
         editors_settled = None
     try:

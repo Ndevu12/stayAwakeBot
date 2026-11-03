@@ -143,10 +143,11 @@ def _process_identity(item) -> tuple:
 
 
 def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes=None,
-               report=print, tell=None) -> int:
+               report=print, tell=None, correct=None) -> int:
     """Keep making the pass until stopped. Takes the pass, the pause between passes, an optional
-    bound on how many passes to make, where a pass's lines are printed, and an optional `tell`
-    called with each pass's event kinds. Returns the code of the last pass that ran."""
+    bound on how many passes to make, where a pass's lines are printed, an optional `tell`
+    called with each pass's event kinds, and an optional `correct` that returns lines to print.
+    Returns the code of the last pass that ran."""
     code = exitcodes.CLEAN
     made = 0
     while passes is None or made < passes:
@@ -161,10 +162,26 @@ def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes
                 tell(kinds)
             except Exception:
                 _print_safely(report, _NOT_TOLD)
+        try:
+            written = (correct if correct is not None else _correct_editors)()
+        except Exception:
+            written = ""
+        if written:
+            _print_safely(report, written)
         made += 1
         if passes is None or made < passes:
             sleep(between)
     return code
+
+
+def _correct_editors() -> str:
+    """Correct editor settings when that was asked for. Returns the lines that say what was written.
+    Nothing, when it was not asked for."""
+    from stayawake.bots.security.harden import settings as editorsettings
+    if not editorsettings.wanted():
+        return ""
+    return "\n".join(editorsettings.lines_of(
+        editorsettings.settle(strict=editorsettings.strict_wanted())))
 
 
 def _print_safely(report, text: str) -> None:
