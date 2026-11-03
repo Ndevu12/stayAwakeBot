@@ -10,5 +10,5 @@
 # Pinned exactly, for the same reason the workflow pins actions by SHA — a docs build that
 # silently changes toolchain is a docs build you cannot reproduce.
 mkdocs==1.6.1
-mkdocs-material==9.7.7
+mkdocs-material==9.8.0
 mike==2.2.0
