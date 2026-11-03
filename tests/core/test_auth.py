@@ -40,9 +40,23 @@ class TestResolveToken(unittest.TestCase):
              mock.patch.object(auth, "gh_token", return_value="ghtok"):
             self.assertEqual(auth.resolve_token(), ("ghtok", "gh"))
 
+    def test_git_is_used_when_nothing_else_is_configured(self):
+        with mock.patch.dict(os.environ, {}, clear=True), _no_app(), \
+             mock.patch.object(auth, "gh_token", return_value=None), \
+             mock.patch.object(auth, "git_token", return_value="ghp_from_git"):
+            self.assertEqual(auth.resolve_token(), ("ghp_from_git", "git"))
+
+    def test_gh_is_used_before_git(self):
+        with mock.patch.dict(os.environ, {}, clear=True), _no_app(), \
+             mock.patch.object(auth, "gh_token", return_value="ghtok"), \
+             mock.patch.object(auth, "git_token") as git:
+            self.assertEqual(auth.resolve_token(), ("ghtok", "gh"))
+            git.assert_not_called()
+
     def test_none_when_nothing_available(self):
         with mock.patch.dict(os.environ, {}, clear=True), _no_app(), \
-             mock.patch.object(auth, "gh_token", return_value=None):
+             mock.patch.object(auth, "gh_token", return_value=None), \
+             mock.patch.object(auth, "git_token", return_value=None):
             self.assertEqual(auth.resolve_token(), (None, None))
 
     def test_blank_env_var_is_ignored(self):
@@ -120,6 +134,26 @@ class TestGhToken(unittest.TestCase):
             self.assertIsNone(auth.gh_token())
 
 
+class TestGitToken(unittest.TestCase):
+    def test_password_line_is_the_token(self):
+        filled = subprocess.CompletedProcess(
+            [], 0, stdout="protocol=https\nhost=github.com\nusername=x\npassword=ghp_from_git\n",
+            stderr="")
+        with mock.patch("stayawake.lib.git.run.run", return_value=filled) as run:
+            self.assertEqual(auth.git_token(), "ghp_from_git")
+        self.assertEqual(run.call_args.args[1], ["credential", "fill"])
+        self.assertIn("host=github.com", run.call_args.kwargs["input_text"])
+
+    def test_a_helper_that_fails_is_no_token(self):
+        with mock.patch("stayawake.lib.git.run.run", return_value=None):
+            self.assertIsNone(auth.git_token())
+
+    def test_an_empty_password_is_no_token(self):
+        filled = subprocess.CompletedProcess([], 0, stdout="password=\n", stderr="")
+        with mock.patch("stayawake.lib.git.run.run", return_value=filled):
+            self.assertIsNone(auth.git_token())
+
+
 class TestActToken(unittest.TestCase):
     """Per-repo token for a multi-repo sweep: env/gh are repo-agnostic; a GitHub App upgrades to the
     installation that owns each repo, and — where the App can't reach a repo — falls back to the gh
@@ -148,10 +182,20 @@ class TestActToken(unittest.TestCase):
         from stayawake.lib import github_app
         with mock.patch("stayawake.lib.github_app.installation_token",
                         side_effect=github_app.GithubAppError("install it on 'org'")), \
-             mock.patch.object(auth, "_gh_fallback", return_value=None):
+             mock.patch.object(auth, "_gh_fallback", return_value=None), \
+             mock.patch.object(auth, "_git_fallback", return_value=None):
             tok, err = auth.act_token("base", "github-app", "org/repo")
         self.assertIsNone(tok)
         self.assertIn("install it on 'org'", err)
+
+    def test_app_unreachable_falls_back_to_the_git_credential(self):
+        from stayawake.lib import github_app
+        with mock.patch("stayawake.lib.github_app.installation_token",
+                        side_effect=github_app.GithubAppError("install it on 'org'")), \
+             mock.patch.object(auth, "_gh_fallback", return_value=None), \
+             mock.patch.object(auth, "_git_fallback", return_value="ghp_from_git"):
+            self.assertEqual(auth.act_token("base", "github-app", "org/repo"),
+                             ("ghp_from_git", None))
 
     def test_no_slug_returns_base(self):
         self.assertEqual(auth.act_token("base", "github-app", None), ("base", None))
