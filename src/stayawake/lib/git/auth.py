@@ -29,7 +29,8 @@ def github_https_auth(token: str | None):
         with github_https_auth(token) as (prefix, env):
             subprocess.run(["git", "clone", f"{prefix}{slug}.git", dst], env=env, ...)
     """
-    base_env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_EDITOR="true")
+    base_env = _without_credential_helpers(dict(os.environ, GIT_TERMINAL_PROMPT="0",
+                                                GIT_EDITOR="true"))
     if not token:
         yield f"https://{_HOST}/", base_env
         return
@@ -49,6 +50,18 @@ def github_https_auth(token: str | None):
     finally:
         with contextlib.suppress(OSError):
             os.unlink(path)
+
+
+def _without_credential_helpers(env: dict) -> dict:
+    """Stop git asking the user's credential helpers, so saw's own HTTPS git neither prompts for a
+    keychain nor stores saw's token there. Takes the environment. Returns it with one more config
+    entry that empties the helper list."""
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT") or 0)
+    except ValueError:
+        count = 0
+    return dict(env, GIT_CONFIG_COUNT=str(count + 1), **{f"GIT_CONFIG_KEY_{count}": "credential.helper",
+                                                      f"GIT_CONFIG_VALUE_{count}": ""})
 
 
 def _ssh_env() -> dict:
