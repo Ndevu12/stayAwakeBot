@@ -109,6 +109,28 @@ class Session:
             return {"verdict": "not verified"}
         return self.scan_paths([path])
 
+    def govern(self, params: object) -> dict:
+        """Check an incoming git or GitHub update that brings files in, in a holding directory saw
+        owns, and apply it only on a clean or residue verdict. Takes the repository, the tool and
+        the command's arguments. Returns the verdict, whether it was applied, and the scan
+        document; the open folder is unchanged on anything but clean or residue."""
+        if not isinstance(params, dict):
+            return {"verdict": "not verified"}
+        repo, tool, args = params.get("repo"), params.get("tool"), params.get("args")
+        if (not isinstance(repo, str) or repo == "" or tool not in ("git", "gh")
+                or not isinstance(args, list) or any(not isinstance(a, str) for a in args)):
+            return {"verdict": "not verified"}
+        from stayawake.bots.security import govern as governor
+        from stayawake.utils import scratch
+        holding = str(scratch.new_dir("an agent's governed update"))
+        payload, _ = governor.prepare(repo, holding, tool, args)
+        document = payload.get("scan")
+        if not isinstance(document, dict):
+            return {"verdict": "not verified"}
+        applied_payload, _ = governor.apply(repo, holding)
+        return {"verdict": scan_verdict(document),
+                "applied": bool(applied_payload.get("applied")), "document": document}
+
     def audit(self, again: bool = False) -> dict:
         """Report this machine's audit. Takes whether to run it again. Returns the verdict and,
         when a document was produced, that document. A later call returns the same answer until
@@ -140,6 +162,8 @@ def handle(session: Session, request: dict) -> dict:
             body = session.scan_paths(paths if isinstance(paths, list) else [])
         elif method == "verdict":
             body = session.verdict(params.get("path"))
+        elif method == "govern":
+            body = session.govern(params)
         elif method == "audit":
             body = session.audit(bool(params.get("again")))
         else:

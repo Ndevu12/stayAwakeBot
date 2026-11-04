@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **saw's MCP server offers a govern tool a cooperating agent can call.** An agent that drives git
+  itself can hand saw a bringing-files command and the repository; saw checks what would arrive in a
+  holding area it owns and applies it only on a clean or residue verdict, leaving the folder unchanged
+  otherwise. The agent waits for the verdict instead of running the raw command.
 - **saw's MCP server tells an agent to let saw check an incoming update before it lands.** When an
   agent brings files in, the server's instructions say to run git the normal way, wait for the
   verdict, act only on a clean or residue result, not reach around the check, and tell the person —
