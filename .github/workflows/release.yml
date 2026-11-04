@@ -107,9 +107,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {name: macOS x86_64, os: macos-13}
-          - {name: macOS arm64, os: macos-14}
-          - {name: Windows x86_64, os: windows-latest}
+          - {name: macOS arm64, os: macos-14, slug: macos-arm64}
+          - {name: macOS x86_64, os: macos-14, slug: macos-x86_64, cross_target: x86_64-apple-darwin, wheel_plat: macosx_11_0_x86_64, macos_min: '11.0'}
+          - {name: Windows x86_64, os: windows-latest, slug: windows-x86_64}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout (full history + tags for hatch-vcs versioning)
@@ -121,7 +121,14 @@ jobs:
         with:
           python-version-file: .python-version
           check-latest: true
+      - name: Add the Rust cross-compile target
+        if: matrix.cross_target != ''
+        run: rustup target add ${{ matrix.cross_target }}
       - name: Build and verify the platform wheel
+        env:
+          SAW_WHEEL_TARGET: ${{ matrix.cross_target }}
+          SAW_WHEEL_PLATFORM_TAG: ${{ matrix.wheel_plat }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_min }}
         run: |
           python -m pip install --upgrade pip
           pip install build "twine>=6.1"
@@ -138,7 +145,7 @@ jobs:
       - name: Upload the wheel
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
-          name: wheel-${{ matrix.os }}
+          name: wheel-${{ matrix.slug }}
           path: dist/*.whl
           if-no-files-found: error
 
