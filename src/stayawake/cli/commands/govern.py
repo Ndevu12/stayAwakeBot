@@ -42,7 +42,7 @@ def register(sub) -> None:
     pp.add_argument("--json", action="store_true", help="machine-readable output")
     pp.add_argument("--repo", required=True, help="the open folder")
     pp.add_argument("--into", required=True, help="the holding directory saw owns")
-    pp.add_argument("--tool", required=True, choices=["git", "gh"], help="which tool the command is")
+    pp.add_argument("--tool", required=True, choices=core.TOOLS, help="which tool the command is")
     pp.add_argument("args", nargs=argparse.REMAINDER, help="the operator's arguments, after --")
     pp.set_defaults(func=run_prepare)
 

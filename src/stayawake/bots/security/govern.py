@@ -11,21 +11,24 @@ from __future__ import annotations
 
 SCHEMA = 1
 
-# The literal incoming commands the extension sends, by leading words. An alias is never sent here,
-# and a command that brings nothing in (status, commit, push, pr view) is not sent here either.
-RECOGNISED: tuple[tuple[str, ...], ...] = (
-    ("git", "pull"), ("git", "fetch"), ("git", "merge"), ("git", "rebase"),
-    ("git", "checkout"), ("git", "switch"), ("git", "submodule", "update"),
-    ("gh", "pr", "checkout"), ("gh", "repo", "sync"),
-    ("gh", "release", "download"), ("gh", "run", "download"),
-)
+TOOLS = ("gh", "git")
+
+# Subcommands that bring files in. An alias is never sent here, and a command that brings nothing
+# in (status, commit, push, pr view) is not sent here either.
+_GIT_INBOUND = frozenset({"pull", "fetch", "merge", "rebase", "checkout", "switch"})
+_GIT_SUBMODULE_UPDATE = ("submodule", "update")
+_GH_INBOUND = frozenset({("pr", "checkout"), ("repo", "sync"), ("release", "download"),
+                         ("run", "download")})
 
 
 def is_recognised(tool: str, args: list[str]) -> bool:
     """Whether `(tool, args)` is one of the incoming commands saw governs. Takes the tool and the
     operator's arguments without the program name. Returns the answer."""
-    head = (tool, *args)
-    return any(head[:len(key)] == key for key in RECOGNISED)
+    if tool == "git":
+        return (bool(args) and args[0] in _GIT_INBOUND) or tuple(args[:2]) == _GIT_SUBMODULE_UPDATE
+    if tool == "gh":
+        return tuple(args[:2]) in _GH_INBOUND
+    return False
 
 
 def prepare(repo: str, into: str, tool: str, args: list[str]) -> dict:
