@@ -103,7 +103,7 @@ impl Saw {
 #[tool_handler(
     name = "saw",
     version = "1",
-    instructions = "Ask the person before you install, build, or run anything in this folder. When the verdict is infected, suspicious, residue, or not verified, stop and ask the person. When an audit says unsafe or incomplete, stop and ask the person."
+    instructions = "Ask the person before you install, build, or run anything in this folder. When the verdict is infected, suspicious, residue, or not verified, stop and ask the person. When an audit says unsafe or incomplete, stop and ask the person. When you bring files in — pull, fetch, checkout, switch, merge, rebase, submodule update, or a GitHub command that lands files — let saw check the update before it reaches the folder: run git the normal way, wait for the verdict, and act only when it is clean or residue. Never reach around the check to a raw git, and tell the person. A held update did not land and the folder is unchanged."
 )]
 impl ServerHandler for Saw {}
 

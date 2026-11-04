@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **saw's MCP server tells an agent to let saw check an incoming update before it lands.** When an
+  agent brings files in, the server's instructions say to run git the normal way, wait for the
+  verdict, act only on a clean or residue result, not reach around the check, and tell the person —
+  the same rules the agent guidance states, now stated at runtime to any MCP-capable agent.
 - **saw ships a git/gh stand-in the editor can place.** Before an incoming update reaches the open
   folder, a command that brings files in — pull, fetch, checkout, switch, merge, rebase, submodule
   update, and the GitHub commands that land files — is checked by `saw govern` and applied only when
