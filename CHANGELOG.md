@@ -129,6 +129,10 @@ reader, not the mechanism or the weakness it closed.
   The `saw fix --json` record includes the choices that were made.
 
 ### Changed
+- **`saw govern verdict` names the commits and carries a machine code.** The JSON adds `head`
+  (the commit checked out now), `let_in` (the commit saw let in, or absent), and `code`
+  (`let-in`, `unknown-commit`, `tree-changed`, `could-not-answer`), so an editor keys off the
+  code and the commits rather than matching the prose `reason`.
 - **The govern check record shows its steps.** As a check runs, saw writes each phase —
   scanning, then applying — into the durable per-folder record, not just checking then ready,
   so an editor can show the steps of a check a terminal or an agent started, not only one it

@@ -110,21 +110,33 @@ def verdict(repo: str, config: str | None = None) -> tuple[dict, int]:
     applied by govern, clean or residue, with the tree still matching), `not-let-in` (an unknown
     commit, or a working tree changed on top of one saw let in), or `could-not-answer`."""
     root = Path(repo)
-    head = stdout(root, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
+    head = stdout(root, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip() or None
+    let_in = clean_ledger.let_in_commit(root, config)
     if not head:
-        return _governed("could-not-answer", "the open folder has no commit yet"), exitcodes.INCOMPLETE
+        return _governed("could-not-answer", "could-not-answer", "the open folder has no commit yet",
+                         head, let_in), exitcodes.INCOMPLETE
     if not clean_ledger.governed(root, clean_ledger.clean_key(head, config)):
-        return _governed("not-let-in", "this tree is not one saw let in"), exitcodes.FINDINGS
+        return _governed("not-let-in", "unknown-commit", "this tree is not one saw let in",
+                         head, let_in), exitcodes.FINDINGS
     changed = uncommitted_paths(root)
     if changed is None:
-        return _governed("could-not-answer", "the working tree could not be read"), exitcodes.INCOMPLETE
+        return _governed("could-not-answer", "could-not-answer", "the working tree could not be read",
+                         head, let_in), exitcodes.INCOMPLETE
     if changed:
-        return _governed("not-let-in", "the working tree changed on top of a tree saw let in"), exitcodes.FINDINGS
-    return _governed("let-in", "this tree is one saw let in"), exitcodes.CLEAN
+        return _governed("not-let-in", "tree-changed",
+                         "the working tree changed on top of a tree saw let in",
+                         head, let_in), exitcodes.FINDINGS
+    return _governed("let-in", "let-in", "this tree is one saw let in", head, let_in), exitcodes.CLEAN
 
 
-def _governed(verdict: str, sentence: str) -> dict:
-    return {"governed": verdict, "reason": sentence}
+def _governed(verdict: str, code: str, sentence: str,
+              head: str | None = None, let_in: str | None = None) -> dict:
+    body = {"governed": verdict, "code": code, "reason": sentence}
+    if head:
+        body["head"] = head
+    if let_in:
+        body["let_in"] = let_in
+    return body
 
 
 def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None) -> tuple[dict, int]:
