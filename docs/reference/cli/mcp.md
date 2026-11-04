@@ -25,4 +25,6 @@ install, build, or run anything. When the verdict is infected, suspicious, resid
 verified, stop and ask the person. When an audit says unsafe or incomplete, stop and ask the
 person.
 
-An editor points its agent configuration at `saw mcp`.
+An editor points its agent configuration at `saw mcp` and keeps it open. An agent can do the same
+itself — point its own Model Context Protocol configuration at `saw mcp` — so it can ask saw for a
+verdict without a person wiring it up first.
