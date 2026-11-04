@@ -27,7 +27,7 @@ from stayawake.utils.json_documents import versioned
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.contexts import empty_hooks_dir
-from stayawake.bots.security import checkout_writes, clean_contents, hook_status, hookscript, outbound, push_record
+from stayawake.bots.security import checkout_writes, clean_contents, clean_ledger, hook_status, hookscript, outbound, push_record
 from stayawake.lib.git.run import stdout_bytes
 from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.bots.security.found import confirmed_first, left_out_line, what_it_is, where_it_is
@@ -1189,47 +1189,19 @@ def _repo_root() -> Path | None:
     return Path(root) if root else None
 
 
-def _load_cache() -> dict:
-    try:
-        cache = json.loads(_cache_path().read_text())
-    except (OSError, ValueError):
-        return {}
-    return cache if isinstance(cache, dict) else {}
+_load_cache = clean_ledger.load_cache
 
 
-def _policy_digest(config_path: str | None) -> str:
-    """Name the policy a hook scan judges under. Takes the operator config. Returns the digest of its
-    signatures, allowlist, file size limit and the folders a walk of the tree reads or skips."""
-    policy = operator_policy(config_path)
-    opts = policy.opts
-    digest = push_record.policy_digest(policy.signatures, policy.allowlist,
-                                       getattr(opts, "max_file_bytes", 0))
-    walked = json.dumps([sorted(getattr(opts, "exclude_dirs", ())), sorted(getattr(opts, "keep_dirs", ())),
-                         bool(getattr(opts, "scan_build_outputs", False))])
-    return f"{digest}:{hashlib.sha256(walked.encode()).hexdigest()}"
+_policy_digest = clean_ledger.policy_digest
 
 
-def _clean_key(head: str, config_path: str | None) -> str:
-    """Name a complete clean scan of a repository's tree. Takes the commit and the operator config.
-    Returns the commit joined to the digest of the policy it was judged under."""
-    return f"{head}:{_policy_digest(config_path)}"
+_clean_key = clean_ledger.clean_key
 
 
-def _settings_scans() -> dict:
-    """Read the clean scans a run from git's settings remembers. Returns them by repository."""
-    try:
-        held = json.loads(hookscript.settings_scan_path().read_text())
-    except (OSError, ValueError):
-        return {}
-    return held if isinstance(held, dict) else {}
+_settings_scans = clean_ledger.settings_scans
 
 
-def _remember_settings_scan(root: Path, key: str) -> None:
-    """Remember a clean scan a run from git's settings made, apart from saw's list of repositories it
-    keeps current. Takes the root and the clean key. A write that fails is skipped."""
-    held = {r: k for r, k in _settings_scans().items() if os.path.isdir(r)}
-    held[os.path.realpath(root)] = key
-    atomicwrite.replace(hookscript.settings_scan_path(), json.dumps(held))
+_remember_settings_scan = clean_ledger.remember_settings_scan
 
 
 _COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
@@ -1293,21 +1265,10 @@ def _history_found_clean(result, merges: list[str] | None) -> bool:
             and not any(f.category == "evil-merge" for f in result.findings))
 
 
-def _remember(root: Path, key: str) -> None:
-    """Record a scanned repository, and the clean scan it may skip next time. Takes the root and
-    the clean key, or "" when the scan was not clean. A write that fails is skipped."""
-    try:
-        cache = {r: s for r, s in _load_cache().items() if os.path.isdir(r)}
-        cache[os.path.realpath(root)] = key
-        atomicwrite.replace(_cache_path(), json.dumps(cache), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
-    except OSError:
-        pass
+_remember = clean_ledger.remember
 
 
-def _scanned_clean(root: Path, key: str) -> bool:
-    """Tell whether saw remembers a complete clean scan of a repository. Takes the root and the clean
-    key. Returns the answer."""
-    return key in (_load_cache().get(os.path.realpath(root)), _settings_scans().get(os.path.realpath(root)))
+_scanned_clean = clean_ledger.scanned_clean
 
 
 def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None = None,
