@@ -15,6 +15,8 @@ from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
+# saw-mcp builds everywhere; saw-git-standin is Unix-only (it uses std::os::unix), so it is left
+# out on Windows, where the editor extension supplies the terminal stand-in instead.
 _BINARIES = ("saw-mcp", "saw-git-standin")
 
 
@@ -29,20 +31,23 @@ class CustomBuildHook(BuildHookInterface):
                        "unavailable until saw is installed where its binaries can be built.")
             return
         manifest = Path(self.root) / "src" / "stayawake" / "bots" / "mcp" / "session" / "Cargo.toml"
+        wanted = [b for b in _BINARIES if b != "saw-git-standin" or sys.platform != "win32"]
+        build = ["cargo", "build", "--release", "--manifest-path", str(manifest)]
+        for name in wanted:
+            build += ["--bin", name]
         try:
-            subprocess.run(["cargo", "build", "--release", "--manifest-path", str(manifest)],
-                           check=True)
+            subprocess.run(build, check=True)
         except (OSError, subprocess.CalledProcessError) as exc:
             self._note(f"the Rust build did not finish ({exc}); building a pure-Python wheel.")
             return
         release = manifest.parent / "target" / "release"
         suffix = ".exe" if sys.platform == "win32" else ""
         include = build_data.setdefault("force_include", {})
-        for name in _BINARIES:
+        for name in wanted:
             built = release / f"{name}{suffix}"
             if built.is_file():
                 include[str(built)] = f"stayawake/bots/mcp/bin/{name}{suffix}"
-        if any(f"stayawake/bots/mcp/bin/{n}" in v for n in _BINARIES for v in include.values()):
+        if any(f"stayawake/bots/mcp/bin/{n}" in v for n in wanted for v in include.values()):
             import sysconfig
             # The bundled binaries are standalone (no Python ABI), so the wheel is platform-specific
             # but works on any Python 3: py3-none-<platform>, not a CPython-ABI tag.
