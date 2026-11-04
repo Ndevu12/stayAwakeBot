@@ -153,9 +153,10 @@ jobs:
       - name: Build in a manylinux container (old glibc), then tag the wheel manylinux
         # Build inside manylinux so the bundled binary runs on older glibc, then retag the
         # py3-none-linux_x86_64 wheel to manylinux so PyPI accepts it. Pin the image by digest
-        # at the next review; `_2_28` is the current baseline.
+        # pinned by digest (manylinux_2_28, 2026.11.01-2); bump deliberately at review, like the
+        # SHA-pinned actions.
         run: |
-          docker run --rm -v "$PWD":/io -w /io             quay.io/pypa/manylinux_2_28_x86_64 bash -euo pipefail -c '
+          docker run --rm -v "$PWD":/io -w /io             quay.io/pypa/manylinux_2_28_x86_64@sha256:7e41b1c7fd64dfc69703a1124b43c404382973ee06ec5d764b85c34d2221fded bash -euo pipefail -c '
               git config --global --add safe.directory /io
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
               . "$HOME/.cargo/env"
