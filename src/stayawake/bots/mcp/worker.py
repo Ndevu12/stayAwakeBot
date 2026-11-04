@@ -117,7 +117,7 @@ class Session:
         if not isinstance(params, dict):
             return {"verdict": "not verified"}
         repo, tool, args = params.get("repo"), params.get("tool"), params.get("args")
-        if (not isinstance(repo, str) or repo == "" or tool not in ("git", "gh")
+        if (not isinstance(repo, str) or repo == "" or tool not in ("gh", "git")
                 or not isinstance(args, list) or any(not isinstance(a, str) for a in args)):
             return {"verdict": "not verified"}
         from stayawake.bots.security import govern as governor
