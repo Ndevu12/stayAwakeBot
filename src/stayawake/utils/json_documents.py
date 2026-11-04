@@ -21,6 +21,7 @@ SCHEMA_VERSION_OF_EACH_DOCUMENT = {
     "audit": 1,
     "hook-status": 1,
     "capabilities": 1,
+    "govern": 1,
 }
 
 # `hook install` and `hook repair` print the hook-status document. Their names are not that document.
