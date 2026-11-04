@@ -129,6 +129,10 @@ reader, not the mechanism or the weakness it closed.
   The `saw fix --json` record includes the choices that were made.
 
 ### Changed
+- **saw's MCP server tells an agent one thing.** The server instructions and the
+  `saw_govern_update` tool now agree: run git the normal way and wait for saw's check, and
+  where saw is not already in front of your git call the tool to get the same check — not the
+  earlier run-normally versus do-not-run-raw contradiction.
 - **Releases build and publish the platform wheels, not only the sdist.** The release pipeline
   builds a wheel per desktop platform (macOS x86_64 and arm64, Windows, and Linux via
   manylinux) that bundles saw's Rust binaries, alongside the sdist, so a plain `pip install`
