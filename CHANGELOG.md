@@ -14,6 +14,16 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw govern` writes a durable record of a check an editor can read.** Per open folder it records
+  checking, then held, applied, or finished without applying, with the verdict — keyed the way the
+  editor keys a folder and kept in saw's state directory, so it survives the holding directory being
+  removed. An editor reads the outcome there instead of parsing output or reading a successful exit
+  as applied.
+- **`saw govern verdict` says whether the open folder's tree is one saw let in.** It answers let-in
+  (scanned clean by a hook, or applied by govern, clean or residue, with the tree still matching),
+  not-let-in (an unknown commit, or a tree changed on top of one saw let in), or could-not-answer —
+  reading what saw already recorded, scanning nothing and changing nothing. A residue apply counts
+  as let in without widening the hooks' strictly-clean skip.
 - **The wheel now ships saw's Rust binaries, so governed git works on a plain install.** A build hook
   compiles `saw-mcp` and `saw-git-standin` and bundles them in a platform wheel, so `saw mcp`, `saw
   govern install` and the git stand-in work after `pip install` wherever a built wheel is used.

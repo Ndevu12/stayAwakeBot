@@ -69,6 +69,20 @@ def register(sub) -> None:
     add_progress_arg(ap)
     ap.set_defaults(func=run_apply)
 
+    vp = add_command(
+        actions, "verdict",
+        help="say whether the open folder's tree is one saw let in",
+        description=(
+            "Answer whether the folder's current tree is one saw let in — scanned clean by a hook, "
+            "or applied by govern with the tree still matching — or a change that came in another "
+            "way. It reads what saw already recorded; it does not scan again or change anything."),
+        examples=[("saw govern verdict --repo . --json", "ask about the open folder")],
+        stream=False)
+    vp.add_argument("--json", action="store_true", help="machine-readable output")
+    vp.add_argument("--repo", required=True, help="the open folder")
+    vp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
+    vp.set_defaults(func=run_verdict)
+
     for name, helptext, description, example in _PLACEMENT:
         c = add_command(actions, name, help=helptext, description=description,
                         examples=[example], stream=False)
@@ -105,6 +119,12 @@ def run_apply(a: argparse.Namespace) -> int:
 
 def _do_apply(a: argparse.Namespace) -> int:
     payload, code = core.apply(a.repo, a.into)
+    print(json.dumps(versioned("govern", payload)))
+    return code
+
+
+def run_verdict(a: argparse.Namespace) -> int:
+    payload, code = core.verdict(a.repo, a.config)
     print(json.dumps(versioned("govern", payload)))
     return code
 
