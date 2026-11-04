@@ -1304,6 +1304,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#putting-the-open-folder-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Putting the open folder back
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2007,6 +2018,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#putting-the-open-folder-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Putting the open folder back
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2068,6 +2090,13 @@ a hook, or carried in by govern with the tree still matching. It answers <code>l
 unknown commit, or a tree changed on top of one saw let in), or <code>could-not-answer</code>. It reads what saw
 already recorded, so it scans nothing and changes nothing. An editor uses it to tell a change saw let
 in from one that reached the folder another way.</p>
+<h2 id="putting-the-open-folder-back">Putting the open folder back<a class="headerlink" href="#putting-the-open-folder-back" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>saw govern restore --repo &lt;open-folder&gt;
+</code></pre></div>
+<p><code>saw govern restore</code> puts the folder back on the commit saw let in, keeping your uncommitted work.
+The branch moves to that commit, so HEAD is not left detached, and nothing is fetched. Call it after
+a verdict that the tree is not one saw let in. An editor uses it instead of running git over a tree
+with unsaved changes.</p>
 
 
 
