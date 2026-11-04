@@ -164,6 +164,18 @@ class GovernIncoming(GitSandbox):
         self.assertFalse(applied["applied"])
         self.assertEqual(self.rev(repo), base)
 
+    def test_prepare_emits_progress_events_for_the_wait(self):
+        import contextlib
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self._run("govern", "prepare", "--json", "--progress", "jsonl", "--repo", str(self.repo),
+                      "--into", str(self.into), "--tool", "git", "--", "checkout", "next")
+        steps = [json.loads(line)["id"] for line in err.getvalue().splitlines()
+                 if line.strip().startswith("{") and json.loads(line).get("event") == "step"]
+        self.assertIn("materialise", steps)
+        self.assertIn("scan", steps)
+        self.assertIn("verdict", steps)
+
     def test_capabilities_names_the_check(self):
         out = io.StringIO()
         with redirect_stdout(out):

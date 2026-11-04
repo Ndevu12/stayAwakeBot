@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw govern` reports its progress.** `saw govern prepare` and `apply` take `--progress jsonl`
+  and emit a step as the update is checked (checking, scanning, verdict, applying), so a caller
+  can show the user that saw is checking an incoming update and that it must wait for the result.
 - **`saw govern` checks a git or GitHub update before it changes the open folder.** For the editor
   extension: `saw govern prepare` carries a pull, fetch, checkout, switch, merge, rebase, submodule
   update, pull-request checkout, repo sync, or release/artifact download out into a holding directory

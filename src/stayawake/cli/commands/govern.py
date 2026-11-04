@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from stayawake.bots.security import govern as core
+from stayawake.cli.argtypes import add_progress_arg, progress_requested
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
+from stayawake.utils.progress_events import covering
 from stayawake.utils.json_documents import versioned
 
 
@@ -44,6 +47,7 @@ def register(sub) -> None:
     pp.add_argument("--into", required=True, help="the holding directory saw owns")
     pp.add_argument("--tool", required=True, choices=core.TOOLS, help="which tool the command is")
     pp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
+    add_progress_arg(pp)
     pp.add_argument("args", nargs=argparse.REMAINDER, help="the operator's arguments, after --")
     pp.set_defaults(func=run_prepare)
 
@@ -59,6 +63,7 @@ def register(sub) -> None:
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--repo", required=True, help="the open folder")
     ap.add_argument("--into", required=True, help="the holding directory saw owns")
+    add_progress_arg(ap)
     ap.set_defaults(func=run_apply)
 
     p.set_defaults(func=_no_action)
@@ -75,12 +80,22 @@ def _operator_args(raw: list[str]) -> list[str]:
 
 
 def run_prepare(a: argparse.Namespace) -> int:
+    return covering("govern", progress_requested(a), lambda: _do_prepare(a),
+                    unfinished=exitcodes.INCOMPLETE, out=sys.stderr)
+
+
+def _do_prepare(a: argparse.Namespace) -> int:
     payload, code = core.prepare(a.repo, a.into, a.tool, _operator_args(a.args), a.config)
     print(json.dumps(versioned("govern", payload)))
     return code
 
 
 def run_apply(a: argparse.Namespace) -> int:
+    return covering("govern", progress_requested(a), lambda: _do_apply(a),
+                    unfinished=exitcodes.INCOMPLETE, out=sys.stderr)
+
+
+def _do_apply(a: argparse.Namespace) -> int:
     payload, code = core.apply(a.repo, a.into)
     print(json.dumps(versioned("govern", payload)))
     return code
