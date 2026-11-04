@@ -1293,6 +1293,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#asking-whether-a-tree-is-one-saw-let-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asking whether a tree is one saw let in
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1985,6 +1996,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#asking-whether-a-tree-is-one-saw-let-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asking whether a tree is one saw let in
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2038,6 +2060,14 @@ terminal, or source the file the command names, for it to take effect.</p>
 <p><code>saw govern status</code> says whether your terminals are covered and whether the shell you are in is
 covered yet. <code>saw govern uninstall</code> takes it back out, and your editor is unaffected. saw always
 falls back to your real git and gh.</p>
+<h2 id="asking-whether-a-tree-is-one-saw-let-in">Asking whether a tree is one saw let in<a class="headerlink" href="#asking-whether-a-tree-is-one-saw-let-in" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>saw govern verdict --repo &lt;open-folder&gt;
+</code></pre></div>
+<p><code>saw govern verdict</code> answers whether the folder's current tree is one saw let in — scanned clean by
+a hook, or carried in by govern with the tree still matching. It answers <code>let-in</code>, <code>not-let-in</code> (an
+unknown commit, or a tree changed on top of one saw let in), or <code>could-not-answer</code>. It reads what saw
+already recorded, so it scans nothing and changes nothing. An editor uses it to tell a change saw let
+in from one that reached the folder another way.</p>
 
 
 
