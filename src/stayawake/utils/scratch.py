@@ -130,6 +130,12 @@ def _remove(area: Area) -> str:
             return why
     if not area.path.exists():
         return ""
+    if area.path.is_file():
+        try:
+            area.path.unlink()
+        except OSError as exc:
+            return str(exc)
+        return ""
     return _rmtree(area.path)
 
 

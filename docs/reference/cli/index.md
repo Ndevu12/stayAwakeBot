@@ -29,6 +29,7 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | [`watch`](watch.md) | One unattended pass: end identified code, remember the rest | this machine |
 | [`guard`](guard.md) | Install and verify the SAW Guard CI gate | `check`/`drift` read-only; `setup` writes a workflow or a PR |
 | [`hook`](hook.md) | Scan what a clone or pull just brought in | your global git config |
+| [`govern`](govern.md) | Check a pull or checkout before it changes an open folder | that folder, only when the check is clean or residue |
 | [`auth`](auth.md) | Credential and capability status; register a GitHub App | local config |
 | [`db`](db.md) | Manage the offline advisory database | its cache only |
 | [`search`](search.md) | Find the command you want | — |

@@ -26,6 +26,7 @@ $ saw capabilities --json
     "audit": 1,
     "hook-status": 1,
     "capabilities": 1,
+    "govern": 1,
     "fix-ask": 1
   },
   "features": [
@@ -37,6 +38,7 @@ $ saw capabilities --json
     "audit.json",
     "hook.status.json",
     "capabilities.json",
+    "govern.json",
     "progress.jsonl",
     "fix.ask.json",
     "stream",

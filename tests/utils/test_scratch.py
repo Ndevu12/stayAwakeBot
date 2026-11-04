@@ -50,7 +50,7 @@ class TestReleaseTakesTheRunWithIt(OwnTempRoot):
     """Check what release removes and what it leaves."""
 
     def test_it_removes_everything_the_run_made(self):
-        made = [scratch.new_dir("the clone"), scratch.new_dir("rollback")]
+        made = [scratch.new_dir("the clone"), scratch.new_dir("rollback"), scratch.new_file("askpass")]
         (made[1] / "original.txt").write_text("bytes")
         self.assertEqual([], scratch.release())
         self.assertFalse(any(p.exists() for p in made))

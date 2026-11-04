@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **A pull or checkout can be checked before it changes the folder you have open.** The folder
+  changes only when that check is clean or residue. Otherwise it stays as it was. `saw capabilities`
+  reports the check.
 - **`saw audit` reads the Windows start-up surface.** What the machine starts at sign-in, at boot, on
   a schedule, as a service and on a system event is graded like a launch agent or a systemd unit,
   and one that cannot be read is unknown. Not every Windows start-up place is read yet, so the
