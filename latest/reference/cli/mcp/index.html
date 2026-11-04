@@ -1948,7 +1948,7 @@
 </code></pre></div>
 <p>Speaks the Model Context Protocol on standard input and output. An editor launches it and keeps
 it open, so an agent can ask for a verdict before it installs or runs anything.</p>
-<p>The tools are <code>saw_scan_folder</code>, <code>saw_scan_files</code>, <code>saw_verdict</code> and <code>saw_audit_summary</code>. A scan
+<p>The tools are <code>saw_scan_folder</code>, <code>saw_scan_files</code>, <code>saw_verdict</code>, <code>saw_audit_summary</code> and <code>saw_govern_update</code>. <code>saw_govern_update</code> checks an incoming git or GitHub update before it reaches the open folder and lets it in only when the check is clean or residue; the others do not change files. A scan
 answer is the same document as <a href="../scan/"><code>saw scan --json</code></a>. An audit answer is the same document
 as <a href="../audit/"><code>saw audit --json</code></a>. The first line of each answer is the verdict: clean, infected,
 suspicious, residue, or not verified. An audit says safe, safe once you confirm the items it
@@ -1959,7 +1959,9 @@ session stands until the agent asks for it again.</p>
 install, build, or run anything. When the verdict is infected, suspicious, residue, or not
 verified, stop and ask the person. When an audit says unsafe or incomplete, stop and ask the
 person.</p>
-<p>An editor points its agent configuration at <code>saw mcp</code>.</p>
+<p>An editor points its agent configuration at <code>saw mcp</code> and keeps it open. An agent can do the same
+itself — point its own Model Context Protocol configuration at <code>saw mcp</code> — so it can ask saw for a
+verdict without a person wiring it up first.</p>
 
 
 
