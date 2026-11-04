@@ -8,12 +8,26 @@
 //! removes it afterwards. Without either, every command passes straight through.
 
 use std::env;
+use std::fs;
+use std::os::unix::fs::symlink;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
 
 fn main() {
     let argv: Vec<String> = env::args().collect();
+    let argv0 = argv.first().map(String::as_str).unwrap_or("");
+    let base = Path::new(argv0).file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let base = base.strip_suffix(".exe").unwrap_or(base);
+    // Invoked by its own name (not git/gh) and not asked to impersonate a tool: an admin
+    // subcommand managing the placement, never a git command.
+    if base != "git" && base != "gh" && env::var_os("SAW_STANDIN_TOOL").is_none() {
+        if let Some(sub) = argv.get(1).map(String::as_str) {
+            if matches!(sub, "install" | "status" | "uninstall") {
+                exit(admin(sub, &argv[2..]));
+            }
+        }
+    }
     let tool = match tool_name(argv.first().map(String::as_str).unwrap_or("")) {
         Some(t) => t,
         None => passthrough_raw(&argv),           // unknown name: find a real one and run it
@@ -199,15 +213,21 @@ fn real_tool(tool: &str) -> Option<PathBuf> {
 }
 
 fn which(program: &str, skip_dir: Option<&Path>) -> Option<PathBuf> {
-    let me = env::current_exe().ok();
+    let me = env::current_exe().ok().and_then(|p| fs::canonicalize(p).ok());
     for dir in env::split_paths(&env::var_os("PATH").unwrap_or_default()) {
         if Some(dir.as_path()) == skip_dir {
             continue;
         }
         let candidate = dir.join(program);
-        if candidate.is_file() && Some(&candidate) != me.as_ref() {
-            return Some(candidate);
+        if !candidate.is_file() {
+            continue;
         }
+        // Never run this stand-in itself, even reached through a symlink named `git` or `gh`
+        // that a system placement put first on PATH — that would loop forever.
+        if fs::canonicalize(&candidate).ok().as_ref() == me.as_ref() {
+            continue;
+        }
+        return Some(candidate);
     }
     None
 }
@@ -230,4 +250,205 @@ fn passthrough_raw(argv: &[String]) -> ! {
             exit(127)
         }
     }
+}
+
+// ---- managing the placement: `saw govern install` / `status` / `uninstall` run these ----
+
+const SHIM_NAMES: [&str; 2] = ["git", "gh"];
+const RC_NAMES: [&str; 3] = [".zshrc", ".bashrc", ".profile"];
+const BLOCK_BEGIN: &str = "# >>> saw govern >>>";
+const BLOCK_END: &str = "# <<< saw govern <<<";
+
+fn flag_value(args: &[String], name: &str) -> Option<String> {
+    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
+}
+
+fn home() -> Option<PathBuf> {
+    env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from)
+}
+
+fn config_home() -> Option<PathBuf> {
+    if let Some(x) = env::var_os("XDG_CONFIG_HOME").filter(|x| !x.is_empty()) {
+        return Some(PathBuf::from(x));
+    }
+    home().map(|h| h.join(".config"))
+}
+
+fn govern_dir() -> Option<PathBuf> {
+    config_home().map(|c| c.join("saw").join("govern"))
+}
+fn shim_dir() -> Option<PathBuf> {
+    govern_dir().map(|g| g.join("bin"))
+}
+fn activate_path() -> Option<PathBuf> {
+    govern_dir().map(|g| g.join("activate.sh"))
+}
+
+/// Quote a path for a POSIX shell.
+fn sh_quote(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+fn activate_text(shim: &Path, saw: &str) -> String {
+    format!(
+        "# Written by `saw govern install`. Checks an incoming git or GitHub update before it\n\
+         # lands in the folder you are working in. Remove it with `saw govern uninstall`.\n\
+         _saw_shim={shim}\n\
+         case \":$PATH:\" in\n\
+         \x20\x20*\":$_saw_shim:\"*) ;;\n\
+         \x20\x20*) PATH=\"$_saw_shim:$PATH\" ;;\n\
+         esac\n\
+         export PATH\n\
+         export SAW_GOVERN_SYSTEM=1\n\
+         export SAW_BIN={saw}\n\
+         unset _saw_shim\n",
+        shim = sh_quote(shim),
+        saw = sh_quote(Path::new(saw)),
+    )
+}
+
+fn rc_block(activate: &Path) -> String {
+    let q = sh_quote(activate);
+    format!("{BLOCK_BEGIN}\n[ -f {q} ] && . {q}\n{BLOCK_END}\n")
+}
+
+/// Rc text with any existing saw govern block removed.
+fn strip_block(text: &str) -> String {
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+        if trimmed == BLOCK_BEGIN {
+            skipping = true;
+            continue;
+        }
+        if skipping {
+            if trimmed == BLOCK_END {
+                skipping = false;
+            }
+            continue;
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+fn rc_targets(create_default: bool) -> Vec<PathBuf> {
+    let Some(h) = home() else { return vec![] };
+    let present: Vec<PathBuf> = RC_NAMES.iter().map(|n| h.join(n)).filter(|p| p.is_file()).collect();
+    if !present.is_empty() || !create_default {
+        present
+    } else {
+        vec![h.join(".profile")]
+    }
+}
+
+fn admin(sub: &str, args: &[String]) -> i32 {
+    match sub {
+        "install" => admin_install(flag_value(args, "--saw")),
+        "status" => admin_status(),
+        "uninstall" => admin_uninstall(),
+        _ => 2,
+    }
+}
+
+fn admin_install(saw: Option<String>) -> i32 {
+    let me = match env::current_exe() {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("saw govern: could not find the stand-in to place.");
+            return 1;
+        }
+    };
+    let (Some(shim), Some(act)) = (shim_dir(), activate_path()) else {
+        eprintln!("saw govern: HOME is not set, so there is nowhere to install.");
+        return 1;
+    };
+    if fs::create_dir_all(&shim).is_err() {
+        eprintln!("saw govern: could not create {}", shim.display());
+        return 1;
+    }
+    let mut placed: Vec<&str> = vec![];
+    for name in SHIM_NAMES {
+        let link = shim.join(name);
+        let _ = fs::remove_file(&link);
+        if which(name, Some(&shim)).is_some() && symlink(&me, &link).is_ok() {
+            placed.push(name);
+        }
+    }
+    let saw_path = saw
+        .or_else(|| real_saw().map(|p| p.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "saw".into());
+    if fs::write(&act, activate_text(&shim, &saw_path)).is_err() {
+        eprintln!("saw govern: could not write {}", act.display());
+        return 1;
+    }
+    let mut turned_on: Vec<PathBuf> = vec![];
+    for rc in rc_targets(true) {
+        let text = fs::read_to_string(&rc).unwrap_or_default();
+        let mut kept = strip_block(&text);
+        if !kept.is_empty() && !kept.ends_with('\n') {
+            kept.push('\n');
+        }
+        kept.push_str(&rc_block(&act));
+        if fs::write(&rc, kept).is_ok() {
+            turned_on.push(rc);
+        }
+    }
+    if placed.is_empty() {
+        println!("saw govern: found no git or gh to check updates for.");
+    } else {
+        println!("saw govern: now checking incoming updates to {} before they land.", placed.join(" and "));
+    }
+    for rc in &turned_on {
+        println!("  on for new shells in {}", rc.display());
+    }
+    println!("  to turn it on in this shell now: . {}", act.display());
+    println!("  undo any time: saw govern uninstall");
+    0
+}
+
+fn admin_uninstall() -> i32 {
+    if let Some(shim) = shim_dir() {
+        for name in SHIM_NAMES {
+            let _ = fs::remove_file(shim.join(name));
+        }
+        let _ = fs::remove_dir(&shim);
+    }
+    if let Some(act) = activate_path() {
+        let _ = fs::remove_file(&act);
+    }
+    let mut cleaned = 0;
+    if let Some(h) = home() {
+        for name in RC_NAMES {
+            let rc = h.join(name);
+            if let Ok(text) = fs::read_to_string(&rc) {
+                let kept = strip_block(&text);
+                if kept != text && fs::write(&rc, kept).is_ok() {
+                    cleaned += 1;
+                }
+            }
+        }
+    }
+    println!("saw govern: took the stand-in back out ({cleaned} shell file(s) updated).");
+    println!("  open a new terminal for it to take effect.");
+    0
+}
+
+fn admin_status() -> i32 {
+    let placed: Vec<&str> = shim_dir()
+        .map(|shim| SHIM_NAMES.into_iter().filter(|n| shim.join(n).symlink_metadata().is_ok()).collect())
+        .unwrap_or_default();
+    let on_now = env::var_os("SAW_GOVERN_SYSTEM").is_some();
+    if placed.is_empty() {
+        println!("saw govern: not installed for terminals.");
+        println!("  turn it on with: saw govern install");
+        return 0;
+    }
+    println!("saw govern: checking updates to {} in terminals.", placed.join(" and "));
+    println!(
+        "  this shell: {}",
+        if on_now { "on" } else { "off — open a new terminal, or source the activate file" }
+    );
+    0
 }

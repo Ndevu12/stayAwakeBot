@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 
 from stayawake.bots.security import govern as core
+from stayawake.bots.mcp.launch import standin_binary
 from stayawake.cli.argtypes import add_progress_arg, progress_requested
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
@@ -66,6 +69,11 @@ def register(sub) -> None:
     add_progress_arg(ap)
     ap.set_defaults(func=run_apply)
 
+    for name, helptext, description, example in _PLACEMENT:
+        c = add_command(actions, name, help=helptext, description=description,
+                        examples=[example], stream=False)
+        c.set_defaults(func=lambda a, _name=name: _run_placement(_name))
+
     p.set_defaults(func=_no_action)
 
 
@@ -99,3 +107,30 @@ def _do_apply(a: argparse.Namespace) -> int:
     payload, code = core.apply(a.repo, a.into)
     print(json.dumps(versioned("govern", payload)))
     return code
+
+
+_PLACEMENT = (
+    ("install",
+     "check updates to git and gh in terminals too",
+     ("Put saw in front of git and gh for your terminals and the shells agents run, so an incoming "
+      "update is checked before it reaches the folder you are working in. Your editor is already "
+      "covered. saw always falls back to the real tool, and `saw govern uninstall` takes it back."),
+     ("saw govern install", "cover your terminals")),
+    ("status",
+     "show whether terminals are covered",
+     "Say whether git and gh are checked in your terminals, and whether this shell is covered yet.",
+     ("saw govern status", "see whether terminals are covered")),
+    ("uninstall",
+     "stop checking updates in terminals",
+     "Take saw back out of git and gh for your terminals. Your editor is unaffected.",
+     ("saw govern uninstall", "stop covering your terminals")),
+)
+
+
+def _run_placement(action: str) -> int:
+    """Run the placement action in saw's stand-in. Takes the action. Returns its exit code."""
+    binary = standin_binary()
+    if not binary:
+        print("saw govern: the stand-in is not available on this machine yet.", file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    return subprocess.run([binary, action, "--saw", os.path.abspath(sys.argv[0])]).returncode

@@ -14,6 +14,12 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw govern install` checks incoming git and GitHub updates in your terminals too.** The editor
+  extension already checks updates for folders you open in the editor; this covers an external
+  terminal and the shells coding agents run, by putting saw in front of git and gh for your login
+  shells. An incoming update is checked before it reaches the folder you are working in. `saw govern
+  status` and `saw govern uninstall` show and take back the coverage; saw always falls back to your
+  real git and gh.
 - **saw's MCP server offers a govern tool a cooperating agent can call.** An agent that drives git
   itself can hand saw a bringing-files command and the repository; saw checks what would arrive in a
   holding area it owns and applies it only on a clean or residue verdict, leaving the folder unchanged
