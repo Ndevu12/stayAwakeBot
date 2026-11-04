@@ -31,7 +31,8 @@ class TestTheVersionIsOneLine(unittest.TestCase):
 class TestHelpSaysWhatEachCommandDoes(unittest.TestCase):
     def test_no_help_uses_saws_internal_terms(self):
         for argv in (["--help"], ["harden", "-h"], ["guard", "-h"], ["hook", "install", "-h"],
-                     ["doctor", "-h"]):
+                     ["doctor", "-h"],
+                     ["govern", "-h"], ["govern", "prepare", "-h"], ["govern", "apply", "-h"]):
             text = _printed(argv)
             self.assertTrue(text, argv)
             for term in _INTERNAL_TERMS:
