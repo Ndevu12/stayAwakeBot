@@ -683,3 +683,15 @@ signatures:
     shown_as: "code that may fetch and run a payload carried in a blockchain transaction; check it"
     remediation: manual
     confidence: heuristic
+
+  # ── Run-time bootstrap prepended to a project script (dev/build/start) ───────────────────────
+  - id: run-script-bootstrap-prepend
+    category: npm-lifecycle
+    severity: high
+    matcher: npm-manifest
+    scripts: run
+    pattern: '(?:^|&&|;|\|\|)\s*node\s+[A-Za-z0-9_-]+\s*&&'
+    description: "A package script prepends `node <bare-file> &&` before its real command, so a top-level bootstrap runs on dev/build/start (review)"
+    shown_as: "a project script that runs an extra program before it starts; check it"
+    remediation: manual
+    confidence: heuristic

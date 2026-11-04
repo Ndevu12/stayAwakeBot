@@ -23,6 +23,10 @@ reader, not the mechanism or the weakness it closed.
   conflict on it.
 
 ### Security
+- **`saw scan` flags a project script that runs a bootstrap before it starts.** A `package.json`
+  script that prepends a bare `node <file> &&` before its real `dev`/`build`/`start` command is
+  reported for review, so a payload wired to run when the project is started is surfaced even when
+  the file it runs is packed in a way no other check recognises.
 - **`saw scan` flags a loader that hides its next stage in a blockchain transaction.** Code that
   reads a transaction from a public explorer or node and runs what it carries is reported — in
   JavaScript and in Python — so a payload fetched from the chain instead of a web address is still
