@@ -20,6 +20,8 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
 from stayawake.lib.git import incoming
+from stayawake.lib.git.run import UNTRUSTED, stdout
+from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.utils import exitcodes, scratch
 from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
@@ -53,9 +55,10 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
         return {"reason": "the check could not finish"}, exitcodes.INCOMPLETE
     current().step("verdict", "verdict: %s" % (_verdict(payload) or "incomplete"))
     releasable = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
-    clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN
-    mark = clean_ledger.clean_key(arrived.commit, config) if clean else None
-    _write_state(Path(into), arrived, releasable, mark)
+    strictly_clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN
+    applied_mark = clean_ledger.clean_key(arrived.commit, config) if releasable else None
+    clean_mark = applied_mark if strictly_clean else None
+    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark)
     return {"scan": payload}, code
 
 
@@ -77,9 +80,35 @@ def apply(repo: str, into: str) -> tuple[dict, int]:
         return _applied(False, "the checked update could not be read")
     current().step("apply", "applying the checked update")
     reason = incoming.apply(Path(repo), Path(into), arrived)
-    if not reason and state.get("clean_mark"):
-        clean_ledger.remember(Path(repo), state["clean_mark"])  # key on the open folder, not the holding
+    if not reason:
+        if state.get("clean_mark"):
+            clean_ledger.remember(Path(repo), state["clean_mark"])  # strictly-clean scan cache
+        if state.get("applied_mark"):
+            clean_ledger.remember_applied(Path(repo), state["applied_mark"])  # clean or residue
     return _applied(not reason, reason)
+
+
+def verdict(repo: str, config: str | None = None) -> tuple[dict, int]:
+    """Answer whether the open folder's current tree is one saw let in. Takes the open folder and the
+    operator config. Returns `(payload, exit)`; `governed` is `let-in` (scanned clean by a hook, or
+    applied by govern, clean or residue, with the tree still matching), `not-let-in` (an unknown
+    commit, or a working tree changed on top of one saw let in), or `could-not-answer`."""
+    root = Path(repo)
+    head = stdout(root, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
+    if not head:
+        return _governed("could-not-answer", "the open folder has no commit yet"), exitcodes.INCOMPLETE
+    if not clean_ledger.governed(root, clean_ledger.clean_key(head, config)):
+        return _governed("not-let-in", "this tree is not one saw let in"), exitcodes.FINDINGS
+    changed = uncommitted_paths(root)
+    if changed is None:
+        return _governed("could-not-answer", "the working tree could not be read"), exitcodes.INCOMPLETE
+    if changed:
+        return _governed("not-let-in", "the working tree changed on top of a tree saw let in"), exitcodes.FINDINGS
+    return _governed("let-in", "this tree is one saw let in"), exitcodes.CLEAN
+
+
+def _governed(verdict: str, sentence: str) -> dict:
+    return {"governed": verdict, "reason": sentence}
 
 
 def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None) -> tuple[dict, int]:
@@ -127,11 +156,11 @@ def _applied(done: bool, sentence: str) -> tuple[dict, int]:
 
 
 def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
-                 clean_mark: str | None = None) -> None:
+                 clean_mark: str | None = None, applied_mark: str | None = None) -> None:
     body = {"schema": SCHEMA, "releasable": releasable, "root": str(arrived.root),
             "paths": list(arrived.paths), "mode": arrived.mode, "commit": arrived.commit,
             "base": arrived.base, "head": arrived.head, "refs": [list(i) for i in arrived.refs],
-            "clean_mark": clean_mark}
+            "clean_mark": clean_mark, "applied_mark": applied_mark}
     path = Path(into) / _STATE
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(body), encoding="utf-8")

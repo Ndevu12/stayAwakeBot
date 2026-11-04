@@ -78,3 +78,41 @@ def scanned_clean(root: Path, key: str) -> bool:
     """Tell whether saw remembers a complete clean scan of a repository. Takes the root and the clean
     key. Returns the answer."""
     return key in (load_cache().get(os.path.realpath(root)), settings_scans().get(os.path.realpath(root)))
+
+
+def applied_path() -> Path:
+    """The record of trees `saw govern` applied — clean or residue — kept apart from the
+    strictly-clean scan cache, so a residue apply counts as governed without widening the hook skip."""
+    return cache_path().with_name("govern-applied.json")
+
+
+def load_applied() -> dict:
+    try:
+        held = json.loads(applied_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return held if isinstance(held, dict) else {}
+
+
+def remember_applied(root: Path, key: str) -> None:
+    """Record a tree govern let into a repository, clean or residue. Takes the root and the key.
+    A write that fails is skipped."""
+    try:
+        held = {r: k for r, k in load_applied().items() if os.path.isdir(r)}
+        held[os.path.realpath(root)] = key
+        atomicwrite.replace(applied_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    except OSError:
+        pass
+
+
+def is_applied(root: Path, key: str) -> bool:
+    """Tell whether govern let this exact tree into a repository, clean or residue. Takes the root
+    and the key. Returns the answer."""
+    return load_applied().get(os.path.realpath(root)) == key
+
+
+def governed(root: Path, key: str) -> bool:
+    """Tell whether saw vouches for this tree — scanned clean by a hook, or let in by govern (clean
+    or residue). Takes the root and the key. Returns the answer."""
+    return scanned_clean(root, key) or is_applied(root, key)
