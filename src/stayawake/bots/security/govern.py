@@ -13,7 +13,7 @@ import json
 import shutil
 from pathlib import Path
 
-from stayawake.bots.security import clean_ledger
+from stayawake.bots.security import clean_ledger, govern_status
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.models import CLEAN, RESIDUE_VERDICT, ScanReport
 from stayawake.bots.security.scanner import scan_target
@@ -42,23 +42,34 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     """Materialise the update outside the open folder and scan what arrived. Returns `(payload,
     exit)`: `{"scan": <document>}` with the scan's own exit, or `{"reason": <sentence>}` and
     INCOMPLETE, in which case nothing is recorded and the update must be held."""
+    govern_status.write(repo, "checking", step="checking the incoming update")
     current().step("materialise", "checking the incoming update")
     arrived = incoming.prepare(Path(repo), Path(into), tool, list(args))
     if isinstance(arrived, str):
+        govern_status.write(repo, "finished", reasons=[arrived])
         return {"reason": arrived}, exitcodes.INCOMPLETE
     current().step("scan", "scanning what arrived")
     try:
         payload, code = _scan_arrived(arrived.root, arrived.paths, config)
     except ValueError as exc:
-        return {"reason": str(exc) or "the check could not use your config"}, exitcodes.INCOMPLETE
+        reason = str(exc) or "the check could not use your config"
+        govern_status.write(repo, "finished", reasons=[reason])
+        return {"reason": reason}, exitcodes.INCOMPLETE
     except OSError:
+        govern_status.write(repo, "finished", reasons=["the check could not finish"])
         return {"reason": "the check could not finish"}, exitcodes.INCOMPLETE
-    current().step("verdict", "verdict: %s" % (_verdict(payload) or "incomplete"))
+    verdict = _verdict(payload) or "incomplete"
+    current().step("verdict", "verdict: %s" % verdict)
     releasable = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
     strictly_clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN
     applied_mark = clean_ledger.clean_key(arrived.commit, config) if releasable else None
     clean_mark = applied_mark if strictly_clean else None
-    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark)
+    if releasable:
+        govern_status.write(repo, "checking", verdict=verdict, step="checked; ready to apply")
+    else:
+        govern_status.write(repo, "held", verdict=verdict,
+                            reasons=["the update was not applied; the open folder is unchanged"])
+    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict)
     return {"scan": payload}, code
 
 
@@ -85,6 +96,9 @@ def apply(repo: str, into: str) -> tuple[dict, int]:
             clean_ledger.remember(Path(repo), state["clean_mark"])  # strictly-clean scan cache
         if state.get("applied_mark"):
             clean_ledger.remember_applied(Path(repo), state["applied_mark"])  # clean or residue
+        govern_status.write(repo, "applied", verdict=state.get("verdict"))
+    else:
+        govern_status.write(repo, "finished", reasons=[reason])
     return _applied(not reason, reason)
 
 
@@ -156,11 +170,12 @@ def _applied(done: bool, sentence: str) -> tuple[dict, int]:
 
 
 def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
-                 clean_mark: str | None = None, applied_mark: str | None = None) -> None:
+                 clean_mark: str | None = None, applied_mark: str | None = None,
+                 verdict: str | None = None) -> None:
     body = {"schema": SCHEMA, "releasable": releasable, "root": str(arrived.root),
             "paths": list(arrived.paths), "mode": arrived.mode, "commit": arrived.commit,
             "base": arrived.base, "head": arrived.head, "refs": [list(i) for i in arrived.refs],
-            "clean_mark": clean_mark, "applied_mark": applied_mark}
+            "clean_mark": clean_mark, "applied_mark": applied_mark, "verdict": verdict}
     path = Path(into) / _STATE
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(body), encoding="utf-8")
