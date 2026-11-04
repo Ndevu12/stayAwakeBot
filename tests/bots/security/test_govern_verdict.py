@@ -36,8 +36,8 @@ class GovernVerdict(GitSandbox):
     def _default(self):
         return "main" if self.git(self.repo, "branch", "--list", "main").strip() else "master"
 
-    def _verdict(self):
-        return govern.verdict(str(self.repo), None)[0]["governed"]
+    def _payload(self):
+        return govern.verdict(str(self.repo), None)[0]
 
     def _govern_checkout_next(self):
         holding = tempfile.mkdtemp()
@@ -50,12 +50,15 @@ class GovernVerdict(GitSandbox):
         self.commit(self.repo, "arrive")
         self.git(self.repo, "checkout", "-q", self._default())
         self._govern_checkout_next()
-        self.assertEqual(self._verdict(), "let-in")
+        p = self._payload()
+        self.assertEqual(p["code"], "let-in")
+        self.assertEqual(p["governed"], "let-in")
+        self.assertEqual(p["head"], p["let_in"])  # the tree in place is the commit saw let in
 
     def test_an_ungoverned_checkout_is_not_let_in(self):
         self.write(self.repo, "arrived.txt", "clean\n")
         self.commit(self.repo, "arrive")
-        self.assertEqual(self._verdict(), "not-let-in")
+        self.assertEqual(self._payload()["code"], "unknown-commit")
 
     def test_a_dirty_tree_on_a_governed_commit_is_not_let_in(self):
         self.write(self.repo, "arrived.txt", "clean\n")
@@ -63,7 +66,9 @@ class GovernVerdict(GitSandbox):
         self.git(self.repo, "checkout", "-q", self._default())
         self._govern_checkout_next()
         self.write(self.repo, "arrived.txt", "tampered\n")  # changed outside govern
-        self.assertEqual(self._verdict(), "not-let-in")
+        p = self._payload()
+        self.assertEqual(p["code"], "tree-changed")
+        self.assertTrue(p.get("let_in"), "the commit saw let in is named so the editor can put it back")
 
     def test_a_residue_apply_is_let_in_without_widening_the_hook_skip(self):
         head = self.git(self.repo, "rev-parse", "HEAD").strip()
@@ -71,7 +76,7 @@ class GovernVerdict(GitSandbox):
         clean_ledger.remember_applied(self.repo, key)  # the residue path: applied, not scanned clean
         self.assertFalse(clean_ledger.scanned_clean(self.repo, key),
                          "residue must not be remembered as a strictly-clean scan")
-        self.assertEqual(self._verdict(), "let-in")
+        self.assertEqual(self._payload()["code"], "let-in")
 
 
 if __name__ == "__main__":
