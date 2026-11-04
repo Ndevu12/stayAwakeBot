@@ -129,6 +129,10 @@ reader, not the mechanism or the weakness it closed.
   The `saw fix --json` record includes the choices that were made.
 
 ### Changed
+- **`saw govern verdict` names the commits and carries a machine code.** The JSON adds `head`
+  (the commit checked out now), `let_in` (the commit saw let in, or absent), and `code`
+  (`let-in`, `unknown-commit`, `tree-changed`, `could-not-answer`), so an editor keys off the
+  code and the commits rather than matching the prose `reason`.
 - **Releases build and publish the platform wheels, not only the sdist.** The release pipeline
   builds a wheel per desktop platform (macOS x86_64 and arm64, Windows, and Linux via
   manylinux) that bundles saw's Rust binaries, alongside the sdist, so a plain `pip install`

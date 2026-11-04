@@ -112,6 +112,20 @@ def is_applied(root: Path, key: str) -> bool:
     return load_applied().get(os.path.realpath(root)) == key
 
 
+def let_in_commit(root: Path, config_path: str | None) -> str | None:
+    """The commit saw last let into a repository under the current policy — applied by govern, or
+    scanned clean by a hook — or None. Takes the root and the operator config. Returns the commit."""
+    import os as _os
+    want = policy_digest(config_path)
+    for store in (load_applied(), load_cache(), settings_scans()):
+        key = store.get(_os.path.realpath(root))
+        if isinstance(key, str):
+            commit, sep, rest = key.partition(":")
+            if sep and rest == want and commit:
+                return commit
+    return None
+
+
 def governed(root: Path, key: str) -> bool:
     """Tell whether saw vouches for this tree — scanned clean by a hook, or let in by govern (clean
     or residue). Takes the root and the key. Returns the answer."""
