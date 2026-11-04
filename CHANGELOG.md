@@ -129,6 +129,10 @@ reader, not the mechanism or the weakness it closed.
   The `saw fix --json` record includes the choices that were made.
 
 ### Changed
+- **`saw govern verdict` names the commits and carries a machine code.** The JSON adds `head`
+  (the commit checked out now), `let_in` (the commit saw let in, or absent), and `code`
+  (`let-in`, `unknown-commit`, `tree-changed`, `could-not-answer`), so an editor keys off the
+  code and the commits rather than matching the prose `reason`.
 - **saw's MCP server tells an agent one thing.** The server instructions and the
   `saw_govern_update` tool now agree: run git the normal way and wait for saw's check, and
   where saw is not already in front of your git call the tool to get the same check — not the
