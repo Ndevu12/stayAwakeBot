@@ -14,6 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **The wheel now ships saw's Rust binaries, so governed git works on a plain install.** A build hook
+  compiles `saw-mcp` and `saw-git-standin` and bundles them in a platform wheel, so `saw mcp`, `saw
+  govern install` and the git stand-in work after `pip install` wherever a built wheel is used.
+  Where no Rust toolchain is present the wheel is pure Python as before, and governed git stays
+  unavailable there rather than failing the install.
 - **saw remembers a clean update it let in, so a change that came in outside the check stands out.**
   When `saw govern` lets a clean update into the open folder, it records that in the same ledger the
   scan-on-clone hooks use. A later check can then tell a working tree that reached a commit saw never

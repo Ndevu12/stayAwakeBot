@@ -13,11 +13,23 @@ def _names() -> tuple[str, ...]:
     return ("saw-mcp",)
 
 
+def _packaged(names: tuple[str, ...]) -> str | None:
+    """Find a bundled binary beside this package. Returns its path, or None."""
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
+    for name in names:
+        candidate = os.path.join(here, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
 def session_binary() -> str | None:
     """Find the program an editor keeps open. Returns its path, or None when it is not installed."""
     named = os.environ.get("SAW_MCP_BIN", "").strip()
     if named:
         return named if os.path.isfile(named) else None
+    packaged = _packaged(_names())
+    if packaged:
+        return packaged
     folder = os.path.dirname(os.path.abspath(sys.argv[0]))
     for name in _names():
         candidate = os.path.join(folder, name)
@@ -42,6 +54,9 @@ def standin_binary() -> str | None:
     named = os.environ.get("SAW_STANDIN_BIN", "").strip()
     if named:
         return named if os.path.isfile(named) else None
+    packaged = _packaged(_standin_names())
+    if packaged:
+        return packaged
     folder = os.path.dirname(os.path.abspath(sys.argv[0]))
     for name in _standin_names():
         candidate = os.path.join(folder, name)
