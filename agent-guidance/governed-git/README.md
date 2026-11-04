@@ -15,6 +15,9 @@ a given agent reads.
     reads `AGENTS.md`).
 - **Runtime:** saw's MCP server states the same rules to any MCP-capable agent, so an agent is
   instructed even without a file in the repo. The file and the MCP instructions are kept in agreement.
+- **Not yet connected:** `AGENTS.md` also tells an agent that has no saw tools how to start saw's MCP
+  server itself (`saw mcp`) and keep it open, so it can bring the checks online without a person
+  wiring it up first.
 
 Install the adapter that matches the operator's agent (the editor extension can do this per detected
 tool); every form points back to the one `AGENTS.md`.

@@ -32,6 +32,10 @@ reader, not the mechanism or the weakness it closed.
   agent brings files in, the server's instructions say to run git the normal way, wait for the
   verdict, act only on a clean or residue result, not reach around the check, and tell the person —
   the same rules the agent guidance states, now stated at runtime to any MCP-capable agent.
+- **An agent can bring saw online itself.** The vendor-neutral agent guidance now tells an AI agent
+  that if saw is installed but not yet answering it, it can start saw's MCP server (`saw mcp`) and
+  keep it open — so it can ask saw for a verdict while it helps, without a person wiring it up first.
+  `saw mcp`'s reference says the same.
 - **saw ships a git/gh stand-in the editor can place.** Before an incoming update reaches the open
   folder, a command that brings files in — pull, fetch, checkout, switch, merge, rebase, submodule
   update, and the GitHub commands that land files — is checked by `saw govern` and applied only when

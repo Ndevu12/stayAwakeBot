@@ -11,6 +11,31 @@ that lands files such as checking out a pull request** — those files can carry
 supply-chain worm. saw checks what would arrive **before it reaches the working folder**, so the
 worm never lands while you work. Let it, wait for it, and keep the operator informed.
 
+## First, make sure saw can answer you
+saw reaches you as an MCP server: in a protected repository its check tools and these rules are
+usually already in front of you. If they are not — saw is installed on the machine but you have no
+saw tools and no runtime instructions from it — bring saw online yourself, so you can ask it for a
+verdict while you help. You do not need a person to wire it up first.
+
+Add saw's MCP server to your own tool configuration and keep it open. Most agents read their MCP
+servers from a small configuration that names a server and the command to run; the command is
+`saw mcp`:
+
+```json
+{ "mcpServers": { "saw": { "command": "saw", "args": ["mcp"] } } }
+```
+
+Write it in whatever file and shape your own configuration uses — the command `saw mcp` is the part
+that stays the same. Once it is open you can ask saw for the verdict on a folder or named files, for
+this machine's audit, and for the governed-update check below; each answer is a verdict first, and
+the same document `saw scan --json` or `saw audit --json` prints.
+
+Do this whenever you are helping in a saw-protected repository and saw is not already answering you —
+before you install dependencies, run a build, run anything in the folder, or bring files in. If saw
+cannot start, nothing is verified: do not treat the quiet as a clean result. These checks do not
+change files, and they never start the operator's clean-up — that stays a separate step the operator
+confirms (`saw fix` prepares the removal on its own branch and opens a pull request, and asks first).
+
 ## The contract — five rules
 1. **Do not run a raw bringing-files command.** In a protected repo those operations are governed —
    run git the normal way and the governing stand-in routes it through saw. **Never reach around it**
