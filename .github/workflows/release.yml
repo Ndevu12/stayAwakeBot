@@ -121,14 +121,16 @@ jobs:
         with:
           python-version-file: .python-version
           check-latest: true
-      - name: Add the Rust cross-compile target
+      - name: Prepare the cross-compile (target, wheel platform, deployment target)
         if: matrix.cross_target != ''
-        run: rustup target add ${{ matrix.cross_target }}
+        run: |
+          rustup target add ${{ matrix.cross_target }}
+          {
+            echo "SAW_WHEEL_TARGET=${{ matrix.cross_target }}"
+            echo "SAW_WHEEL_PLATFORM_TAG=${{ matrix.wheel_plat }}"
+            echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_min }}"
+          } >> "$GITHUB_ENV"
       - name: Build and verify the platform wheel
-        env:
-          SAW_WHEEL_TARGET: ${{ matrix.cross_target }}
-          SAW_WHEEL_PLATFORM_TAG: ${{ matrix.wheel_plat }}
-          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_min }}
         run: |
           python -m pip install --upgrade pip
           pip install build "twine>=6.1"
