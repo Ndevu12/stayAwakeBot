@@ -137,6 +137,7 @@ nav:
           - reference/cli/watch.md
           - reference/cli/guard.md
           - reference/cli/hook.md
+          - reference/cli/govern.md
           - reference/cli/auth.md
           - reference/cli/db.md
           - reference/cli/search.md
