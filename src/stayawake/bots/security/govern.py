@@ -20,6 +20,7 @@ from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
 from stayawake.lib.git import incoming
 from stayawake.utils import exitcodes, scratch
+from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
 
 SCHEMA = 1
@@ -38,15 +39,18 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     """Materialise the update outside the open folder and scan what arrived. Returns `(payload,
     exit)`: `{"scan": <document>}` with the scan's own exit, or `{"reason": <sentence>}` and
     INCOMPLETE, in which case nothing is recorded and the update must be held."""
+    current().step("materialise", "checking the incoming update")
     arrived = incoming.prepare(Path(repo), Path(into), tool, list(args))
     if isinstance(arrived, str):
         return {"reason": arrived}, exitcodes.INCOMPLETE
+    current().step("scan", "scanning what arrived")
     try:
         payload, code = _scan_arrived(arrived.root, arrived.paths, config)
     except ValueError as exc:
         return {"reason": str(exc) or "the check could not use your config"}, exitcodes.INCOMPLETE
     except OSError:
         return {"reason": "the check could not finish"}, exitcodes.INCOMPLETE
+    current().step("verdict", "verdict: %s" % (_verdict(payload) or "incomplete"))
     releasable = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
     _write_state(Path(into), arrived, releasable)
     return {"scan": payload}, code
@@ -68,6 +72,7 @@ def apply(repo: str, into: str) -> tuple[dict, int]:
             refs=tuple(tuple(item) for item in state["refs"]))
     except (KeyError, TypeError):
         return _applied(False, "the checked update could not be read")
+    current().step("apply", "applying the checked update")
     reason = incoming.apply(Path(repo), Path(into), arrived)
     return _applied(not reason, reason)
 
