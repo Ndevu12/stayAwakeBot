@@ -14,6 +14,12 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw govern` checks a git or GitHub update before it changes the open folder.** For the editor
+  extension: `saw govern prepare` carries a pull, fetch, checkout, switch, merge, rebase, submodule
+  update, pull-request checkout, repo sync, or release/artifact download out into a holding directory
+  and scans what arrived, leaving the open folder untouched; `saw govern apply` makes the folder match
+  a checked tree only when the scan was clean or residue, keeping uncommitted work. Nothing from the
+  incoming repository runs, and nothing is pushed.
 - **`saw audit` reads the Windows start-up surface.** What the machine starts at sign-in, at boot, on
   a schedule, as a service and on a system event is graded like a launch agent or a systemd unit,
   and one that cannot be read is unknown. Not every Windows start-up place is read yet, so the

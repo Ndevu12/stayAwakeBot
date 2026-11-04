@@ -43,6 +43,7 @@ def register(sub) -> None:
     pp.add_argument("--repo", required=True, help="the open folder")
     pp.add_argument("--into", required=True, help="the holding directory saw owns")
     pp.add_argument("--tool", required=True, choices=core.TOOLS, help="which tool the command is")
+    pp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
     pp.add_argument("args", nargs=argparse.REMAINDER, help="the operator's arguments, after --")
     pp.set_defaults(func=run_prepare)
 
@@ -74,13 +75,12 @@ def _operator_args(raw: list[str]) -> list[str]:
 
 
 def run_prepare(a: argparse.Namespace) -> int:
-    result = core.prepare(a.repo, a.into, a.tool, _operator_args(a.args))
-    print(json.dumps(versioned("govern", result)))
-    # TODO: when a scan is present, return the exit code saw scan --json uses for that document.
-    return exitcodes.CLEAN if "scan" in result else exitcodes.INCOMPLETE
+    payload, code = core.prepare(a.repo, a.into, a.tool, _operator_args(a.args), a.config)
+    print(json.dumps(versioned("govern", payload)))
+    return code
 
 
 def run_apply(a: argparse.Namespace) -> int:
-    result = core.apply(a.repo, a.into)
-    print(json.dumps(versioned("govern", result)))
-    return exitcodes.CLEAN if result.get("applied") else exitcodes.INCOMPLETE
+    payload, code = core.apply(a.repo, a.into)
+    print(json.dumps(versioned("govern", payload)))
+    return code

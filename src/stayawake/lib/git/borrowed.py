@@ -149,3 +149,13 @@ def _make(bare: Path, operator_repo: Path, objects: Path, worktree: Path | None,
     except OSError as exc:
         raise BorrowError(f"could not prepare {bare}: {exc}") from exc
     return Borrowed(bare, operator_repo, objects, carried)
+
+
+def place(operator_repo: str | Path, bare: str | Path) -> Borrowed:
+    """A borrowed repository kept at `bare` until the caller removes it. Takes the operator
+    repository and the destination. Returns it. Raises BorrowError when it cannot be made."""
+    operator_repo = Path(operator_repo)
+    bare = Path(bare)
+    bare.parent.mkdir(parents=True, exist_ok=True)
+    objects, worktree, fmt = _operator_layout(operator_repo)
+    return _make(bare, operator_repo, objects, worktree, fmt)

@@ -51,14 +51,14 @@ class TestGovernRecognisedCommands(unittest.TestCase):
 
 class TestGovernFailsClosed(unittest.TestCase):
     def test_an_unrecognised_command_is_held_with_a_reason_and_no_scan(self):
-        out = govern.prepare("/repo", "/holding", "git", ["status"])
-        self.assertNotIn("scan", out)
-        self.assertIn("reason", out)
+        payload, code = govern.prepare("/repo", "/holding", "git", ["status"])
+        self.assertNotIn("scan", payload)
+        self.assertIn("reason", payload)
 
     def test_apply_defaults_to_not_applied_with_a_reason(self):
-        out = govern.apply("/repo", "/holding")
-        self.assertFalse(out.get("applied"))
-        self.assertIn("reason", out)
+        payload, code = govern.apply("/repo", "/holding")
+        self.assertFalse(payload.get("applied"))
+        self.assertIn("reason", payload)
 
 
 if __name__ == "__main__":
