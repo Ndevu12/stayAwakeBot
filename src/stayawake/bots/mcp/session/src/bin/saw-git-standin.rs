@@ -2,8 +2,10 @@
 //! until `saw govern` has checked what it would bring in. Everything else — and anything saw cannot
 //! answer — runs the real program unchanged, so the stand-in can never break the operator's git.
 //!
-//! It is inert unless a placer (the editor extension) activates it with `SAW_GOVERN_HOLDING` and
-//! points it at the real program and at `saw`. Without that, every command passes straight through.
+//! It is inert unless activated. A placer (the editor extension) activates it per command with
+//! `SAW_GOVERN_HOLDING` and points it at the real program and at `saw`. A system install instead
+//! sets `SAW_GOVERN_SYSTEM`, and the stand-in makes its own holding directory for each check and
+//! removes it afterwards. Without either, every command passes straight through.
 
 use std::env;
 use std::os::unix::process::CommandExt;
@@ -42,7 +44,7 @@ fn tool_name(argv0: &str) -> Option<String> {
 }
 
 fn governing() -> bool {
-    env::var_os("SAW_GOVERN_HOLDING").is_some()
+    env::var_os("SAW_GOVERN_HOLDING").is_some() || env::var_os("SAW_GOVERN_SYSTEM").is_some()
 }
 
 /// Whether `(tool, args)` brings files into the open folder. Mirrors `lib/git/incoming.classify`;
@@ -109,15 +111,46 @@ fn target_repo(args: &[String]) -> String {
 /// Run the check. Returns an exit code when the command was governed (applied or held), or `None`
 /// to fall back to the real program (saw absent or it could not answer — fail open, never break git).
 fn govern(tool: &str, args: &[String]) -> Option<i32> {
-    let holding = env::var_os("SAW_GOVERN_HOLDING")?;
     let saw = real_saw()?;
+    let (holding, temporary) = holding_dir()?;
+    let code = govern_with(&saw, tool, args, &holding);
+    if temporary {
+        let _ = std::fs::remove_dir_all(&holding); // never leave a held update on disk
+    }
+    code
+}
+
+/// The holding directory for this check, and whether the stand-in owns it. A placer's
+/// `SAW_GOVERN_HOLDING` is used as given and left in place. In system mode (`SAW_GOVERN_SYSTEM`)
+/// a fresh directory is made under the system temp directory and removed when the check is done.
+fn holding_dir() -> Option<(PathBuf, bool)> {
+    if let Some(given) = env::var_os("SAW_GOVERN_HOLDING") {
+        return Some((PathBuf::from(given), false));
+    }
+    env::var_os("SAW_GOVERN_SYSTEM")?;
+    let unique = format!(
+        "saw-govern-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let dir = env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).ok()?;
+    Some((dir, true))
+}
+
+/// Run `saw govern prepare`, then `apply` when it comes back clean. Returns the exit code, or
+/// `None` to fall back to the real program (fail open, never break git).
+fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path) -> Option<i32> {
     let repo = target_repo(args);
-    let mut prepare = Command::new(&saw);
+    let mut prepare = Command::new(saw);
     prepare
         .args(["govern", "prepare", "--json", "--repo"])
         .arg(&repo)
         .arg("--into")
-        .arg(&holding)
+        .arg(holding)
         .args(["--tool", tool, "--"])
         .args(args)
         .stdout(Stdio::null())
@@ -129,11 +162,11 @@ fn govern(tool: &str, args: &[String]) -> Option<i32> {
         return prepared.code().or(Some(2));
     }
     // Clean or residue: apply the tree saw already checked, without fetching again.
-    let applied = Command::new(&saw)
+    let applied = Command::new(saw)
         .args(["govern", "apply", "--json", "--repo"])
         .arg(&repo)
         .arg("--into")
-        .arg(&holding)
+        .arg(holding)
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .status()

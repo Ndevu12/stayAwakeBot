@@ -115,3 +115,66 @@ fn it_fails_open_to_the_real_git_when_saw_is_absent() {
     assert!(f.real_ran(), "saw absent must never break git — fall through to the real pull");
     assert!(!f.applied());
 }
+
+// ---- system mode: activated by SAW_GOVERN_SYSTEM, makes and cleans its own holding ----
+
+fn run_system(f: &Fixture, args: &[&str], tmp: &Path, held: bool) -> std::process::ExitStatus {
+    let mut c = Command::new(STANDIN);
+    c.args(args)
+        .current_dir(&f.dir)
+        .env("SAW_STANDIN_TOOL", "git")
+        .env("SAW_REAL_GIT", &f.real_git)
+        .env("PATH", &f.dir)
+        .env("SAW_BIN", &f.saw)
+        .env("TMPDIR", tmp) // the stand-in's own holding lands here
+        .env("SAW_GOVERN_SYSTEM", "1"); // system mode, no SAW_GOVERN_HOLDING
+    if held {
+        c.env("SAW_FAKE_HELD", "1");
+    }
+    c.status().unwrap()
+}
+
+#[test]
+fn system_mode_checks_and_applies_a_clean_update_then_cleans_up() {
+    let f = Fixture::new("system-clean");
+    let tmp = f.dir.join("systmp");
+    fs::create_dir_all(&tmp).unwrap();
+    let status = run_system(&f, &["pull"], &tmp, false);
+    assert!(status.success());
+    assert!(f.applied(), "a clean update should be applied in system mode");
+    assert!(!f.real_ran(), "the raw git must not run when the update was governed");
+    assert_eq!(fs::read_dir(&tmp).unwrap().count(), 0, "the system-mode holding must be removed");
+}
+
+#[test]
+fn system_mode_holds_an_infected_update_without_running_raw_git_and_cleans_up() {
+    let f = Fixture::new("system-held");
+    let tmp = f.dir.join("systmp");
+    fs::create_dir_all(&tmp).unwrap();
+    let status = run_system(&f, &["pull"], &tmp, true);
+    assert!(!status.success(), "a held update exits non-zero");
+    assert!(!f.applied(), "a held update is not applied");
+    assert!(!f.real_ran(), "the raw git must not run for a held update");
+    assert_eq!(fs::read_dir(&tmp).unwrap().count(), 0, "the held update's holding must be removed");
+}
+
+#[test]
+fn without_either_activation_a_bringing_files_command_passes_through() {
+    let f = Fixture::new("system-inert");
+    let tmp = f.dir.join("systmp");
+    fs::create_dir_all(&tmp).unwrap();
+    // neither SAW_GOVERN_HOLDING nor SAW_GOVERN_SYSTEM
+    let status = Command::new(STANDIN)
+        .args(["pull"])
+        .current_dir(&f.dir)
+        .env("SAW_STANDIN_TOOL", "git")
+        .env("SAW_REAL_GIT", &f.real_git)
+        .env("PATH", &f.dir)
+        .env("SAW_BIN", &f.saw)
+        .env("TMPDIR", &tmp)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert!(f.real_ran(), "with no activation the real git runs");
+    assert!(!f.applied(), "nothing is governed when inert");
+}
