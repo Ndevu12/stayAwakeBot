@@ -129,6 +129,10 @@ reader, not the mechanism or the weakness it closed.
   The `saw fix --json` record includes the choices that were made.
 
 ### Changed
+- **Releases build and publish the platform wheels, not only the sdist.** The release pipeline
+  builds a wheel per desktop platform (macOS x86_64 and arm64, Windows, and Linux via
+  manylinux) that bundles saw's Rust binaries, alongside the sdist, so a plain `pip install`
+  gets governed git where a built wheel matches and still falls back to the sdist elsewhere.
 - **The README no longer has a sponsor section.** The commercial-license contact is a mailto link
   labeled Contact.
 
