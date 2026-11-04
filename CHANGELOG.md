@@ -23,6 +23,10 @@ reader, not the mechanism or the weakness it closed.
   conflict on it.
 
 ### Security
+- **`saw scan` flags a loader that hides its next stage in a blockchain transaction.** Code that
+  reads a transaction from a public explorer or node and runs what it carries is reported — in
+  JavaScript and in Python — so a payload fetched from the chain instead of a web address is still
+  caught. A read that only displays a transaction is left alone.
 - **`saw harden` turns off an auto-approved command that names arguments when the command it
   starts with is one saw treats as risky** (`yarn dev`, `yarn lint`). `bun`, `bunx`, `deno`,
   `make`, `mvn`, `gradle`, `go`, `cargo`, `pip`, `uv`, `docker`, `kubectl`, and `supabase` are

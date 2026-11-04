@@ -8,8 +8,24 @@ from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, evidence, globs_ok
 from stayawake.bots.security.obfuscation.execsink import _has_exec_sink_beyond_decoding
 
+_PY_EXEC_SINK = re.compile(
+    r"\b(?:subprocess\s*\.\s*(?:run|call|check_output|check_call|Popen)"
+    r"|os\s*\.\s*(?:system|popen)"
+    r"|os\s*\.\s*exec[lv][ep]?e?)\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _runs_fetched_stage(window: str) -> bool:
+    """Whether code near the match runs a fetched stage: an exec sink in JavaScript (the
+    shared detector) or a Python process-spawn. Takes the window around the match; returns
+    True when one is present."""
+    return _has_exec_sink_beyond_decoding(window) or bool(_PY_EXEC_SINK.search(window))
+
+
 CORROBORATORS = {
     "exec-sink": _has_exec_sink_beyond_decoding,
+    "runs-fetched-stage": _runs_fetched_stage,
 }
 
 _CORROBORATION_RADIUS = 2_000

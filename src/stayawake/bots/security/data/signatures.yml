@@ -658,3 +658,28 @@ signatures:
     description: "A command git runs for this repository."
     shown_as: "a command git runs for this repository"
     remediation: manual
+
+  # ── Blockchain-transaction-as-C2 loader (shared by the JS init and the Python loader) ────────
+  - id: chain-c2-ethplorer-enum
+    category: code-loader
+    severity: critical
+    matcher: content
+    pattern: 'ethplorer\.io/getAddressTransactions/\S+apiKey=freekey'
+    prefilter: "freekey"
+    corroborate: runs-fetched-stage
+    description: "Loader enumerates an address's transactions via ethplorer (freekey) to resolve a stage from the chain"
+    shown_as: "hidden code that fetches and runs a payload carried in a blockchain transaction"
+    remediation: manual
+    confidence: confirmed
+
+  - id: chain-c2-tx-by-hash-exec
+    category: code-loader
+    severity: high
+    matcher: content
+    pattern: 'eth_getTransactionByHash'
+    prefilter: "eth_gettransactionbyhash"
+    corroborate: runs-fetched-stage
+    description: "Code fetches a blockchain transaction by hash and runs an interpreter nearby — a stage resolved from the chain (review)"
+    shown_as: "code that may fetch and run a payload carried in a blockchain transaction; check it"
+    remediation: manual
+    confidence: heuristic
