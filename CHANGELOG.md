@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw govern restore` puts the open folder back on the tree saw let in.** It keeps your
+  uncommitted work and moves the branch, so HEAD is not left detached, and it writes the same
+  record a check does. An editor calls it instead of running git over a dirty tree; it works on
+  every platform.
 - **`saw govern` writes a durable record of a check an editor can read.** Per open folder it records
   checking, then held, applied, or finished without applying, with the verdict — keyed the way the
   editor keys a folder and kept in saw's state directory, so it survives the holding directory being
