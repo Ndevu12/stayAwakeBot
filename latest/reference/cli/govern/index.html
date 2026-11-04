@@ -1232,6 +1232,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw govern
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -1248,6 +1266,36 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#covering-your-terminals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Covering your terminals
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1920,6 +1968,25 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#covering-your-terminals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Covering your terminals
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1958,6 +2025,19 @@ The extension calls it only when the verdict was clean or residue, and your unco
 kept — or the folder is not changed and saw says why.</p>
 <p>When the verdict is suspicious or infected, or the check could not finish, the update is held and
 your open folder stays as it was. These commands never push and never open a pull request.</p>
+<h2 id="covering-your-terminals">Covering your terminals<a class="headerlink" href="#covering-your-terminals" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>saw govern install
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>saw govern status
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>saw govern uninstall
+</code></pre></div>
+<p>The editor extension checks updates for the folders you open in the editor. To check them in your
+terminals too, and in the shells coding agents run, run <code>saw govern install</code>. From then on, when a
+terminal pulls, fetches, checks out, switches, merges, or updates a submodule, saw checks what
+arrives before it reaches the folder you are working in, the same as in the editor. Open a new
+terminal, or source the file the command names, for it to take effect.</p>
+<p><code>saw govern status</code> says whether your terminals are covered and whether the shell you are in is
+covered yet. <code>saw govern uninstall</code> takes it back out, and your editor is unaffected. saw always
+falls back to your real git and gh.</p>
 
 
 
