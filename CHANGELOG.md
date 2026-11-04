@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-04
+
 ### Added
 - **`saw govern restore` puts the open folder back on the tree saw let in.** It keeps your
   uncommitted work and moves the branch, so HEAD is not left detached, and it writes the same
@@ -97,6 +99,9 @@ reader, not the mechanism or the weakness it closed.
   `saw watch` leaves them until `saw harden` runs again. `saw audit` reports these settings and
   changes nothing.
 - **An editor that does not say automatic tasks are off is reported as a warning.**
+- A scan of a repository that has no working tree reads the files that repository holds. One that
+  cannot be read is not reported clean. A scan of a folder, and a bare `saw scan`, include the bare
+  and mirror clones in it.
 
 ### Fixed
 - **When saw needs you signed in to GitHub, it says how:** `saw auth app register` or
@@ -118,10 +123,6 @@ reader, not the mechanism or the weakness it closed.
   and `saw db status` say when the database was saved by an older saw, which can still report an
   advisory its publisher withdrew; `saw db update` rebuilds it.
 
-### Security
-- A scan of a repository that has no working tree reads the files that repository holds. One that
-  cannot be read is not reported clean. A scan of a folder, and a bare `saw scan`, include the bare
-  and mirror clones in it.
 
 ## [0.15.0] - 2026-10-22
 
@@ -1967,7 +1968,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.0...v0.13.1
