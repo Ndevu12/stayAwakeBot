@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-04
+
 ### Added
 - **saw ships a git/gh stand-in the editor can place.** Before an incoming update reaches the open
   folder, a command that brings files in — pull, fetch, checkout, switch, merge, rebase, submodule
@@ -1910,7 +1912,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.0...v0.13.1
