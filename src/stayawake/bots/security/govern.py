@@ -13,6 +13,7 @@ import json
 import shutil
 from pathlib import Path
 
+from stayawake.bots.security import clean_ledger
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.models import CLEAN, RESIDUE_VERDICT, ScanReport
 from stayawake.bots.security.scanner import scan_target
@@ -52,7 +53,9 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
         return {"reason": "the check could not finish"}, exitcodes.INCOMPLETE
     current().step("verdict", "verdict: %s" % (_verdict(payload) or "incomplete"))
     releasable = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
-    _write_state(Path(into), arrived, releasable)
+    clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN
+    mark = clean_ledger.clean_key(arrived.commit, config) if clean else None
+    _write_state(Path(into), arrived, releasable, mark)
     return {"scan": payload}, code
 
 
@@ -74,6 +77,8 @@ def apply(repo: str, into: str) -> tuple[dict, int]:
         return _applied(False, "the checked update could not be read")
     current().step("apply", "applying the checked update")
     reason = incoming.apply(Path(repo), Path(into), arrived)
+    if not reason and state.get("clean_mark"):
+        clean_ledger.remember(Path(repo), state["clean_mark"])  # key on the open folder, not the holding
     return _applied(not reason, reason)
 
 
@@ -121,10 +126,12 @@ def _applied(done: bool, sentence: str) -> tuple[dict, int]:
     return body, exitcodes.CLEAN if done else exitcodes.INCOMPLETE
 
 
-def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool) -> None:
+def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
+                 clean_mark: str | None = None) -> None:
     body = {"schema": SCHEMA, "releasable": releasable, "root": str(arrived.root),
             "paths": list(arrived.paths), "mode": arrived.mode, "commit": arrived.commit,
-            "base": arrived.base, "head": arrived.head, "refs": [list(i) for i in arrived.refs]}
+            "base": arrived.base, "head": arrived.head, "refs": [list(i) for i in arrived.refs],
+            "clean_mark": clean_mark}
     path = Path(into) / _STATE
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(body), encoding="utf-8")

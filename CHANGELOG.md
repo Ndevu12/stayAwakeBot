@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **saw remembers a clean update it let in, so a change that came in outside the check stands out.**
+  When `saw govern` lets a clean update into the open folder, it records that in the same ledger the
+  scan-on-clone hooks use. A later check can then tell a working tree that reached a commit saw never
+  checked — a change brought in by a tool that runs neither saw nor a git hook.
 - **`saw govern install` checks incoming git and GitHub updates in your terminals too.** The editor
   extension already checks updates for folders you open in the editor; this covers an external
   terminal and the shells coding agents run, by putting saw in front of git and gh for your login
