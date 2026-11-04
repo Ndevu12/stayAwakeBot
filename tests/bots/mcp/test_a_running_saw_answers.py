@@ -128,7 +128,8 @@ class TestTheSessionProgram(unittest.TestCase):
     def test_a_missing_program_is_not_verified(self):
         with mock.patch.dict(os.environ, {"SAW_MCP_BIN": ""}, clear=False):
             os.environ.pop("SAW_MCP_BIN", None)
-            with mock.patch("stayawake.bots.mcp.launch.shutil.which", return_value=None):
+            with mock.patch("stayawake.bots.mcp.launch.shutil.which", return_value=None), \
+                    mock.patch("stayawake.bots.mcp.launch._packaged", return_value=None):
                 self.assertIsNone(launch.session_binary())
 
     def test_the_command_does_not_call_a_missing_program_clean(self):
