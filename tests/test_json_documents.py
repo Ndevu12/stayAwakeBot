@@ -84,6 +84,9 @@ _PRINT_EACH_DOCUMENT = {
     "capabilities": [lambda: _stdout_of(lambda: cli.main(["capabilities", "--json"]))],
     "audit": [lambda: _stdout_of(_audit_with_nothing_to_report)],
     "hook-status": [lambda: _stdout_of(lambda: cli.main(["hook", "status", "--json", "--no-stream"]))],
+    "govern": [lambda: _stdout_of(lambda: cli.main(
+        ["govern", "prepare", "--json", "--repo", "/no/such/folder", "--into",
+         "/tmp/saw-govern-absent", "--tool", "git", "--", "status"]))],
 }
 
 
