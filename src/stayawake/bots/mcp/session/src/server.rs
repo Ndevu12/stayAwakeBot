@@ -37,6 +37,17 @@ struct AuditArgs {
     again: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GovernArgs {
+    /// The repository the command acts on — the open folder.
+    repo: String,
+    /// Which tool the command is: "git" or "gh".
+    tool: String,
+    /// The command's arguments, without the program name — e.g. ["pull"] or ["pr","checkout","12"].
+    #[serde(default)]
+    args: Vec<String>,
+}
+
 #[derive(Clone)]
 struct Saw {
     worker: Arc<Mutex<Worker>>,
@@ -97,6 +108,14 @@ impl Saw {
     async fn saw_audit_summary(&self, Parameters(args): Parameters<AuditArgs>) -> CallToolResult {
         let mut worker = self.worker.lock().await;
         answered(worker.ask("audit", json!({"again": args.again})).await)
+    }
+    #[tool(description = "Check an incoming git or GitHub update that brings files in, before it reaches the open folder, and apply it only when the check is clean. Give the repository, the tool (git or gh) and the command's arguments. saw checks what would arrive in a holding area it owns and applies it only on a clean or residue verdict; otherwise the open folder is unchanged. Wait for the verdict; do not run the raw command yourself.")]
+    async fn saw_govern_update(&self, Parameters(args): Parameters<GovernArgs>) -> CallToolResult {
+        if args.repo.is_empty() || !(args.tool == "git" || args.tool == "gh") {
+            return unanswered();
+        }
+        let mut worker = self.worker.lock().await;
+        answered(worker.ask("govern", json!({"repo": args.repo, "tool": args.tool, "args": args.args})).await)
     }
 }
 
