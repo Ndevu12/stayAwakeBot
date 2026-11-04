@@ -14,6 +14,12 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **saw ships a git/gh stand-in the editor can place to check an incoming update before it reaches
+  the open folder.** It sends a bringing-files command (pull, fetch, checkout, switch, merge, rebase,
+  submodule update, and the GitHub commands that land files) through `saw govern`, applies it only
+  when the check is clean, and runs every other command — and the real program when saw cannot
+  answer — unchanged, so it never stands in the way of ordinary git. It is inert until a placer
+  activates it.
 - **`saw govern` reports its progress.** `saw govern prepare` and `apply` take `--progress jsonl`
   and emit a step as the update is checked (checking, scanning, verdict, applying), so a caller
   can show the user that saw is checking an incoming update and that it must wait for the result.
