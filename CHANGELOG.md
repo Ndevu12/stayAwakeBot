@@ -141,6 +141,10 @@ reader, not the mechanism or the weakness it closed.
   `saw_govern_update` tool now agree: run git the normal way and wait for saw's check, and
   where saw is not already in front of your git call the tool to get the same check — not the
   earlier run-normally versus do-not-run-raw contradiction.
+- **The govern check record shows its steps.** As a check runs, saw writes each phase —
+  scanning, then applying — into the durable per-folder record, not just checking then ready,
+  so an editor can show the steps of a check a terminal or an agent started, not only one it
+  ran itself.
 - **Releases build and publish the platform wheels, not only the sdist.** The release pipeline
   builds a wheel per desktop platform (macOS x86_64 and arm64, Windows, and Linux via
   manylinux) that bundles saw's Rust binaries, alongside the sdist, so a plain `pip install`

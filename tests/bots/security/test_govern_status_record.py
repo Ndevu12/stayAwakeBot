@@ -71,6 +71,24 @@ class GovernStatusRecord(GitSandbox):
         self.assertEqual(rec["verdict"], "infected")
         self.assertTrue(rec["reasons"])
 
+    def test_the_scan_and_apply_phases_are_written_to_the_record(self):
+        from unittest import mock
+        from stayawake.bots.security import govern_status as gs
+        self.write(self.repo, "arrived.txt", "clean\n")
+        self.commit(self.repo, "arrive")
+        self.git(self.repo, "checkout", "-q", self._default())
+        steps = []
+        real = gs.write
+
+        def spy(repo, phase, *, verdict=None, reasons=None, step=None):
+            steps.append((phase, step))
+            return real(repo, phase, verdict=verdict, reasons=reasons, step=step)
+
+        with mock.patch.object(gs, "write", spy):
+            self._govern()
+        self.assertIn(("checking", "scanning what arrived"), steps)
+        self.assertIn(("checking", "applying the checked update"), steps)
+
     def test_the_record_outlives_the_holding_directory(self):
         self.write(self.repo, "arrived.txt", "clean\n")
         self.commit(self.repo, "arrive")
