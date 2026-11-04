@@ -37,6 +37,17 @@ struct AuditArgs {
     again: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GovernArgs {
+    /// The repository the command acts on — the open folder.
+    repo: String,
+    /// Which tool the command is: "git" or "gh".
+    tool: String,
+    /// The command's arguments, without the program name — e.g. ["pull"] or ["pr","checkout","12"].
+    #[serde(default)]
+    args: Vec<String>,
+}
+
 #[derive(Clone)]
 struct Saw {
     worker: Arc<Mutex<Worker>>,
@@ -98,12 +109,20 @@ impl Saw {
         let mut worker = self.worker.lock().await;
         answered(worker.ask("audit", json!({"again": args.again})).await)
     }
+    #[tool(description = "Get saw's check for an incoming git or GitHub update that brings files in, before it reaches the open folder, when saw is not already in front of your git. Give the repository, the tool (git or gh) and the command's arguments; saw checks what would arrive in a holding area it owns and applies it only on a clean or residue verdict, otherwise the open folder is unchanged. Where a stand-in already governs your git, run it the normal way instead. Wait for the result.")]
+    async fn saw_govern_update(&self, Parameters(args): Parameters<GovernArgs>) -> CallToolResult {
+        if args.repo.is_empty() || !(args.tool == "git" || args.tool == "gh") {
+            return unanswered();
+        }
+        let mut worker = self.worker.lock().await;
+        answered(worker.ask("govern", json!({"repo": args.repo, "tool": args.tool, "args": args.args})).await)
+    }
 }
 
 #[tool_handler(
     name = "saw",
     version = "1",
-    instructions = "Ask the person before you install, build, or run anything in this folder. When the verdict is infected, suspicious, residue, or not verified, stop and ask the person. When an audit says unsafe or incomplete, stop and ask the person."
+    instructions = "Ask the person before you install, build, or run anything in this folder. When the verdict is infected, suspicious, residue, or not verified, stop and ask the person. When an audit says unsafe or incomplete, stop and ask the person. When you bring files in — pull, fetch, checkout, switch, merge, rebase, submodule update, or a GitHub command that lands files — let saw check the update before it reaches the folder: run git the normal way, wait for the verdict, and act only when it is clean or residue. Never reach around the check to a raw git, and tell the person. A held update did not land and the folder is unchanged. Where saw is not already in front of your git, call saw_govern_update to get the same check instead of running the command yourself."
 )]
 impl ServerHandler for Saw {}
 

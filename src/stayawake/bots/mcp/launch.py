@@ -13,17 +13,56 @@ def _names() -> tuple[str, ...]:
     return ("saw-mcp",)
 
 
+def _packaged(names: tuple[str, ...]) -> str | None:
+    """Find a bundled binary beside this package. Returns its path, or None."""
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
+    for name in names:
+        candidate = os.path.join(here, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
 def session_binary() -> str | None:
     """Find the program an editor keeps open. Returns its path, or None when it is not installed."""
     named = os.environ.get("SAW_MCP_BIN", "").strip()
     if named:
         return named if os.path.isfile(named) else None
+    packaged = _packaged(_names())
+    if packaged:
+        return packaged
     folder = os.path.dirname(os.path.abspath(sys.argv[0]))
     for name in _names():
         candidate = os.path.join(folder, name)
         if os.path.isfile(candidate):
             return candidate
     for name in _names():
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def _standin_names() -> tuple[str, ...]:
+    """Name the stand-in on this system. Returns the names, the platform one first."""
+    if sys.platform == "win32":
+        return ("saw-git-standin.exe", "saw-git-standin")
+    return ("saw-git-standin",)
+
+
+def standin_binary() -> str | None:
+    """Find saw's git/gh stand-in. Returns its path, or None when it is not installed."""
+    named = os.environ.get("SAW_STANDIN_BIN", "").strip()
+    if named:
+        return named if os.path.isfile(named) else None
+    packaged = _packaged(_standin_names())
+    if packaged:
+        return packaged
+    folder = os.path.dirname(os.path.abspath(sys.argv[0]))
+    for name in _standin_names():
+        candidate = os.path.join(folder, name)
+        if os.path.isfile(candidate):
+            return candidate
+    for name in _standin_names():
         found = shutil.which(name)
         if found:
             return found

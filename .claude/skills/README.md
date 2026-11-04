@@ -15,6 +15,7 @@ distilled, actionable body.
 | **engineering-standard** | Designing, adding capability, refactoring, or optimizing — SRP, DRY-not-too-DRY, self-documenting names, value-before-coverage, reuse-check + measure-first, right-depth. |
 | **working-with-this-codebase** | Every non-trivial task — analyze & align before consequential work, decide-and-recommend (no option menus), ask before decisive actions, stay focused, prove don't assert. |
 | **shipping-changes** | Committing or opening a PR — feature-branch PRs, rebase on `origin/main`, bare `Closes #NNNN`, CHANGELOG in-PR, signed commits. |
+| **governed-git** | Running git/GitHub operations in a saw-protected repo (as an agent) — let saw check an incoming update first, wait for the verdict, act only on clean, never bypass, and tell the operator. |
 
 ## What belongs here, and what does not
 

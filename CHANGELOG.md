@@ -16,6 +16,47 @@ reader, not the mechanism or the weakness it closed.
 ## [0.16.0] - 2026-11-04
 
 ### Added
+- **`saw govern restore` puts the open folder back on the tree saw let in.** It keeps your
+  uncommitted work and moves the branch, so HEAD is not left detached, and it writes the same
+  record a check does. An editor calls it instead of running git over a dirty tree; it works on
+  every platform.
+- **`saw govern` writes a durable record of a check an editor can read.** Per open folder it records
+  checking, then held, applied, or finished without applying, with the verdict — keyed the way the
+  editor keys a folder and kept in saw's state directory, so it survives the holding directory being
+  removed. An editor reads the outcome there instead of parsing output or reading a successful exit
+  as applied.
+- **`saw govern verdict` says whether the open folder's tree is one saw let in.** It answers let-in
+  (scanned clean by a hook, or applied by govern, clean or residue, with the tree still matching),
+  not-let-in (an unknown commit, or a tree changed on top of one saw let in), or could-not-answer —
+  reading what saw already recorded, scanning nothing and changing nothing. A residue apply counts
+  as let in without widening the hooks' strictly-clean skip.
+- **The wheel now ships saw's Rust binaries, so governed git works on a plain install.** A build hook
+  compiles `saw-mcp` and `saw-git-standin` and bundles them in a platform wheel, so `saw mcp`, `saw
+  govern install` and the git stand-in work after `pip install` wherever a built wheel is used.
+  Where no Rust toolchain is present the wheel is pure Python as before, and governed git stays
+  unavailable there rather than failing the install.
+- **saw remembers a clean update it let in, so a change that came in outside the check stands out.**
+  When `saw govern` lets a clean update into the open folder, it records that in the same ledger the
+  scan-on-clone hooks use. A later check can then tell a working tree that reached a commit saw never
+  checked — a change brought in by a tool that runs neither saw nor a git hook.
+- **`saw govern install` checks incoming git and GitHub updates in your terminals too.** The editor
+  extension already checks updates for folders you open in the editor; this covers an external
+  terminal and the shells coding agents run, by putting saw in front of git and gh for your login
+  shells. An incoming update is checked before it reaches the folder you are working in. `saw govern
+  status` and `saw govern uninstall` show and take back the coverage; saw always falls back to your
+  real git and gh.
+- **saw's MCP server offers a govern tool a cooperating agent can call.** An agent that drives git
+  itself can hand saw a bringing-files command and the repository; saw checks what would arrive in a
+  holding area it owns and applies it only on a clean or residue verdict, leaving the folder unchanged
+  otherwise. The agent waits for the verdict instead of running the raw command.
+- **saw's MCP server tells an agent to let saw check an incoming update before it lands.** When an
+  agent brings files in, the server's instructions say to run git the normal way, wait for the
+  verdict, act only on a clean or residue result, not reach around the check, and tell the person —
+  the same rules the agent guidance states, now stated at runtime to any MCP-capable agent.
+- **An agent can bring saw online itself.** The vendor-neutral agent guidance now tells an AI agent
+  that if saw is installed but not yet answering it, it can start saw's MCP server (`saw mcp`) and
+  keep it open — so it can ask saw for a verdict while it helps, without a person wiring it up first.
+  `saw mcp`'s reference says the same.
 - **saw ships a git/gh stand-in the editor can place.** Before an incoming update reaches the open
   folder, a command that brings files in — pull, fetch, checkout, switch, merge, rebase, submodule
   update, and the GitHub commands that land files — is checked by `saw govern` and applied only when
@@ -94,6 +135,22 @@ reader, not the mechanism or the weakness it closed.
   The `saw fix --json` record includes the choices that were made.
 
 ### Changed
+- **`saw govern verdict` names the commits and carries a machine code.** The JSON adds `head`
+  (the commit checked out now), `let_in` (the commit saw let in, or absent), and `code`
+  (`let-in`, `unknown-commit`, `tree-changed`, `could-not-answer`), so an editor keys off the
+  code and the commits rather than matching the prose `reason`.
+- **saw's MCP server tells an agent one thing.** The server instructions and the
+  `saw_govern_update` tool now agree: run git the normal way and wait for saw's check, and
+  where saw is not already in front of your git call the tool to get the same check — not the
+  earlier run-normally versus do-not-run-raw contradiction.
+- **The govern check record shows its steps.** As a check runs, saw writes each phase —
+  scanning, then applying — into the durable per-folder record, not just checking then ready,
+  so an editor can show the steps of a check a terminal or an agent started, not only one it
+  ran itself.
+- **Releases build and publish the platform wheels, not only the sdist.** The release pipeline
+  builds a wheel per desktop platform (macOS x86_64 and arm64, Windows, and Linux via
+  manylinux) that bundles saw's Rust binaries, alongside the sdist, so a plain `pip install`
+  gets governed git where a built wheel matches and still falls back to the sdist elsewhere.
 - **The README no longer has a sponsor section.** The commercial-license contact is a mailto link
   labeled Contact.
 

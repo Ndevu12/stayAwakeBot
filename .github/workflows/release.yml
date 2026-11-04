@@ -47,18 +47,18 @@ jobs:
           python-version-file: .python-version
           check-latest: true
 
-      - name: Build sdist + wheel
+      - name: Build the sdist (the per-OS wheels are built in the matrix below)
         run: |
           python -m pip install --upgrade pip
           pip install build "twine>=6.1"
-          python -m build
+          python -m build --sdist
 
-      - name: Validate metadata (modern twine — rejects malformed 2.4 metadata)
+      - name: Validate sdist metadata (modern twine — rejects malformed 2.4 metadata)
         run: python -m twine check --strict dist/*
 
-      - name: Smoke-test the built wheel (entry points + packaged signature DB)
+      - name: Smoke-test from the sdist (entry points + packaged signature DB)
         run: |
-          pip install dist/*.whl
+          pip install dist/*.tar.gz
           saw --help
           saw scan --help
           stayawake-health-check --help
@@ -92,11 +92,86 @@ jobs:
           path: sbom.cdx.json
           if-no-files-found: error
 
-      - name: Upload distribution artifacts
+      - name: Upload the sdist
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
-          name: dist
-          path: dist/
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  wheels:
+    name: Wheel — ${{ matrix.name }}
+    # The desktop platform wheels. The runners carry a Rust toolchain, so the build hook bundles
+    # saw-mcp and saw-git-standin; the wheel is py3-none-<platform>.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: macOS x86_64, os: macos-13}
+          - {name: macOS arm64, os: macos-14}
+          - {name: Windows x86_64, os: windows-latest}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout (full history + tags for hatch-vcs versioning)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0   # v7.1.0
+        with:
+          python-version-file: .python-version
+          check-latest: true
+      - name: Build and verify the platform wheel
+        run: |
+          python -m pip install --upgrade pip
+          pip install build "twine>=6.1"
+          python -m build --wheel
+          python -m twine check --strict dist/*.whl
+      - name: Fail if the binaries did not bundle
+        shell: python
+        run: |
+          import glob, sys, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          bins = [n for n in names if "/bots/mcp/bin/" in n]
+          print("bundled:", bins)
+          sys.exit(0 if bins else "the Rust toolchain was missing on this runner")
+      - name: Upload the wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        with:
+          name: wheel-${{ matrix.os }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  wheels-linux:
+    name: Wheel — Linux x86_64 (manylinux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history + tags for hatch-vcs versioning)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Build in a manylinux container (old glibc), then tag the wheel manylinux
+        # Build inside manylinux so the bundled binary runs on older glibc, then retag the
+        # py3-none-linux_x86_64 wheel to manylinux so PyPI accepts it. Pin the image by digest
+        # pinned by digest (manylinux_2_28, 2026.11.01-2); bump deliberately at review, like the
+        # SHA-pinned actions.
+        run: |
+          docker run --rm -v "$PWD":/io -w /io             quay.io/pypa/manylinux_2_28_x86_64@sha256:7e41b1c7fd64dfc69703a1124b43c404382973ee06ec5d764b85c34d2221fded bash -euo pipefail -c '
+              git config --global --add safe.directory /io
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+              . "$HOME/.cargo/env"
+              PY=/opt/python/cp311-cp311/bin/python
+              "$PY" -m pip install --upgrade pip build wheel "twine>=6.1"
+              "$PY" -m build --wheel
+              "$PY" -m wheel tags --platform-tag manylinux_2_28_x86_64 --remove dist/*.whl
+              "$PY" -m twine check --strict dist/*.whl
+              test -n "$(unzip -l dist/*.whl | grep bots/mcp/bin/ || true)"
+            '
+      - name: Upload the wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        with:
+          name: wheel-linux
+          path: dist/*.whl
           if-no-files-found: error
 
   self-scan:
@@ -128,17 +203,23 @@ jobs:
   publish-testpypi:
     name: Publish to TestPyPI (manual dry-run)
     if: github.event_name == 'workflow_dispatch'
-    needs: [build, self-scan]
+    needs: [build, wheels, wheels-linux, self-scan]
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
       id-token: write          # OIDC for Trusted Publishing — no API token
     steps:
-      - name: Download distribution artifacts
+      - name: Download the sdist
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
-          name: dist
+          name: sdist
           path: dist/
+      - name: Download the platform wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with:
+          pattern: wheel-*
+          path: dist/
+          merge-multiple: true
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086   # v1.14.3
         with:
@@ -151,17 +232,23 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, self-scan]
+    needs: [build, wheels, wheels-linux, self-scan]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write          # OIDC for Trusted Publishing — no API token
     steps:
-      - name: Download distribution artifacts
+      - name: Download the sdist
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
-          name: dist
+          name: sdist
           path: dist/
+      - name: Download the platform wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with:
+          pattern: wheel-*
+          path: dist/
+          merge-multiple: true
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086   # v1.14.3
         with:
@@ -182,11 +269,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0
-      - name: Download distribution artifacts
+      - name: Download the sdist
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
-          name: dist
+          name: sdist
           path: dist/
+      - name: Download the platform wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with:
+          pattern: wheel-*
+          path: dist/
+          merge-multiple: true
       - name: Download SBOM
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
@@ -220,7 +313,7 @@ jobs:
     # after the tag exists and the version is spent. A dispatch exercises that gate first. The
     # push step stays tag-only.
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: [build, self-scan]
+    needs: [build, wheels, wheels-linux, self-scan]
     runs-on: ubuntu-latest
     permissions:
       contents: read
