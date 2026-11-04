@@ -129,6 +129,10 @@ reader, not the mechanism or the weakness it closed.
   The `saw fix --json` record includes the choices that were made.
 
 ### Changed
+- **The govern check record shows its steps.** As a check runs, saw writes each phase —
+  scanning, then applying — into the durable per-folder record, not just checking then ready,
+  so an editor can show the steps of a check a terminal or an agent started, not only one it
+  ran itself.
 - **Releases build and publish the platform wheels, not only the sdist.** The release pipeline
   builds a wheel per desktop platform (macOS x86_64 and arm64, Windows, and Linux via
   manylinux) that bundles saw's Rust binaries, alongside the sdist, so a plain `pip install`

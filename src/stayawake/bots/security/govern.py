@@ -49,6 +49,7 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
         govern_status.write(repo, "finished", reasons=[arrived])
         return {"reason": arrived}, exitcodes.INCOMPLETE
     current().step("scan", "scanning what arrived")
+    govern_status.write(repo, "checking", step="scanning what arrived")
     try:
         payload, code = _scan_arrived(arrived.root, arrived.paths, config)
     except ValueError as exc:
@@ -90,6 +91,7 @@ def apply(repo: str, into: str) -> tuple[dict, int]:
     except (KeyError, TypeError):
         return _applied(False, "the checked update could not be read")
     current().step("apply", "applying the checked update")
+    govern_status.write(repo, "checking", step="applying the checked update")
     reason = incoming.apply(Path(repo), Path(into), arrived)
     if not reason:
         if state.get("clean_mark"):
