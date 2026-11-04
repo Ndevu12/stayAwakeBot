@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""npm manifest matcher — install-time lifecycle-hook execution in package.json."""
+"""npm manifest matcher — package.json script execution.
+
+Install-time lifecycle hooks are scanned by the signatures that do not opt out; a signature that
+sets `scripts: run` is scanned over every script entry instead (dev/build/start and the rest), for
+shapes that fire when a project is run rather than installed.
+"""
 from __future__ import annotations
 
 import re
@@ -19,6 +24,8 @@ class NpmManifestMatcher(Matcher):
     def scan(self, target, signatures):
         compiled = [(s, re.compile(s["pattern"], re.IGNORECASE))
                     for s in signatures if s.get("pattern")]
+        lifecycle = [(s, rx) for s, rx in compiled if s.get("scripts") != "run"]
+        run = [(s, rx) for s, rx in compiled if s.get("scripts") == "run"]
         findings: list[Finding] = []
         for rel in target.iter_files():
             if rel.rsplit("/", 1)[-1] != "package.json":
@@ -26,9 +33,12 @@ class NpmManifestMatcher(Matcher):
             text = target.read_text(rel) or ""
             spans = object_spans(text, "scripts")
             span = spans[0] if spans else None
-            for key, cmd in lifecycle_scripts(text):
+            for key, cmd in all_scripts(text):
+                applicable = (lifecycle if key in NPM_LIFECYCLE_KEYS else []) + run
+                if not applicable:
+                    continue
                 line = line_of_entry(text, key, cmd, span)
-                for sig, rx in compiled:
+                for sig, rx in applicable:
                     if rx.search(cmd):
                         findings.append(self._emit(sig, rel, f"{key}: {cmd[:80]}", line=line))
         return findings
@@ -49,3 +59,13 @@ def lifecycle_scripts(text: str) -> list[tuple[str, str]]:
     if not isinstance(scripts, dict):
         return []
     return [(key, scripts[key]) for key in NPM_LIFECYCLE_KEYS if isinstance(scripts.get(key), str)]
+
+
+def all_scripts(text: str) -> list[tuple[str, str]]:
+    """List every script a package.json declares. Takes its text. Returns `(key, command)` pairs in
+    file order, none when the text holds no scripts."""
+    data = load_jsonc(text)
+    scripts = data.get("scripts") if isinstance(data, dict) else None
+    if not isinstance(scripts, dict):
+        return []
+    return [(k, v) for k, v in scripts.items() if isinstance(v, str)]
