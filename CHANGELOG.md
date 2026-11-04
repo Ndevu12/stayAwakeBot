@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw govern restore` puts the open folder back on the tree saw let in.** It keeps your
+  uncommitted work and moves the branch, so HEAD is not left detached, and it writes the same
+  record a check does. An editor calls it instead of running git over a dirty tree; it works on
+  every platform.
 - **`saw govern` writes a durable record of a check an editor can read.** Per open folder it records
   checking, then held, applied, or finished without applying, with the verdict — keyed the way the
   editor keys a folder and kept in saw's state directory, so it survives the holding directory being
@@ -133,6 +137,10 @@ reader, not the mechanism or the weakness it closed.
   (the commit checked out now), `let_in` (the commit saw let in, or absent), and `code`
   (`let-in`, `unknown-commit`, `tree-changed`, `could-not-answer`), so an editor keys off the
   code and the commits rather than matching the prose `reason`.
+- **saw's MCP server tells an agent one thing.** The server instructions and the
+  `saw_govern_update` tool now agree: run git the normal way and wait for saw's check, and
+  where saw is not already in front of your git call the tool to get the same check — not the
+  earlier run-normally versus do-not-run-raw contradiction.
 - **The govern check record shows its steps.** As a check runs, saw writes each phase —
   scanning, then applying — into the durable per-folder record, not just checking then ready,
   so an editor can show the steps of a check a terminal or an agent started, not only one it

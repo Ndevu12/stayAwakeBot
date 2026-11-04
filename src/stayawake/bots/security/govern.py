@@ -139,6 +139,25 @@ def _governed(verdict: str, code: str, sentence: str,
     return body
 
 
+def restore(repo: str, config: str | None = None) -> tuple[dict, int]:
+    """Put the open folder back on the commit saw let in, keeping uncommitted work. Takes the open
+    folder and the operator config. Returns `(payload, exit)`: `{"restored": true, "commit": <id>}`,
+    or `{"restored": false, "reason": <sentence>}` with the open folder unchanged. Writes the same
+    record as a check: putting back, then applied or finished."""
+    let_in = clean_ledger.let_in_commit(Path(repo), config)
+    if not let_in:
+        reason = "saw has not let a tree into this folder, so there is nothing to put back"
+        govern_status.write(repo, "finished", reasons=[reason])
+        return {"restored": False, "reason": reason}, exitcodes.INCOMPLETE
+    govern_status.write(repo, "checking", step="putting the folder back")
+    reason = incoming.restore(Path(repo), let_in)
+    if reason:
+        govern_status.write(repo, "finished", reasons=[reason])
+        return {"restored": False, "reason": reason}, exitcodes.INCOMPLETE
+    govern_status.write(repo, "applied", verdict="clean")
+    return {"restored": True, "commit": let_in}, exitcodes.CLEAN
+
+
 def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None) -> tuple[dict, int]:
     policy = operator_policy(config)
     files = _plain_copy(Path(root), paths)
