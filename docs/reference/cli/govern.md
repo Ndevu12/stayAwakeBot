@@ -23,3 +23,21 @@ kept — or the folder is not changed and saw says why.
 
 When the verdict is suspicious or infected, or the check could not finish, the update is held and
 your open folder stays as it was. These commands never push and never open a pull request.
+
+## Covering your terminals
+
+```text
+saw govern install
+saw govern status
+saw govern uninstall
+```
+
+The editor extension checks updates for the folders you open in the editor. To check them in your
+terminals too, and in the shells coding agents run, run `saw govern install`. From then on, when a
+terminal pulls, fetches, checks out, switches, merges, or updates a submodule, saw checks what
+arrives before it reaches the folder you are working in, the same as in the editor. Open a new
+terminal, or source the file the command names, for it to take effect.
+
+`saw govern status` says whether your terminals are covered and whether the shell you are in is
+covered yet. `saw govern uninstall` takes it back out, and your editor is unaffected. saw always
+falls back to your real git and gh.
