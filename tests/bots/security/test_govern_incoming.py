@@ -15,6 +15,7 @@ from unittest import mock
 
 from stayawake import cli
 from stayawake.utils import exitcodes
+from tests.support import samples
 from tests.support.gitrepo import GitSandbox
 
 _SCAN = "stayawake.bots.security.govern._scan_arrived"
@@ -128,7 +129,8 @@ class GovernIncoming(GitSandbox):
 
     def test_a_finding_already_in_the_folder_does_not_hold_the_update(self):
         repo = self.new_repo("legacy")
-        self.write(repo, "legacy.js", 'var _0x=[String.fromCharCode(127)];eval(_0x.join(""));\n')
+        self.write(repo, "legacy.js",
+                   "var _0x=[String.%s(127)];eval(_0x.join(\"\"));\n" % samples.FROM_CHAR_CODE)
         self.commit(repo, "start")
         self.git(repo, "checkout", "-q", "-b", "next")
         self.write(repo, "clean.txt", "ok\n")
@@ -141,6 +143,26 @@ class GovernIncoming(GitSandbox):
         state = json.loads((into / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["paths"], ["clean.txt"])
         self.assertTrue(state["releasable"])
+
+    def test_a_real_infected_file_that_arrives_is_held(self):
+        repo = self.new_repo("worm")
+        self.write(repo, "keep.txt", "ok\n")
+        self.commit(repo, "start")
+        base = self.rev(repo)
+        self.git(repo, "checkout", "-q", "-b", "next")
+        self.write(repo, "loader.js",
+                   "var _0x=[String.%s(127)];eval(_0x.join(\"\"));\n" % samples.FROM_CHAR_CODE)
+        self.commit(repo, "arrive")
+        self.git(repo, "checkout", "-q", "main")
+        into = self.root / "worm-holding"
+        code, body = self._run("govern", "prepare", "--json", "--repo", str(repo),
+                               "--into", str(into), "--tool", "git", "--", "checkout", "next")
+        self.assertEqual(code, exitcodes.FINDINGS, body)      # the real content scan flags it
+        self.assertEqual(body["scan"]["results"][0]["verdict"], "infected")
+        self.assertEqual(self.rev(repo), base)                # open folder untouched
+        code, applied = self._run("govern", "apply", "--json", "--repo", str(repo), "--into", str(into))
+        self.assertFalse(applied["applied"])
+        self.assertEqual(self.rev(repo), base)
 
     def test_capabilities_names_the_check(self):
         out = io.StringIO()

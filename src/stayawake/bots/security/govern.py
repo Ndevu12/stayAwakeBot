@@ -10,6 +10,7 @@ the payload is stamped with the schema by the CLI.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from stayawake.bots.security.hook_policy import operator_policy
@@ -18,7 +19,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
 from stayawake.lib.git import incoming
-from stayawake.utils import exitcodes
+from stayawake.utils import exitcodes, scratch
 from stayawake.utils.timeutil import now_iso
 
 SCHEMA = 1
@@ -73,7 +74,8 @@ def apply(repo: str, into: str) -> tuple[dict, int]:
 
 def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None) -> tuple[dict, int]:
     policy = operator_policy(config)
-    with LocalRepoTarget(str(root), str(root), policy.opts, include_only=paths) as target:
+    files = _plain_copy(Path(root), paths)
+    with LocalRepoTarget(str(files), str(files), policy.opts, include_only=paths) as target:
         result = scan_target(target, policy.signatures, policy.allowlist)
     report = ScanReport(generated_at=now_iso(), results=[result])
     if report.any_infected:
@@ -83,6 +85,21 @@ def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None) -> tup
     else:
         code = exitcodes.CLEAN
     return _in_plain_words(report.to_payload()), code
+
+
+def _plain_copy(root: Path, paths: tuple[str, ...]) -> Path:
+    """Copy the arrived files into a directory of their own, so they are scanned as content and not
+    as the borrowed repository they were produced in. Takes the work tree and the arrived paths;
+    returns the directory."""
+    where = scratch.new_dir("the files an update brought in")
+    for rel in paths:
+        destination = where / rel
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copyfile(root / rel, destination)
+        except OSError:
+            pass
+    return where
 
 
 def _verdict(payload: dict) -> str:
