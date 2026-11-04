@@ -83,6 +83,20 @@ def register(sub) -> None:
     vp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
     vp.set_defaults(func=run_verdict)
 
+    rp = add_command(
+        actions, "restore",
+        help="put the open folder back on the tree saw let in",
+        description=(
+            "Put the open folder back on the commit saw let in, keeping your uncommitted work. The "
+            "branch moves to that commit, so HEAD is not left detached. Nothing is fetched. Call this "
+            "after a verdict that the tree is not one saw let in."),
+        examples=[("saw govern restore --repo . --json", "put the open folder back")],
+        stream=False)
+    rp.add_argument("--json", action="store_true", help="machine-readable output")
+    rp.add_argument("--repo", required=True, help="the open folder")
+    rp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
+    rp.set_defaults(func=run_restore)
+
     for name, helptext, description, example in _PLACEMENT:
         c = add_command(actions, name, help=helptext, description=description,
                         examples=[example], stream=False)
@@ -125,6 +139,12 @@ def _do_apply(a: argparse.Namespace) -> int:
 
 def run_verdict(a: argparse.Namespace) -> int:
     payload, code = core.verdict(a.repo, a.config)
+    print(json.dumps(versioned("govern", payload)))
+    return code
+
+
+def run_restore(a: argparse.Namespace) -> int:
+    payload, code = core.restore(a.repo, a.config)
     print(json.dumps(versioned("govern", payload)))
     return code
 

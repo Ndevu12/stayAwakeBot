@@ -171,6 +171,50 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     return ""
 
 
+def restore(repo: Path, commit: str) -> str:
+    """Put the open folder back on `commit`, a tree saw let in, keeping uncommitted work. Takes the
+    open folder and the commit, which must already be in the repository. Returns "" when the folder
+    is on it, else a sentence; leaves the folder as it was when it returns a sentence. The current
+    branch is moved to the commit, so HEAD stays attached and is not detached."""
+    repo = Path(repo).resolve()
+    gitdir = _git_dir(repo)
+    if gitdir is None:
+        return "the open folder is not a git checkout"
+    if not run_ok(repo, ["cat-file", "-e", f"{commit}^{{commit}}"], context=UNTRUSTED):
+        return "saw does not have the tree to put back"
+    base = stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
+    if not base:
+        return "the open folder has no commit to put back from"
+    way = changes_in_the_way(repo, commit)
+    if way is None:
+        return "saw could not tell whether uncommitted work could be kept"
+    if way.blocking:
+        return "uncommitted work would be overwritten, so the folder was not changed"
+    head = _head_text(repo)
+    branch = head[len("ref: "):].strip() if head.startswith("ref: ") else None
+    keep = frozenset(path.encode() for path in way.carryable)
+    move = PreparedMove(repo, Checkout(repo, gitdir), base, commit, keep=keep)
+    if not move.prepare():
+        move.release()
+        return "the folder could not be put back"
+    if branch and not update_refs(repo, [(branch, commit, base)]):
+        move.release()
+        return "the open folder changed while saw was putting it back"
+    if not move.apply():
+        if branch:
+            update_refs(repo, [(branch, base, commit)])
+        move.release()
+        return "the folder could not be put back"
+    if not _write_head(gitdir, head if branch else commit):
+        move.restore_files()
+        if branch:
+            update_refs(repo, [(branch, base, commit)])
+        move.release()
+        return "the folder could not be put back"
+    move.release()
+    return ""
+
+
 def _git_kind(args: list[str]) -> str | None:
     parsed = _parse_git(args)
     if parsed is None:

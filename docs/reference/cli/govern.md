@@ -53,3 +53,14 @@ a hook, or carried in by govern with the tree still matching. It answers `let-in
 unknown commit, or a tree changed on top of one saw let in), or `could-not-answer`. It reads what saw
 already recorded, so it scans nothing and changes nothing. An editor uses it to tell a change saw let
 in from one that reached the folder another way.
+
+## Putting the open folder back
+
+```text
+saw govern restore --repo <open-folder>
+```
+
+`saw govern restore` puts the folder back on the commit saw let in, keeping your uncommitted work.
+The branch moves to that commit, so HEAD is not left detached, and nothing is fetched. Call it after
+a verdict that the tree is not one saw let in. An editor uses it instead of running git over a tree
+with unsaved changes.
