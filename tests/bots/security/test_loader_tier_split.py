@@ -103,6 +103,8 @@ def _sample_matching(sig: dict) -> str:
         "loader-global-bang": f"{samples.GLOBAL}['!'] =",
         "loader-require-hijack": f"{samples.GLOBAL}[{samples.seed()}[0]] = require",
         "loader-require-escapes-esm": samples.joined('glo', "bal['r']=require"),
+        "chain-c2-ethplorer-enum": samples.joined("ethplorer.io/getAddressTransactions/0xabc?apiKey=free", "key"),
+        "chain-c2-tx-by-hash-exec": samples.joined("eth_getTransaction", "ByHash"),
     }
     sample = by_signature.get(sig["id"])
     if sample is None:
