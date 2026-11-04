@@ -1,0 +1,8 @@
+---
+description: Governed git in a saw-protected repo — check incoming updates before they land.
+alwaysApply: true
+---
+Follow `AGENTS.md` (governed git). In this repo, bringing-files git/GitHub operations (pull, fetch,
+checkout, switch, merge, rebase, submodule update, PR checkout) are governed by saw: run git the
+normal way, never reach around the stand-in to a raw git, wait for saw's verdict, act only on a
+clean/residue result, and tell the operator. Never bypass the check or call a held update safe.
