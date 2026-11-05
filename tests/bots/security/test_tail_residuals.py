@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from stayawake.bots.security.models import CLEAN, INFECTED, SUSPICIOUS
@@ -109,6 +110,29 @@ class TestSymlinkEscape(unittest.TestCase):
         r = self._scan_dir()
         self.assertIn("symlink-escapes-repo", {f.signature_id for f in r.findings})
         self.assertEqual(r.verdict, SUSPICIOUS)                 # heuristic — never INFECTED
+
+    def test_dir_symlink_into_the_pub_cache_is_not_an_escape(self):
+        # Flutter's ios/.symlinks/plugins/<pkg> point into the pub cache — a package manager's own
+        # install tree. Anchored on the real cache root, they are NOT scan-evasion escapes.
+        cache = Path(tempfile.mkdtemp())
+        pkg = cache / "hosted" / "pub.dev" / "foo-1.0.0"
+        pkg.mkdir(parents=True)
+        (pkg / "foo.dart").write_text("final x = 1;\n")
+        (self.d / "plugin").symlink_to(pkg, target_is_directory=True)
+        with mock.patch.dict(os.environ, {"PUB_CACHE": str(cache)}):
+            ids = {f.signature_id for f in self._scan_dir().findings}
+        self.assertNotIn("symlink-escapes-repo", ids)
+
+    def test_a_cache_named_dir_outside_the_real_cache_still_escapes(self):
+        # Anchoring, not a bare path match: a ".pub-cache" directory the attacker controls elsewhere
+        # must NOT buy the exemption, or the heuristic's scan-evasion cover is handed straight back.
+        fake = Path(tempfile.mkdtemp()) / "x" / ".pub-cache" / "hosted" / "pub.dev" / "evil-1.0.0"
+        fake.mkdir(parents=True)
+        (fake / "evil.js").write_text(samples.joined('String.fromC', 'harCode(127)'))
+        (self.d / "plugin").symlink_to(fake, target_is_directory=True)
+        with mock.patch.dict(os.environ, {"PUB_CACHE": str(Path(tempfile.mkdtemp()))}):
+            ids = {f.signature_id for f in self._scan_dir().findings}
+        self.assertIn("symlink-escapes-repo", ids)
 
     def test_escaping_file_symlink_is_residual_not_flagged(self):
         # FILE symlinks escaping the repo are a documented residual, NOT flagged: they are overwhelmingly

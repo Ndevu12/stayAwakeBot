@@ -7,6 +7,7 @@ them is looking somewhere the other is not.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterator
 
@@ -16,6 +17,36 @@ INSTALLED_DIR = "node_modules"
 _NOT_WALKED = frozenset({".git", ".hg", ".svn"})
 _ROLLBACK_NAME = ROLLBACK_DIR.rsplit("/", 1)[-1]
 _MAX_DEPTH = 8
+
+# (cache-root env var, its default under the home directory, the package subdirectories under it).
+_PACKAGE_CACHES = (
+    ("PUB_CACHE", ".pub-cache", ("hosted", "git")),
+)
+
+
+def in_dependency_cache(resolved: Path) -> bool:
+    """Return whether `resolved` lies inside a recognised package-manager install cache."""
+    try:
+        home: Path | None = Path.home()
+    except RuntimeError:
+        home = None
+    for env, default, subdirs in _PACKAGE_CACHES:
+        override = os.environ.get(env)
+        if override:
+            root = Path(override)
+        elif home is not None:
+            root = home / default
+        else:
+            continue
+        try:
+            root = root.resolve()
+        except (OSError, RuntimeError):
+            continue
+        for sub in subdirs:
+            base = root / sub
+            if resolved == base or base in resolved.parents:
+                return True
+    return False
 
 
 def in_kept_copies(path: Path) -> bool:
