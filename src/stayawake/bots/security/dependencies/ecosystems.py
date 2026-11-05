@@ -18,6 +18,7 @@ PURL_TO_OSV = {
     "composer": "Packagist",
     "nuget": "NuGet",
     "maven": "Maven",
+    "pub": "Pub",
 }
 
 _OSV_TO_PURL = {osv.lower(): purl for purl, osv in PURL_TO_OSV.items()}

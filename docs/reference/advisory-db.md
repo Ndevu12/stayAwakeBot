@@ -52,6 +52,7 @@ has, `saw` reads.
 | PHP | Composer | `composer.lock` |
 | C# / .NET | NuGet | `packages.lock.json` |
 | Ruby | RubyGems | `Gemfile.lock` |
+| Dart / Flutter | Pub | `pubspec.lock` |
 
 `saw db update -e <ecosystem>` limits a refresh to one of these; the default refreshes all of them.
 

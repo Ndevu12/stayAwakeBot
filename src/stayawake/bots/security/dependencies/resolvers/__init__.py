@@ -16,14 +16,15 @@ from stayawake.bots.security.dependencies.resolvers.rubygems import RubyGemsReso
 from stayawake.bots.security.dependencies.resolvers.composer import ComposerResolver
 from stayawake.bots.security.dependencies.resolvers.nuget import NuGetResolver
 from stayawake.bots.security.dependencies.resolvers.maven import MavenResolver
+from stayawake.bots.security.dependencies.resolvers.pub import PubResolver
 
 RESOLVERS: tuple[Resolver, ...] = (
     NpmResolver(), PyPiResolver(), CargoResolver(), GoResolver(),
-    RubyGemsResolver(), ComposerResolver(), NuGetResolver(), MavenResolver(),
+    RubyGemsResolver(), ComposerResolver(), NuGetResolver(), MavenResolver(), PubResolver(),
 )
 
 __all__ = [
     "Resolver", "RESOLVERS",
     "NpmResolver", "PyPiResolver", "CargoResolver", "GoResolver",
-    "RubyGemsResolver", "ComposerResolver", "NuGetResolver", "MavenResolver",
+    "RubyGemsResolver", "ComposerResolver", "NuGetResolver", "MavenResolver", "PubResolver",
 ]

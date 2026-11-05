@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- A scan audits a Dart or Flutter project's dependencies: it reads `pubspec.lock` and
+  reports a package with a known advisory, as it does for the other ecosystems it supports.
+
 ## [0.16.0] - 2026-11-04
 
 ### Added
