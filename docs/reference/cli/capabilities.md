@@ -26,6 +26,8 @@ $ saw capabilities --json
     "audit": 1,
     "hook-status": 1,
     "capabilities": 1,
+    "govern": 1,
+    "watch-status": 1,
     "fix-ask": 1
   },
   "features": [
@@ -37,9 +39,14 @@ $ saw capabilities --json
     "audit.json",
     "hook.status.json",
     "capabilities.json",
+    "govern.json",
+    "watch.status.json",
     "progress.jsonl",
     "fix.ask.json",
     "stream",
+    "govern.progress.jsonl",
+    "govern.verdict",
+    "govern.restore",
     "serve",
     "mcp"
   ],
@@ -54,7 +61,7 @@ $ saw capabilities --json
 | --- | --- |
 | `version` | The installed saw, as `saw --version` prints it. |
 | `schema_versions` | Each JSON document this saw prints, and the schema version it writes. A document is named after the command that prints it: `auth-status` is `saw auth status --json`. `fix-ask` is the schema of the questions `saw fix --ask=jsonl` writes. |
-| `features` | What this saw can do. `<command>.json` means that command takes `--json`. `progress.jsonl` means `saw scan`, `saw audit` and `saw fix` take `--progress=jsonl`. `fix.ask.json` means `saw fix` and `saw fix amend` take `--ask=jsonl`. `serve` and `mcp` mean an editor can keep one saw open and an agent can ask it. |
+| `features` | What this saw can do. `<command>.json` means that command takes `--json`. `progress.jsonl` means `saw scan`, `saw audit` and `saw fix` take `--progress=jsonl`. `fix.ask.json` means `saw fix` and `saw fix amend` take `--ask=jsonl`. `govern.progress.jsonl` means `saw govern prepare` and `saw govern apply` take `--progress=jsonl`; `govern.verdict` and `govern.restore` mean those subcommands exist. `serve` and `mcp` mean an editor can keep one saw open and an agent can ask it. |
 | `platform` | The operating system, and whether saw supports it. |
 
 ## Schema versions

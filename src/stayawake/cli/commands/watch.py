@@ -7,6 +7,7 @@ the scheduled item calls — hidden from help.
 from __future__ import annotations
 
 import argparse
+import json
 import time
 
 from stayawake.bots.security import (watch, watchack, watchalerts, watchrecord, watchstatus,
@@ -47,6 +48,7 @@ def register(sub) -> None:
         help="say whether `saw watch` is in place",
         description="Say whether `saw watch` is in place, and what to run if it is not.",
         examples=[("saw watch status", "say whether saw watch is in place")])
+    status.add_argument("--json", action="store_true", help="machine-readable output")
     status.set_defaults(func=run_status)
 
     internal = wsub.add_parser("run")          # the entry the scheduled item calls, not offered
@@ -86,6 +88,10 @@ def run_stop(a: argparse.Namespace) -> int:
 
 
 def run_status(a: argparse.Namespace) -> int:
+    if getattr(a, "json", False):
+        code, body = watchstatus.status_document()
+        print(json.dumps(body, indent=2))
+        return code
     no_stream = no_stream_requested(a)
     with busy("reading whether saw watch is in place…", no_stream=no_stream):
         code, text = watchstatus.status_of()

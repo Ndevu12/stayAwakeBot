@@ -16,6 +16,10 @@ reader, not the mechanism or the weakness it closed.
 ### Added
 - A scan names a project it found and the lockfile to commit so saw can audit its
   dependencies -- a Dart, Rust, .NET or Gradle project with no lockfile was silent before.
+- `saw watch status --json` prints the watcher's state as one JSON object -- the schedule, what is
+  still open, and what happened since the last report -- for an editor or a script to read, naming
+  no paths and no process numbers. `saw capabilities` lists it and the govern progress, verdict,
+  and restore an editor reads.
 
 ## [0.16.0] - 2026-11-04
 
