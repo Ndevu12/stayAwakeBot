@@ -7,6 +7,7 @@ them is looking somewhere the other is not.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterator
 
@@ -16,6 +17,41 @@ INSTALLED_DIR = "node_modules"
 _NOT_WALKED = frozenset({".git", ".hg", ".svn"})
 _ROLLBACK_NAME = ROLLBACK_DIR.rsplit("/", 1)[-1]
 _MAX_DEPTH = 8
+
+# A package manager's own install cache, anchored on its real root — an env override or a fixed path
+# under the running user's home — so a cache-named directory planted anywhere else is not mistaken
+# for it. (root env var, root default under home, the subdirectories it stores packages in.)
+_PACKAGE_CACHES = (
+    ("PUB_CACHE", ".pub-cache", ("hosted", "git")),   # Dart/Flutter: <root>/hosted/<host>/<pkg>-<ver>
+)
+
+
+def in_dependency_cache(resolved: Path) -> bool:
+    """Return whether a resolved path lies inside a package manager's install cache — the tree the
+    manager populates, reached by a normal install link (Flutter's ios/.symlinks/plugins pointing at
+    the pub cache, for one). Anchored on the real cache root, so a cache-named directory planted
+    elsewhere does not qualify."""
+    try:
+        home: Path | None = Path.home()
+    except RuntimeError:
+        home = None
+    for env, default, subdirs in _PACKAGE_CACHES:
+        override = os.environ.get(env)
+        if override:
+            root = Path(override)
+        elif home is not None:
+            root = home / default
+        else:
+            continue
+        try:
+            root = root.resolve()
+        except (OSError, RuntimeError):
+            continue
+        for sub in subdirs:
+            base = root / sub
+            if resolved == base or base in resolved.parents:
+                return True
+    return False
 
 
 def in_kept_copies(path: Path) -> bool:

@@ -12,6 +12,7 @@ from pathlib import Path
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher
 from stayawake.bots.security.write_sinks import (CONTROL_EXEC_LABEL, control_exec_sink, sink_label)
+from stayawake.bots.security.dependencies.layout import in_dependency_cache
 from stayawake.lib.git.query import exec_paths
 
 _MAX_LINK_HOPS = 40
@@ -67,7 +68,8 @@ def _graded(rel: str, raw: str, resolved: Path, resolved_root: Path,
         label = sink_label(raw, resolved)
         if label is not None:                 # escaping → a sensitive write-sink → CONFIRMED critical
             return _finding(redirect_sig, rel, f"symlink → {raw} redirects a write into {label}")
-    if escape_sig is not None and is_dir:      # escaping directory → non-sink → scan-evasion HEURISTIC
+    if escape_sig is not None and is_dir and not in_dependency_cache(resolved):
+        # escaping directory, non-sink, not a package manager's install cache → scan-evasion HEURISTIC
         return _finding(escape_sig, rel, f"symlink → {raw} resolves outside the repo root (contents unscanned)")
     return None
 
