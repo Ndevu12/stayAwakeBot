@@ -69,7 +69,7 @@ def _graded(rel: str, raw: str, resolved: Path, resolved_root: Path,
         if label is not None:                 # escaping → a sensitive write-sink → CONFIRMED critical
             return _finding(redirect_sig, rel, f"symlink → {raw} redirects a write into {label}")
     if escape_sig is not None and is_dir and not in_dependency_cache(resolved):
-        # escaping directory, non-sink, not a package manager's install cache → scan-evasion HEURISTIC
+        # escaping directory, not an install cache → scan-evasion HEURISTIC
         return _finding(escape_sig, rel, f"symlink → {raw} resolves outside the repo root (contents unscanned)")
     return None
 

@@ -18,19 +18,14 @@ _NOT_WALKED = frozenset({".git", ".hg", ".svn"})
 _ROLLBACK_NAME = ROLLBACK_DIR.rsplit("/", 1)[-1]
 _MAX_DEPTH = 8
 
-# A package manager's own install cache, anchored on its real root — an env override or a fixed path
-# under the running user's home — so a cache-named directory planted anywhere else is not mistaken
-# for it. (root env var, root default under home, the subdirectories it stores packages in.)
+# (cache-root env var, its default under the home directory, the package subdirectories under it).
 _PACKAGE_CACHES = (
-    ("PUB_CACHE", ".pub-cache", ("hosted", "git")),   # Dart/Flutter: <root>/hosted/<host>/<pkg>-<ver>
+    ("PUB_CACHE", ".pub-cache", ("hosted", "git")),
 )
 
 
 def in_dependency_cache(resolved: Path) -> bool:
-    """Return whether a resolved path lies inside a package manager's install cache — the tree the
-    manager populates, reached by a normal install link (Flutter's ios/.symlinks/plugins pointing at
-    the pub cache, for one). Anchored on the real cache root, so a cache-named directory planted
-    elsewhere does not qualify."""
+    """Return whether `resolved` lies inside a recognised package-manager install cache."""
     try:
         home: Path | None = Path.home()
     except RuntimeError:
