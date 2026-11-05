@@ -20,6 +20,8 @@ def _strip_v(version: str) -> str:
 
 class ComposerResolver(Resolver):
     ecosystem = "composer"
+    label = "PHP"
+    manifests = ("composer.json",)
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():

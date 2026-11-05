@@ -22,6 +22,8 @@ _PNPM_KEY = re.compile(r"^/?(?P<name>.+?)[@/](?P<version>\d+\.\d+\.\d+[0-9A-Za-z
 
 class NpmResolver(Resolver):
     ecosystem = "npm"
+    label = "npm"
+    manifests = ("package.json",)
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():

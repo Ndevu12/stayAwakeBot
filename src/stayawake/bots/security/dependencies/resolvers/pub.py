@@ -19,6 +19,8 @@ _FIELD = re.compile(r"^ {4}(?P<key>source|version):[ \t]+(?P<val>.+)$")
 
 class PubResolver(Resolver):
     ecosystem = "pub"
+    label = "Dart/Flutter"
+    manifests = ("pubspec.yaml",)
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():

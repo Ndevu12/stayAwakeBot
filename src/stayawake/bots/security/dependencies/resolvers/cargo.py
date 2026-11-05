@@ -15,6 +15,8 @@ from stayawake.bots.security.dependencies.resolvers._lockfiles import toml_packa
 
 class CargoResolver(Resolver):
     ecosystem = "cargo"
+    label = "Rust"
+    manifests = ("Cargo.toml",)
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():
