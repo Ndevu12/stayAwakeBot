@@ -6,7 +6,7 @@ from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher
 from stayawake.bots.security.dependencies import RESOLVERS, Advisory, AdvisoryStore
 from stayawake.bots.security.dependencies.purl import ResolvedDependency
-from stayawake.bots.security.dependencies.markers import detected_ecosystems
+from stayawake.bots.security.dependencies.markers import unaudited_ecosystems
 from stayawake.bots.security.dependencies.remediation import (
     advisory_reference, external_advisory_fix, malware_fix, vulnerability_fix)
 
@@ -50,19 +50,17 @@ class DependencyAuditMatcher(Matcher):
         if external_on and not getattr(target, "names_one_file", False):
             findings.extend(_external_findings(target, signatures, emitted))
         elif not store.is_empty():
-            _note_unaudited(target, resolved_ecosystems)
+            _note_unaudited(target, resolved_ecosystems, self._resolvers)
         return findings
 
 
-def _note_unaudited(target, resolved: set) -> None:
-    """Note each ecosystem present as a project but with no dependency resolved to audit."""
+def _note_unaudited(target, resolved, resolvers) -> None:
+    """Note each ecosystem a first-party manifest declares but no resolved dependency covers."""
     if getattr(target, "names_one_file", False):
         return
-    for eco, label in detected_ecosystems(target.iter_files()).items():
-        if eco in resolved:
-            continue
-        note = (f"A {label} project was found here, but its dependencies were not audited: there "
-                "is no lockfile to resolve them. Commit one so saw can check them.")
+    for eco, label in unaudited_ecosystems(target.iter_files(), resolved, resolvers).items():
+        note = (f"A {label} project is here. If it declares dependencies, commit a lockfile so "
+                "saw can audit them.")
         if note not in target.coverage_notes:
             target.coverage_notes.append(note)
 

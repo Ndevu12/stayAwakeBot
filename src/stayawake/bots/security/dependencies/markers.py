@@ -1,31 +1,35 @@
 #!/usr/bin/env python3
-"""Manifest files that show a package ecosystem is present even without a lockfile."""
+"""Which package ecosystems a scanned project declares but leaves without a dependency audit."""
 from __future__ import annotations
 
 from fnmatch import fnmatch
 
-# ecosystem (PURL type) -> (human label, manifest basenames or globs that prove it is present).
-_MARKERS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "npm":      ("npm", ("package.json",)),
-    "pypi":     ("Python", ("pyproject.toml", "setup.py", "setup.cfg")),
-    "cargo":    ("Rust", ("Cargo.toml",)),
-    "golang":   ("Go", ("go.mod",)),
-    "maven":    ("Java/Kotlin", ("pom.xml", "build.gradle", "build.gradle.kts")),
-    "composer": ("PHP", ("composer.json",)),
-    "gem":      ("Ruby", ("Gemfile",)),
-    "nuget":    (".NET", ("*.csproj", "*.vbproj", "*.fsproj", "*.sln")),
-    "pub":      ("Dart/Flutter", ("pubspec.yaml",)),
-}
+# A manifest inside one of these is a dependency's own, not the scanned project's.
+_VENDORED = frozenset({
+    "vendor", "third_party", "third-party", "Pods", "bower_components", ".pub-cache",
+    "node_modules", "packages", "example", "examples", "testdata", "fixtures",
+})
 
 
-def detected_ecosystems(files) -> dict[str, str]:
-    """{ecosystem: label} for each ecosystem whose manifest marker appears among `files`."""
+def _first_party(rel: str) -> bool:
+    return not any(part in _VENDORED for part in rel.split("/")[:-1])
+
+
+def unaudited_ecosystems(files, resolved, resolvers) -> dict[str, str]:
+    """{ecosystem: label} for each resolver whose manifest a first-party file matches while it
+    resolved no dependency."""
+    want = {r.ecosystem: (r.label, r.manifests) for r in resolvers
+            if r.label and r.manifests and r.ecosystem not in resolved}
     found: dict[str, str] = {}
     for rel in files:
-        if len(found) == len(_MARKERS):
+        if not want:
             break
+        if not _first_party(rel):
+            continue
         base = rel.rsplit("/", 1)[-1]
-        for eco, (label, markers) in _MARKERS.items():
-            if eco not in found and any(fnmatch(base, m) for m in markers):
+        for eco in list(want):
+            label, manifests = want[eco]
+            if any(fnmatch(base, m) for m in manifests):
                 found[eco] = label
+                del want[eco]
     return found

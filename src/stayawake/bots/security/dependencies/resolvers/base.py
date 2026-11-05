@@ -13,6 +13,8 @@ class Resolver:
     """Base class: turn a scan `target` into the packages it declares/locks."""
 
     ecosystem: str = ""
+    label: str = ""
+    manifests: tuple[str, ...] = ()
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         raise NotImplementedError

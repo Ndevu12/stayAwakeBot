@@ -32,6 +32,8 @@ def _is_requirements(base: str) -> bool:
 
 class PyPiResolver(Resolver):
     ecosystem = "pypi"
+    label = "Python"
+    manifests = ("pyproject.toml", "setup.py", "setup.cfg")
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():

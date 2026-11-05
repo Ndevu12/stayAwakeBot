@@ -7,7 +7,8 @@ import unittest
 from pathlib import Path
 
 from stayawake.bots.security.dependencies import AdvisoryStore
-from stayawake.bots.security.dependencies.markers import detected_ecosystems
+from stayawake.bots.security.dependencies.markers import unaudited_ecosystems
+from stayawake.bots.security.dependencies.resolvers import RESOLVERS
 from stayawake.bots.security.matchers.dependency_audit import DependencyAuditMatcher
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 
@@ -26,20 +27,34 @@ def _notes(files: dict) -> list[str]:
 
 
 class TestDetection(unittest.TestCase):
-    def test_markers_map_to_ecosystems(self):
-        self.assertEqual(detected_ecosystems(["Cargo.toml"]), {"cargo": "Rust"})
-        self.assertEqual(detected_ecosystems(["a/b/App.csproj"]), {"nuget": ".NET"})
-        self.assertEqual(detected_ecosystems(["pubspec.yaml"]), {"pub": "Dart/Flutter"})
-        self.assertEqual(detected_ecosystems(["README.md", "src/main.rs"]), {})
+    def test_a_first_party_manifest_with_no_resolved_dep_is_named(self):
+        self.assertEqual(unaudited_ecosystems(["Cargo.toml"], set(), RESOLVERS), {"cargo": "Rust"})
+
+    def test_a_resolved_ecosystem_is_not_named(self):
+        self.assertEqual(unaudited_ecosystems(["Cargo.toml"], {"cargo"}, RESOLVERS), {})
+
+    def test_a_vendored_manifest_is_not_named(self):
+        self.assertEqual(unaudited_ecosystems(["third_party/esbuild/package.json"], set(), RESOLVERS), {})
+        self.assertEqual(unaudited_ecosystems(["vendor/x/Cargo.toml"], set(), RESOLVERS), {})
+
+    def test_a_nested_first_party_manifest_is_named(self):
+        self.assertEqual(unaudited_ecosystems(["src/App/App.csproj"], set(), RESOLVERS), {"nuget": ".NET"})
+
+    def test_a_flutter_project_is_named(self):
+        self.assertEqual(unaudited_ecosystems(["pubspec.yaml"], set(), RESOLVERS), {"pub": "Dart/Flutter"})
 
 
 class TestUnauditedNote(unittest.TestCase):
-    def test_a_rust_project_without_a_lockfile_is_named_unaudited(self):
+    def test_a_rust_project_without_a_lockfile_is_named(self):
         notes = _notes({"Cargo.toml": "[package]\nname = 'a'\n", "src/main.rs": "fn main(){}\n"})
-        self.assertTrue(any("Rust" in n and "not audited" in n for n in notes), notes)
+        self.assertTrue(any("Rust" in n and "lockfile" in n for n in notes), notes)
 
     def test_a_resolvable_lockfile_produces_no_note(self):
         lock = ("GEM\n  remote: https://rubygems.org/\n  specs:\n    rails (7.0.4)\n\n"
                 "PLATFORMS\n  ruby\n\nDEPENDENCIES\n  rails\n")
         notes = _notes({"Gemfile": "source 'x'\n", "Gemfile.lock": lock})
         self.assertFalse(any("Ruby" in n for n in notes), notes)
+
+    def test_a_vendored_dependency_manifest_does_not_fire(self):
+        notes = _notes({"go.mod": "module x\ngo 1.21\n", "third_party/esbuild/package.json": '{"name":"esbuild"}'})
+        self.assertFalse(any("npm" in n for n in notes), notes)

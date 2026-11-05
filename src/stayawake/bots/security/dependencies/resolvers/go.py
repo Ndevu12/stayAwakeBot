@@ -25,6 +25,8 @@ def _norm_version(v: str) -> str:
 
 class GoResolver(Resolver):
     ecosystem = "golang"
+    label = "Go"
+    manifests = ("go.mod",)
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():

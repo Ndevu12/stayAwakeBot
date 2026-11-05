@@ -11,6 +11,8 @@ from stayawake.bots.security.jsonc import load_jsonc
 
 class NuGetResolver(Resolver):
     ecosystem = "nuget"
+    label = ".NET"
+    manifests = ("*.csproj", "*.vbproj", "*.fsproj", "*.sln")
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():

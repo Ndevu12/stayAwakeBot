@@ -35,6 +35,8 @@ def _is_literal_version(v: str) -> bool:
 
 class MavenResolver(Resolver):
     ecosystem = "maven"
+    label = "Java/Kotlin"
+    manifests = ("pom.xml", "build.gradle", "build.gradle.kts")
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():

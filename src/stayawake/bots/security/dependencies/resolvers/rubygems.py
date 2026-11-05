@@ -20,6 +20,8 @@ _SPEC = re.compile(r"^ {4}(?P<name>[A-Za-z0-9._-]+) \((?P<version>[0-9][^)]*)\)$
 
 class RubyGemsResolver(Resolver):
     ecosystem = "gem"
+    label = "Ruby"
+    manifests = ("Gemfile",)
 
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():
