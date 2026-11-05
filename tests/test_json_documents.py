@@ -87,6 +87,7 @@ _PRINT_EACH_DOCUMENT = {
     "govern": [lambda: _stdout_of(lambda: cli.main(
         ["govern", "prepare", "--json", "--repo", "/no/such/folder", "--into",
          "/tmp/saw-govern-absent", "--tool", "git", "--", "status"]))],
+    "watch-status": [lambda: _stdout_of(lambda: cli.main(["watch", "status", "--json"]))],
 }
 
 
@@ -149,7 +150,9 @@ class TestCapabilities(unittest.TestCase):
                          {**SCHEMA_VERSION_OF_EACH_DOCUMENT, "fix-ask": 1})
         self.assertEqual(printed["features"],
                          [".".join(command_of(d)) + ".json" for d in SCHEMA_VERSION_OF_EACH_DOCUMENT]
-                         + ["progress.jsonl", "fix.ask.json", "stream", "serve", "mcp"])
+                         + ["progress.jsonl", "fix.ask.json", "stream",
+                            "govern.progress.jsonl", "govern.verdict", "govern.restore",
+                            "serve", "mcp"])
         self.assertTrue({"scan.json", "fix.json"} <= set(printed["features"]))
         self.assertEqual(printed["version"], cli.__version__)
 

@@ -11,7 +11,7 @@ until you take it back with `saw watch stop`.
 
 ```text
 saw watch [--no-stream]
-saw watch status [--no-stream]
+saw watch status [--json] [--no-stream]
 saw watch stop [--no-stream]
 ```
 
@@ -63,6 +63,14 @@ or could not be stopped.
 they come from Script Editor; if none appears, allow notifications for Script Editor in System
 Settings. On Linux they go to your desktop's notification service. A notification that cannot be
 shown is tried again later.
+
+## For a program
+
+`saw watch status --json` prints the same facts as one JSON object, for an editor extension or a
+script: the schedule, every matter still open, and what happened since the last report. It names
+no paths and no process numbers, as the sentences do. A program learns this saw prints it from
+[`saw capabilities`](capabilities.md), which lists the `watch-status` document and the
+`watch.status.json` feature.
 
 ## When it runs by itself
 
