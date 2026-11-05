@@ -154,7 +154,7 @@ class TestPub(unittest.TestCase):
                 '    version: "0.0.0"\n'
                 'sdks:\n'
                 '  dart: ">=3.0.0 <4.0.0"\n')
-        # Only the hosted (pub.dev) package is auditable; path and sdk sources are skipped.
+        # only the hosted package resolves; path and sdk sources are skipped
         self.assertEqual(_resolve(PubResolver(), {"pubspec.lock": lock}),
                          {("pub", "http", "1.2.0")})
 

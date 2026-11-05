@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """Dart / Flutter (pub) resolver — pubspec.lock -> `pkg:pub/...` PURLs.
 
-`pubspec.lock` locks each dependency under `packages:` with its resolved `version` and a `source`.
-Only `source: hosted` packages come from a pub registry (pub.dev) and carry OSV `Pub` advisories;
-`git`, `path` and `sdk` sources are not registry packages and are skipped. The lock is the audit
-surface -- `pubspec.yaml` holds version ranges, not resolved versions.
-
-Parsed line by line (bounded, no YAML alias expansion on an untrusted file) keyed on indentation:
-a package is a two-space `name:`, its `source:` and `version:` are four-space fields; the deeper
-`description:` block (six-space) is ignored. Malformed input yields no packages.
+In `pubspec.lock`, each dependency is a two-space `name:` under `packages:`, with a four-space
+`source:` and `version:`. Only `source: hosted` packages are pub.dev packages (OSV `Pub`); `git`,
+`path` and `sdk` sources are skipped. Deeper `description:` fields are not packages.
 """
 from __future__ import annotations
 
@@ -47,7 +42,7 @@ def _pubspec_lock_deps(text) -> list[tuple[str, str]]:
     for line in (text or "").splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if not line[:1].isspace():                      # a top-level key (packages:, sdks:, ...)
+        if not line[:1].isspace():
             flush()
             name = source = version = None
             in_packages = line.strip() == "packages:"
