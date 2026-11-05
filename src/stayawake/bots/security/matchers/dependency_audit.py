@@ -6,6 +6,7 @@ from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher
 from stayawake.bots.security.dependencies import RESOLVERS, Advisory, AdvisoryStore
 from stayawake.bots.security.dependencies.purl import ResolvedDependency
+from stayawake.bots.security.dependencies.markers import detected_ecosystems
 from stayawake.bots.security.dependencies.remediation import (
     advisory_reference, external_advisory_fix, malware_fix, vulnerability_fix)
 
@@ -27,9 +28,11 @@ class DependencyAuditMatcher(Matcher):
         seen_malware: set[tuple[str, str]] = set()
         seen_vuln: set[tuple[str, str, str]] = set()
         emitted: set[tuple[str, str]] = set()
+        resolved_ecosystems: set[str] = set()
         if not store.is_empty():
             for resolver in self._resolvers:
                 for dep in resolver.resolve(target):
+                    resolved_ecosystems.add(dep.purl.type)
                     advisory = store.advisory_for(dep.purl)
                     if advisory is not None:
                         key = (dep.source_path, dep.purl.coordinate)
@@ -46,7 +49,22 @@ class DependencyAuditMatcher(Matcher):
                                 emitted.add((vuln.osv_id or "", dep.purl.coordinate))
         if external_on and not getattr(target, "names_one_file", False):
             findings.extend(_external_findings(target, signatures, emitted))
+        elif not store.is_empty():
+            _note_unaudited(target, resolved_ecosystems)
         return findings
+
+
+def _note_unaudited(target, resolved: set) -> None:
+    """Note each ecosystem present as a project but with no dependency resolved to audit."""
+    if getattr(target, "names_one_file", False):
+        return
+    for eco, label in detected_ecosystems(target.iter_files()).items():
+        if eco in resolved:
+            continue
+        note = (f"A {label} project was found here, but its dependencies were not audited: there "
+                "is no lockfile to resolve them. Commit one so saw can check them.")
+        if note not in target.coverage_notes:
+            target.coverage_notes.append(note)
 
 
 def _emit(advisory: Advisory, dep: ResolvedDependency) -> Finding:

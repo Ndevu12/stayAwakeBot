@@ -14,13 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
-- A scan audits a Dart or Flutter project's dependencies: it reads `pubspec.lock` and
-  reports a package with a known advisory, as it does for the other ecosystems it supports.
-
-### Fixed
-- A scan no longer reports a package manager's own install links (for example Flutter's
-  `ios/.symlinks/plugins` entries, which point into the pub cache) as a symlink that leaves
-  the repository.
+- A scan names a project it found and the lockfile to commit so saw can audit its
+  dependencies -- a Dart, Rust, .NET or Gradle project with no lockfile was silent before.
 
 ## [0.16.0] - 2026-11-04
 
