@@ -13,13 +13,22 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-06
+
 ### Added
+- A scan audits a Dart or Flutter project's dependencies: it reads `pubspec.lock` and
+  reports a package with a known advisory, as it does for the other ecosystems it supports.
 - A scan names a project it found and the lockfile to commit so saw can audit its
   dependencies -- a Dart, Rust, .NET or Gradle project with no lockfile was silent before.
 - `saw watch status --json` prints the watcher's state as one JSON object -- the schedule, what is
   still open, and what happened since the last report -- for an editor or a script to read, naming
   no paths and no process numbers. `saw capabilities` lists it and the govern progress, verdict,
   and restore an editor reads.
+
+### Fixed
+- A scan no longer reports a package manager's own install links (for example Flutter's
+  `ios/.symlinks/plugins` entries, which point into the pub cache) as a symlink that leaves
+  the repository.
 
 ### Security
 - saw's own network connections now require TLS 1.2 or newer, refusing the retired TLS 1.0 and 1.1.
@@ -1980,7 +1989,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.13.1...v0.14.0
