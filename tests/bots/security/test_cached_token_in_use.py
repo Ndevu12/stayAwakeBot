@@ -403,5 +403,21 @@ class ThePlaintextFile(unittest.TestCase):
             self.assertNotIn(issue_id, ROTATION_UNSAFE_IDS)
 
 
+
+class ScopeReachesGithubRejectsLookAlikes(unittest.TestCase):
+    """`credential.<url>` scoping applies to github.com by host, never by substring: a look-alike
+    host must not be read as github.com. Regression guard for py/incomplete-url-substring."""
+
+    def test_a_real_github_host_reaches_it(self):
+        for scope in ("https://github.com", "github.com", "https://user@github.com/x",
+                      "https://GITHUB.COM", "https://github.com.", "https://github.com:443"):
+            self.assertTrue(C._scope_reaches_github(scope), scope)
+
+    def test_a_look_alike_host_does_not_reach_it(self):
+        for scope in ("https://github.com.evil.com", "https://evil-github.com",
+                      "https://notgithub.com", "https://github.com.attacker.net",
+                      "https://api.github.com"):
+            self.assertFalse(C._scope_reaches_github(scope), scope)
+
 if __name__ == "__main__":
     unittest.main()
