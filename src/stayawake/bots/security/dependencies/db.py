@@ -32,6 +32,7 @@ try:
     _SSL_CTX: ssl.SSLContext = ssl.create_default_context(cafile=certifi.where())
 except Exception:  # noqa: BLE001 — a TLS-setup hiccup must never crash import
     _SSL_CTX = ssl.create_default_context()
+_SSL_CTX.minimum_version = ssl.TLSVersion.TLSv1_2
 
 _CORPUS_MEMO: dict[tuple[str, float], AdvisoryCorpus | None] = {}
 
