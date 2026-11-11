@@ -28,6 +28,7 @@ reader, not the mechanism or the weakness it closed.
 
 ### Security
 - saw's own network connections now require TLS 1.2 or newer, refusing the retired TLS 1.0 and 1.1.
+- A scan catches a payload that hides packed, obfuscated script inside a file posing as a font or other non-code asset.
 
 ## [0.16.0] - 2026-11-04
 
