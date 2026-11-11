@@ -197,14 +197,16 @@ class _AmendFixture(GitSandbox):
     def _amend(self, pusher=_ok_push, **kw):
         return render_amend_line(self._act(pusher=pusher, **kw))
 
-    def _remote(self, *, permitted=True, protected=False):
+    def _remote(self, *, permitted=True, protected=False, allow_force_pushes=False):
         """The answers this path must get from GitHub before it may move anything: who may
         rewrite, whether the refs refreshed, and what each remote branch is at. Every amend goes
         through them, so the harness supplies them rather than letting them be skipped."""
-        return github_answers(self._rev, permitted=permitted, protected=protected)
+        return github_answers(self._rev, permitted=permitted, protected=protected,
+                              allow_force_pushes=allow_force_pushes)
 
-    def _act(self, pusher=_ok_push, *, permitted=True, protected=False, **kw):
-        with self._remote(permitted=permitted, protected=protected):
+    def _act(self, pusher=_ok_push, *, permitted=True, protected=False, allow_force_pushes=False, **kw):
+        with self._remote(permitted=permitted, protected=protected,
+                          allow_force_pushes=allow_force_pushes):
             return amend_outcome(self.d, "acme/app", ScanOptions(), _sigs(), [],
                                  "t", pusher=pusher, **kw)
 
@@ -677,6 +679,26 @@ class TestAmendGates(_AmendFixture):
         pushes = []
         outcome = self._act(pusher=lambda *a: pushes.append(a) or PushResult(True),
                             protected=None)
+        self.assertEqual(outcome.branches[0].reason.cause, Cause.PROTECTION_UNKNOWN)
+        self.assertTrue(pushes and pushes[0][1].startswith("security/amend-"))
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_protected_branch_that_allows_force_push_is_amended_over(self):
+        self._loader_merge()
+        before = self._rev()
+        pushes = []
+        outcome = self._act(pusher=lambda *a: pushes.append(a) or PushResult(True),
+                            protected=True, allow_force_pushes=True)
+        self.assertEqual([b.force_updated for b in outcome.branches], [True])
+        self.assertTrue(outcome.completed)
+        self.assertTrue(pushes and not pushes[0][1].startswith("security/amend-"))
+        self.assertNotEqual(before, self._rev())
+
+    def test_a_protected_branch_whose_force_push_rule_is_unreadable_is_set_aside(self):
+        self._loader_merge()
+        pushes = []
+        outcome = self._act(pusher=lambda *a: pushes.append(a) or PushResult(True),
+                            protected=True, allow_force_pushes=None)
         self.assertEqual(outcome.branches[0].reason.cause, Cause.PROTECTION_UNKNOWN)
         self.assertTrue(pushes and pushes[0][1].startswith("security/amend-"))
         self.assertTrue(outcome.needs_review)

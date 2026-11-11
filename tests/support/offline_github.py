@@ -14,7 +14,8 @@ class NoRemoteTags:
 
 
 @contextmanager
-def github_answers(remote_head, *, permitted=True, protected=False, slug="acme/app", account=None):
+def github_answers(remote_head, *, permitted=True, protected=False, allow_force_pushes=False,
+                   slug="acme/app", account=None):
     """Answer every question the amend path asks the remote: who may rewrite, whether the refs
     refreshed, what each remote branch is at, which tags it holds, whose account the token is, and which signing keys it lists.
 
@@ -37,7 +38,8 @@ def github_answers(remote_head, *, permitted=True, protected=False, slug="acme/a
                 permitted=permitted, conclusive=True,
                 reason="owner" if permitted else "unauthorized"))),
             ("authority.ref_protection", dict(return_value=mock.Mock(
-                protected=protected, reason="rule_read"))),
+                protected=protected, reason="rule_read",
+                allows_force_push=(allow_force_pushes if protected is True else None)))),
             ("authority.fork_count", dict(return_value=0)),
             ("gitutil.fetch_refs", dict(return_value=mock.Mock(ok=True, reason=""))),
             ("_read_remote_head", dict(side_effect=lambda r, s, b, tk: (True, remote_head(b)))),
