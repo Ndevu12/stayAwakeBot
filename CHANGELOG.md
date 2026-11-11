@@ -25,6 +25,9 @@ reader, not the mechanism or the weakness it closed.
 - `saw fix amend` publishes the cleaned history over a protected branch when that branch allows
   force-pushes, rather than always setting it aside; when the branch blocks force-pushes, the
   message names the setting to change.
+- `saw guard setup` bumps a gate's stale saw version even when its action pin is current, and
+  `saw guard check` and `saw guard drift` report a scanner version that has fallen behind, not
+  only the action pin.
 
 ### Security
 - saw's own network connections now require TLS 1.2 or newer, refusing the retired TLS 1.0 and 1.1.

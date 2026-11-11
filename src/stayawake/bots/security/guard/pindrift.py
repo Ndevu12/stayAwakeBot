@@ -45,6 +45,21 @@ def _resolve_slug(repo: Path) -> tuple[str, str] | None:
     return None
 
 
+def _behind_reason(st: "detect.GuardStatus", action_behind: bool, scanner_behind: bool) -> str:
+    """The drift issue's lead sentence for a gate that has fallen behind, naming the action pin, the
+    scanner version, or both."""
+    reasons = []
+    if action_behind:
+        reasons.append(f"its action pin `{SAW_GUARD_ACTION}@{st.ref.ref[:12]}…` trails the latest "
+                       f"{SAW_GUARD_NAME} release **{_code(st.fresh.latest_tag or 'unknown')}**")
+    if scanner_behind:
+        current = detect.pinned_scanner_version(st.ref) or "unknown"
+        reasons.append(f"it scans with saw **{_code(current)}**, behind the latest release "
+                       f"**{_code(st.scanner.latest_tag or 'unknown')}**")
+    return (f"The SAW Guard gate ({_code(st.ref.workflow)}) is out of date: {'; and '.join(reasons)} "
+            f"— it is running an out-of-date detection engine.")
+
+
 def _classify(st: "detect.GuardStatus") -> tuple[str, str]:
     """Map a `GuardStatus` to `(state, reason)`. `reason` is the issue's lead sentence for a
     deficiency (`state in _DEFICIENT`), else empty. A non-SAW Guard gate is PROTECTED (no reason)."""
@@ -58,13 +73,12 @@ def _classify(st: "detect.GuardStatus") -> tuple[str, str]:
                            "blocked — it is **unprotected**.")
     if st.ref is None:
         return "not-saw-guard", ""
+    action_behind = st.fresh is not None and st.fresh.state == "behind"
+    scanner_behind = st.scanner is not None and st.scanner.state == "behind"
+    if action_behind or scanner_behind:
+        return "behind", _behind_reason(st, action_behind, scanner_behind)
     if st.fresh is None or st.fresh.state == "unknown":
         return "unknown", ""
-    if st.fresh.state == "behind":
-        return "behind", (f"The SAW Guard gate ({_code(st.ref.workflow)}) pins "
-                          f"`{SAW_GUARD_ACTION}@{st.ref.ref[:12]}…`, but the latest {SAW_GUARD_NAME} release is "
-                          f"**{_code(st.fresh.latest_tag or 'unknown')}** — it is running an "
-                          f"out-of-date detection engine.")
     return st.fresh.state, ""
 
 
