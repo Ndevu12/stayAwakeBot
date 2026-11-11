@@ -9,6 +9,7 @@ from dataclasses import dataclass
 SAW_GUARD_NAME = "SAW Guard"
 SAW_GUARD_OWNER, SAW_GUARD_REPO = "Ndevu12", "SAW_GUARD"
 SAW_GUARD_ACTION = f"{SAW_GUARD_OWNER}/{SAW_GUARD_REPO}"
+SAW_SCANNER_OWNER, SAW_SCANNER_REPO = "Ndevu12", "stayAwakeBot"
 SAW_GUARD_USES = re.escape(SAW_GUARD_ACTION)
 WORKFLOW_DIR = ".github/workflows"
 SAW_GUARD_FILE = f"{WORKFLOW_DIR}/saw-guard.yml"

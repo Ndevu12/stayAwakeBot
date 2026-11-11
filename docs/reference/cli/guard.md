@@ -59,7 +59,7 @@ each holding only what it needs:
 | --- | --- | --- | --- |
 | `saw-guard` | every pull request and push to the default branch | `contents: read`, `pull-requests: write`, `security-events: write` | Scans, and reports what it finds: a comment on the pull request, an alert in the Security tab, and the evidence as a run artifact. It **cannot push code to your repository** — it comments and raises alerts, nothing more. |
 | `remediate` | only once `saw-guard` has reported an infected verdict | `contents: write`, `pull-requests: write` | Opens one rolling `security/auto-clean` pull request with the payload removed. This is the only job that can push, and on a clean run it never starts. |
-| `pin-drift` | weekly, and on demand | `contents: read`, `issues: write` | Files one self-closing issue when the pinned SAW Guard release falls behind. |
+| `pin-drift` | weekly, and on demand | `contents: read`, `issues: write` | Files one self-closing issue when the pinned SAW Guard release or the gate's saw version falls behind. |
 
 The gate stays **red until the fix pull request is merged**: remediation opens the fix, it does not
 make the check pass.

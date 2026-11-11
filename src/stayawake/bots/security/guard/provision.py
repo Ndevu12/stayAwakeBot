@@ -22,6 +22,7 @@ from stayawake.bots.security.guard.constants import (
     CHECKOUT_ACTION, SETUP_PYTHON_ACTION)
 from stayawake.bots.security.guard.detect import (
     check, classify_pin, find_saw_guard, find_worm_gate, grade_config, render,
+    latest_scanner_version, pinned_scanner_version, scanner_freshness,
     _local_workflows, _ref_workflows, _local_action_reader, _ref_action_reader)
 
 
@@ -49,6 +50,8 @@ class SetupPlan:
     old_ref: str | None = None
     new_ref: str | None = None
     detail: str | None = None
+    scanner_from: str | None = None
+    scanner_to: str | None = None
 
 
 @dataclass
@@ -85,12 +88,7 @@ def resolve_scanner_version(token: str | None = None) -> str | None:
     stayawakebot`, so the SHA-pinned step fetches whatever is newest at run time and the pin buys
     nothing. Returns None when it cannot be resolved — setup then fails closed rather than provision
     an unpinned scanner, the same posture `resolve_pin` takes for the action SHA."""
-    rel = github_api.latest_release("Ndevu12", "stayAwakeBot", token)
-    tag = rel.get("tag_name") if isinstance(rel, dict) else None
-    if not isinstance(tag, str):
-        return None
-    version = tag.lstrip("vV").strip()
-    return version if re.fullmatch(r"\d+\.\d+\.\d+", version) else None
+    return latest_scanner_version(token)
 
 
 def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None = None, *,
@@ -182,6 +180,17 @@ def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None 
     )
 
 
+_SCANNER_VERSION_LINE = re.compile(r"(?m)^(?P<pre>[ \t]+version: )'[^']*'$")
+_PIP_SCANNER_SPEC = re.compile(r"(?P<pre>pip install stayawakebot==)[0-9][^\s'\"]*")
+
+
+def _reversion(text: str, scanner: str) -> str:
+    """Surgically rewrite ONLY the pinned scanner version — the action `version:` inputs and the
+    pin-drift `pip install` spec — preserving the rest of the file byte-for-byte."""
+    text = _SCANNER_VERSION_LINE.sub(lambda m: f"{m.group('pre')}'{scanner}'", text)
+    return _PIP_SCANNER_SPEC.sub(lambda m: f"{m.group('pre')}{scanner}", text)
+
+
 def _repin(text: str, pin: Pin) -> str:
     """Surgically rewrite ONLY the saw-guard `uses:` ref, preserving the rest of the file byte-for-byte."""
     comment = f"  # {pin.tag}" if pin.tag else ""
@@ -214,12 +223,21 @@ def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
         return SetupPlan("repair", ref.workflow, render_workflow(pin, default_branch, scanner,
                                                      push_branches=push_branches),
                          old_ref=ref.ref, new_ref=pin.sha, detail=_degraded_detail(config))
+    detail = _degraded_detail(config) if config.degraded else None
+    current_scanner = pinned_scanner_version(ref)
+    stale = bool(scanner) and scanner_freshness(ref, latest_version=scanner).state == "behind"
     if ref.pin == "sha" and ref.ref.lower() == pin.sha.lower():
-        return SetupPlan("noop", ref.workflow, old_ref=ref.ref, new_ref=pin.sha,
-                         detail=_degraded_detail(config) if config.degraded else None)
-    return SetupPlan("repin", ref.workflow, _repin(workflows[ref.workflow], pin),
-                     old_ref=ref.ref, new_ref=pin.sha,
-                     detail=_degraded_detail(config) if config.degraded else None)
+        if stale:
+            return SetupPlan("revise", ref.workflow, _reversion(workflows[ref.workflow], scanner),
+                             old_ref=ref.ref, new_ref=pin.sha, detail=detail,
+                             scanner_from=current_scanner, scanner_to=scanner)
+        return SetupPlan("noop", ref.workflow, old_ref=ref.ref, new_ref=pin.sha, detail=detail)
+    content = _repin(workflows[ref.workflow], pin)
+    if stale:
+        content = _reversion(content, scanner)
+    return SetupPlan("repin", ref.workflow, content, old_ref=ref.ref, new_ref=pin.sha, detail=detail,
+                     scanner_from=current_scanner if stale else None,
+                     scanner_to=scanner if stale else None)
 
 
 def _degraded_detail(config) -> str:
@@ -239,6 +257,7 @@ def _setup_pr_body(plan: SetupPlan, base: str) -> str:
     set branch protection, CODEOWNERS, or the create-PR repo setting), stated honestly."""
     verb = ("Installs" if plan.action == "create"
             else "Rewrites the configuration of" if plan.action == "repair"
+            else "Updates the pinned saw version of" if plan.action == "revise"
             else "Updates the pin of")
     tag = f" (`{plan.new_ref}`)" if plan.new_ref and len(plan.new_ref) == 40 else ""
     return "\n".join([
@@ -249,6 +268,8 @@ def _setup_pr_body(plan: SetupPlan, base: str) -> str:
            "beyond the gate itself are not preserved — review the diff."]
           if plan.action == "repair" and plan.detail else []),
         f"- **Pin:** `{SAW_GUARD_ACTION}@{plan.new_ref[:12]}…`{tag}",
+        *([f"- **saw version:** `{plan.scanner_from or 'unset'}` → `{plan.scanner_to}`"]
+          if plan.scanner_to else []),
         "- **Gate job** (`saw-guard`): scans PRs/pushes and reports what it finds — a PR comment, a "
         "code-scanning alert and a run artifact. It **cannot push to this repository** "
         "(`contents: read`).",
@@ -314,7 +335,8 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
         if not gitutil.stage_all(wt):
             return SetupResult(plan=plan, slug=slug, error="could not stage the workflow change")
         verb = ("install" if plan.action == "create"
-                else "repair" if plan.action == "repair" else "update")
+                else "repair" if plan.action == "repair"
+                else "update the saw version in" if plan.action == "revise" else "update")
         commit = gitutil.commit_fix(
             wt, f"ci(security): {verb} the {SAW_GUARD_NAME} gate\n\n"
                 f"Pin {SAW_GUARD_ACTION}@{plan.new_ref[:12]}. Opened by `saw guard setup`.")
@@ -323,6 +345,7 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
         title = (f"ci(security): install the {SAW_GUARD_NAME} gate" if plan.action == "create"
                  else "ci(security): the worm gate reports its findings and holds no standing write"
                  if plan.action == "repair"
+                 else f"ci(security): update the {SAW_GUARD_NAME} saw version" if plan.action == "revise"
                  else f"ci(security): update the {SAW_GUARD_NAME} pin")
         with spin_status(f"opening guard PR for {slug}…", enabled=spin):
             res = proposal.submit_change_pr(wt, slug, base, branch=SETUP_BRANCH, title=title,
@@ -416,10 +439,12 @@ def render_setup(result: SetupResult, *, color: bool = False) -> str:
         return head + " Nothing to do."
 
     verb = ("install" if plan.action == "create"
-            else "repair" if plan.action == "repair" else "update the pin in")
+            else "repair" if plan.action == "repair"
+            else "update the saw version in" if plan.action == "revise" else "update the pin in")
     if result.dry_run:
-        head = paint(f"— dry run: would {verb} {plan.path}", dim, on=color) + \
-            f"  (→ {SAW_GUARD_ACTION}@{_short(plan.new_ref)})"
+        where = (f"  (saw {plan.scanner_from} → {plan.scanner_to})" if plan.action == "revise"
+                 else f"  (→ {SAW_GUARD_ACTION}@{_short(plan.new_ref)})")
+        head = paint(f"— dry run: would {verb} {plan.path}", dim, on=color) + where
         preview = (plan.content if plan.action in ("create", "repair")
                    else _repin_preview(plan))
         return head + "\n\n" + preview
@@ -437,9 +462,11 @@ def render_setup(result: SetupResult, *, color: bool = False) -> str:
 
 
 def _repin_preview(plan: SetupPlan) -> str:
-    """Show just the rewritten `uses:` line for a repin dry-run (the rest of the file is untouched)."""
+    """Show just the line a surgical plan rewrote: the `uses:` pin, or the `version:` input for a
+    saw-version revise. The rest of the file is untouched."""
+    matcher = _SCANNER_VERSION_LINE if plan.action == "revise" else _SAW_GUARD_USES_LINE
     for line in (plan.content or "").splitlines():
-        if _SAW_GUARD_USES_LINE.match(line):
+        if matcher.match(line):
             return f"  {line.strip()}"
     return ""
 
