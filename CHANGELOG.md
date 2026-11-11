@@ -21,8 +21,14 @@ reader, not the mechanism or the weakness it closed.
   no paths and no process numbers. `saw capabilities` lists it and the govern progress, verdict,
   and restore an editor reads.
 
+### Fixed
+- `saw fix amend` publishes the cleaned history over a protected branch when that branch allows
+  force-pushes, rather than always setting it aside; when the branch blocks force-pushes, the
+  message names the setting to change.
+
 ### Security
 - saw's own network connections now require TLS 1.2 or newer, refusing the retired TLS 1.0 and 1.1.
+- A scan catches a payload that hides packed, obfuscated script inside a file posing as a font or other non-code asset.
 
 ## [0.16.0] - 2026-11-04
 
