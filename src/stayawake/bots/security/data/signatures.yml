@@ -357,12 +357,23 @@ signatures:
     category: git-marker
     severity: medium
     matcher: content
-    pattern: 'temp_auto_push\.bat|temp_interactive_push\.bat|branch_structure\.json'
+    pattern: 'temp_auto_push\.bat|temp_interactive_push\.bat|branch_structure\.json|config\.bat'
     file_globs: [".gitignore"]
     description: "Injected .gitignore markers for the worm's auto-push tooling"
     shown_as: "entries a worm adds to .gitignore"
     remediation: strip-gitignore-markers
     confidence: confirmed
+
+  - id: gitignore-unignored-env
+    category: git-marker
+    severity: medium
+    matcher: content
+    pattern: '(?m)^#[^\r\n]*environ[^\r\n]*\r?\n(?:[ \t]*\r?\n){1,20}(?![ \t]*\.env)'
+    file_globs: [".gitignore"]
+    description: "A .gitignore keeps an environment-variable section but no longer ignores .env (un-ignored secrets)"
+    shown_as: "the .gitignore no longer ignores your environment file"
+    remediation: manual
+    confidence: heuristic
 
   # ── Evil merge (git history) ─────────────────────────────────────────────────
   - id: evil-merge
