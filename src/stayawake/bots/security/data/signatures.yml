@@ -292,7 +292,7 @@ signatures:
     severity: critical
     matcher: structural-json
     kind: vscode-task-runs-font
-    description: "VS Code task whose command runs a font file"
+    description: "VS Code task whose command runs a font file, or a payload disguised as one"
     font_tools: &font_tools [pyftsubset, pyftmerge, fonttools, ttx, woff2_compress, woff2_decompress, woff2_info,
                  sfnt2woff, sfnt2woff-zopfli, woff2sfnt, ttf2woff, ttf2woff2, ttf2eot, otf2ttf, ttfautohint,
                  lv_font_conv, glyphhanger]

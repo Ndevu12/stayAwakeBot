@@ -34,6 +34,7 @@ reader, not the mechanism or the weakness it closed.
 - A scan catches a payload that hides packed, obfuscated script inside a file posing as a font or other non-code asset.
 - A scan flags a `.gitignore` changed to hide a worm's tooling and to stop ignoring your environment file, which leaks committed secrets.
 - A scan catches a Python loader that pulls its payload from a blockchain transaction and runs it, as it already did for the JavaScript form.
+- A scan flags an editor task that runs a payload posing as a font, now whatever extension it hides behind, not only the real font endings.
 
 ## [0.16.0] - 2026-11-04
 
