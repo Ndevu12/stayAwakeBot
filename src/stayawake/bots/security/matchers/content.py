@@ -9,9 +9,10 @@ from stayawake.bots.security.matchers.base import Matcher, evidence, globs_ok
 from stayawake.bots.security.obfuscation.execsink import _has_exec_sink_beyond_decoding
 
 _PY_EXEC_SINK = re.compile(
-    r"\b(?:subprocess\s*\.\s*(?:run|call|check_output|check_call|Popen)"
+    r"(?:\b(?:subprocess\s*\.\s*(?:run|call|check_output|check_call|Popen)"
     r"|os\s*\.\s*(?:system|popen)"
-    r"|os\s*\.\s*exec[lv][ep]?e?)\s*\(",
+    r"|os\s*\.\s*exec[lv][ep]?e?)"
+    r"|(?<![.\w])(?:exec|eval))\s*\(",
     re.IGNORECASE,
 )
 
