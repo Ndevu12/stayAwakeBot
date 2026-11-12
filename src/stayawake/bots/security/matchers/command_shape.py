@@ -187,6 +187,15 @@ def not_plain(text: str) -> list[str]:
     return list(dict.fromkeys(reasons))
 
 
+def simple_commands(text: str) -> list[list[str]]:
+    """The simple commands a line runs, each as its words, across its pipelines and operators. Takes
+    the text. Returns the word lists, empty when it does not parse."""
+    tokens = _tokens(text)
+    if tokens is None:
+        return []
+    return [words for line in _commands(tokens) for words in line]
+
+
 def runs_downloaded_or_decoded_code(text: str) -> bool:
     """Tell whether a command line downloads or decodes code and runs it. Takes the text. Returns the
     answer."""
