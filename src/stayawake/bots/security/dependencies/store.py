@@ -24,6 +24,7 @@ class Advisory:
     osv_id: str | None = None
     aliases: tuple[str, ...] = field(default_factory=tuple)
     fixed_version: str | None = None
+    severity: str | None = None
 
 
 _CORPUS_UNSET = object()
@@ -41,12 +42,18 @@ class AdvisoryStore:
     def __init__(self, by_coordinate: dict[str, Advisory], corpus=None,
                  corpus_signature: dict[str, Any] | None = None,
                  vulnerability_signature: dict[str, Any] | None = None,
-                 corpus_loader=None):
+                 corpus_loader=None, cache_status_fn=None):
         self._by_coordinate = by_coordinate
         self._corpus_signature = corpus_signature
         self._vulnerability_signature = vulnerability_signature
         self._corpus_loader = corpus_loader
+        self._cache_status_fn = cache_status_fn
         self._corpus = _CORPUS_UNSET if corpus_loader is not None else corpus
+
+    def advisory_cache_status(self):
+        """Return the offline advisory cache's health (`db.cache_status`: presence, age), or None
+        when the CVE tier is off or a corpus was handed in directly."""
+        return self._cache_status_fn() if self._cache_status_fn is not None else None
 
     def _corpus_or_load(self):
         """The corpus, built on first access (once) — or None when there is no corpus tier."""
@@ -74,8 +81,10 @@ class AdvisoryStore:
         corpus_sig = next((s for s in signatures if s.get("corpus")), None)
         vuln_sig = next((s for s in signatures if s.get("advisory_corpus")), None)
         loader = (lambda: db.load_corpus(cache_dir)) if (corpus_sig or vuln_sig) else None
+        status_fn = (lambda: db.cache_status(cache_dir)) if vuln_sig else None
         return cls(cls._inline_index(signatures), corpus_signature=corpus_sig,
-                   vulnerability_signature=vuln_sig, corpus_loader=loader)
+                   vulnerability_signature=vuln_sig, corpus_loader=loader,
+                   cache_status_fn=status_fn)
 
     @staticmethod
     def _inline_index(signatures: list[dict[str, Any]]) -> dict[str, Advisory]:
@@ -114,7 +123,8 @@ class AdvisoryStore:
         if corpus is None:
             return []
         return [Advisory(signature=self._vulnerability_signature, osv_id=m.record.id,
-                         aliases=m.record.aliases, fixed_version=m.fixed)
+                         aliases=m.record.aliases, fixed_version=m.fixed,
+                         severity=m.record.severity)
                 for m in corpus.vulnerability_matches(purl)]
 
     def is_empty(self) -> bool:

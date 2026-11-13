@@ -20,8 +20,12 @@ reader, not the mechanism or the weakness it closed.
   still open, and what happened since the last report -- for an editor or a script to read, naming
   no paths and no process numbers. `saw capabilities` lists it and the govern progress, verdict,
   and restore an editor reads.
+- A dependency audit says when its advisory data is more than a month old, so a clean result is not
+  mistaken for one checked against current advisories.
 
 ### Changed
+- A known CVE in a dependency now surfaces at the advisory's own severity, so a critical
+  remote-code-execution flaw in a framework reads as critical instead of a flat medium.
 - stayAwakeBot is now licensed under Apache-2.0, replacing the previous AGPL-3.0-or-later or
   commercial dual license. You may use it freely, including in closed-source and commercial
   products, as long as you keep the copyright and license notices. Releases up to the previous

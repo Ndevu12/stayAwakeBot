@@ -15,12 +15,7 @@ from typing import Callable
 from stayawake.bots.security.dependencies.ecosystems import canonical_ecosystem
 from stayawake.bots.security.dependencies.external.base import (
     ExternalAuditor, ExternalFinding, run_tool)
-
-
-def _severity(vuln: dict) -> str:
-    ds = vuln.get("database_specific") or {}
-    sev = str(ds.get("severity", "")).lower()
-    return sev if sev in ("low", "moderate", "medium", "high", "critical") else "medium"
+from stayawake.bots.security.dependencies.osv import advisory_severity as _severity
 
 
 class OsvScannerAdapter(ExternalAuditor):

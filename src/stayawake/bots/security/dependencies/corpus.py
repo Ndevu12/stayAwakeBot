@@ -47,9 +47,10 @@ class AdvisoryCorpus:
             for aff in rec.affected:
                 key = (_eco(aff.ecosystem), aff.name)
                 if _covers_all_versions(aff):
-                    # Drop the version/range payload — a whole-package hit needs only id/aliases/tier.
+                    # Drop the version/range payload — a whole-package hit needs only its
+                    # id/aliases/tier/severity.
                     whole.setdefault(key, []).append(
-                        OsvRecord(rec.id, rec.aliases, rec.malicious, ()))
+                        OsvRecord(rec.id, rec.aliases, rec.malicious, (), rec.severity))
                 else:
                     bounded.setdefault(key, []).append((aff, rec))
         return cls(whole, bounded)

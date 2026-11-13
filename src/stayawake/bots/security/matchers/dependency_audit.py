@@ -51,7 +51,28 @@ class DependencyAuditMatcher(Matcher):
             findings.extend(_external_findings(target, signatures, emitted))
         elif not store.is_empty():
             _note_unaudited(target, resolved_ecosystems, self._resolvers)
+            if advisories_on and resolved_ecosystems:
+                _note_stale_advisories(target, store)
         return findings
+
+
+_ADVISORY_MAX_AGE_DAYS = 30
+
+
+def _note_stale_advisories(target, store) -> None:
+    """Append a coverage note when the advisory cache is present but older than
+    `_ADVISORY_MAX_AGE_DAYS`. Takes the target and the advisory store; returns None. An absent cache
+    is left to `--require-db` and `saw db status`."""
+    status = store.advisory_cache_status()
+    if status is None or not status.get("present"):
+        return
+    age = status.get("age_days")
+    if age is None or age <= _ADVISORY_MAX_AGE_DAYS:
+        return
+    note = (f"The advisory data is {age} days old, so newer CVEs in these dependencies may not be "
+            "flagged. Run `saw db update`.")
+    if note not in target.coverage_notes:
+        target.coverage_notes.append(note)
 
 
 def _note_unaudited(target, resolved, resolvers) -> None:
@@ -81,14 +102,16 @@ def _emit(advisory: Advisory, dep: ResolvedDependency) -> Finding:
 
 
 def _emit_advisory(advisory: Advisory, dep: ResolvedDependency) -> Finding:
-    """A CVE/GHSA advisory on a declared dependency — informational, routed OUT of the verdict."""
+    """Build a Finding for a CVE/GHSA advisory on a declared dependency, graded at the advisory's
+    severity and routed out of the verdict (`advisory_only`). Takes the advisory and the dependency;
+    returns the Finding."""
     sig = advisory.signature
     cite = f" [{advisory.osv_id}]" if advisory.osv_id else ""
     fix = vulnerability_fix(dep.purl.type, dep.purl.name, dep.purl.version,
                             advisory.fixed_version)
     return Finding(
         signature_id=sig["id"], category=sig["category"],
-        severity=Severity.parse(sig["severity"]), path=dep.source_path,
+        severity=Severity.parse(advisory.severity or sig["severity"]), path=dep.source_path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{dep.purl.coordinate} — known security advisory{cite} ({dep.source_name})",
         vector=sig["category"], advisory_only=True,

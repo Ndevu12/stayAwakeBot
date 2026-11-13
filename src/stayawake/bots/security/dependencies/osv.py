@@ -27,15 +27,28 @@ class OsvAffected:
     ranges: tuple[OsvRange, ...] = field(default_factory=tuple)
 
 
+_SEVERITY_LABELS = ("low", "moderate", "medium", "high", "critical")
+
+
+def advisory_severity(rec: dict[str, Any]) -> str:
+    """Return the advisory's qualitative severity from its `database_specific.severity` label, or
+    'medium' when the record names none. Takes a raw OSV object (or one osv-scanner vuln); returns
+    one of low|moderate|medium|high|critical."""
+    ds = rec.get("database_specific") or {}
+    sev = str(ds.get("severity", "")).lower()
+    return sev if sev in _SEVERITY_LABELS else "medium"
+
+
 @dataclass(frozen=True)
 class OsvRecord:
-    """A normalized OSV advisory: its id, cross-source aliases, malware flag, and the packages
-    (with affected versions/ranges) it names."""
+    """A normalized OSV advisory: its id, cross-source aliases, malware flag, the packages
+    (with affected versions/ranges) it names, and its qualitative severity."""
 
     id: str
     aliases: tuple[str, ...]
     malicious: bool
     affected: tuple[OsvAffected, ...]
+    severity: str = "medium"
 
 
 def is_malicious(rec: dict[str, Any]) -> bool:
@@ -105,4 +118,5 @@ def parse_osv_record(rec: dict[str, Any]) -> OsvRecord | None:
             affected.append(OsvAffected(ecosystem, name, versions, ranges))
     if not affected:
         return None
-    return OsvRecord(id=rid, aliases=aliases, malicious=is_malicious(rec), affected=tuple(affected))
+    return OsvRecord(id=rid, aliases=aliases, malicious=is_malicious(rec), affected=tuple(affected),
+                     severity=advisory_severity(rec))
