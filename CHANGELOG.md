@@ -21,6 +21,12 @@ reader, not the mechanism or the weakness it closed.
   no paths and no process numbers. `saw capabilities` lists it and the govern progress, verdict,
   and restore an editor reads.
 
+### Changed
+- stayAwakeBot is now licensed under Apache-2.0, replacing the previous AGPL-3.0-or-later or
+  commercial dual license. You may use it freely, including in closed-source and commercial
+  products, as long as you keep the copyright and license notices. Releases up to the previous
+  version remain under their original terms.
+
 ### Fixed
 - `saw fix amend` publishes the cleaned history over a protected branch when that branch allows
   force-pushes, rather than always setting it aside; when the branch blocks force-pushes, the
