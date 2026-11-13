@@ -595,7 +595,7 @@ signatures:
     category: supply-chain-vuln
     severity: medium
     matcher: dependency-audit
-    description: "Declared/locked dependency has a known security advisory (CVE/GHSA) — informational"
+    description: "Declared/locked dependency has a known security advisory (CVE/GHSA), at the advisory's severity"
     shown_as: "a dependency with a known vulnerability"
     remediation: manual
     advisory_corpus: true
