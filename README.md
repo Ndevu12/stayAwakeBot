@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://pypi.org/project/stayawakebot/"><img alt="PyPI" src="https://img.shields.io/pypi/v/stayawakebot"></a>
   <a href="https://pypi.org/project/stayawakebot/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/stayawakebot"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0--or--later%20%7C%20commercial-blue"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
 
 ---
@@ -223,12 +223,8 @@ stayawake-health-check --config config/urls.yml
 
 ## License
 
-stayAwakeBot is **dual-licensed**:
-
-- **[AGPL-3.0-or-later](LICENSE)** — free and open source. You must preserve attribution, and if you
-  modify it and convey it or offer it over a network (e.g. as a hosted service), you must release
-  your corresponding source under the AGPL too.
-- **[Commercial license](COMMERCIAL-LICENSE.md)** — a paid, proprietary-use option for closed-source
-  or proprietary-SaaS use without the AGPL's source-disclosure obligations. For terms,
-  [contact](mailto:saw@ndevuspace.com).
+stayAwakeBot is open-source software licensed under the **[Apache License, Version 2.0](LICENSE)** —
+free for any use, including in closed-source and commercial products, provided you preserve the
+copyright and license notices. See [`LICENSE`](LICENSE) for the full text and [`NOTICE`](NOTICE) for
+attribution.
 

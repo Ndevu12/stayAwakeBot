@@ -40,5 +40,5 @@ While a false positive is open, you can suppress that one signature on that one 
 own config — see [configuration](https://saw-docs.ndevuspace.com/latest/reference/configuration/). The allowlist is yours and
 must name a signature, so it never silences whatever lands on that path next.
 
-This is a small project. Issues get read; there is no support SLA, and no commercial-support
-channel beyond the [commercial licence](COMMERCIAL-LICENSE.md) [contact](mailto:saw@ndevuspace.com).
+This is a small project. Issues get read; there is no support SLA. For anything that does not belong
+in a public issue, [reach out](mailto:saw@ndevuspace.com).

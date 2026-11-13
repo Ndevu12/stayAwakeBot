@@ -20,7 +20,7 @@ site_description: >-
   scan a repository, read the verdict, gate CI, and audit the machine it runs on.
 site_author: Jean Paul Elisa NIYOKWIZERWA
 copyright: >-
-  Dual-licensed AGPL-3.0-or-later or commercial — see COMMERCIAL-LICENSE.md
+  Copyright 2026 Jean Paul Elisa NIYOKWIZERWA — licensed under Apache-2.0
 
 repo_url: https://github.com/Ndevu12/stayAwakeBot
 repo_name: Ndevu12/stayAwakeBot
