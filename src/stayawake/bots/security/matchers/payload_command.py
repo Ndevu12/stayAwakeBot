@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 import shlex
 
-from stayawake.bots.security.matchers.command_shape import not_plain, runs_downloaded_or_decoded_code
+from stayawake.bots.security.matchers.command_shape import (
+    name_of, not_plain, runs_downloaded_or_decoded_code, simple_commands)
 from stayawake.utils.invocation import resolve_invocation
 
 FONT_FILE = re.compile(r"\.(?:woff2?|ttf|otf|eot)\b", re.IGNORECASE)
@@ -18,6 +19,25 @@ _SHORT_FLAGS = re.compile(r"-[A-Za-z]{1,20}")
 _CODE_TAKING_LETTERS = frozenset("eEpcxr")
 _PLAIN_PATH = re.compile(r"[\w./@+-]{1,500}")
 _FONT_ENDING = re.compile(r"\.(?:woff2?|ttf|otf|eot)$", re.IGNORECASE)
+_NODE = frozenset({"node", "nodejs"})
+_JS_SCRIPT_ENDING = re.compile(r"\.[mc]?[jt]sx?$", re.IGNORECASE)
+
+
+def _runs_a_disguised_asset(line: str) -> bool:
+    """Tell whether Node is told to run a file whose extension is not JavaScript or TypeScript — a
+    payload posing as a font or other asset, such as `node fa-brand-400.orc`. Takes the line; returns
+    the answer."""
+    for words in simple_commands(line):
+        invocation = resolve_invocation(words)
+        if name_of(invocation.interpreter or "") not in _NODE:
+            continue
+        path = invocation.payload_path
+        if not path or path == invocation.interpreter:
+            continue
+        name = path.rsplit("/", 1)[-1]
+        if "." in name and not _JS_SCRIPT_ENDING.search(name):
+            return True
+    return False
 
 
 def plain_call(line: str) -> list[str] | None:
@@ -80,11 +100,11 @@ def _only_writes_fonts(line: str) -> bool:
 
 
 def may_run_a_font(line: str, font_tools: frozenset[str], *, lifts: bool = True) -> bool:
-    """Tell whether a command line names a font file it may run. Takes the line, the font tools' names and
-    whether a plain call of a font tool, or a line that only writes fonts, is let through. Returns the
-    answer."""
+    """Tell whether a command line runs a font file, or hands Node a file posing as one. Takes the line,
+    the font tools' names and whether a plain call of a font tool, or a line that only writes fonts, is
+    let through. Returns the answer."""
     if not FONT_FILE.search(line):
-        return False
+        return _runs_a_disguised_asset(line)
     return not (lifts and (_one_call_of_a_font_tool(line, font_tools) or _only_writes_fonts(line)))
 
 

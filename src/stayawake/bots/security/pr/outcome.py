@@ -241,7 +241,7 @@ _PHRASE = {
         "the replacement would drop content the finding does not cover",
     Cause.CAPTURE_FAILED: "the previous commits could not be captured first",
     Cause.REPLAY_CHANGED_UNRELATED_COMMITS: "replaying changed commits it should not have",
-    Cause.BRANCH_PROTECTED: "the branch is protected — the amended history is on",
+    Cause.BRANCH_PROTECTED: "the branch blocks force-pushes — allow force-pushes on it, or remove its protection, then run again; the amended history is on",
     Cause.PROTECTION_UNKNOWN:
         "the protection rule could not be read — the amended history is on",
     Cause.PUSH_NOT_CONFIRMED:

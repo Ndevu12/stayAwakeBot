@@ -18,7 +18,7 @@ from stayawake.lib import git as gitutil
 from stayawake.utils.render import SEVERITY, paint
 from stayawake.bots.security.guard.constants import (
     SAW_GUARD_ACTION, SAW_GUARD_NAME, SAW_GUARD_OWNER, SAW_GUARD_REPO, SAW_GUARD_USES, WORKFLOW_DIR,
-    SAW_GUARD_FILE)
+    SAW_GUARD_FILE, SAW_SCANNER_OWNER, SAW_SCANNER_REPO)
 
 _SAW_GUARD_USES = re.compile(rf"^{SAW_GUARD_USES}@(?P<ref>\S+?)\s*(?:#.*)?$", re.IGNORECASE)
 _SHA = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
@@ -369,11 +369,51 @@ def freshness(ref: SawGuardRef, token: str | None = None, *, latest: LatestSawGu
                      "" if ok else f"pinned {ref.ref[:12]}…, {latest.tag} is {latest_sha[:12]}…")
 
 
+def latest_scanner_version(token: str | None = None) -> str | None:
+    """Resolve the latest published saw (`stayawakebot`) release version, or None when unreachable."""
+    rel = github_api.latest_release(SAW_SCANNER_OWNER, SAW_SCANNER_REPO, token)
+    tag = rel.get("tag_name") if isinstance(rel, dict) else None
+    if not isinstance(tag, str):
+        return None
+    version = tag.lstrip("vV").strip()
+    return version if re.fullmatch(r"\d+\.\d+\.\d+", version) else None
+
+
+def pinned_scanner_version(ref: SawGuardRef) -> str | None:
+    """The scanner version `ref` pins through its `version:` input, or None when it pins none."""
+    raw = ref.inputs if isinstance(ref.inputs, dict) else {}
+    value = next((str(v).strip().strip("'\"") for k, v in raw.items()
+                  if str(k).strip().lower() == "version"), "")
+    return value if re.fullmatch(r"\d+\.\d+\.\d+", value) else None
+
+
+def _older(current: str, latest: str) -> bool:
+    return tuple(map(int, current.split("."))) < tuple(map(int, latest.split(".")))
+
+
+def scanner_freshness(ref: SawGuardRef, token: str | None = None, *,
+                      latest_version: str | None = None) -> Freshness:
+    """Grade the scanner version `ref` pins against the latest saw release. Takes the gate, a token,
+    and optionally a precomputed latest version. Returns 'floating' when no version is pinned,
+    'unknown' when the release cannot be read, 'behind' when the pinned version trails the latest,
+    else 'fresh'."""
+    latest = latest_version if latest_version is not None else latest_scanner_version(token)
+    if latest is None:
+        return Freshness("unknown", detail="couldn't reach the saw releases API")
+    current = pinned_scanner_version(ref)
+    if current is None:
+        return Freshness("floating", latest, "no saw version pinned — installs the latest at run time")
+    if _older(current, latest):
+        return Freshness("behind", latest, f"pins saw {current}, latest release is {latest}")
+    return Freshness("fresh", latest)
+
+
 @dataclass
 class GuardStatus:
     present: bool
     ref: SawGuardRef | None = None
     fresh: Freshness | None = None
+    scanner: "Freshness | None" = None
     required: bool | None = None
     protected_by: str = ""
     branch: str | None = None
@@ -392,6 +432,8 @@ class GuardStatus:
         if not self.present or self.ref is None or self.ref.pin != "sha":
             return False
         if self.fresh is not None and self.fresh.state == "behind":
+            return False
+        if self.scanner is not None and self.scanner.state == "behind":
             return False
         cfg = self.config
         if cfg is not None:
@@ -489,7 +531,8 @@ def remote_gate(slug: str, token: str | None) -> SawGuardRef | None:
 
 def check(*, repo: str | Path | None = None, slug: str | None = None, branch: str = "main",
           token: str | None = None, offline: bool = False,
-          latest: "LatestSawGuard | None" = None) -> GuardStatus:
+          latest: "LatestSawGuard | None" = None,
+          latest_scanner: str | None = None) -> GuardStatus:
     """Inspect one repo's SAW Guard gate. Local (a working-tree `repo` path) or remote (`slug`,
     `owner/name`, via the API). `offline` skips the freshness network call; a sweep passes a
     precomputed `latest` so freshness is graded without a per-repo release lookup."""
@@ -516,14 +559,16 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
 
     ref = gate.saw_guard
     fresh = None if offline else freshness(ref, token, latest=latest)
+    scanner = None if offline else scanner_freshness(ref, token, latest_version=latest_scanner)
     required: bool | None = None
     protected_by = ""
     if slug and token:
         owner, _, name = slug.partition("/")
         prot = github_branch_protection.read(owner, name, branch, token)
         required, protected_by = ref.job in prot.required_checks, prot.held_by if prot.protected else ""
-    return GuardStatus(present=True, ref=ref, fresh=fresh, required=required, protected_by=protected_by,
-                       config=grade_config(ref), branch=branch if slug else None)
+    return GuardStatus(present=True, ref=ref, fresh=fresh, scanner=scanner, required=required,
+                       protected_by=protected_by, config=grade_config(ref),
+                       branch=branch if slug else None)
 
 
 def render(status: GuardStatus, *, color: bool = False) -> str:

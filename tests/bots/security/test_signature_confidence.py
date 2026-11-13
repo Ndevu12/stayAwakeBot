@@ -18,6 +18,7 @@ GRADED_BELOW_CONFIRMED = {
     "ghost-package": "heuristic",
     "git-exec-runs": "informational",
     "git-exec-suspicious": "heuristic",
+    "gitignore-unignored-env": "heuristic",
     "loader-clientcode-error": "heuristic",
     "loader-decoder-fn": "heuristic",
     "npm-lifecycle-agent-yolo": "heuristic",
