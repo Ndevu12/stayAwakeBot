@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-13
+
 ### Added
 - A scan names a project it found and the lockfile to commit so saw can audit its
   dependencies -- a Dart, Rust, .NET or Gradle project with no lockfile was silent before.
