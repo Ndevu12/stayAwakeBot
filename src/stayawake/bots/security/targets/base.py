@@ -28,6 +28,12 @@ SOURCE_EXTS = CODE_EXTS | {
     ".vue", ".svelte", ".md", ".yml", ".yaml", ".html", ".htm", ".css", ".map",
 }
 
+# Text formats that commonly hold one long line.
+DENSE_TEXT_EXTS = {
+    ".svg", ".svgz", ".scss", ".sass", ".less", ".xml", ".csv", ".tsv",
+    ".json5", ".toml", ".ini", ".txt", ".rst", ".lock",
+}
+
 
 _SOURCE_WINDOW_OVERLAP = 65_536
 _RUN_OF_TEXT = re.compile(r"[\t\n\r\x20-\x7e]{16,}")

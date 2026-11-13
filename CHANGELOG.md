@@ -21,8 +21,26 @@ reader, not the mechanism or the weakness it closed.
   no paths and no process numbers. `saw capabilities` lists it and the govern progress, verdict,
   and restore an editor reads.
 
+### Changed
+- stayAwakeBot is now licensed under Apache-2.0, replacing the previous AGPL-3.0-or-later or
+  commercial dual license. You may use it freely, including in closed-source and commercial
+  products, as long as you keep the copyright and license notices. Releases up to the previous
+  version remain under their original terms.
+
+### Fixed
+- `saw fix amend` publishes the cleaned history over a protected branch when that branch allows
+  force-pushes, rather than always setting it aside; when the branch blocks force-pushes, the
+  message names the setting to change.
+- `saw guard setup` bumps a gate's stale saw version even when its action pin is current, and
+  `saw guard check` and `saw guard drift` report a scanner version that has fallen behind, not
+  only the action pin.
+
 ### Security
 - saw's own network connections now require TLS 1.2 or newer, refusing the retired TLS 1.0 and 1.1.
+- A scan catches a payload that hides packed, obfuscated script inside a file posing as a font or other non-code asset.
+- A scan flags a `.gitignore` changed to hide a worm's tooling and to stop ignoring your environment file, which leaks committed secrets.
+- A scan catches a Python loader that pulls its payload from a blockchain transaction and runs it, as it already did for the JavaScript form.
+- A scan flags an editor task that runs a payload posing as a font, now whatever extension it hides behind, not only the real font endings.
 
 ## [0.16.0] - 2026-11-04
 

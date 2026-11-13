@@ -1210,11 +1210,12 @@ def _collect_remote_heads(repo: Path, slug: str, names: list[str],
 
 def _destination(slug: str, branch: str, token: str | None,
                  sha12: str) -> tuple[str, Reason | None]:
-    """Where this branch's amended history goes, as `(branch, reason)`."""
+    """Where this branch's amended history goes, as `(branch, reason)` — the branch itself when it
+    is unprotected or its protection allows force-pushes, otherwise an aside branch."""
     protection = authority.ref_protection(slug, branch, token)
-    if protection.protected is False:
+    if protection.protected is False or protection.allows_force_push is True:
         return branch, None
-    cause = Cause.BRANCH_PROTECTED if protection.protected else Cause.PROTECTION_UNKNOWN
+    cause = Cause.BRANCH_PROTECTED if protection.allows_force_push is False else Cause.PROTECTION_UNKNOWN
     aside = f"security/amend-{sha12}"
     return aside, Reason(cause, aside)
 

@@ -109,5 +109,17 @@ class TestTheCorroboratorNameIsRegistered(unittest.TestCase):
                     self.assertIn(name, CORROBORATORS)
 
 
+class TestThePythonExecAndEvalBuiltinsAreSinks(unittest.TestCase):
+    """A Python loader runs its fetched stage through the `exec`/`eval` builtins, not only
+    `subprocess`/`os.exec` — but a regex `.exec()` method call is not a sink."""
+
+    def test_python_exec_and_eval_corroborate_but_a_method_exec_does_not(self):
+        from stayawake.bots.security.matchers.content import _runs_fetched_stage
+        self.assertTrue(_runs_fetched_stage("exec(base64.b64decode(data))"))
+        self.assertTrue(_runs_fetched_stage("result = eval(decoded_input)"))
+        self.assertFalse(_runs_fetched_stage("m = re.compile('x').exec(source)"))
+        self.assertFalse(_runs_fetched_stage("# do not eval anything here"))
+
+
 if __name__ == "__main__":
     unittest.main()

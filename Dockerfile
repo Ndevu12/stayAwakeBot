@@ -33,7 +33,7 @@ ARG VERSION=0.0.0.dev0+docker
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION}
 
 # Copy only what the wheel build needs (matches the Dockerfile's whitelist .dockerignore).
-COPY --chown=builder:builder pyproject.toml README.md LICENSE COMMERCIAL-LICENSE.md CHANGELOG.md ./
+COPY --chown=builder:builder pyproject.toml README.md LICENSE NOTICE CHANGELOG.md ./
 COPY --chown=builder:builder src ./src
 
 RUN pip install --no-cache-dir --user build \
@@ -44,7 +44,7 @@ FROM ${PYTHON_IMAGE} AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/Ndevu12/stayAwakeBot" \
       org.opencontainers.image.description="StayAwakeBot — supply-chain worm hunter + uptime sentinel" \
-      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 # Debian security updates are applied at build time: the digest-pinned base lags upstream rebuilds,
 # and the release gate refuses to publish an image carrying a fixable CRITICAL or HIGH.
