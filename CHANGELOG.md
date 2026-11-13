@@ -45,6 +45,7 @@ reader, not the mechanism or the weakness it closed.
 - A scan flags a `.gitignore` changed to hide a worm's tooling and to stop ignoring your environment file, which leaks committed secrets.
 - A scan catches a Python loader that pulls its payload from a blockchain transaction and runs it, as it already did for the JavaScript form.
 - A scan flags an editor task that runs a payload posing as a font, now whatever extension it hides behind, not only the real font endings.
+- A scan flags a real credential committed as a `${VAR:…}` default in a configuration file, with the value redacted, so a secret that silently falls back into use is caught.
 
 ## [0.16.0] - 2026-11-04
 

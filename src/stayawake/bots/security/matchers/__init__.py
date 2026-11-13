@@ -20,6 +20,7 @@ from stayawake.bots.security.matchers.installed_package_audit import InstalledPa
 from stayawake.bots.security.matchers.symlink import SymlinkMatcher
 from stayawake.bots.security.matchers.git_exec_surface import GitExecSurfaceMatcher
 from stayawake.bots.security.matchers.task_package_script import TaskPackageScriptMatcher
+from stayawake.bots.security.posture.config_secrets import ConfigSecretMatcher
 
 REGISTRY: dict[str, Matcher] = {
     m.handles: m for m in (
@@ -27,7 +28,7 @@ REGISTRY: dict[str, Matcher] = {
         HeuristicMatcher(), GitHistoryMatcher(), ObfuscationMatcher(), DestructiveMatcher(),
         NpmManifestMatcher(), WorkflowYamlMatcher(), DependencyAuditMatcher(),
         InstalledPackageAuditMatcher(), SymlinkMatcher(), GitExecSurfaceMatcher(),
-        TaskPackageScriptMatcher(),
+        TaskPackageScriptMatcher(), ConfigSecretMatcher(),
     )
 }
 

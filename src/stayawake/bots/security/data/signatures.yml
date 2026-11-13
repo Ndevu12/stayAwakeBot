@@ -601,6 +601,17 @@ signatures:
     advisory_corpus: true
     confidence: confirmed
 
+  # ── Posture: a real credential committed as a ${VAR:default} fallback in a config file ───
+  - id: config-credential-default
+    category: committed-secret
+    severity: high
+    matcher: config-secret
+    kind: config-credential-default
+    description: "A configuration file commits a real credential as a ${VAR:default} fallback"
+    shown_as: "a committed credential in a configuration default"
+    remediation: manual
+    confidence: heuristic
+
   # ── GitHub Actions workflow persistence / camouflage (.github/workflows/*.yml) ───
   - id: workflow-injection-run
     category: workflow-autorun
