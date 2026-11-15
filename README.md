@@ -221,6 +221,11 @@ stayawake-health-check --config config/urls.yml
 - [Security policy](SECURITY.md) — how to report a security issue privately
 - [Code of conduct](CODE_OF_CONDUCT.md) — what taking part here commits you to
 
+## Support the project
+
+`saw` is free and open source. If it protects your work or your organisation, you can sponsor its
+development through **[GitHub Sponsors](https://github.com/sponsors/Ndevu12)**.
+
 ## License
 
 stayAwakeBot is open-source software licensed under the **[Apache License, Version 2.0](LICENSE)** —
