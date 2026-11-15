@@ -10,6 +10,11 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
 
+<p align="center">
+  <code>saw</code> is free and open source. If it protects your work or your organisation, you can
+  sponsor its development through <a href="https://github.com/sponsors/Ndevu12"><strong>GitHub Sponsors</strong></a>.
+</p>
+
 ---
 
 A single compromised dependency is how one package becomes an organisation-wide incident.
