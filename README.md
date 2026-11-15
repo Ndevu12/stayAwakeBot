@@ -15,9 +15,8 @@
 </p>
 
 <p align="center">
-  <code>saw</code> is free, open source and built by an independent maintainer.<br>
-  If it protects your machines, your repositories or your organisation,
-  <a href="https://github.com/sponsors/Ndevu12"><strong>sponsoring it</strong></a> keeps it independent and helps it grow.
+  <code>saw</code> is free and open source. If it protects your machines, your repositories or your
+  organisation, consider <a href="https://github.com/sponsors/Ndevu12"><strong>sponsoring</strong></a> its development.
 </p>
 
 ---
