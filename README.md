@@ -11,8 +11,13 @@
 </p>
 
 <p align="center">
-  <code>saw</code> is free and open source. If it protects your work or your organisation, you can
-  sponsor its development through <a href="https://github.com/sponsors/Ndevu12"><strong>GitHub Sponsors</strong></a>.
+  <a href="https://github.com/sponsors/Ndevu12"><img alt="Sponsor saw on GitHub" src="https://img.shields.io/badge/Sponsor%20saw-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white"></a>
+</p>
+
+<p align="center">
+  <code>saw</code> is free, open source and built by an independent maintainer.<br>
+  If it protects your machines, your repositories or your organisation,
+  <a href="https://github.com/sponsors/Ndevu12"><strong>sponsoring it</strong></a> keeps it independent and helps it grow.
 </p>
 
 ---
