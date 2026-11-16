@@ -1,0 +1,158 @@
+# The outside crates saw may use. Each one is accepted for now, not for good: it names the
+# milestone where it is reviewed for replacement by saw's own code. Adding a crate here, or a
+# name to `locked`, needs the maintainer's approval first.
+
+# Licences an outside crate may be used under. An "OR" choice needs one of them; "AND" needs all.
+licences = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "CDLA-Permissive-2.0"]
+licence_exceptions = ["LLVM-exception"]
+
+# Crates that compile C or link a system library when they build.
+c_build_crates = ["cc", "cmake", "bindgen", "pkg-config", "vcpkg", "autotools", "openssl-src"]
+# "-sys" crates that are pure Rust bindings and build no C.
+sys_crates_without_c = ["windows-sys", "js-sys", "core-foundation-sys", "linux-raw-sys"]
+
+[c_build_exceptions]
+cc = "Locked only through iana-time-zone-haiku, which is built on Haiku alone."
+
+# The crates a manifest may name. `scope` limits which saw crates may use it; `version`,
+# `default_features` and `features` are what the decision fixed.
+[direct.regex]
+review = "M2"
+[direct.serde]
+review = "after the YAML review"
+[direct.serde_json]
+review = "after the YAML review"
+[direct.serde-saphyr]
+review = "after M2"
+default_features = false
+features = ["deserialize"]
+[direct.roxmltree]
+review = "M5"
+[direct.flate2]
+review = "M8"
+[direct.toml]
+review = "M8"
+default_features = false
+features = ["std", "parse"]
+[direct.unicode-properties]
+review = "M2"
+version = "=0.1.4"
+[direct.unicode-normalization]
+review = "M2"
+version = "=0.1.25"
+[direct.sha2]
+review = "kept: cryptography is never hand-written"
+[direct.libc]
+review = "M1"
+[direct.windows-sys]
+review = "M1"
+[direct.rmcp]
+review = "M7"
+scope = ["saw-mcp"]
+[direct.tokio]
+review = "M7"
+scope = ["saw-mcp"]
+[direct.schemars]
+review = "M7"
+scope = ["saw-mcp"]
+
+# Every outside crate in saw's lock files. The list only shrinks: a crate that leaves the lock is
+# removed here, and a new one needs the maintainer's approval.
+[locked]
+crates = [
+  "android_system_properties",
+  "autocfg",
+  "base64",
+  "bitflags",
+  "bumpalo",
+  "bytes",
+  "cc",
+  "cfg-if",
+  "cfg_aliases",
+  "chrono",
+  "core-foundation-sys",
+  "darling",
+  "darling_core",
+  "darling_macro",
+  "dyn-clone",
+  "equivalent",
+  "errno",
+  "find-msvc-tools",
+  "futures",
+  "futures-channel",
+  "futures-core",
+  "futures-executor",
+  "futures-io",
+  "futures-macro",
+  "futures-sink",
+  "futures-task",
+  "futures-util",
+  "getrandom",
+  "hashbrown",
+  "iana-time-zone",
+  "iana-time-zone-haiku",
+  "ident_case",
+  "indexmap",
+  "itoa",
+  "js-sys",
+  "libc",
+  "log",
+  "memchr",
+  "mio",
+  "nix",
+  "num-traits",
+  "once_cell",
+  "pastey",
+  "pin-project-lite",
+  "proc-macro2",
+  "process-wrap",
+  "quote",
+  "r-efi",
+  "ref-cast",
+  "ref-cast-impl",
+  "rmcp",
+  "rmcp-macros",
+  "rustversion",
+  "schemars",
+  "schemars_derive",
+  "serde",
+  "serde_core",
+  "serde_derive",
+  "serde_derive_internals",
+  "serde_json",
+  "shlex",
+  "signal-hook-registry",
+  "slab",
+  "socket2",
+  "strsim",
+  "syn",
+  "thiserror",
+  "thiserror-impl",
+  "tokio",
+  "tokio-macros",
+  "tokio-stream",
+  "tokio-util",
+  "tracing",
+  "tracing-attributes",
+  "tracing-core",
+  "unicode-ident",
+  "uuid",
+  "wasi",
+  "wasm-bindgen",
+  "wasm-bindgen-macro",
+  "wasm-bindgen-macro-support",
+  "wasm-bindgen-shared",
+  "windows",
+  "windows-collections",
+  "windows-core",
+  "windows-future",
+  "windows-implement",
+  "windows-interface",
+  "windows-link",
+  "windows-numerics",
+  "windows-result",
+  "windows-strings",
+  "windows-sys",
+  "windows-threading",
+  "zmij",
+]

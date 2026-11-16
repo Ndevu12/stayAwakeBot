@@ -1,0 +1,20 @@
+[package]
+name = "saw-cli"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "saw"
+path = "src/main.rs"
+
+[dependencies]
+saw-model = { path = "../saw-model" }
+saw-engine = { path = "../saw-engine" }
+saw-domains = { path = "../saw-domains" }
+saw-act = { path = "../saw-act" }
+saw-present = { path = "../saw-present" }
+
+[lints]
+workspace = true

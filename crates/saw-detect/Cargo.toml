@@ -1,0 +1,13 @@
+[package]
+name = "saw-detect"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+saw-model = { path = "../saw-model" }
+saw-platform = { path = "../saw-platform" }
+
+[lints]
+workspace = true

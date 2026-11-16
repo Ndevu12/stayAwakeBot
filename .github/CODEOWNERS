@@ -8,4 +8,10 @@
 /.github/workflows/security-sentinel.yml          @Ndevu12
 /.github/actions/worm-scan/                       @Ndevu12
 
+/Cargo.toml                                       @Ndevu12
+/Cargo.lock                                       @Ndevu12
+/crates/dependencies.toml                         @Ndevu12
+/crates/layers.toml                               @Ndevu12
+/tests/test_rust_workspace.py                     @Ndevu12
+
 /.github/CODEOWNERS                               @Ndevu12

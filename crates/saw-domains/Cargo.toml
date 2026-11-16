@@ -1,0 +1,13 @@
+[package]
+name = "saw-domains"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+saw-model = { path = "../saw-model" }
+saw-engine = { path = "../saw-engine" }
+
+[lints]
+workspace = true
