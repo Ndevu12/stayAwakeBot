@@ -13,5 +13,12 @@
 /crates/dependencies.toml                         @Ndevu12
 /crates/layers.toml                               @Ndevu12
 /tests/test_rust_workspace.py                     @Ndevu12
+/tests/test_rust_source_homes.py                  @Ndevu12
+/tests/test_rust_locked_crates_advisories.py      @Ndevu12
+
+/crates/saw-detect/                               @Ndevu12
+/crates/saw-engine/                               @Ndevu12
+/crates/saw-domains/                              @Ndevu12
+/crates/saw-act/                                  @Ndevu12
 
 /.github/CODEOWNERS                               @Ndevu12
