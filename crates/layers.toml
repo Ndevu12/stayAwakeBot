@@ -1,0 +1,16 @@
+# The layers of the Rust workspace, lowest first. A crate may depend only on crates of a lower
+# layer, never on its own layer or a higher one. A new crate is placed here before it is used.
+
+unsafe_allowed_in = "saw-platform"
+
+[layer]
+saw-model = 0
+saw-platform = 1
+saw-detect = 2
+saw-engine = 3
+saw-domains = 4
+saw-act = 4
+saw-present = 4
+saw-cli = 5
+saw-mcp = 5
+saw-git-standin = 5
