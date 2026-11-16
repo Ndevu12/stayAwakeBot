@@ -115,6 +115,17 @@ jobs:
       - name: Test the Rust workspace
         run: cargo test --workspace --locked
 
+      - name: Build the Rust workspace for every platform
+        run: |
+          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl \
+            aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-gnullvm aarch64-pc-windows-gnullvm
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            cargo build --workspace --locked --release --target "$target"
+          done
+          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-gnullvm aarch64-pc-windows-gnullvm; do
+            cargo check --workspace --locked --target "$target"
+          done
+
       - name: Check the Rust workspace rules
         run: |
           cargo fetch --locked
