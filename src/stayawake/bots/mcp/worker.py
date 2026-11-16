@@ -9,6 +9,7 @@ from typing import TextIO
 
 from stayawake.bots.mcp.identity import files_identity
 from stayawake.utils import exitcodes
+from stayawake.utils.release import RELEASE
 
 _AUDIT_VERDICTS = ("safe", "safe-once-confirmed", "unsafe", "incomplete")
 
@@ -148,7 +149,8 @@ class Session:
 
 
 def handle(session: Session, request: dict) -> dict:
-    """Answer one request. Takes the session and the request. Returns the JSON-RPC reply."""
+    """Answer one request. Takes the session and the request. Returns the JSON-RPC reply, which
+    names the saw release that produced it."""
     request_id = request.get("id")
     method = request.get("method")
     params = request.get("params")
@@ -172,8 +174,8 @@ def handle(session: Session, request: dict) -> dict:
         body = {"verdict": "not verified"}
     if body.get("verdict") == "not verified" and "document" not in body:
         return {"jsonrpc": "2.0", "id": request_id,
-                "error": {"code": -32000, "message": "not verified"}}
-    return {"jsonrpc": "2.0", "id": request_id, "result": body}
+                "error": {"code": -32000, "message": "not verified", "data": {"release": RELEASE}}}
+    return {"jsonrpc": "2.0", "id": request_id, "result": {**body, "release": RELEASE}}
 
 
 def _write(stdout: TextIO, payload: dict) -> bool:

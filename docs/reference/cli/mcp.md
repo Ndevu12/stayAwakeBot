@@ -15,7 +15,8 @@ The tools are `saw_scan_folder`, `saw_scan_files`, `saw_verdict`, `saw_audit_sum
 answer is the same document as [`saw scan --json`](scan.md). An audit answer is the same document
 as [`saw audit --json`](audit.md). The first line of each answer is the verdict: clean, infected,
 suspicious, residue, or not verified. An audit says safe, safe once you confirm the items it
-names, unsafe, or that it did not finish.
+names, unsafe, or that it did not finish. The last line names the saw release that gave the
+answer, such as `saw 0.17.0`, so an answer from an older saw can be told apart.
 
 A later question about a folder that has not changed reuses that result. The first audit in a
 session stands until the agent asks for it again.
