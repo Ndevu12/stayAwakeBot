@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- Every `saw mcp` answer names the saw release that gave it, so an agent can tell a verdict from
+  an older saw apart from the current one's.
+
 ### Security
 - The editor integration (`saw mcp` and the git stand-in) is built on an MCP library with no
   known security advisory.
