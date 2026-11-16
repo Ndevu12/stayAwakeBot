@@ -44,11 +44,13 @@ maintainer before opening the pull request.
 cargo build --workspace                                                # this machine
 cargo build --workspace --release --target x86_64-unknown-linux-musl   # static Linux, x86_64
 cargo build --workspace --release --target aarch64-unknown-linux-musl  # static Linux, arm64
-cargo check --workspace --target x86_64-pc-windows-gnullvm             # Windows, type-checked
+cargo build --workspace --release --target x86_64-pc-windows-gnullvm   # Windows, x86_64
+cargo build --workspace --release --target aarch64-pc-windows-gnullvm  # Windows, arm64
 ```
 
 Add a target once with `rustup target add <target>`. Linux builds need nothing beyond the Rust
-toolchain.
+toolchain. Windows builds need [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) with its `bin`
+folder on `PATH`. A Windows binary needs only what Windows 10 and later provide.
 
 ## Checks
 
