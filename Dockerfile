@@ -7,7 +7,7 @@
 # Base is pinned by DIGEST, never a mutable tag (same doctrine as the SHA-pinned Actions).
 # Refresh the digest deliberately:  docker buildx imagetools inspect python:3.14-slim
 # Refresh it in every release PR: the pin is fixed, the advisory feed is not. Multi-arch index digest.
-ARG PYTHON_IMAGE=python:3.14-slim@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966
+ARG PYTHON_IMAGE=python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 
 # ───────────────────────── builder: build the wheel from source ─────────────────────────
 FROM ${PYTHON_IMAGE} AS builder
