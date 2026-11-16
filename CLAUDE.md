@@ -40,10 +40,14 @@ report, remediate (PR-only), prevent, plus dependency-CVE auditing and local hyg
 10. **Tell the user what they deserve to know.** User-facing text states the verdict, what it covers,
    whether it is safe to act and the command to run — never how saw decides, a map of where it looks,
    or commentary on the tool. Tone and brevity work may reword it, never drop it. → `saw-overview`.
+11. **saw is being rebuilt in Rust on `rebuild/one-engine`.** `main` takes maintenance only (security
+   fixes and signature data). Rebuild work uses `rebuild/<topic>` branches into `rebuild/one-engine`,
+   `main` is merged into it weekly, and it merges into `main` once, at the merge gate. → `rust-rebuild`.
 
 ## Skills index
 
-`saw-overview` · `engineering-standard` · `working-with-this-codebase` · `shipping-changes` — see
+`saw-overview` · `engineering-standard` · `working-with-this-codebase` · `shipping-changes` ·
+`rust-rebuild` — see
 `.claude/skills/README.md`, which also states the rule these follow: **skills publish obligations,
 never detection mechanisms.**
 
