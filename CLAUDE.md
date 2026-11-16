@@ -23,7 +23,9 @@ report, remediate (PR-only), prevent, plus dependency-CVE auditing and local hyg
    CHANGELOG `[Unreleased]` in the same PR; signed commits; no `--admin`; merging/releasing are the
    maintainer's. → `shipping-changes`.
 4. **Changes under `src/stayawake/bots/security/**` carry additional required checks and review
-   obligations.** Agree the approach with the maintainer **before** opening the PR.
+   obligations.** Agree the approach with the maintainer **before** opening the PR. On the Rust
+   rebuild the same holds for `crates/saw-detect`, `crates/saw-engine`, `crates/saw-domains` and
+   `crates/saw-act`.
 5. **Adversarially verify security-critical changes and gate the push** — parallel refuters, with the
    lens matched to the risk, re-verified until clean.
 6. **Respect the layers** `utils→lib→core→bots→cli` (import down-only; inject callables up), enforced

@@ -14,3 +14,9 @@ saw-present = 4
 saw-cli = 5
 saw-mcp = 5
 saw-git-standin = 5
+
+# Where each capability lives. Code anywhere else in the workspace may not use it.
+[home]
+external_programs = "crates/saw-platform/src/programs"
+network = "crates/saw-platform/src/network"
+regex = "crates/saw-detect/src/patterns"

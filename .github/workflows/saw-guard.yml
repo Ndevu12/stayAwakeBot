@@ -1,14 +1,14 @@
 name: SAW Guard — block infected merges
 
-# Gate: scan PRs (catch injected indicators) and pushes of real code to main
-# (catch evil merges). README.md is NOT excluded — the content signatures match it,
+# Gate: scan PRs (catch injected indicators) and pushes of real code to main and the
+# rebuild branch (catch evil merges). README.md is NOT excluded — the content signatures match it,
 # so a payload appended to it must still be caught. reports/** is excluded only
 # because the bot's own reports quote detected payloads (their evidence snippets
 # would self-flag); those commits never carry executable code.
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, rebuild/one-engine]
     paths-ignore:
       - 'reports/**'
 
