@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Security
+- The editor integration (`saw mcp` and the git stand-in) is built on an MCP library with no
+  known security advisory.
+
 ## [0.17.0] - 2026-11-13
 
 ### Added
