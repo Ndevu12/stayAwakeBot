@@ -115,16 +115,38 @@ jobs:
       - name: Test the Rust workspace
         run: cargo test --workspace --locked
 
+      - name: Install llvm-mingw for the Windows builds
+        env:
+          LLVM_MINGW: llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
+          LLVM_MINGW_SHA256: 919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSfL -o "$RUNNER_TEMP/llvm-mingw.tar.xz" \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/$LLVM_MINGW.tar.xz"
+          echo "$LLVM_MINGW_SHA256  $RUNNER_TEMP/llvm-mingw.tar.xz" | sha256sum --check --strict
+          tar -xJf "$RUNNER_TEMP/llvm-mingw.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$LLVM_MINGW/bin" >> "$GITHUB_PATH"
+
       - name: Build the Rust workspace for every platform
         run: |
           rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl \
             aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-gnullvm aarch64-pc-windows-gnullvm
-          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl \
+              x86_64-pc-windows-gnullvm aarch64-pc-windows-gnullvm; do
             cargo build --workspace --locked --release --target "$target"
           done
-          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-gnullvm aarch64-pc-windows-gnullvm; do
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
             cargo check --workspace --locked --target "$target"
           done
+
+      - name: Windows binaries need only what Windows provides
+        run: |
+          status=0
+          for exe in target/*-pc-windows-gnullvm/release/*.exe; do
+            extra=$(llvm-objdump -p "$exe" | sed -n 's/.*DLL Name: //p' \
+              | grep -viE '^(kernel32|ntdll|advapi32|bcrypt|bcryptprimitives|shell32|user32|ws2_32|userenv|ole32)\.dll$|^api-ms-win-' || true)
+            if [ -n "$extra" ]; then echo "::error::$exe needs DLLs Windows does not provide: $extra"; status=1; fi
+          done
+          exit $status
 
       - name: Set up saw
         uses: ./.github/actions/setup
