@@ -8,12 +8,17 @@ use tokio::process::{Child, ChildStdin, Command};
 pub struct Answer {
     pub verdict: String,
     pub document: Option<Value>,
+    pub release: Option<String>,
 }
 
 impl Answer {
     fn missing() -> Self {
-        Self { verdict: "not verified".into(), document: None }
+        Self { verdict: "not verified".into(), document: None, release: None }
     }
+}
+
+fn release_in(part: Option<&Value>) -> Option<String> {
+    part?.get("release")?.as_str().filter(|release| !release.is_empty()).map(str::to_string)
 }
 
 pub struct Worker {
@@ -96,7 +101,7 @@ impl Worker {
             if verdict.is_empty() {
                 return None;
             }
-            return Some(Answer { verdict: verdict.to_string(), document: None });
+            return Some(Answer { verdict: verdict.to_string(), document: None, release: release_in(error.get("data")) });
         }
         let result = value.get("result")?;
         let verdict = result.get("verdict")?.as_str()?.to_string();
@@ -108,7 +113,7 @@ impl Worker {
             Some(_) => return None,
             None => None,
         };
-        Some(Answer { verdict, document })
+        Some(Answer { verdict, document, release: release_in(Some(result)) })
     }
 
     pub async fn ask(&mut self, method: &str, extra: Value) -> Answer {
@@ -152,7 +157,7 @@ mod tests {
             "if n == 1:\n",
             "    raise SystemExit(1)\n",
             "req = json.loads(sys.stdin.readline())\n",
-            "sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': req['id'], 'result': {'verdict': 'clean', 'document': {'schema_version': 1}}}) + '\\n')\n",
+            "sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': req['id'], 'result': {'verdict': 'clean', 'document': {'schema_version': 1}, 'release': '9.9.9'}}) + '\\n')\n",
             "sys.stdout.flush()\n",
         )).unwrap();
         let mut worker = Worker::launching(program, vec![script.to_string_lossy().into_owned()])
@@ -160,6 +165,7 @@ mod tests {
         let answer = worker.ask("scan", json!({"path": "/any"})).await;
         assert_eq!(answer.verdict, "clean");
         assert_eq!(answer.document.unwrap()["schema_version"], 1);
+        assert_eq!(answer.release.as_deref(), Some("9.9.9"));
         worker.stop().await;
     }
 }

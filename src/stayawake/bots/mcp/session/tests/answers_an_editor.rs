@@ -20,8 +20,11 @@ fn fake_worker(root: &std::path::Path) {
         "    if not line:\n",
         "        break\n",
         "    req = json.loads(line)\n",
-        "    body = {'verdict': 'clean', 'document': {'schema_version': 1}}\n",
-        "    sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': req['id'], 'result': body}) + '\\n')\n",
+        "    if req['params'].get('path') == '/unread':\n",
+        "        reply = {'error': {'code': -32000, 'message': 'not verified', 'data': {'release': '9.9.9'}}}\n",
+        "    else:\n",
+        "        reply = {'result': {'verdict': 'clean', 'document': {'schema_version': 1}, 'release': '9.9.9'}}\n",
+        "    sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': req['id'], **reply}) + '\\n')\n",
         "    sys.stdout.flush()\n",
     )).unwrap();
 }
@@ -59,6 +62,16 @@ async fn an_editor_hears_the_verdict_first() {
         CallToolRequestParams::new("saw_scan_folder").with_arguments(folder),
     ).await.expect("scan");
     assert_eq!(answered.content[0].as_text().unwrap().text, "clean");
+    assert_eq!(answered.content[1].as_text().unwrap().text, r#"{"schema_version":1}"#);
+    assert_eq!(answered.content[2].as_text().unwrap().text, "saw 9.9.9");
     assert_ne!(answered.is_error, Some(true));
+
+    let unread = json!({"path": "/unread"}).as_object().unwrap().clone();
+    let unverified = client.call_tool(
+        CallToolRequestParams::new("saw_scan_folder").with_arguments(unread),
+    ).await.expect("unread");
+    let texts: Vec<String> = unverified.content.iter().map(|block| block.as_text().unwrap().text.clone()).collect();
+    assert_eq!(texts, ["not verified", "saw 9.9.9"]);
+    assert_eq!(unverified.is_error, Some(true));
     let _ = client.cancel().await;
 }
