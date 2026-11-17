@@ -199,7 +199,7 @@ jobs:
           # Pin the scanner to a known-good SHA, NEVER the commit under test: a compromised
           # release commit must not be able to certify itself. Bump after an intentional
           # scanner/signature update (kept in sync with saw-guard.yml).
-          sentinel-ref: e6fb180516f66989d97ed183e9bc35304ce14ea5   # e6fb180516f6 — kept identical to saw-guard.yml
+          sentinel-ref: 7f291c2b3d650ef4efabbfe618003650e3b408e0   # 7f291c2b3d65 — kept identical to saw-guard.yml
           fail-on-findings: 'true'
           # Pure exit-code gate: the job conclusion is the scan verdict, nothing else. This
           # commit is also scanned (and, when enabled, uploaded) by SAW Guard + security-sentinel,
