@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- Findings about a committed credential, or a .gitignore that may expose your environment file,
+  read in their own words in reports, and say when they are worth a review.
+
 ## [0.17.2] - 2026-11-17
 
 ### Security
