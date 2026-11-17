@@ -260,8 +260,9 @@ class TestWhatItFreezesStaysContained(unittest.TestCase):
             pass
 
     def _state(self, pid):
+        """Return the run state of `pid`, without the flags `ps` adds after it."""
         return subprocess.run(["ps", "-o", "state=", "-p", str(pid)],
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True).stdout.strip()[:1]
 
     @unittest.skipUnless(os.name == "posix", "needs POSIX signals")
     def test_a_grader_that_raises_mid_pass_leaves_it_contained(self):
