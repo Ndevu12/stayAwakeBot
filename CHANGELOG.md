@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-11-17
+
 ### Security
 - saw's git hooks always start saw, including hooks put in place by `saw watch`. Where an earlier
   saw left them unable to start it, `saw hook status` says so and `saw hook repair` puts them right.
@@ -2019,7 +2021,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.2...HEAD
+[0.17.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.15.0...v0.16.0
