@@ -152,6 +152,8 @@ jobs:
         uses: ./.github/actions/setup
 
       - name: Check the Rust workspace rules
+        env:
+          SAW_ADVISORY_CACHE_DIR: ${{ runner.temp }}/saw-advisories
         run: |
           cargo fetch --locked
           cargo fetch --locked --manifest-path src/stayawake/bots/mcp/session/Cargo.toml
