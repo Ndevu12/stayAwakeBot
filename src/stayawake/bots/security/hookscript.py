@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import sys
+import sysconfig
 from functools import partial
 from hashlib import sha256
 from pathlib import Path
@@ -70,9 +71,21 @@ def declaration_path() -> Path:
     return Path(env.xdg_config_home()) / "saw" / "hook-install.json"
 
 
-def saw_executable() -> str:
-    """Return the absolute path of the `saw` running now."""
-    return shutil.which("saw") or os.path.realpath(sys.argv[0])
+def runs(program: str) -> bool:
+    """Return whether `program` is a file this account can run. Takes its path."""
+    return os.path.isfile(program) and os.access(program, os.X_OK)
+
+
+def saw_executable() -> str | None:
+    """Return the path of a `saw` program that runs: the one on the path, else the one installed
+    beside the Python running now, else the program this process started as. Returns None when
+    none of them can run."""
+    beside_python = os.path.join(sysconfig.get_path("scripts") or "", "saw.exe" if os.name == "nt" else "saw")
+    started_as = os.path.realpath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    for program in (shutil.which("saw") or "", beside_python, started_as):
+        if program and runs(program):
+            return program
+    return None
 
 
 def declare(saw: str, config: str | None, hooks: Path | None = None,
@@ -343,7 +356,7 @@ def is_installed(text: str, expected: tuple[str, str | None] | None = None) -> b
     event = event_of(text)
     if event is None:
         return False
-    saw, config = expected or installed() or (saw_executable(), None)
+    saw, config = expected or installed() or (saw_executable() or "saw", None)
     return text == render(event, saw, config)
 
 
@@ -353,7 +366,7 @@ def _is_previous(text: str, expected: tuple[str, str | None] | None = None) -> b
     event = event_of(text)
     if event is None:
         return False
-    saw, config = expected or installed() or (saw_executable(), None)
+    saw, config = expected or installed() or (saw_executable() or "saw", None)
     return text in render_earlier(event, saw, config)
 
 
@@ -510,7 +523,7 @@ def _plain_name(name: str) -> str:
 def recorded_saw_runs() -> bool:
     """Return False when the `saw` recorded at install is gone or cannot be executed."""
     recorded = installed()
-    return recorded is None or (os.path.isfile(recorded[0]) and os.access(recorded[0], os.X_OK))
+    return recorded is None or runs(recorded[0])
 
 
 def altered_hooks(unread: list | None = None) -> list[Path]:
@@ -520,7 +533,7 @@ def altered_hooks(unread: list | None = None) -> list[Path]:
     saw's own directory or from a repository saw seeded."""
     found: list[Path] = []
     recorded = installed()
-    expected = recorded or (saw_executable(), None)
+    expected = recorded or (saw_executable() or "saw", None)
     for d in hook_dirs(unread):
         if not d.is_dir():
             continue
