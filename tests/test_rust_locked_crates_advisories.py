@@ -1,6 +1,4 @@
-"""Every outside crate saw locks has no known security advisory, judged by saw's own scan against its
-offline advisory database. The check needs that database's cargo records (`saw db update -e cargo`);
-without them it is skipped, saying so, rather than passing."""
+"""No outside crate saw locks has a known security advisory."""
 
 import json
 import os
@@ -30,7 +28,7 @@ def _lockfiles() -> list[Path]:
 
 
 def advisories_in(lockfile_text: str) -> list[str]:
-    """The evidence of each advisory saw's scan reports for one Cargo.lock."""
+    """Return the evidence of each advisory saw's scan reports for one Cargo.lock."""
     with tempfile.TemporaryDirectory() as scratch:
         (Path(scratch) / "Cargo.lock").write_text(lockfile_text)
         result = _python(_RUN_SAW, "scan", scratch, "--json", "--no-stream")

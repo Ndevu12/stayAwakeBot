@@ -1,5 +1,4 @@
-# The layers of the Rust workspace, lowest first. A crate may depend only on crates of a lower
-# layer, never on its own layer or a higher one. A new crate is placed here before it is used.
+# The layer of each crate, lowest first.
 
 unsafe_allowed_in = "saw-platform"
 
@@ -15,7 +14,7 @@ saw-cli = 5
 saw-mcp = 5
 saw-git-standin = 5
 
-# Where each capability lives. Code anywhere else in the workspace may not use it.
+# The one place each capability may be used.
 [home]
 external_programs = "crates/saw-platform/src/programs"
 network = "crates/saw-platform/src/network"

@@ -1,6 +1,4 @@
-"""The Rust `saw` learns its release only from the build: a release build passes the tag's release
-in, and a build without one says `0+unknown`, as the Python package does from a source tree. Its
-`saw --version` line has the same form as the Python `saw`'s."""
+"""The Rust saw's release comes only from the build."""
 
 import contextlib
 import io
@@ -27,7 +25,7 @@ def rust_version_line(target_dir: Path, release: str | None) -> str:
 
 
 def python_version_line() -> str:
-    """What the Python `saw --version` prints."""
+    """Return what the Python `saw --version` prints."""
     from stayawake.cli import main
 
     printed = io.StringIO()

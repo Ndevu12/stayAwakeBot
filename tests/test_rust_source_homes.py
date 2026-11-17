@@ -1,8 +1,4 @@
-"""Each confined capability of the Rust workspace is used only in its home: external programs run
-only through the platform's one chokepoint, the network is reached only from the platform's network
-home, and regular expressions are built only where patterns are bounded. This carries over the
-ratchets that hold the same shape for the Python code. Each check also runs on a crate that breaks
-it, so a check that stops catching its violation fails here."""
+"""Each confined capability of the Rust workspace is used only in its home."""
 
 import re
 import shutil
@@ -13,7 +9,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# What using each capability looks like in Rust source.
 CAPABILITY_USES = {
     "external_programs": re.compile(
         r"\bstd\s*::\s*process\b|\bprocess\s*::|\buse\s+(?:::)?std\s*::\s*\{[^;]*\bprocess\b"
@@ -38,7 +33,7 @@ def _code(path: Path) -> str:
 
 
 def home_problems(root: Path) -> list[str]:
-    """Each use of a confined capability outside its home, as `capability: file:line`."""
+    """Return each use of a confined capability outside its home, as `capability: file:line`."""
     homes = _homes(root)
     problems = [f"{capability} has no pattern to look for" for capability in homes if capability not in CAPABILITY_USES]
     for source in sorted((root / "crates").rglob("*.rs")):
