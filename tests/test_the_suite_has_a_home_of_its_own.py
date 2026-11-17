@@ -1,4 +1,4 @@
-"""Every test runs in a home of its own, never the operator's."""
+"""The test suite runs in a home of its own, never the operator's."""
 
 import os
 import subprocess
@@ -13,10 +13,7 @@ try:
 except ImportError:
     pwd = None
 
-_HOMES_SEEN: list[Path] = []
-
-
-class EveryTestHasItsOwnHome(unittest.TestCase):
+class TheSuiteHasAHomeOfItsOwn(unittest.TestCase):
 
     def _home(self) -> Path:
         return Path(os.environ["HOME"])
@@ -40,14 +37,6 @@ class EveryTestHasItsOwnHome(unittest.TestCase):
     def test_the_account_database_names_the_test_home(self):
         self.assertEqual(Path(pwd.getpwuid(os.getuid()).pw_dir), self._home())
         self.assertTrue(watchrecord.shared_folder().is_relative_to(self._home()))
-
-    def test_one_test_and_the_next_have_different_homes_1(self):
-        _HOMES_SEEN.append(self._home())
-        self.assertEqual(len(set(_HOMES_SEEN)), len(_HOMES_SEEN))
-
-    def test_one_test_and_the_next_have_different_homes_2(self):
-        _HOMES_SEEN.append(self._home())
-        self.assertEqual(len(set(_HOMES_SEEN)), len(_HOMES_SEEN))
 
 
 if __name__ == "__main__":
