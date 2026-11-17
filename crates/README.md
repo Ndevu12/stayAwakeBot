@@ -21,8 +21,7 @@ builds on its own until the rebuild promotes it.
 ## Where each capability lives
 
 Running an external program, reaching the network, and building a regular expression each have one
-home, named in `layers.toml`. Code anywhere else may not use them. The homes are where the safety of
-each capability is enforced once, for every caller.
+home, named in `layers.toml`. Code anywhere else may not use them.
 
 ## Outside crates
 
@@ -79,8 +78,7 @@ Python code:
 python -m unittest discover -s tests -p "test_rust_*.py"
 ```
 
-Every check is also tested against a copy that breaks it, so a check that stops catching its
-violation fails.
+Every check is also tested against a copy that breaks it.
 
 The data and documentation checks of the Python suite (signatures, wording, operator docs) keep
 running unchanged.

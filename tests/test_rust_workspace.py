@@ -1,7 +1,4 @@
-"""The Rust workspace keeps the rebuild's rules: crates depend only on lower layers, use only the
-outside crates the dependency record names, build no C, keep `unsafe` in the platform crate, carry
-no version of their own, and use only recorded licences. Each check also runs on a workspace that
-breaks it, so a check that stops catching its violation fails here."""
+"""The Rust workspace keeps the rebuild's rules."""
 
 import json
 import re
@@ -26,7 +23,7 @@ def _workspace(root: Path) -> dict:
 
 
 def member_manifests(root: Path) -> dict[str, Path]:
-    """Map each workspace member's package name to its manifest."""
+    """Return each workspace member's package name with its manifest."""
     members = {}
     for pattern in _workspace(root).get("members", []):
         for manifest in sorted(root.glob(f"{pattern}/Cargo.toml")):
@@ -35,7 +32,7 @@ def member_manifests(root: Path) -> dict[str, Path]:
 
 
 def separate_manifests(root: Path) -> dict[str, Path]:
-    """Map each crate built outside the workspace (its excluded folders) to its manifest."""
+    """Return each crate built outside the workspace with its manifest."""
     found = {}
     for folder in _workspace(root).get("exclude", []):
         manifest = root / folder / "Cargo.toml"
@@ -51,7 +48,7 @@ def _dependency_tables(manifest: dict) -> list[dict]:
 
 
 def _declared_dependencies(root: Path, manifest: dict) -> list[tuple[str, dict]]:
-    """Each (crate name, spec) a manifest declares, with `workspace = true` specs resolved."""
+    """Return each (crate name, spec) a manifest declares, with inherited specs filled in."""
     shared = _workspace(root).get("dependencies", {})
     declared = []
     for table in _dependency_tables(manifest):
@@ -110,7 +107,7 @@ def direct_dependency_problems(root: Path) -> list[str]:
 
 
 def locked_outside_crates(root: Path) -> set[str]:
-    """Names of every outside crate in the workspace lock and the separate crates' locks."""
+    """Return the names of every outside crate in saw's lock files."""
     locks = [root / "Cargo.lock"] + [path.parent / "Cargo.lock" for path in separate_manifests(root).values()]
     names = set()
     for lock in locks:
@@ -169,7 +166,7 @@ def version_problems(root: Path) -> list[str]:
 
 
 def licence_allowed(expression: str, licences: set[str], exceptions: set[str]) -> bool:
-    """Whether an SPDX licence expression can be satisfied with the allowed licences."""
+    """Return whether an SPDX licence expression is satisfied by the allowed licences."""
     tokens = re.findall(r"\(|\)|[^\s()]+", expression.replace("/", " OR "))
     position = 0
 
@@ -256,8 +253,7 @@ class TheWorkspaceKeepsTheRules(unittest.TestCase):
 
 
 class EachRuleCatchesItsViolation(unittest.TestCase):
-    """Copies the workspace's manifests and data into a scratch folder, breaks one rule, and
-    expects the matching check to report it."""
+    """Each rule, broken in a copy of the workspace, is reported."""
 
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()

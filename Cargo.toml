@@ -1,8 +1,6 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-# The editor session crate moves into the workspace as `saw-mcp` and `saw-git-standin` when the
-# rebuild reaches it; until then it builds on its own for the current package.
 exclude = ["src/stayawake/bots/mcp/session"]
 
 [workspace.package]

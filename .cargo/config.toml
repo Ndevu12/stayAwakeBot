@@ -1,13 +1,9 @@
-# Linux builds are static (musl) and link with the linker the Rust toolchain ships, so every
-# platform builds from one machine without a C toolchain.
 [target.x86_64-unknown-linux-musl]
 linker = "rust-lld"
 
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
 
-# Windows builds link with llvm-mingw (its `bin` folder on PATH). The C runtime and unwinder are
-# linked in, so the program needs only what Windows itself provides.
 [target.x86_64-pc-windows-gnullvm]
 linker = "x86_64-w64-mingw32-clang"
 rustflags = ["-C", "target-feature=+crt-static"]
