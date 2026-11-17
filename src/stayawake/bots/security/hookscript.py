@@ -77,9 +77,7 @@ def runs(program: str) -> bool:
 
 
 def saw_executable() -> str | None:
-    """Return the path of a `saw` program that runs: the one on the path, else the one installed
-    beside the Python running now, else the program this process started as. Returns None when
-    none of them can run."""
+    """Return the path of a `saw` program that runs, or None when there is none."""
     beside_python = os.path.join(sysconfig.get_path("scripts") or "", "saw.exe" if os.name == "nt" else "saw")
     started_as = os.path.realpath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
     for program in (shutil.which("saw") or "", beside_python, started_as):
