@@ -16,8 +16,7 @@ reader, not the mechanism or the weakness it closed.
 ## [0.17.2] - 2026-11-17
 
 ### Security
-- saw's git hooks always start saw, including hooks put in place by `saw watch`. Where an earlier
-  saw left them unable to start it, `saw hook status` says so and `saw hook repair` puts them right.
+- saw's git hooks always start saw. After upgrading, run `saw hook repair`.
 
 ## [0.17.1] - 2026-11-16
 
