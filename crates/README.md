@@ -52,6 +52,17 @@ Add a target once with `rustup target add <target>`. Linux builds need nothing b
 toolchain. Windows builds need [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) with its `bin`
 folder on `PATH`. A Windows binary needs only what Windows 10 and later provide.
 
+## The release
+
+The release exists only as the git tag; no manifest or source file carries it. A release build
+passes it in from the tag it is built at:
+
+```sh
+SAW_RELEASE="$(git describe --tags --exact-match | sed 's/^v//')" cargo build --workspace --release
+```
+
+A build without `SAW_RELEASE` reports `0+unknown`, as the Python package does from a source tree.
+
 ## Checks
 
 The Python test suite enforces the workspace rules, the same way it enforces the rules of the
@@ -61,6 +72,7 @@ Python code:
 | --- | --- |
 | `tests/test_rust_workspace.py` | Layers, the dependency record and its count, licences, no C, `unsafe` only in the platform crate, no version in any manifest |
 | `tests/test_rust_source_homes.py` | Each confined capability used only in its home |
+| `tests/test_rust_release.py` | The release comes only from the build, and `saw --version` has the Python `saw`'s form |
 | `tests/test_rust_locked_crates_advisories.py` | No locked crate has a known advisory (run `saw db update -e cargo` first) |
 
 ```sh
