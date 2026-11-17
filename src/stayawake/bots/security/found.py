@@ -10,6 +10,7 @@ from stayawake.bots.security.signatures import load_signatures
 _WHAT_IT_IS: dict[str, str] = {
     "agent-autorun": "an AI-assistant hook that runs a command",
     "camouflage": "content disguised to hide an infection",
+    "committed-secret": "a credential committed to the repository",
     "code-loader": "hidden code that loads and runs a payload",
     "destructive": "code that deletes your files",
     "evil-merge": "a merge commit that adds code of its own",
