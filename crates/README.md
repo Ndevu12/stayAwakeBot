@@ -82,3 +82,15 @@ Every check is also tested against a copy that breaks it.
 
 The data and documentation checks of the Python suite (signatures, wording, operator docs) keep
 running unchanged.
+
+## Comparing with main
+
+```sh
+python -m tests.parity                 # main at the pinned commit against this checkout
+python -m tests.parity --actual main   # main against itself
+```
+
+The harness scans the same corpus with both and reports each scan variant as the same or
+different, naming the target and matcher of each difference. `tests/parity/main.pin` names the
+commit of `main` it compares with; the weekly sync moves it to `main`'s tip. Main's answers are
+kept in `~/.cache/saw-parity`, or in `SAW_PARITY_CACHE`.
