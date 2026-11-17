@@ -11,6 +11,7 @@ from unittest import mock
 from stayawake.bots.mcp import identity, launch, worker
 from stayawake.cli import main
 from stayawake.utils import exitcodes
+from stayawake.utils.release import RELEASE
 
 
 class TestAFolderCanBeNamed(unittest.TestCase):
@@ -122,6 +123,25 @@ class TestARunningSawAnswers(unittest.TestCase):
         answer = json.loads(outgoing.getvalue())
         self.assertEqual(answer["id"], 7)
         self.assertEqual(answer["error"]["message"], "not verified")
+
+    def test_every_answer_names_the_release_that_produced_it(self):
+        document = {"schema_version": 1, "any_infected": False}
+        with mock.patch.object(worker, "_scan_document", return_value=document):
+            verified = worker.handle(self._session(), {"id": 1, "method": "scan", "params": {"path": "/any"}})
+        unverified = worker.handle(self._session(), {"id": 2, "method": "scan", "params": {"path": ""}})
+        self.assertEqual(verified["result"]["verdict"], "clean")
+        self.assertEqual(verified["result"]["release"], RELEASE)
+        self.assertEqual(unverified["error"]["data"]["release"], RELEASE)
+
+    def test_a_remembered_answer_still_names_the_release(self):
+        document = {"schema_version": 1}
+        session = self._session()
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(worker, "_scan_document", return_value=document):
+            request = {"id": 1, "method": "scan", "params": {"path": folder}}
+            first, second = worker.handle(session, request), worker.handle(session, request)
+        self.assertEqual(second["result"]["release"], RELEASE)
+        self.assertEqual(second, first)
 
 
 class TestTheSessionProgram(unittest.TestCase):

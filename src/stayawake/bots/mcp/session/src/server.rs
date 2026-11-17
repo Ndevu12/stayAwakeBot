@@ -64,11 +64,15 @@ fn unanswered() -> CallToolResult {
 }
 
 fn answered(answer: Answer) -> CallToolResult {
+    let unverified = answer.verdict == "not verified" && answer.document.is_none();
     let mut blocks = vec![ContentBlock::text(answer.verdict.clone())];
     if let Some(document) = answer.document {
         blocks.push(ContentBlock::text(document.to_string()));
     }
-    if answer.verdict == "not verified" && blocks.len() == 1 {
+    if let Some(release) = answer.release {
+        blocks.push(ContentBlock::text(format!("saw {release}")));
+    }
+    if unverified {
         CallToolResult::error(blocks)
     } else {
         CallToolResult::success(blocks)

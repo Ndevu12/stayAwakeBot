@@ -2031,6 +2031,39 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         self.assertEqual(code, 0, text)
         self.assertTrue(hook.hookscript.recorded_saw_runs())
 
+    def _program(self, name: str, runs: bool) -> Path:
+        program = self.home / "bin" / name
+        program.parent.mkdir(exist_ok=True)
+        program.write_text("#!/bin/sh\n")
+        os.chmod(program, 0o755 if runs else 0o644)
+        return program
+
+    def test_a_recorded_saw_that_is_there_but_cannot_run_is_repaired_without_an_alarm(self):
+        module = self._program("__main__.py", runs=False)
+        with mock.patch("stayawake.bots.security.hook._saw_executable", return_value=str(module)):
+            self.assertEqual(self._quiet(hook.install)[0], 0)
+        self.assertIn("cannot run", self._quiet(hook.status)[1])
+        mine = self._program("saw", runs=True)
+        with mock.patch("stayawake.bots.security.hook._saw_executable", return_value=str(mine)):
+            code, text = self._quiet(hook.repair)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(hook.hookscript.installed(), (str(mine), None))
+        self.assertTrue(hook.hookscript.recorded_saw_runs())
+        self.assertIn(str(mine), (self._managed() / "post-checkout").read_text())
+        self.assertNotIn(str(module), (self._managed() / "post-checkout").read_text())
+        self.assertEqual(hook.hookscript.altered_hooks(), [])
+        self.assertNotIn("cannot run", self._quiet(hook.status)[1])
+
+    def test_with_no_saw_that_runs_install_says_so_and_writes_no_hook(self):
+        with mock.patch("stayawake.bots.security.hook._saw_executable", return_value=None):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code, text = self._quiet(hook.install)
+        self.assertEqual(code, 2, text)
+        self.assertIn("on your path", text + err.getvalue())
+        self.assertFalse((self._managed() / "post-checkout").exists())
+        self.assertIsNone(hook.hookscript.installed())
+
     def test_a_link_to_nothing_is_never_chained(self):
         user_tpl = self.home / "my-template"
         (user_tpl / "hooks").mkdir(parents=True)
@@ -2358,6 +2391,38 @@ class TestTheOutboundHookIsInstalledWithTheOthers(_Isolated):
         with mock.patch.dict(os.environ, {"SAW_HOOK_DISABLED": "1"}), \
                 mock.patch.object(hook.outbound, "check_push", side_effect=AssertionError("ran")):
             self.assertEqual(hook.run_event("pre-push", ["origin", "url"]), 0)
+
+
+class TestTheSawTheHooksRunIsAProgramThatRuns(unittest.TestCase):
+
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        self.module = self.root / "site-packages" / "stayawake" / "__main__.py"
+        self.module.parent.mkdir(parents=True)
+        self.module.write_text("")
+        self.scripts = self.root / "bin"
+        self.scripts.mkdir()
+
+    def _found(self) -> str | None:
+        with mock.patch.object(hookscript.shutil, "which", return_value=None), \
+                mock.patch.object(hookscript.sysconfig, "get_path", return_value=str(self.scripts)), \
+                mock.patch.object(hookscript.sys, "argv", [str(self.module), "watch", "run"]):
+            return hookscript.saw_executable()
+
+    def test_a_saw_run_as_a_module_names_the_saw_installed_beside_its_python(self):
+        beside = self.scripts / "saw"
+        beside.write_text("#!/bin/sh\n")
+        os.chmod(beside, 0o755)
+        self.assertEqual(self._found(), str(beside))
+
+    def test_a_module_file_is_never_named_as_the_saw_to_run(self):
+        self.assertIsNone(self._found())
+        beside = self.scripts / "saw"
+        beside.write_text("#!/bin/sh\n")
+        os.chmod(beside, 0o644)
+        self.assertIsNone(self._found())
 
 
 if __name__ == "__main__":

@@ -13,7 +13,6 @@ SARIF `level` is informational only; the build gate stays the process exit code
 from __future__ import annotations
 
 import hashlib
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -22,11 +21,7 @@ from stayawake.bots.security.found import described
 from stayawake.bots.security import redaction
 from stayawake.utils import textsafe
 from stayawake.utils.io import write_json
-
-try:                                       # version is derived from the git tag at build time
-    __version__ = _pkg_version("stayawakebot")
-except PackageNotFoundError:               # running from a source tree without an installed dist
-    __version__ = "0+unknown"
+from stayawake.utils.release import RELEASE
 
 SCHEMA = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
 TOOL_NAME = "saw"
@@ -139,7 +134,7 @@ def build_sarif(payload: dict) -> dict[str, Any]:
             "tool": {"driver": {
                 "name": TOOL_NAME,
                 "informationUri": INFORMATION_URI,
-                "version": __version__,
+                "version": RELEASE,
                 "rules": rules,
             }},
             "invocations": [{"executionSuccessful": not unscanned,

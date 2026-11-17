@@ -491,6 +491,8 @@ def settle_hooks(config_path: str | None = None, *, repositories: list[Path] | N
     and the folder git runs every repository's hooks from when it is the operator's alone. Takes the
     operator config and the repository roots. Returns what was done."""
     saw = _saw_executable()
+    if saw is None:
+        return Settling(code=2, problem=_NO_SAW_THAT_RUNS)
     config = os.path.abspath(config_path) if config_path else None
     if config and resolve_config(config_path) is None:
         return Settling(problem="the named config could not be read", code=2)
@@ -542,6 +544,8 @@ def _record_what_was_written(saw: str, config: str | None, target: str, hooks_fo
 
 
 _NOT_PUT_IN_PLACE = "saw's hooks could not all be put in place. Run `saw hook install` to try again."
+_NO_SAW_THAT_RUNS = ("No hooks were put in place: no `saw` that can run was found. Make sure `saw` is on "
+                     "your path, then run `saw hook install`.")
 
 
 class _WrittenFolders:
@@ -784,7 +788,12 @@ def repair(*, no_stream: bool = False, as_json: bool = False) -> int:
         if as_json:
             _print_json(_posture(), [])
         return 2
-    saw = recorded[0] if os.path.isfile(recorded[0]) else _saw_executable()
+    saw = recorded[0] if hookscript.runs(recorded[0]) else _saw_executable()
+    if saw is None:
+        print(f"error: {_NO_SAW_THAT_RUNS}", file=sys.stderr)
+        if as_json:
+            _print_json(_posture(), [])
+        return 2
     config = recorded[1]
     if config and not os.path.isfile(config):
         print("error: the config your hooks scan with is gone. Run `saw hook install -c <your config>`, "
@@ -869,7 +878,9 @@ def _keep_current(root: Path) -> list[Action]:
     hooks_dir = hookscript.repository_hooks_dir(root)
     if hooks_dir is None or _inside_what_saw_keeps(hooks_dir):
         return []
-    saw = recorded[0] if os.path.isfile(recorded[0]) else _saw_executable()
+    saw = recorded[0] if hookscript.runs(recorded[0]) else _saw_executable()
+    if saw is None:
+        return []
     return [a for a in _repair_repository(hooks_dir, saw, recorded[1])
             if a.state not in (IN_PLACE, CHAINED, LEFT)]
 
