@@ -23,7 +23,7 @@ from stayawake.bots.security.targets.local import LocalRepoTarget
 from stayawake.lib.git import incoming, objects
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.write.working_tree import uncommitted_paths
-from stayawake.utils import exitcodes, pathsafe, scratch
+from stayawake.utils import atomicwrite, exitcodes, pathsafe, scratch
 from stayawake.utils.pace import DeadlineReached, Pace
 from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
@@ -263,8 +263,11 @@ def _copy_as_before(root: Path, base: str, paths: tuple[str, ...]) -> Path:
         if data is None:
             continue
         destination = where / rel
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(data)
+        try:
+            atomicwrite.make_folder(destination.parent)
+        except OSError:
+            continue
+        atomicwrite.replace(destination, data)
     return where
 
 

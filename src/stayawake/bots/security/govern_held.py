@@ -3,6 +3,7 @@
 which were already in the folder, what to do next, and how to let the update in after review."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED, INFECTED, SUSPICIOUS, Finding, ScanResult
@@ -34,7 +35,7 @@ def set_aside_already_there(update: ScanResult, before: ScanResult) -> list[Find
 
 def folder_name(repo: str) -> str:
     """Return the name the user types to let in an infected update: the open folder's own name."""
-    return Path(repo).resolve().name
+    return Path(os.path.abspath(repo)).name
 
 
 def decision(repo: str, into: str, commit: str, verdict: str) -> dict:

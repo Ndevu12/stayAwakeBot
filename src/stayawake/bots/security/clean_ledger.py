@@ -86,12 +86,17 @@ def applied_path() -> Path:
     return cache_path().with_name("govern-applied.json")
 
 
-def load_applied() -> dict:
+def _load_record(path: Path) -> dict:
+    """Return a govern record by repository, or an empty one when it is missing or unreadable."""
     try:
-        held = json.loads(applied_path().read_text())
+        held = json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
     return held if isinstance(held, dict) else {}
+
+
+def load_applied() -> dict:
+    return _load_record(applied_path())
 
 
 def remember_applied(root: Path, key: str) -> None:
@@ -141,11 +146,7 @@ def remember_accepted(root: Path, commit: str, verdict: str) -> None:
     """Record that the user let a held tree into a repository. Takes the root, the commit and the
     verdict saw gave it. A write that fails is skipped."""
     try:
-        try:
-            held = json.loads(accepted_path().read_text())
-        except (OSError, ValueError):
-            held = {}
-        held = {r: v for r, v in (held if isinstance(held, dict) else {}).items() if os.path.isdir(r)}
+        held = {r: v for r, v in _load_record(accepted_path()).items() if os.path.isdir(r)}
         held[os.path.realpath(root)] = {"commit": commit, "verdict": verdict}
         atomicwrite.replace(accepted_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
                             at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
@@ -156,11 +157,7 @@ def remember_accepted(root: Path, commit: str, verdict: str) -> None:
 def accepted_verdict(root: Path, commit: str) -> str | None:
     """Return the verdict of a held tree the user let into a repository, when it is this commit.
     Takes the root and the commit."""
-    try:
-        held = json.loads(accepted_path().read_text())
-    except (OSError, ValueError):
-        return None
-    entry = held.get(os.path.realpath(root)) if isinstance(held, dict) else None
+    entry = _load_record(accepted_path()).get(os.path.realpath(root))
     if isinstance(entry, dict) and entry.get("commit") == commit and isinstance(entry.get("verdict"), str):
         return entry["verdict"]
     return None

@@ -22,6 +22,9 @@ reader, not the mechanism or the weakness it closed.
   `SAW_GOVERN_DECISION` decides.
 
 ### Fixed
+- A held `saw govern` update is no longer a dead end. An update is no longer held for a
+  finding the changed file already had. A held update says what to do, and you can let it in after
+  review: a yes for a suspicious update, the folder name typed for an infected one.
 - Ctrl-C ends saw with one line, `saw: stopped.`, and no Python error output, whatever the
   command is doing.
 - Stopping `saw scan` from outside, as an editor or a CI timeout does, stops its workers too and
