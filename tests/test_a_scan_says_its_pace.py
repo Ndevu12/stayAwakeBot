@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 from stayawake.bots.security.service.run import DEADLINE_REASON
@@ -25,7 +26,8 @@ class AScanSaysItsPace(unittest.TestCase):
         return tree
 
     def _scan(self, tree: Path, *extra: str):
-        done = subprocess.run([sys.executable, "-m", "stayawake", "scan", str(tree), "--no-stream", "--progress",
+        self.marker = f"ignore:::pace_{uuid.uuid4().hex}"
+        done = subprocess.run([sys.executable, "-W", self.marker, "-m", "stayawake", "scan", str(tree), "--no-stream", "--progress",
                                "jsonl", "--json", *extra], capture_output=True, text=True,
                               env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}, timeout=300)
         events = [json.loads(line) for line in done.stderr.splitlines() if line.startswith("{")]
@@ -47,7 +49,7 @@ class AScanSaysItsPace(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertTrue(report["any_error"])
         self.assertEqual([result["error"] for result in report["results"]], [DEADLINE_REASON])
-        leftover = subprocess.run(["pgrep", "-f", "multiprocessing.spawn"], capture_output=True, text=True).stdout
+        leftover = subprocess.run(["pgrep", "-f", self.marker], capture_output=True, text=True).stdout
         self.assertEqual(leftover.split(), [])
 
 

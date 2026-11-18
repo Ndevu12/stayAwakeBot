@@ -16,7 +16,7 @@ from pathlib import Path
 
 import heapq
 
-from stayawake.utils import parallel
+from stayawake.utils import parallel, pathsafe
 from stayawake.utils.io import reports_dir_choice, resolve_reports_dir
 from stayawake.utils import textsafe
 from stayawake.utils.pace import DeadlineReached, Pace
@@ -101,12 +101,7 @@ def _plan_target(pace: Pace | None, scope, display: str, files: list[str], worke
     """Say what one local target holds. Takes the run's pace, the target, its files and workers."""
     if pace is None or not pace.events.enabled:
         return
-    size = 0
-    for rel in files:
-        try:
-            size += (Path(scope.root) / rel).stat().st_size
-        except OSError:
-            continue
+    size = pathsafe.regular_size(Path(scope.root), files)
     commits = 0
     if scope.is_repo:
         counted = git_stdout(str(scope.root), ["rev-list", "--count", "--all"], context=UNTRUSTED).strip()

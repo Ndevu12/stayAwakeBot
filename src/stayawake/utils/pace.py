@@ -92,13 +92,16 @@ class Pace:
                  trace: TracebackType | None) -> None:
         self._stop.set()
         self._disarm_deadline()
+        if self.expired and kind is KeyboardInterrupt:
+            raise DeadlineReached from None
 
     def _heartbeat(self) -> None:
         while not self._stop.wait(HEARTBEAT_SECONDS):
             self.beat()
 
     def _arm_deadline(self, seconds: float) -> None:
-        if hasattr(signal, "setitimer") and threading.current_thread() is threading.main_thread():
+        if (hasattr(signal, "setitimer") and threading.current_thread() is threading.main_thread()
+                and signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)):
             self._previous_alarm = signal.signal(signal.SIGALRM, self._expire_now)
             signal.setitimer(signal.ITIMER_REAL, seconds)
             return

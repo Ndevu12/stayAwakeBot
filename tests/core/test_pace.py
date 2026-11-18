@@ -68,11 +68,20 @@ class TheDeadline(unittest.TestCase):
         self.assertTrue(running.expired)
         self.assertIs(signal.getsignal(signal.SIGALRM), before)
 
+    def test_a_timer_the_process_already_had_is_kept(self):
+        signal.setitimer(signal.ITIMER_REAL, 30)
+        self.addCleanup(signal.setitimer, signal.ITIMER_REAL, 0)
+        with self.assertRaises(KeyboardInterrupt):
+            with pace.Pace(_Events(), deadline=0.2):
+                time.sleep(5)
+        self.assertGreater(signal.getitimer(signal.ITIMER_REAL)[0], 20)
+
     def test_a_run_inside_its_deadline_is_left_alone(self):
+        had_a_timer = signal.getitimer(signal.ITIMER_REAL)[0] > 0
         with pace.Pace(_Events(), deadline=5) as running:
             time.sleep(0.1)
         self.assertFalse(running.expired)
-        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL)[0] > 0, had_a_timer)
 
 
 if __name__ == "__main__":

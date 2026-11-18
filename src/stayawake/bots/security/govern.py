@@ -22,7 +22,7 @@ from stayawake.bots.security.targets.local import LocalRepoTarget
 from stayawake.lib.git import incoming
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.write.working_tree import uncommitted_paths
-from stayawake.utils import exitcodes, scratch
+from stayawake.utils import exitcodes, pathsafe, scratch
 from stayawake.utils.pace import DeadlineReached, Pace
 from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
@@ -174,7 +174,7 @@ def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None,
     policy = operator_policy(config)
     files = _plain_copy(Path(root), paths)
     with Pace(current(), deadline) as pace:
-        pace.plan(str(root), files=len(paths), size=_size_of(files, paths), commits=0, workers=1)
+        pace.plan(str(root), files=len(paths), size=pathsafe.regular_size(files, paths), commits=0, workers=1)
         pace.begin(str(root), "files", len(paths), counted=False)
         try:
             with LocalRepoTarget(str(files), str(files), policy.opts, include_only=paths) as target:
@@ -191,17 +191,6 @@ def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None,
     else:
         code = exitcodes.CLEAN
     return _in_plain_words(report.to_payload()), code
-
-
-def _size_of(root: Path, paths: tuple[str, ...]) -> int:
-    """Return the total size of `paths` under `root`, in bytes."""
-    total = 0
-    for rel in paths:
-        try:
-            total += (Path(root) / rel).stat().st_size
-        except OSError:
-            continue
-    return total
 
 
 def _plain_copy(root: Path, paths: tuple[str, ...]) -> Path:
