@@ -12,7 +12,8 @@ import argparse
 import sys
 
 from stayawake.bots.security import service
-from stayawake.cli.argtypes import add_jobs_arg, add_progress_arg, no_stream_requested, progress_requested
+from stayawake.cli.argtypes import (add_deadline_arg, add_jobs_arg, add_progress_arg, no_stream_requested,
+                                     progress_requested)
 from stayawake.utils.progress_events import covering, current
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
@@ -73,6 +74,8 @@ def register(sub) -> None:
                         "its integrity check, instead of falling back to the inline malware seed — "
                         "for CI gates that must not silently lose coverage. Default is fail-open "
                         "(degrade to the seed).")
+    add_deadline_arg(p, help="stop the scan after SECONDS; the report keeps the targets it finished "
+                             "and marks the rest incomplete")
     add_jobs_arg(p, help="scan up to N targets concurrently (a multi-repo sweep). Default AUTO: one "
                          "target runs sequentially, several use one worker per CPU core. Pass a number "
                          "to cap it, `-j 1` to force sequential (reproducible / low-load), or `auto`.")
@@ -115,4 +118,5 @@ def _scan(a: argparse.Namespace) -> int:
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
                         alert=a.alert, no_stream=no_stream_requested(a), pager=a.pager,
                         no_advisories=a.no_advisories, external_audit=a.external_audit,
-                        deep=a.deep, history=a.history, require_db=a.require_db, jobs=a.jobs)
+                        deep=a.deep, history=a.history, require_db=a.require_db, jobs=a.jobs,
+                        deadline=a.deadline)

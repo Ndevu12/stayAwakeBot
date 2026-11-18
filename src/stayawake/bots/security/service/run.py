@@ -16,9 +16,10 @@ from pathlib import Path
 
 import heapq
 
-from stayawake.utils import parallel
+from stayawake.utils import parallel, pathsafe
 from stayawake.utils.io import reports_dir_choice, resolve_reports_dir
 from stayawake.utils import textsafe
+from stayawake.utils.pace import DeadlineReached, Pace
 from stayawake.utils.progress_events import current
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.sweep import run_sweep
@@ -40,7 +41,7 @@ from stayawake.bots.security.service.config import (
     _read_config, _options, _as_bool, _require_db_or_error, jobs_setting as _jobs_setting)
 from stayawake.bots.security.service.report import (
     _status_tag, _print_dependency_actions, _print_report_pointer)
-from stayawake.lib.git.run import one_pass
+from stayawake.lib.git.run import UNTRUSTED, one_pass, stdout as git_stdout
 
 
 REPORTS_DIR = Path("reports/security")
@@ -55,8 +56,12 @@ def _resolve_workers(jobs: int | None, target_count: int) -> int:
     return parallel.resolve_jobs(jobs, target_count)
 
 
+DEADLINE_REASON = "the scan reached its deadline before it finished this target"
+
+
 def _scan_targets(jobs_batch: list, labels: list[str], sources: list[str], worker_fn, *,
-                  workers: int, progress_on: bool) -> list[ScanResult]:
+                  workers: int, progress_on: bool, pace: Pace | None = None,
+                  kept: dict[int, ScanResult] | None = None) -> list[ScanResult]:
     """Scan a batch of targets, up to `workers` at a time, returning results in SUBMISSION order
     (so the persisted report is byte-identical whether run with one worker or many). A worker that
     crashes outright becomes an ERROR result (fail-closed → exit 2), never a silent drop. Any
@@ -65,7 +70,8 @@ def _scan_targets(jobs_batch: list, labels: list[str], sources: list[str], worke
     outcomes = run_sweep(
         worker_fn, jobs_batch, jobs=workers, backend=parallel.PROCESS, labels=labels,
         describe=lambda o: (_status_tag(o.value.result), f"{len(o.value.result.findings)} findings"),
-        progress_on=progress_on, out=sys.stderr)
+        progress_on=progress_on, out=sys.stderr,
+        on_each=lambda o: _keep(o, kept, pace))
 
     results: list[ScanResult] = []
     diagnostics: list[str] = []
@@ -80,6 +86,53 @@ def _scan_targets(jobs_batch: list, labels: list[str], sources: list[str], worke
     for text in diagnostics:          # replay captured worker output AFTER the board is gone
         sys.stderr.write(text)
     return results
+
+
+def _keep(outcome, kept: dict[int, ScanResult] | None, pace: Pace | None) -> None:
+    """Remember a finished target's result and count it. Takes the outcome, where results are kept,
+    and the run's pace."""
+    if kept is not None and not outcome.error:
+        kept[outcome.index] = outcome.value.result
+    if pace is not None:
+        pace.advance()
+
+
+def _plan_target(pace: Pace | None, scope, display: str, files: list[str], workers: int) -> None:
+    """Say what one local target holds. Takes the run's pace, the target, its files and workers."""
+    if pace is None or not pace.events.enabled:
+        return
+    size = pathsafe.regular_size(Path(scope.root), files)
+    commits = 0
+    if scope.is_repo:
+        counted = git_stdout(str(scope.root), ["rev-list", "--count", "--all"], context=UNTRUSTED).strip()
+        commits = int(counted) if counted.isdigit() else 0
+    pace.plan(display, files=len(files), size=size, commits=commits, workers=workers)
+
+
+def _counting(pace: Pace | None, display: str, jobs: list):
+    """Return the callback that counts a target's finished jobs: files while file chunks remain,
+    then the whole-repository checks. Takes the run's pace, the target and its jobs."""
+    chunks_left = sum(1 for job in jobs if job.include is not None)
+    checks_total = len(jobs) - chunks_left
+    checks_done = 0
+
+    def on_done(outcome) -> None:
+        nonlocal chunks_left, checks_done
+        if pace is None:
+            return
+        job = jobs[outcome.index]
+        if job.include is None:
+            checks_done += 1
+            if chunks_left == 0:
+                pace.advance()
+            return
+        pace.advance(len(job.include))
+        chunks_left -= 1
+        if chunks_left == 0 and checks_total:
+            pace.begin(display, "repository", checks_total)
+            pace.advance(checks_done)
+
+    return on_done
 
 
 WITHIN_TARGET_MIN_FILES = 256
@@ -121,7 +174,7 @@ def _balanced_chunks(root, files: list[str], nchunks: int) -> list[list[str]]:
 
 
 def _scan_one_target(scope, display: str, opts, sigs, allowlist, workers: int,
-                     progress_on: bool, settings: dict) -> ScanResult:
+                     progress_on: bool, settings: dict, pace: Pace | None = None) -> ScanResult:
     """Scan ONE local target. Above the file-count floor and with >1 worker, split its files into
     size-balanced chunks scanned in parallel (partitionable matchers) alongside the whole-target
     matchers (each once), then MERGE raw findings through `scanner.finalize` — byte-identical to a
@@ -129,18 +182,22 @@ def _scan_one_target(scope, display: str, opts, sigs, allowlist, workers: int,
     try:
         with one_pass():
             return _scan_one_target_inner(scope, display, opts, sigs, allowlist, workers,
-                                          progress_on, settings)
+                                          progress_on, settings, pace)
     except Exception as exc:  # never let one target crash the CLI — fail CLOSED (mirrors scan_target)
         return ScanResult(target=display, source="local",
                           error=f"scan worker failed: {type(exc).__name__}: {exc}")
 
 
 def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: int,
-                           progress_on: bool, settings: dict) -> ScanResult:
+                           progress_on: bool, settings: dict, pace: Pace | None = None) -> ScanResult:
     reader = scan_workers.read_as(scope, display, opts, include_only=scope.include_only)
     files = list(reader.iter_files())
     min_files = int(settings.get("parallel_min_files", WITHIN_TARGET_MIN_FILES) or 0)
-    if workers <= 1 or len(files) < min_files or scope.names_one_file:
+    sequential = workers <= 1 or len(files) < min_files or scope.names_one_file
+    _plan_target(pace, scope, display, files, 1 if sequential else workers)
+    if pace is not None:
+        pace.begin(display, "files", len(files), counted=not sequential)
+    if sequential:
         worker_scan = scan_workers.scan_local(
             scan_workers.LocalScanJob(scope, display, opts, sigs, allowlist))
         if worker_scan.diagnostics:
@@ -164,8 +221,8 @@ def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: 
 
     with status(f"Scanning {display} — {len(files)} files across {workers} workers…",
                 enabled=progress_on):
-        outcomes = parallel.run_ordered(scan_workers.collect_partial, jobs,
-                                        jobs=workers, backend=parallel.PROCESS)
+        outcomes = parallel.run_ordered(scan_workers.collect_partial, jobs, jobs=workers,
+                                        backend=parallel.PROCESS, on_done=_counting(pace, display, jobs))
 
     merged: dict[str, list] = {}
     read_errors: list[str] = []
@@ -192,6 +249,8 @@ def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: 
     # The other local path — one small target, and every target of a fleet scan — goes through
     # `workers.scan_local`, which attaches this itself. This branch is the one it does not reach.
     if scope.is_repo:
+        if pace is not None:
+            pace.begin(display, "history", 0, counted=False)
         scanner.attach_history_note(result, str(scope.root), opts, sigs, allowlist)
     if not scope.is_repo and not files and not result.findings:
         result.error = scan_workers.NOTHING_TO_READ
@@ -215,6 +274,19 @@ def _why_nothing_at(pattern: str) -> str:
     return f"{shown} does not exist"
 
 
+def _results_at_deadline(planned: dict[str, list[str]], kept: dict[int, ScanResult],
+                         paths: list[str] | None) -> list[ScanResult]:
+    """Return each planned target's result, with the ones the deadline cut short reported as not
+    scanned. Takes the planned targets, the results kept so far, and the paths asked for."""
+    labels, sources = planned["labels"], planned["sources"]
+    if not labels:
+        named = ", ".join(paths or []) or "the scan"
+        return [ScanResult(target=named, source="local",
+                           error="the scan reached its deadline before it found its targets")]
+    return [kept.get(index) or ScanResult(target=label, source=source, error=DEADLINE_REASON)
+            for index, (label, source) in enumerate(zip(labels, sources))]
+
+
 def scan(config_path: str | None = None, *, remote: bool = False,
          paths: list[str] | None = None, users: list[str] | None = None,
          orgs: list[str] | None = None, slugs: list[str] | None = None,
@@ -223,7 +295,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          no_stream: bool = False, pager: bool = False,
          no_advisories: bool = False, external_audit: bool = False,
          deep: bool = False, history: bool = False, require_db: bool = False,
-         jobs: int | None = None) -> int:
+         jobs: int | None = None, deadline: float | None = None) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the ladder:
@@ -253,67 +325,81 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     jobs_pref = jobs if jobs is not None else _jobs_setting(settings)
 
     results: list[ScanResult] = []
-    if remote:
-        bad = invalid_slugs(slugs)
-        if bad:
-            print(f"error: --remote targets must be owner/repo slugs; got {bad}", file=sys.stderr)
-            return 2
-        resolved, token, source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
-        if not resolved:
-            print(REMOTE_EMPTY_HINT, file=sys.stderr)
-        elif not events.enabled:
-            print(f"Scanning {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
-                  f"({_remote_scope(cfg, users, orgs, slugs)}, via {source or 'anonymous'}).",
-                  file=sys.stderr)
-        if resolved:
-            jobs_batch = [scan_workers.RemoteScanJob(slug, opts, token, sigs, allowlist)
-                          for slug in resolved]
-            results = _scan_targets(jobs_batch, list(resolved), ["remote"] * len(resolved),
-                                    scan_workers.scan_remote,
-                                    workers=_resolve_workers(jobs_pref, len(resolved)),
-                                    progress_on=progress_on)
-    else:
-        cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
-        if paths:
-            local_patterns = list(paths)
-        else:
-            local_patterns = bare_run_targets(cfg_local)
-            if not cfg_local:
-                print("No target named: scanning your home folder. "
-                      "`saw scan .` scans only the folder you are in.", file=sys.stderr)
-        unsearched: list[Path] = []
-        with status("Discovering targets…", enabled=progress_on):
-            found = resolve_local_targets(local_patterns, opts, unsearched=unsearched)
-        repos = [t.root for t in found]
-        if not repos:
-            for pattern in local_patterns:
-                print(f"error: {_why_nothing_at(pattern)}.", file=sys.stderr)
-            print("Nothing was scanned.", file=sys.stderr)
-            return 2
-        if progress_on and repos:
-            prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
-        if unsearched and (progress_on or events.enabled):
-            unread = (f"{len(unsearched)} folder{'' if len(unsearched) == 1 else 's'} could not be "
-                      "read, so the scan is not complete. Check their permissions and scan again.")
-            if events.enabled:
-                print(unread, file=sys.stderr)
+    pace = Pace(events, deadline)
+    kept: dict[int, ScanResult] = {}
+    planned: dict[str, list[str]] = {"labels": [], "sources": []}
+    with pace:
+        try:
+            if remote:
+                bad = invalid_slugs(slugs)
+                if bad:
+                    print(f"error: --remote targets must be owner/repo slugs; got {bad}", file=sys.stderr)
+                    return 2
+                resolved, token, source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
+                if not resolved:
+                    print(REMOTE_EMPTY_HINT, file=sys.stderr)
+                elif not events.enabled:
+                    print(f"Scanning {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
+                          f"({_remote_scope(cfg, users, orgs, slugs)}, via {source or 'anonymous'}).",
+                          file=sys.stderr)
+                if resolved:
+                    jobs_batch = [scan_workers.RemoteScanJob(slug, opts, token, sigs, allowlist)
+                                  for slug in resolved]
+                    planned.update(labels=list(resolved), sources=["remote"] * len(resolved))
+                    pace.begin("", "targets", len(resolved))
+                    results = _scan_targets(jobs_batch, list(resolved), ["remote"] * len(resolved),
+                                            scan_workers.scan_remote,
+                                            workers=_resolve_workers(jobs_pref, len(resolved)),
+                                            progress_on=progress_on, pace=pace, kept=kept)
             else:
-                prog.line(unread)
-        if len(repos) == 1:
-            home = os.path.expanduser("~")
-            display = str(found[0].label).replace(home, "~")
-            events.target(str(found[0].root), index=1, of=1)
-            results = [_scan_one_target(found[0], display, opts, sigs, allowlist,
-                                        _file_workers(jobs_pref), progress_on, settings)]
-        elif repos:
-            home = os.path.expanduser("~")
-            labels = [str(t.label).replace(home, "~") for t in found]
-            jobs_batch = [scan_workers.LocalScanJob(t, labels[i], opts, sigs, allowlist)
-                          for i, t in enumerate(found)]
-            results = _scan_targets(jobs_batch, labels, ["local"] * len(repos),
-                                    scan_workers.scan_local,
-                                    workers=_resolve_workers(jobs_pref, len(repos)),
-                                    progress_on=progress_on)
+                cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
+                if paths:
+                    local_patterns = list(paths)
+                else:
+                    local_patterns = bare_run_targets(cfg_local)
+                    if not cfg_local:
+                        print("No target named: scanning your home folder. "
+                              "`saw scan .` scans only the folder you are in.", file=sys.stderr)
+                unsearched: list[Path] = []
+                with status("Discovering targets…", enabled=progress_on):
+                    found = resolve_local_targets(local_patterns, opts, unsearched=unsearched)
+                repos = [t.root for t in found]
+                if not repos:
+                    for pattern in local_patterns:
+                        print(f"error: {_why_nothing_at(pattern)}.", file=sys.stderr)
+                    print("Nothing was scanned.", file=sys.stderr)
+                    return 2
+                if progress_on and repos:
+                    prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
+                if unsearched and (progress_on or events.enabled):
+                    unread = (f"{len(unsearched)} folder{'' if len(unsearched) == 1 else 's'} could not be "
+                              "read, so the scan is not complete. Check their permissions and scan again.")
+                    if events.enabled:
+                        print(unread, file=sys.stderr)
+                    else:
+                        prog.line(unread)
+                if len(repos) == 1:
+                    home = os.path.expanduser("~")
+                    display = str(found[0].label).replace(home, "~")
+                    events.target(str(found[0].root), index=1, of=1)
+                    planned.update(labels=[display], sources=["local"])
+                    results = [_scan_one_target(found[0], display, opts, sigs, allowlist,
+                                                _file_workers(jobs_pref), progress_on, settings, pace)]
+                elif repos:
+                    home = os.path.expanduser("~")
+                    labels = [str(t.label).replace(home, "~") for t in found]
+                    jobs_batch = [scan_workers.LocalScanJob(t, labels[i], opts, sigs, allowlist)
+                                  for i, t in enumerate(found)]
+                    planned.update(labels=labels, sources=["local"] * len(repos))
+                    pace.begin("", "targets", len(repos))
+                    results = _scan_targets(jobs_batch, labels, ["local"] * len(repos),
+                                            scan_workers.scan_local,
+                                            workers=_resolve_workers(jobs_pref, len(repos)),
+                                            progress_on=progress_on, pace=pace, kept=kept)
+        except KeyboardInterrupt:
+            if not pace.expired:
+                raise
+            results = _results_at_deadline(planned, kept, paths)
 
     report = ScanReport(generated_at=now_iso(), results=results)
 

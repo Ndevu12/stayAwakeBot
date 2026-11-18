@@ -74,6 +74,8 @@ stderr. A program should ignore an event it does not recognise, so a later saw c
 | `start` | The run began. `command` is `scan`, `audit` or `fix`. `steps`, when present, is how many steps the run will report. |
 | `step` | One step. `label` is the same words the spinner shows. `id` names the step. `index` and `of`, when present, say which step this is. |
 | `target` | One repository or path, in `path`. `index` and `of`, when present, say which target this is. |
+| `plan` | `saw scan` and `saw govern prepare`, before a target is read: its `files`, `bytes` and `commits`, the `workers` reading it, `estimate_seconds` (saw's estimate) and `budget_seconds` (how long it may take before something is wrong; a good `--deadline`). |
+| `progress` | At least every few seconds while a target is read: its `phase` (`files`, `repository`, `history`, or `targets` across several), `total`, and `done` when it is counted. While these arrive, the scan is alive. |
 | `done` | The run finished. |
 
 ## Command aliases

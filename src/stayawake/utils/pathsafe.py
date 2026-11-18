@@ -125,6 +125,20 @@ def grade(path: Path) -> str:
     return "unverified"
 
 
+def regular_size(root: Path, names) -> int:
+    """Return the total size of the regular files among `names` under `root`, in bytes, without
+    following a link. Takes the folder and the relative names."""
+    total = 0
+    for name in names:
+        try:
+            found = os.lstat(Path(root) / name)
+        except OSError:
+            continue
+        if stat.S_ISREG(found.st_mode):
+            total += found.st_size
+    return total
+
+
 def is_safe_write_target(path: Path, root: Path) -> bool:
     """True only if writing to / deleting `path` stays inside `root` and does NOT go through a symlink.
 

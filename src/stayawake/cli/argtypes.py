@@ -76,6 +76,22 @@ def progress_requested(a: argparse.Namespace) -> bool:
     return getattr(a, "progress", None) == "jsonl"
 
 
+def seconds(value: str) -> float:
+    """Read a positive number of seconds. Takes the text. Returns the number."""
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number of seconds") from None
+    if not number > 0:
+        raise argparse.ArgumentTypeError("the deadline must be more than 0 seconds")
+    return number
+
+
+def add_deadline_arg(parser: argparse.ArgumentParser, *, help: str) -> None:
+    """Register the shared `--deadline SECONDS` flag. Takes the parser and the command's own help."""
+    parser.add_argument("--deadline", type=seconds, default=None, metavar="SECONDS", help=help)
+
+
 def add_jobs_arg(parser: argparse.ArgumentParser, *, help: str) -> None:
     """Register the shared `-j/--jobs` flag on a sweep command — SAME type parser, flag names,
     `dest`, and `metavar` everywhere, but each command supplies its OWN `help` text (its wording

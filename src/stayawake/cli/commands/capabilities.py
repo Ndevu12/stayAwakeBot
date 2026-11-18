@@ -73,6 +73,11 @@ def offers_progress(commands: dict[str, argparse.ArgumentParser]) -> bool:
                if (parser := commands.get(name)) is not None)
 
 
+def _takes(parser: argparse.ArgumentParser, flag: str) -> bool:
+    """Return whether `parser` accepts `flag`."""
+    return any(flag in action.option_strings for action in parser._actions)
+
+
 def _subcommands(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
     """The subcommands `parser` offers, by name. Returns an empty mapping when it has none."""
     return next((action.choices for action in parser._actions
@@ -90,6 +95,8 @@ def govern_features(commands: dict[str, argparse.ArgumentParser]) -> list[str]:
         feats.append("govern.progress.jsonl")
     if "prepare" in subs:
         feats.append("govern.decision")
+    if "prepare" in subs and _takes(subs["prepare"], "--deadline"):
+        feats.append("govern.deadline")
     feats += [f"govern.{name}" for name in ("verdict", "restore") if name in subs]
     return feats
 
@@ -120,6 +127,10 @@ def capabilities(commands: dict[str, argparse.ArgumentParser]) -> dict:
         features.append("fix.ask.json")
     if offers_stream(commands):
         features.append("stream")
+    if "scan" in commands and _takes_progress(commands["scan"]):
+        features.append("scan.plan")
+    if "scan" in commands and _takes(commands["scan"], "--deadline"):
+        features.append("scan.deadline")
     features.extend(govern_features(commands))
     features.extend(name for name in ("serve", "mcp") if name in commands)
     return versioned("capabilities", {

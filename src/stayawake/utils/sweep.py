@@ -17,7 +17,8 @@ from stayawake.utils.terminal import supports_color
 def run_sweep(work_fn: Callable[[Any], Any], items: Iterable[Any], *, jobs: int, backend: str,
               labels: list[str], describe: Callable[[Outcome], tuple[str, str]],
               progress_on: bool, out: TextIO | None = None,
-              verb: str = "Scanning") -> list[Outcome]:
+              verb: str = "Scanning",
+              on_each: Callable[[Outcome], None] | None = None) -> list[Outcome]:
     """Map `work_fn` over `items`, up to `jobs` at a time, driving a live board and returning
     `Outcome`s in SUBMISSION order (so a caller renders identically at any worker count).
 
@@ -31,6 +32,7 @@ def run_sweep(work_fn: Callable[[Any], Any], items: Iterable[Any], *, jobs: int,
     - `progress_on` picks a live board (a real TTY) vs one plain line per item (pipe / CI /
       `--no-stream`). The board draws on `out` (default stderr — progress, never the report).
     - `verb` is the board header's action word ("Fixing"/"Checking"…), cosmetic only.
+    - `on_each(outcome)`, when given, is called as each item finishes, on the calling thread.
     - A failed item never raises: it comes back as an `Outcome.error`, shows on the board as an
       `[ERROR]` line, and is returned so the caller can fail closed. Ctrl-C tears down in-flight
       workers immediately (see `parallel`).
@@ -56,6 +58,8 @@ def run_sweep(work_fn: Callable[[Any], Any], items: Iterable[Any], *, jobs: int,
             tag, detail = rendered[0], rendered[1]
             block = rendered[2] if len(rendered) > 2 else None
             progress.item_done(labels[outcome.index], tag, detail, block=block)
+        if on_each is not None:
+            on_each(outcome)
 
     try:
         return parallel.run_ordered(work_fn, work, jobs=jobs, backend=backend,

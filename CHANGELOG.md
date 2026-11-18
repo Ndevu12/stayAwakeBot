@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- `saw scan --progress=jsonl` says what a target holds and how long it should take before it
+  starts, then reports progress every few seconds. `--deadline SECONDS` stops a scan or a
+  `saw govern prepare` check in time and still reports what it covered.
 - When `saw govern` cannot check an update, it says why and leaves the decision to you: run the
   command as typed and scan the folder after, or leave it as it is. A terminal asks; elsewhere,
   `SAW_GOVERN_DECISION` decides.

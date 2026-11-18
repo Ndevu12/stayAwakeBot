@@ -22,7 +22,8 @@ from stayawake.bots.security.targets.local import LocalRepoTarget
 from stayawake.lib.git import incoming
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.write.working_tree import uncommitted_paths
-from stayawake.utils import exitcodes, scratch
+from stayawake.utils import exitcodes, pathsafe, scratch
+from stayawake.utils.pace import DeadlineReached, Pace
 from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
 
@@ -40,7 +41,8 @@ def is_recognised(tool: str, args: list[str]) -> bool:
     return incoming.classify(tool, list(args)) is not None
 
 
-def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None = None) -> tuple[dict, int]:
+def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None = None, *,
+            deadline: float | None = None) -> tuple[dict, int]:
     """Materialise the update outside the open folder and scan what arrived. Returns `(payload,
     exit)`: `{"scan": <document>}` with the scan's own exit, or, when the update could not be
     checked, `{"reason": <sentence>, "decision": ...}` and INCOMPLETE, leaving the user to run the
@@ -53,7 +55,9 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     current().step("scan", "scanning what arrived")
     govern_status.write(repo, "checking", step="scanning what arrived")
     try:
-        payload, code = _scan_arrived(arrived.root, arrived.paths, config)
+        payload, code = _scan_arrived(arrived.root, arrived.paths, config, deadline)
+    except DeadlineReached:
+        return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:
         return _unchecked(repo, str(exc) or "the check could not use your config")
     except OSError:
@@ -165,11 +169,20 @@ def restore(repo: str, config: str | None = None) -> tuple[dict, int]:
     return {"restored": True, "commit": let_in}, exitcodes.CLEAN
 
 
-def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None) -> tuple[dict, int]:
+def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None,
+                  deadline: float | None = None) -> tuple[dict, int]:
     policy = operator_policy(config)
     files = _plain_copy(Path(root), paths)
-    with LocalRepoTarget(str(files), str(files), policy.opts, include_only=paths) as target:
-        result = scan_target(target, policy.signatures, policy.allowlist)
+    with Pace(current(), deadline) as pace:
+        pace.plan(str(root), files=len(paths), size=pathsafe.regular_size(files, paths), commits=0, workers=1)
+        pace.begin(str(root), "files", len(paths), counted=False)
+        try:
+            with LocalRepoTarget(str(files), str(files), policy.opts, include_only=paths) as target:
+                result = scan_target(target, policy.signatures, policy.allowlist)
+        except KeyboardInterrupt:
+            if pace.expired:
+                raise DeadlineReached from None
+            raise
     report = ScanReport(generated_at=now_iso(), results=[result])
     if report.any_infected:
         code = exitcodes.FINDINGS
