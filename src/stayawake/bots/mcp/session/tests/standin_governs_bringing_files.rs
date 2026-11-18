@@ -37,6 +37,7 @@ impl Fixture {
                 "#!/bin/sh\n\
                  if [ \"$1\" = scan ]; then echo scanned >> {:?}; exit 0; fi\n\
                  if [ \"$2\" = prepare ]; then\n\
+                 \tif [ -n \"$SAW_FAKE_LET_IN\" ]; then echo '{{\"scan\":{{\"results\":[{{\"verdict\":\"suspicious\"}}]}},\"next_steps\":[\"Check .claude/settings.json\"],\"decision\":{{\"choices\":[\"let-in\",\"leave-unchanged\"],\"let_in\":[\"saw\",\"govern\",\"apply\",\"--accept\",\"c0ffee\"],\"confirm\":\"yes\"}}}}'; exit 0; fi\n\
                  \tif [ -n \"$SAW_FAKE_UNCHECKED\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{}}}}'; exit 2; fi\n\
                  \t[ -n \"$SAW_FAKE_HELD\" ] && exit 2\n\
                  \techo '{{\"schema_version\":1,\"scan\":{{}}}}'; exit 0\n\
@@ -226,4 +227,28 @@ fn an_update_saw_could_not_check_stays_out_when_the_user_decides_so() {
     assert_eq!(f.run_unchecked(Some("leave-unchanged")).status.code(), Some(2));
     assert!(!f.real_ran());
     assert!(!f.scanned());
+}
+
+#[test]
+fn a_held_update_is_never_let_in_from_the_environment() {
+    let f = Fixture::new("held-env");
+    let out = Command::new(STANDIN)
+        .args(["pull"])
+        .current_dir(&f.dir)
+        .env("SAW_STANDIN_TOOL", "git")
+        .env("SAW_REAL_GIT", &f.real_git)
+        .env("PATH", &f.dir)
+        .env("SAW_BIN", &f.saw)
+        .env("SAW_GOVERN_HOLDING", &f.holding)
+        .env("SAW_FAKE_LET_IN", "1")
+        .env("SAW_GOVERN_DECISION", "run-as-typed")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_ne!(out.status.code(), Some(0));
+    assert!(!f.real_ran(), "a held update ran from the environment");
+    assert!(!f.applied(), "a held update was let in without the user");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("Check .claude/settings.json"), "{said}");
+    assert!(said.contains("govern apply --accept c0ffee"), "{said}");
 }

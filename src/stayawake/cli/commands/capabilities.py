@@ -95,6 +95,7 @@ def govern_features(commands: dict[str, argparse.ArgumentParser]) -> list[str]:
         feats.append("govern.progress.jsonl")
     if "prepare" in subs:
         feats.append("govern.decision")
+        feats.append("govern.held.decision")
     if "prepare" in subs and _takes(subs["prepare"], "--deadline"):
         feats.append("govern.deadline")
     feats += [f"govern.{name}" for name in ("verdict", "restore") if name in subs]
