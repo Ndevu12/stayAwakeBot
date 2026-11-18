@@ -11,7 +11,8 @@ from tests.support.gitrepo import GitSandbox
 from tests.support.local_remotes import allow_local_remotes
 
 
-class AReplayFromATrackingCheckout(GitSandbox):
+class _TrackingCheckout(GitSandbox):
+    """A checkout cloned from a local upstream that has moved on since."""
 
     def setUp(self):
         super().setUp()
@@ -36,6 +37,8 @@ class AReplayFromATrackingCheckout(GitSandbox):
 
     def _copy_config(self) -> str:
         return (self.into / "repo.git" / "config").read_text()
+
+class AReplayFromATrackingCheckout(_TrackingCheckout):
 
     def test_a_pull_brings_what_the_upstream_has(self):
         for args in (["pull"], ["pull", "--ff-only"], ["pull", "--rebase"], ["pull", "origin", "main"]):
@@ -112,3 +115,21 @@ class AReplayFromATrackingCheckout(GitSandbox):
         self.assertNotIn("insteadof", copied)
         self.assertNotIn("uploadpack", copied)
         self.assertFalse(mark.exists())
+
+
+class AnUpdateSawCannotCheckIsTheUsersToDecide(_TrackingCheckout):
+
+    def test_the_answer_offers_to_run_it_as_typed_or_leave_it(self):
+        from stayawake.bots.security import govern
+        self.git(self.open, "remote", "remove", "origin")
+        payload, code = govern.prepare(str(self.open), str(self.into), "git", ["fetch"])
+        self.assertEqual(code, 2)
+        self.assertTrue(payload["reason"])
+        self.assertEqual(payload["decision"]["choices"], ["run-as-typed", "leave-unchanged"])
+        self.assertEqual(payload["decision"]["scan_after"], ["saw", "scan", str(self.open)])
+
+    def test_an_update_that_was_checked_carries_no_decision(self):
+        from stayawake.bots.security import govern
+        payload, _ = govern.prepare(str(self.open), str(self.into), "git", ["pull"])
+        self.assertIn("scan", payload)
+        self.assertNotIn("decision", payload)
