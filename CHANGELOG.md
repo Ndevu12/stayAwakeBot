@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- `saw govern` checks a pull, fetch, merge, rebase, or a checkout of a branch from the remote,
+  in a repository that tracks a remote, the way git runs it.
 - Findings about a committed credential, or a .gitignore that may expose your environment file,
   read in their own words in reports, and say when they are worth a review.
 
