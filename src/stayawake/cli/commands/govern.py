@@ -68,6 +68,10 @@ def register(sub) -> None:
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--repo", required=True, help="the open folder")
     ap.add_argument("--into", required=True, help="the holding directory saw owns")
+    ap.add_argument("--accept", default=None, metavar="COMMIT",
+                    help="let in an update saw held, after you reviewed it: the commit it checked")
+    ap.add_argument("--confirm", default=None, metavar="FOLDER",
+                    help="for an infected update, the open folder's name, typed by you")
     add_progress_arg(ap)
     ap.set_defaults(func=run_apply)
 
@@ -135,7 +139,7 @@ def run_apply(a: argparse.Namespace) -> int:
 
 
 def _do_apply(a: argparse.Namespace) -> int:
-    payload, code = core.apply(a.repo, a.into)
+    payload, code = core.apply(a.repo, a.into, a.accept, a.confirm)
     print(json.dumps(versioned("govern", payload)))
     return code
 

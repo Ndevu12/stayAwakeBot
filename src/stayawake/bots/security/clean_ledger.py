@@ -130,3 +130,37 @@ def governed(root: Path, key: str) -> bool:
     """Tell whether saw vouches for this tree — scanned clean by a hook, or let in by govern (clean
     or residue). Takes the root and the key. Returns the answer."""
     return scanned_clean(root, key) or is_applied(root, key)
+
+
+def accepted_path() -> Path:
+    """The record of trees the user let in although saw found them suspicious or infected."""
+    return cache_path().with_name("govern-accepted.json")
+
+
+def remember_accepted(root: Path, commit: str, verdict: str) -> None:
+    """Record that the user let a held tree into a repository. Takes the root, the commit and the
+    verdict saw gave it. A write that fails is skipped."""
+    try:
+        try:
+            held = json.loads(accepted_path().read_text())
+        except (OSError, ValueError):
+            held = {}
+        held = {r: v for r, v in (held if isinstance(held, dict) else {}).items() if os.path.isdir(r)}
+        held[os.path.realpath(root)] = {"commit": commit, "verdict": verdict}
+        atomicwrite.replace(accepted_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    except OSError:
+        pass
+
+
+def accepted_verdict(root: Path, commit: str) -> str | None:
+    """Return the verdict of a held tree the user let into a repository, when it is this commit.
+    Takes the root and the commit."""
+    try:
+        held = json.loads(accepted_path().read_text())
+    except (OSError, ValueError):
+        return None
+    entry = held.get(os.path.realpath(root)) if isinstance(held, dict) else None
+    if isinstance(entry, dict) and entry.get("commit") == commit and isinstance(entry.get("verdict"), str):
+        return entry["verdict"]
+    return None
