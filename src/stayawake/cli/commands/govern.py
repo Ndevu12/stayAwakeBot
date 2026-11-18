@@ -10,7 +10,7 @@ import sys
 
 from stayawake.bots.security import govern as core
 from stayawake.bots.mcp.launch import standin_binary
-from stayawake.cli.argtypes import add_progress_arg, progress_requested
+from stayawake.cli.argtypes import add_deadline_arg, add_progress_arg, progress_requested
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
 from stayawake.utils.progress_events import covering
@@ -51,6 +51,8 @@ def register(sub) -> None:
     pp.add_argument("--tool", required=True, choices=core.TOOLS, help="which tool the command is")
     pp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
     add_progress_arg(pp)
+    add_deadline_arg(pp, help="stop the check after SECONDS; an unfinished check is left to the user "
+                              "to decide")
     pp.add_argument("args", nargs=argparse.REMAINDER, help="the operator's arguments, after --")
     pp.set_defaults(func=run_prepare)
 
@@ -121,7 +123,8 @@ def run_prepare(a: argparse.Namespace) -> int:
 
 
 def _do_prepare(a: argparse.Namespace) -> int:
-    payload, code = core.prepare(a.repo, a.into, a.tool, _operator_args(a.args), a.config)
+    payload, code = core.prepare(a.repo, a.into, a.tool, _operator_args(a.args), a.config,
+                                 deadline=a.deadline)
     print(json.dumps(versioned("govern", payload)))
     return code
 

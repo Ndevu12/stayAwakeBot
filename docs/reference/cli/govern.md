@@ -17,6 +17,8 @@ artifact, these commands check what arrives before your open folder changes.
 and prints the verdict as the same document `saw scan --json` prints. Your open folder is not
 changed, and nothing from the incoming repository runs.
 
+`--deadline SECONDS` stops the check in time; an unfinished check is yours to decide, as below.
+
 `saw govern apply` makes your open folder match the tree that was checked, without fetching again.
 The extension calls it only when the verdict was clean or residue, and your uncommitted work is
 kept — or the folder is not changed and saw says why.

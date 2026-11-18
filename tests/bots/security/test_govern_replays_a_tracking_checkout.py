@@ -133,3 +133,13 @@ class AnUpdateSawCannotCheckIsTheUsersToDecide(_TrackingCheckout):
         payload, _ = govern.prepare(str(self.open), str(self.into), "git", ["pull"])
         self.assertIn("scan", payload)
         self.assertNotIn("decision", payload)
+
+    def test_a_check_that_reaches_its_deadline_is_the_users_to_decide(self):
+        import time
+        from unittest import mock
+        from stayawake.bots.security import govern
+        with mock.patch.object(govern, "scan_target", side_effect=lambda *a, **k: time.sleep(5)):
+            payload, code = govern.prepare(str(self.open), str(self.into), "git", ["pull"], deadline=0.3)
+        self.assertEqual(code, 2)
+        self.assertIn("deadline", payload["reason"])
+        self.assertIn("decision", payload)
