@@ -235,6 +235,7 @@ _PARENT_CHECK_SECONDS = 0.5
 def _worker_init(start_q, parent_pid: int | None = None) -> None:
     global _WORKER_START_Q
     _WORKER_START_Q = start_q
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     _leave_the_callers_streams()
     if parent_pid is not None:
         threading.Thread(target=_exit_when_the_parent_is_gone, args=(parent_pid,), daemon=True).start()

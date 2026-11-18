@@ -19,6 +19,8 @@ reader, not the mechanism or the weakness it closed.
   `SAW_GOVERN_DECISION` decides.
 
 ### Fixed
+- Ctrl-C ends saw with one line, `saw: stopped.`, and no Python error output, whatever the
+  command is doing.
 - Stopping `saw scan` from outside, as an editor or a CI timeout does, stops its workers too and
   lets go of its output at once, even when the scan is killed outright.
 - `saw govern` checks a pull, fetch, merge, rebase, or a checkout of a branch from the remote,
