@@ -91,7 +91,7 @@ class GovernIncoming(GitSandbox):
         self.assertTrue((self.repo / "arrived.txt").exists())
 
     def test_an_infected_check_leaves_the_folder_and_refuses_apply(self):
-        with mock.patch(_SCAN, return_value=(_verdict_doc("infected"), exitcodes.FINDINGS)):
+        with mock.patch(_SCAN, return_value=(_verdict_doc("infected"), exitcodes.FINDINGS, [])):
             code, body = self._prepare("checkout", "next")
         self.assertEqual(code, exitcodes.FINDINGS, body)
         self.assertEqual(self.rev(self.repo), self.base)
@@ -102,13 +102,13 @@ class GovernIncoming(GitSandbox):
         self.assertFalse((self.repo / "arrived.txt").exists())
 
     def test_a_suspicious_check_does_not_change_the_folder(self):
-        with mock.patch(_SCAN, return_value=(_verdict_doc("suspicious"), exitcodes.CLEAN)):
+        with mock.patch(_SCAN, return_value=(_verdict_doc("suspicious"), exitcodes.CLEAN, [])):
             self.assertEqual(self._prepare("checkout", "next")[0], exitcodes.CLEAN)
         self.assertFalse(self._apply()[1]["applied"])
         self.assertEqual(self.rev(self.repo), self.base)
 
     def test_residue_is_applied(self):
-        with mock.patch(_SCAN, return_value=(_verdict_doc("residue"), exitcodes.CLEAN)):
+        with mock.patch(_SCAN, return_value=(_verdict_doc("residue"), exitcodes.CLEAN, [])):
             self.assertEqual(self._prepare("checkout", "next")[0], exitcodes.CLEAN)
         self.assertTrue(self._apply()[1]["applied"])
         self.assertEqual((self.repo / "arrived.txt").read_text(encoding="utf-8"), "from next\n")
