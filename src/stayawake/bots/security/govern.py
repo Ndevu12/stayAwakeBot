@@ -32,6 +32,8 @@ _STATE = "state.json"
 TOOLS = ("gh", "git")
 
 
+DECISION_CHOICES = ("run-as-typed", "leave-unchanged")
+
 def is_recognised(tool: str, args: list[str]) -> bool:
     """Whether `(tool, args)` is an incoming command saw governs. Takes the tool and the operator's
     arguments without the program name. Returns the answer."""
@@ -40,25 +42,22 @@ def is_recognised(tool: str, args: list[str]) -> bool:
 
 def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None = None) -> tuple[dict, int]:
     """Materialise the update outside the open folder and scan what arrived. Returns `(payload,
-    exit)`: `{"scan": <document>}` with the scan's own exit, or `{"reason": <sentence>}` and
-    INCOMPLETE, in which case nothing is recorded and the update must be held."""
+    exit)`: `{"scan": <document>}` with the scan's own exit, or, when the update could not be
+    checked, `{"reason": <sentence>, "decision": ...}` and INCOMPLETE, leaving the user to run the
+    command as typed or leave the folder unchanged."""
     govern_status.write(repo, "checking", step="checking the incoming update")
     current().step("materialise", "checking the incoming update")
     arrived = incoming.prepare(Path(repo), Path(into), tool, list(args))
     if isinstance(arrived, str):
-        govern_status.write(repo, "finished", reasons=[arrived])
-        return {"reason": arrived}, exitcodes.INCOMPLETE
+        return _unchecked(repo, arrived)
     current().step("scan", "scanning what arrived")
     govern_status.write(repo, "checking", step="scanning what arrived")
     try:
         payload, code = _scan_arrived(arrived.root, arrived.paths, config)
     except ValueError as exc:
-        reason = str(exc) or "the check could not use your config"
-        govern_status.write(repo, "finished", reasons=[reason])
-        return {"reason": reason}, exitcodes.INCOMPLETE
+        return _unchecked(repo, str(exc) or "the check could not use your config")
     except OSError:
-        govern_status.write(repo, "finished", reasons=["the check could not finish"])
-        return {"reason": "the check could not finish"}, exitcodes.INCOMPLETE
+        return _unchecked(repo, "the check could not finish")
     verdict = _verdict(payload) or "incomplete"
     current().step("verdict", "verdict: %s" % verdict)
     releasable = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
@@ -72,6 +71,14 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
                             reasons=["the update was not applied; the open folder is unchanged"])
     _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict)
     return {"scan": payload}, code
+
+
+def _unchecked(repo: str, reason: str) -> tuple[dict, int]:
+    """Answer an update saw could not check, leaving the decision to the user. Takes the open folder
+    and the reason. Returns the payload and INCOMPLETE."""
+    govern_status.write(repo, "finished", reasons=[reason])
+    decision = {"choices": list(DECISION_CHOICES), "scan_after": ["saw", "scan", str(repo)]}
+    return {"reason": reason, "decision": decision}, exitcodes.INCOMPLETE
 
 
 def apply(repo: str, into: str) -> tuple[dict, int]:

@@ -35,13 +35,15 @@ impl Fixture {
             &saw,
             &format!(
                 "#!/bin/sh\n\
+                 if [ \"$1\" = scan ]; then echo scanned >> {:?}; exit 0; fi\n\
                  if [ \"$2\" = prepare ]; then\n\
+                 \tif [ -n \"$SAW_FAKE_UNCHECKED\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{}}}}'; exit 2; fi\n\
                  \t[ -n \"$SAW_FAKE_HELD\" ] && exit 2\n\
                  \techo '{{\"schema_version\":1,\"scan\":{{}}}}'; exit 0\n\
                  fi\n\
                  if [ \"$2\" = apply ]; then echo applied >> {:?}; echo '{{\"applied\":true}}'; exit 0; fi\n\
                  exit 1\n",
-                apply_log
+                apply_log, apply_log
             ),
         );
         let holding = dir.join("holding");
@@ -68,6 +70,26 @@ impl Fixture {
         c.status().unwrap()
     }
 
+    fn run_unchecked(&self, decision: Option<&str>) -> std::process::Output {
+        let mut c = Command::new(STANDIN);
+        c.args(["pull"])
+            .current_dir(&self.dir)
+            .env("SAW_STANDIN_TOOL", "git")
+            .env("SAW_REAL_GIT", &self.real_git)
+            .env("PATH", &self.dir)
+            .env("SAW_BIN", &self.saw)
+            .env("SAW_GOVERN_HOLDING", &self.holding)
+            .env("SAW_FAKE_UNCHECKED", "1")
+            .env_remove("SAW_GOVERN_DECISION")
+            .stdin(std::process::Stdio::null());
+        if let Some(choice) = decision {
+            c.env("SAW_GOVERN_DECISION", choice);
+        }
+        c.output().unwrap()
+    }
+    fn scanned(&self) -> bool {
+        fs::read_to_string(&self.apply_log).map(|s| s.contains("scanned")).unwrap_or(false)
+    }
     fn real_ran(&self) -> bool {
         fs::read_to_string(&self.real_log).map(|s| !s.trim().is_empty()).unwrap_or(false)
     }
@@ -177,4 +199,31 @@ fn without_either_activation_a_bringing_files_command_passes_through() {
     assert!(status.success());
     assert!(f.real_ran(), "with no activation the real git runs");
     assert!(!f.applied(), "nothing is governed when inert");
+}
+
+#[test]
+fn an_update_saw_could_not_check_is_left_unchanged_when_no_one_can_be_asked() {
+    let f = Fixture::new("unchecked-nobody");
+    let out = f.run_unchecked(None);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!f.real_ran(), "the command ran without the user deciding");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no remote to fetch from"));
+}
+
+#[test]
+fn an_update_saw_could_not_check_runs_as_typed_when_the_user_decides_so() {
+    let f = Fixture::new("unchecked-run");
+    let out = f.run_unchecked(Some("run-as-typed"));
+    assert_eq!(out.status.code(), Some(0));
+    assert!(f.real_ran(), "the user decided to run it as typed");
+    assert!(f.scanned(), "what arrived was scanned after it ran");
+    assert!(!f.applied());
+}
+
+#[test]
+fn an_update_saw_could_not_check_stays_out_when_the_user_decides_so() {
+    let f = Fixture::new("unchecked-leave");
+    assert_eq!(f.run_unchecked(Some("leave-unchanged")).status.code(), Some(2));
+    assert!(!f.real_ran());
+    assert!(!f.scanned());
 }

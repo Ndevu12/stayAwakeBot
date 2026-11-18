@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- When `saw govern` cannot check an update, it says why and leaves the decision to you: run the
+  command as typed and scan the folder after, or leave it as it is. A terminal asks; elsewhere,
+  `SAW_GOVERN_DECISION` decides.
+
 ### Fixed
 - `saw govern` checks a pull, fetch, merge, rebase, or a checkout of a branch from the remote,
   in a repository that tracks a remote, the way git runs it.

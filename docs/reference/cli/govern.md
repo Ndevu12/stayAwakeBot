@@ -21,8 +21,10 @@ changed, and nothing from the incoming repository runs.
 The extension calls it only when the verdict was clean or residue, and your uncommitted work is
 kept — or the folder is not changed and saw says why.
 
-When the verdict is suspicious or infected, or the check could not finish, the update is held and
-your open folder stays as it was. These commands never push and never open a pull request.
+When the verdict is suspicious or infected, the update is held and your open folder stays as it
+was. When the update cannot be checked, you get the reason and the decision: run the command as
+typed, then scan the folder with `saw scan`, or leave the folder as it is. These commands
+never push and never open a pull request.
 
 ## Covering your terminals
 
@@ -37,6 +39,10 @@ terminals too, and in the shells coding agents run, run `saw govern install`. Fr
 terminal pulls, fetches, checks out, switches, merges, or updates a submodule, saw checks what
 arrives before it reaches the folder you are working in, the same as in the editor. Open a new
 terminal, or source the file the command names, for it to take effect.
+
+In a terminal, an update that cannot be checked brings a question: run the command as typed? Answer
+yes and the folder is scanned afterwards. Where there is no one to ask, the folder is left as it is;
+set `SAW_GOVERN_DECISION=run-as-typed` or `SAW_GOVERN_DECISION=leave-unchanged` to decide ahead.
 
 `saw govern status` says whether your terminals are covered and whether the shell you are in is
 covered yet. `saw govern uninstall` takes it back out, and your editor is unaffected. saw always
