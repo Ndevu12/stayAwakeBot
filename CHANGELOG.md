@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- In a terminal covered by `saw govern install` or by the editor, a pull, fetch or checkout is
+  checked, and applied when it is clean.
+
 ## [0.17.3] - 2026-11-18
 
 ### Added
