@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- A signed pull, merge or rebase in a terminal `saw govern` covers is checked, and the commit
+  that reaches the folder is signed as you asked.
 - In a terminal covered by `saw govern install` or by the editor, a pull, fetch or checkout is
   checked, and applied when it is clean.
 

@@ -31,6 +31,10 @@ _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "pru
                   "branch": frozenset({"remote", "merge", "rebase"})}
 _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
 _IDENTITY_KEYS = ("user.name", "user.email")
+_SIGNING_KEYS = ("user.signingkey", "gpg.format", "commit.gpgsign")
+_SIGNING_PROGRAMS = {"gpg.openpgp.program": ("gpg.openpgp.program", "gpg.program", "gpg"),
+                     "gpg.x509.program": ("gpg.x509.program", "gpgsm"),
+                     "gpg.ssh.program": ("gpg.ssh.program", "ssh-keygen")}
 
 
 @dataclass(frozen=True)
@@ -296,7 +300,7 @@ def _run_command(work: Path, tool: str, args: list[str], kind: str) -> str:
         return _pull(work, rest)
     if kind == "fetch":
         return "" if run_ok(work, ["fetch", *rest], context=OPERATOR_PUSH) else "the fetch did not finish"
-    return "" if run_ok(work, [sub, *rest], context=SAW_OWNED) else "the update did not finish cleanly"
+    return "" if run_ok(work, [*_signing(work), sub, *rest], context=SAW_OWNED) else "the update did not finish cleanly"
 
 
 def _pull(work: Path, args: list[str]) -> str:
@@ -309,7 +313,7 @@ def _pull(work: Path, args: list[str]) -> str:
         command = ["rebase", *(["--rebase-merges"] if rebase == "merges" else []), *onto]
     else:
         command = ["merge", *_pull_ff(work, args), *onto]
-    return "" if run_ok(work, command, context=SAW_OWNED) else "the update did not finish cleanly"
+    return "" if run_ok(work, [*_signing(work), *command], context=SAW_OWNED) else "the update did not finish cleanly"
 
 
 def _pull_rebases(work: Path, args: list[str]) -> str:
@@ -346,10 +350,11 @@ def _pull_ff(work: Path, args: list[str]) -> list[str]:
 
 
 def _carry_tracking(repo: Path, copy: Path) -> bool:
-    """Copy into the holding repository the remotes, branch tracking, pull settings and identity a
-    replay needs, read from the open folder. Takes the open folder and the holding repository.
-    Returns whether every value was written."""
-    listed = stdout(repo, ["config", "--local", "--null", "--get-regexp", r"^(remote|branch|pull|user)\."],
+    """Copy into the holding repository the remotes, branch tracking, pull settings, identity and
+    signing settings a replay needs, read from the open folder, then from the operator's own
+    config. Takes the open folder and the holding repository. Returns whether every value was
+    written."""
+    listed = stdout(repo, ["config", "--local", "--null", "--get-regexp", r"^(remote|branch|pull|user|gpg|commit)\."],
                     context=UNTRUSTED)
     carried: list[tuple[str, str]] = []
     for entry in listed.split("\0"):
@@ -357,7 +362,7 @@ def _carry_tracking(repo: Path, copy: Path) -> bool:
         if key and _carried(key):
             carried.append((key, value))
     present = {key.lower() for key, _ in carried}
-    for key in _IDENTITY_KEYS:
+    for key in (*_IDENTITY_KEYS, *_SIGNING_KEYS):
         if key not in present:
             value = stdout(None, ["config", "--get", key], context=OPERATOR_CONFIG).strip()
             if value:
@@ -365,10 +370,28 @@ def _carry_tracking(repo: Path, copy: Path) -> bool:
     return all(run_ok(copy, ["config", "--add", key, value], context=SAW_OWNED) for key, value in carried)
 
 
+def _signing(work: Path) -> list[str]:
+    """Return the options a replay signs commits with: the operator's own signing programs, or
+    git's, never the repository's, and signing on or off as the repository or the operator set it.
+    Takes the holding work tree."""
+    options: list[str] = []
+    for key, (*names, default) in _SIGNING_PROGRAMS.items():
+        chosen = next((value for value in (stdout(None, ["config", "--get", name], context=OPERATOR_CONFIG).strip()
+                                           for name in names) if value), default)
+        options += ["-c", f"{key}={chosen}"]
+    command = stdout(None, ["config", "--get", "gpg.ssh.defaultKeyCommand"], context=OPERATOR_CONFIG).strip()
+    if command:
+        options += ["-c", f"gpg.ssh.defaultKeyCommand={command}"]
+    sign = stdout(work, ["config", "--local", "--get", "commit.gpgsign"], context=SAW_OWNED).strip()
+    if sign:
+        options += ["-c", f"commit.gpgSign={sign}"]
+    return options
+
+
 def _carried(key: str) -> bool:
     """Return whether a config key is one a replay needs and that names no program."""
     lowered = key.lower()
-    if lowered in _PLAIN_KEYS or lowered in _IDENTITY_KEYS:
+    if lowered in _PLAIN_KEYS or lowered in _IDENTITY_KEYS or lowered in _SIGNING_KEYS:
         return True
     section, _, rest = lowered.partition(".")
     name = rest.rpartition(".")[2]
