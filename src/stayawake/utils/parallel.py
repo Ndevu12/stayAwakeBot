@@ -7,6 +7,9 @@ import multiprocessing as mp
 import os
 from pathlib import Path
 import queue
+import signal
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
@@ -226,11 +229,73 @@ def _run_threaded(fn, work, workers, on_start, on_done) -> list[Outcome]:
 
 
 _WORKER_START_Q = None
+_PARENT_CHECK_SECONDS = 0.5
 
 
-def _worker_init(start_q) -> None:
+def _worker_init(start_q, parent_pid: int | None = None) -> None:
     global _WORKER_START_Q
     _WORKER_START_Q = start_q
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    _leave_the_callers_streams()
+    if parent_pid is not None:
+        threading.Thread(target=_exit_when_the_parent_is_gone, args=(parent_pid,), daemon=True).start()
+
+
+def _leave_the_callers_streams() -> None:
+    """Point this worker's standard streams at the null device. Returns nothing."""
+    try:
+        null = os.open(os.devnull, os.O_RDWR)
+    except OSError:
+        return
+    for fd in (0, 1, 2):
+        try:
+            os.dup2(null, fd)
+        except OSError:
+            pass
+    os.close(null)
+
+
+def _exit_when_the_parent_is_gone(parent_pid: int) -> None:
+    """End this worker once the process that started it is gone. Takes that process's id."""
+    while os.getppid() == parent_pid:
+        time.sleep(_PARENT_CHECK_SECONDS)
+    os._exit(1)
+
+
+def _stop_signals_interrupt() -> Callable[[], None]:
+    """Make SIGTERM and SIGHUP stop the run the way Ctrl-C does. Returns the function that puts the
+    previous handlers back."""
+    if threading.current_thread() is not threading.main_thread():
+        return lambda: None
+    previous = {}
+    for name in ("SIGTERM", "SIGHUP"):
+        number = getattr(signal, name, None)
+        if number is not None and signal.getsignal(number) is signal.SIG_DFL:
+            previous[number] = signal.signal(number, _interrupt)
+
+    def restore() -> None:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+    return restore
+
+
+class StopRequested(KeyboardInterrupt):
+    """A stop signal received while workers run. Holds the signal's number."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
+
+
+def _interrupt(signum, _frame) -> None:
+    raise StopRequested(signum)
+
+
+def _end_with(signum: int) -> None:
+    """End this process with the stop signal it received. Takes the signal's number."""
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
 
 
 def _process_task(fn, index, item):
@@ -266,19 +331,24 @@ def _run_process(fn, work, workers, on_start, on_done) -> list[Outcome]:
     ctx = mp.get_context("spawn")
     start_q = ctx.Queue() if on_start else None
     ex = cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx,
-                                initializer=_worker_init, initargs=(start_q,))
+                                initializer=_worker_init, initargs=(start_q, os.getpid()))
     interrupted = False
+    restore_signals = _stop_signals_interrupt()
     try:
         return _pump(lambda i, item: ex.submit(_process_task, fn, i, item),
                      start_q, work, on_start, on_done)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as stopped:
         interrupted = True
         _terminate_pool(ex)                            # stop in-flight workers FIRST (shutdown nils _processes)
         ex.shutdown(wait=False, cancel_futures=True)   # then drop queued work, non-blocking
+        if isinstance(stopped, StopRequested):
+            restore_signals()
+            _end_with(stopped.signum)
         raise
     finally:
         # Normal exit → wait=True reaps the (already-finished) workers promptly. Interrupt → wait=False
         # so we never re-block after terminating them.
+        restore_signals()
         ex.shutdown(wait=not interrupted)
         if start_q is not None:
             start_q.close()

@@ -114,6 +114,27 @@ class ProgressEvents:
         _count(body, index, of)
         self._emit(body)
 
+    def plan(self, target: str, *, files: int, size: int, commits: int, workers: int,
+             estimate_seconds: int, budget_seconds: int) -> None:
+        """Say how much work a target holds and how long saw expects it to take. Takes the target
+        and the measured work, saw's estimate and its budget, in seconds. Returns nothing."""
+        if not self.enabled:
+            return
+        self._emit({"event": "plan", "target": textsafe.plain(target, 200), "files": int(files),
+                    "bytes": int(size), "commits": int(commits), "workers": int(workers),
+                    "estimate_seconds": int(estimate_seconds), "budget_seconds": int(budget_seconds)})
+
+    def progress(self, target: str, *, phase: str, done: int | None, total: int) -> None:
+        """Say how far a target has come. Takes the target, the phase, how much of it is done when
+        that is known, and its total. Returns nothing."""
+        if not self.enabled:
+            return
+        body: dict[str, Any] = {"event": "progress", "target": textsafe.plain(target, 200),
+                                "phase": phase, "total": int(total)}
+        if done is not None:
+            body["done"] = int(done)
+        self._emit(body)
+
     def done(self, code: int) -> None:
         """Say the run finished. Takes the status the command returns. Returns nothing. A second
         call is ignored. A run that never started still reports that it started."""

@@ -9,6 +9,7 @@
 
 use std::env;
 use std::fs;
+use std::io::{self, BufRead, IsTerminal};
 use std::os::unix::fs::symlink;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -38,7 +39,7 @@ fn main() {
         exit(127);
     });
     if governing() && brings_files_in(&tool, &args) {
-        if let Some(code) = govern(&tool, &args) {
+        if let Some(code) = govern(&tool, &args, &real) {
             exit(code);                            // governed: saw applied it, or held it
         }
     }
@@ -124,10 +125,10 @@ fn target_repo(args: &[String]) -> String {
 
 /// Run the check. Returns an exit code when the command was governed (applied or held), or `None`
 /// to fall back to the real program (saw absent or it could not answer — fail open, never break git).
-fn govern(tool: &str, args: &[String]) -> Option<i32> {
+fn govern(tool: &str, args: &[String], real: &Path) -> Option<i32> {
     let saw = real_saw()?;
     let (holding, temporary) = holding_dir()?;
-    let code = govern_with(&saw, tool, args, &holding);
+    let code = govern_with(&saw, tool, args, &holding, real);
     if temporary {
         let _ = std::fs::remove_dir_all(&holding); // never leave a held update on disk
     }
@@ -157,7 +158,7 @@ fn holding_dir() -> Option<(PathBuf, bool)> {
 
 /// Run `saw govern prepare`, then `apply` when it comes back clean. Returns the exit code, or
 /// `None` to fall back to the real program (fail open, never break git).
-fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path) -> Option<i32> {
+fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &Path) -> Option<i32> {
     let repo = target_repo(args);
     let mut prepare = Command::new(saw);
     prepare
@@ -167,10 +168,27 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path) -> Optio
         .arg(holding)
         .args(["--tool", tool, "--"])
         .args(args)
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit()); // progress/status reaches the operator
-    let prepared = prepare.status().ok()?;
+    let output = prepare.output().ok()?;
+    let prepared = output.status;
+    let answer: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&output.stdout).trim()).unwrap_or_default();
+    if offers_let_in(&answer) {
+        let held = prepared.code().filter(|code| *code != 0).unwrap_or(1);
+        return Some(let_in_or_leave(saw, &answer, held));
+    }
     if !prepared.success() {
+        if let Some(reason) = unchecked_reason(&String::from_utf8_lossy(&output.stdout)) {
+            return Some(match decide(tool, args, &reason) {
+                Decision::RunAsTyped => run_then_scan(real, saw, args, &repo),
+                Decision::LeaveUnchanged => {
+                    eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
+                               answer yes in a terminal, or set SAW_GOVERN_DECISION=run-as-typed.");
+                    2
+                }
+            });
+        }
         // Held: suspicious / infected / could not finish. The open folder is unchanged.
         eprintln!("saw: held this update — it was not applied. Run `saw govern` output for why.");
         return prepared.code().or(Some(2));
@@ -186,6 +204,109 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path) -> Optio
         .status()
         .ok()?;
     applied.code().or(Some(0))
+}
+
+/// Whether saw held the update and offers to let it in after review.
+fn offers_let_in(answer: &serde_json::Value) -> bool {
+    answer
+        .pointer("/decision/choices")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|choices| choices.iter().any(|c| c == "let-in"))
+}
+
+/// Say why saw held the update and what to do, then ask the user whether to let it in. Never read
+/// from the environment: letting in a finding is decided by a person, each time. Returns the exit
+/// code: the let-in command's, or `held` when the folder is left unchanged.
+fn let_in_or_leave(saw: &Path, answer: &serde_json::Value, held: i32) -> i32 {
+    let verdict = answer.pointer("/scan/results/0/verdict").and_then(serde_json::Value::as_str).unwrap_or("held");
+    eprintln!("saw: held this update ({verdict}); the folder is unchanged.");
+    for step in answer.get("next_steps").and_then(serde_json::Value::as_array).into_iter().flatten() {
+        if let Some(text) = step.as_str() {
+            eprintln!("  - {text}");
+        }
+    }
+    let command: Vec<String> = answer
+        .pointer("/decision/let_in")
+        .and_then(serde_json::Value::as_array)
+        .map(|parts| parts.iter().filter_map(|p| p.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    if command.len() < 2 {
+        return held;
+    }
+    let typed = answer.pointer("/decision/confirm").and_then(serde_json::Value::as_str) == Some("typed");
+    if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
+        eprintln!("saw: after you review it, let it in with: {}{}", command.join(" "),
+                  if typed { " --confirm <folder name>" } else { "" });
+        return held;
+    }
+    let mut extra = Vec::new();
+    if typed {
+        let name = answer.pointer("/decision/type_to_confirm").and_then(serde_json::Value::as_str).unwrap_or("");
+        eprint!("saw recommends leaving the folder unchanged. To let it in anyway, type the folder name \
+                 ({name}); anything else leaves it unchanged: ");
+        extra.push("--confirm".to_string());
+        extra.push(read_answer());
+    } else {
+        eprint!("Let this update in? [y/N] ");
+        if !matches!(read_answer().to_lowercase().as_str(), "y" | "yes") {
+            eprintln!("saw: left the folder unchanged.");
+            return held;
+        }
+    }
+    Command::new(saw).args(&command[1..]).args(&extra).status().ok().and_then(|s| s.code()).unwrap_or(held)
+}
+
+/// Read one line the user typed, trimmed.
+fn read_answer() -> String {
+    let mut answer = String::new();
+    let _ = io::stdin().lock().read_line(&mut answer);
+    answer.trim().to_string()
+}
+
+/// What the user decided about an update saw could not check.
+enum Decision {
+    RunAsTyped,
+    LeaveUnchanged,
+}
+
+/// Return the reason `saw govern prepare` gave when it could not check the update and left the
+/// decision to the user, or `None` when its answer carries no decision.
+fn unchecked_reason(answer: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(answer.trim()).ok()?;
+    parsed.get("decision")?;
+    let reason = parsed.get("reason").and_then(serde_json::Value::as_str);
+    Some(reason.unwrap_or("the update could not be checked").to_string())
+}
+
+/// Ask the user whether to run a command saw could not check. Returns leave-unchanged when there is
+/// no one to ask.
+fn decide(tool: &str, args: &[String], reason: &str) -> Decision {
+    match env::var("SAW_GOVERN_DECISION").as_deref() {
+        Ok("run-as-typed") => return Decision::RunAsTyped,
+        Ok("leave-unchanged") => return Decision::LeaveUnchanged,
+        _ => {}
+    }
+    if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
+        eprintln!("saw: this update cannot be checked: {reason}.");
+        return Decision::LeaveUnchanged;
+    }
+    eprint!("saw: this update cannot be checked: {reason}.\nRun `{tool} {}` as typed anyway? It will not \
+             be checked first. [y/N] ", args.join(" "));
+    let mut answer = String::new();
+    let _ = io::stdin().lock().read_line(&mut answer);
+    if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+        Decision::RunAsTyped
+    } else {
+        Decision::LeaveUnchanged
+    }
+}
+
+/// Run the command as typed with the real program, then scan the folder it changed. Returns the
+/// real program's exit code.
+fn run_then_scan(real: &Path, saw: &Path, args: &[String], repo: &str) -> i32 {
+    let code = Command::new(real).args(args).status().ok().and_then(|s| s.code()).unwrap_or(127);
+    let _ = Command::new(saw).args(["scan", repo, "--no-stream"]).status();
+    code
 }
 
 fn real_saw() -> Option<PathBuf> {

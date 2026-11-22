@@ -86,12 +86,17 @@ def applied_path() -> Path:
     return cache_path().with_name("govern-applied.json")
 
 
-def load_applied() -> dict:
+def _load_record(path: Path) -> dict:
+    """Return a govern record by repository, or an empty one when it is missing or unreadable."""
     try:
-        held = json.loads(applied_path().read_text())
+        held = json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
     return held if isinstance(held, dict) else {}
+
+
+def load_applied() -> dict:
+    return _load_record(applied_path())
 
 
 def remember_applied(root: Path, key: str) -> None:
@@ -130,3 +135,29 @@ def governed(root: Path, key: str) -> bool:
     """Tell whether saw vouches for this tree — scanned clean by a hook, or let in by govern (clean
     or residue). Takes the root and the key. Returns the answer."""
     return scanned_clean(root, key) or is_applied(root, key)
+
+
+def accepted_path() -> Path:
+    """The record of trees the user let in although saw found them suspicious or infected."""
+    return cache_path().with_name("govern-accepted.json")
+
+
+def remember_accepted(root: Path, commit: str, verdict: str) -> None:
+    """Record that the user let a held tree into a repository. Takes the root, the commit and the
+    verdict saw gave it. A write that fails is skipped."""
+    try:
+        held = {r: v for r, v in _load_record(accepted_path()).items() if os.path.isdir(r)}
+        held[os.path.realpath(root)] = {"commit": commit, "verdict": verdict}
+        atomicwrite.replace(accepted_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    except OSError:
+        pass
+
+
+def accepted_verdict(root: Path, commit: str) -> str | None:
+    """Return the verdict of a held tree the user let into a repository, when it is this commit.
+    Takes the root and the commit."""
+    entry = _load_record(accepted_path()).get(os.path.realpath(root))
+    if isinstance(entry, dict) and entry.get("commit") == commit and isinstance(entry.get("verdict"), str):
+        return entry["verdict"]
+    return None
