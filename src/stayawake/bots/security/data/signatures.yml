@@ -371,7 +371,7 @@ signatures:
     pattern: '(?m)^#[^\r\n]*environ[^\r\n]*\r?\n(?:[ \t]*\r?\n){1,20}(?![ \t]*\.env)'
     file_globs: [".gitignore"]
     description: "A .gitignore keeps an environment-variable section but no longer ignores .env (un-ignored secrets)"
-    shown_as: "the .gitignore no longer ignores your environment file"
+    shown_as: "the .gitignore may no longer ignore your environment file"
     remediation: manual
     confidence: heuristic
 
@@ -608,7 +608,7 @@ signatures:
     matcher: config-secret
     kind: config-credential-default
     description: "A configuration file commits a real credential as a ${VAR:default} fallback"
-    shown_as: "a committed credential in a configuration default"
+    shown_as: "what looks like a committed credential in a configuration default"
     remediation: manual
     confidence: heuristic
 

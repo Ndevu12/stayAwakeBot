@@ -13,6 +13,29 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.17.3] - 2026-11-18
+
+### Added
+- `saw scan --progress=jsonl` says what a target holds and how long it should take before it
+  starts, then reports progress every few seconds. `--deadline SECONDS` stops a scan or a
+  `saw govern prepare` check in time and still reports what it covered.
+- When `saw govern` cannot check an update, it says why and leaves the decision to you: run the
+  command as typed and scan the folder after, or leave it as it is. A terminal asks; elsewhere,
+  `SAW_GOVERN_DECISION` decides.
+
+### Fixed
+- A held `saw govern` update is no longer a dead end. An update is no longer held for a
+  finding the changed file already had. A held update says what to do, and you can let it in after
+  review: a yes for a suspicious update, the folder name typed for an infected one.
+- Ctrl-C ends saw with one line, `saw: stopped.`, and no Python error output, whatever the
+  command is doing.
+- Stopping `saw scan` from outside, as an editor or a CI timeout does, stops its workers too and
+  lets go of its output at once, even when the scan is killed outright.
+- `saw govern` checks a pull, fetch, merge, rebase, or a checkout of a branch from the remote,
+  in a repository that tracks a remote, the way git runs it.
+- Findings about a committed credential, or a .gitignore that may expose your environment file,
+  read in their own words in reports, and say when they are worth a review.
+
 ## [0.17.2] - 2026-11-17
 
 ### Security
@@ -2020,7 +2043,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.2...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.3...HEAD
+[0.17.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.2...v0.17.3
 [0.17.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.16.0...v0.17.0

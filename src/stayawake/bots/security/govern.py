@@ -13,16 +13,18 @@ import json
 import shutil
 from pathlib import Path
 
-from stayawake.bots.security import clean_ledger, govern_status
+from stayawake.bots.security import clean_ledger, govern_held, govern_status
 from stayawake.bots.security.hook_policy import operator_policy
-from stayawake.bots.security.models import CLEAN, RESIDUE_VERDICT, ScanReport
+from stayawake.bots.security.models import CLEAN, INFECTED, RESIDUE_VERDICT, ScanReport, ScanResult
 from stayawake.bots.security.scanner import scan_target
+from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
-from stayawake.lib.git import incoming
+from stayawake.lib.git import incoming, objects
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.write.working_tree import uncommitted_paths
-from stayawake.utils import exitcodes, scratch
+from stayawake.utils import atomicwrite, exitcodes, pathsafe, scratch
+from stayawake.utils.pace import DeadlineReached, Pace
 from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
 
@@ -32,37 +34,40 @@ _STATE = "state.json"
 TOOLS = ("gh", "git")
 
 
+DECISION_CHOICES = ("run-as-typed", "leave-unchanged")
+
 def is_recognised(tool: str, args: list[str]) -> bool:
     """Whether `(tool, args)` is an incoming command saw governs. Takes the tool and the operator's
     arguments without the program name. Returns the answer."""
     return incoming.classify(tool, list(args)) is not None
 
 
-def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None = None) -> tuple[dict, int]:
+def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None = None, *,
+            deadline: float | None = None) -> tuple[dict, int]:
     """Materialise the update outside the open folder and scan what arrived. Returns `(payload,
-    exit)`: `{"scan": <document>}` with the scan's own exit, or `{"reason": <sentence>}` and
-    INCOMPLETE, in which case nothing is recorded and the update must be held."""
+    exit)`: `{"scan": <document>}` with the scan's own exit, or, when the update could not be
+    checked, `{"reason": <sentence>, "decision": ...}` and INCOMPLETE, leaving the user to run the
+    command as typed or leave the folder unchanged."""
     govern_status.write(repo, "checking", step="checking the incoming update")
     current().step("materialise", "checking the incoming update")
     arrived = incoming.prepare(Path(repo), Path(into), tool, list(args))
     if isinstance(arrived, str):
-        govern_status.write(repo, "finished", reasons=[arrived])
-        return {"reason": arrived}, exitcodes.INCOMPLETE
+        return _unchecked(repo, arrived)
     current().step("scan", "scanning what arrived")
     govern_status.write(repo, "checking", step="scanning what arrived")
     try:
-        payload, code = _scan_arrived(arrived.root, arrived.paths, config)
+        payload, code, already_there = _scan_arrived(arrived.root, arrived.paths, config, arrived.base,
+                                                     deadline)
+    except DeadlineReached:
+        return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:
-        reason = str(exc) or "the check could not use your config"
-        govern_status.write(repo, "finished", reasons=[reason])
-        return {"reason": reason}, exitcodes.INCOMPLETE
+        return _unchecked(repo, str(exc) or "the check could not use your config")
     except OSError:
-        govern_status.write(repo, "finished", reasons=["the check could not finish"])
-        return {"reason": "the check could not finish"}, exitcodes.INCOMPLETE
+        return _unchecked(repo, "the check could not finish")
     verdict = _verdict(payload) or "incomplete"
     current().step("verdict", "verdict: %s" % verdict)
     releasable = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
-    strictly_clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN
+    strictly_clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN and not already_there
     applied_mark = clean_ledger.clean_key(arrived.commit, config) if releasable else None
     clean_mark = applied_mark if strictly_clean else None
     if releasable:
@@ -71,18 +76,43 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
         govern_status.write(repo, "held", verdict=verdict,
                             reasons=["the update was not applied; the open folder is unchanged"])
     _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict)
-    return {"scan": payload}, code
+    answer: dict = {"scan": payload}
+    if already_there:
+        answer["pre_existing"] = already_there
+    findings = (payload.get("results") or [{}])[0].get("findings") or []
+    steps = govern_held.next_steps(verdict, findings, already_there, arrived.commit)
+    if steps:
+        answer["next_steps"] = steps
+    if not releasable and verdict in govern_held.HELD_VERDICTS:
+        answer["decision"] = govern_held.decision(repo, into, arrived.commit, verdict)
+    elif not releasable:
+        answer["decision"] = _unchecked(repo, "")[0]["decision"]
+    return answer, code
 
 
-def apply(repo: str, into: str) -> tuple[dict, int]:
+def _unchecked(repo: str, reason: str) -> tuple[dict, int]:
+    """Answer an update saw could not check, leaving the decision to the user. Takes the open folder
+    and the reason. Returns the payload and INCOMPLETE."""
+    govern_status.write(repo, "finished", reasons=[reason])
+    decision = {"choices": list(DECISION_CHOICES), "scan_after": ["saw", "scan", str(repo)]}
+    return {"reason": reason, "decision": decision}, exitcodes.INCOMPLETE
+
+
+def apply(repo: str, into: str, accept: str | None = None, confirm: str | None = None) -> tuple[dict, int]:
     """Make the open folder match the checked tree recorded by `prepare`, without fetching again.
-    Returns `(payload, exit)`: `{"applied": true}`, or `{"applied": false, "reason": <sentence>}`
-    with the open folder unchanged."""
+    Takes the open folder, the holding directory, and, to let in an update saw held, the checked
+    commit the user accepts and, for an infected one, the folder name the user typed. Returns
+    `(payload, exit)`: `{"applied": true}`, or `{"applied": false, "reason": <sentence>}` with the
+    open folder unchanged."""
     state = _read_state(Path(into))
     if state is None:
         return _applied(False, "there is no checked update to apply")
+    accepted_verdict = None
     if not state.get("releasable"):
-        return _applied(False, "the check cannot be applied")
+        refused = _refuse_let_in(repo, state, accept, confirm)
+        if refused:
+            return _applied(False, refused)
+        accepted_verdict = state.get("verdict")
     try:
         arrived = incoming.Arrived(
             root=Path(state["root"]), paths=tuple(state["paths"]), mode=state["mode"],
@@ -93,7 +123,11 @@ def apply(repo: str, into: str) -> tuple[dict, int]:
     current().step("apply", "applying the checked update")
     govern_status.write(repo, "checking", step="applying the checked update")
     reason = incoming.apply(Path(repo), Path(into), arrived)
-    if not reason:
+    if not reason and accepted_verdict:
+        clean_ledger.remember_accepted(Path(repo), state["commit"], accepted_verdict)
+        govern_status.write(repo, "applied", verdict=accepted_verdict,
+                            reasons=[f"you let in an update saw found {accepted_verdict}"])
+    elif not reason:
         if state.get("clean_mark"):
             clean_ledger.remember(Path(repo), state["clean_mark"])  # strictly-clean scan cache
         if state.get("applied_mark"):
@@ -102,6 +136,20 @@ def apply(repo: str, into: str) -> tuple[dict, int]:
     else:
         govern_status.write(repo, "finished", reasons=[reason])
     return _applied(not reason, reason)
+
+
+def _refuse_let_in(repo: str, state: dict, accept: str | None, confirm: str | None) -> str:
+    """Return why a held update cannot be let in as asked, or an empty string when it can. Takes
+    the open folder, the recorded check, the accepted commit and the typed confirmation."""
+    if state.get("verdict") not in govern_held.HELD_VERDICTS:
+        return "the check did not finish, so there is nothing checked to let in"
+    if not accept:
+        return "saw held this update; review it, then let it in with --accept and its commit"
+    if accept != state.get("commit"):
+        return "this is not the update saw checked; check it again"
+    if state.get("verdict") == INFECTED and confirm != govern_held.folder_name(repo):
+        return "to let in an infected update, type the folder's name with --confirm"
+    return ""
 
 
 def verdict(repo: str, config: str | None = None) -> tuple[dict, int]:
@@ -115,6 +163,11 @@ def verdict(repo: str, config: str | None = None) -> tuple[dict, int]:
     if not head:
         return _governed("could-not-answer", "could-not-answer", "the open folder has no commit yet",
                          head, let_in), exitcodes.INCOMPLETE
+    accepted = clean_ledger.accepted_verdict(root, head)
+    if accepted:
+        return _governed("not-let-in", "let-in-by-you",
+                         f"you let this tree in although saw found it {accepted}",
+                         head, let_in), exitcodes.FINDINGS
     if not clean_ledger.governed(root, clean_ledger.clean_key(head, config)):
         return _governed("not-let-in", "unknown-commit", "this tree is not one saw let in",
                          head, let_in), exitcodes.FINDINGS
@@ -158,11 +211,32 @@ def restore(repo: str, config: str | None = None) -> tuple[dict, int]:
     return {"restored": True, "commit": let_in}, exitcodes.CLEAN
 
 
-def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None) -> tuple[dict, int]:
+def _scan_files(files: Path, paths: tuple[str, ...], policy) -> ScanResult:
+    with LocalRepoTarget(str(files), str(files), policy.opts, include_only=paths) as target:
+        return scan_target(target, policy.signatures, policy.allowlist)
+
+
+def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None, base: str | None = None,
+                  deadline: float | None = None) -> tuple[dict, int, list[dict]]:
+    """Scan the files an update brought, within `deadline` seconds when given. Takes the work tree,
+    the arrived paths, the operator config, the commit the folder had before and the deadline.
+    Returns the scan document, its exit, and the findings the folder already had before the
+    update, which do not count toward the verdict. Raises DeadlineReached at the deadline."""
     policy = operator_policy(config)
     files = _plain_copy(Path(root), paths)
-    with LocalRepoTarget(str(files), str(files), policy.opts, include_only=paths) as target:
-        result = scan_target(target, policy.signatures, policy.allowlist)
+    already = []
+    with Pace(current(), deadline) as pace:
+        pace.plan(str(root), files=len(paths), size=pathsafe.regular_size(files, paths), commits=0, workers=1)
+        pace.begin(str(root), "files", len(paths), counted=False)
+        try:
+            result = _scan_files(files, paths, policy)
+            if base and result.findings:
+                before = _scan_files(_copy_as_before(Path(root), base, paths), paths, policy)
+                already = govern_held.set_aside_already_there(result, before)
+        except KeyboardInterrupt:
+            if pace.expired:
+                raise DeadlineReached from None
+            raise
     report = ScanReport(generated_at=now_iso(), results=[result])
     if report.any_infected:
         code = exitcodes.FINDINGS
@@ -170,7 +244,31 @@ def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None) -> tup
         code = exitcodes.INCOMPLETE
     else:
         code = exitcodes.CLEAN
-    return _in_plain_words(report.to_payload()), code
+    already_there = []
+    for finding in already:
+        body = finding.to_dict()
+        body["description"] = described(body.get("signature_id", ""), body.get("category", ""),
+                                        body.get("description"))
+        body["pre_existing"] = True
+        already_there.append(body)
+    return _in_plain_words(report.to_payload()), code, already_there
+
+
+def _copy_as_before(root: Path, base: str, paths: tuple[str, ...]) -> Path:
+    """Copy the arrived files as they were at `base` into a directory of their own; a file the
+    update added is left out. Takes the work tree, the earlier commit and the paths."""
+    where = scratch.new_dir("the files an update changed, as they were before")
+    for rel in paths:
+        data = objects.blob(root, f"{base}:{rel}")
+        if data is None:
+            continue
+        destination = where / rel
+        try:
+            atomicwrite.make_folder(destination.parent)
+        except OSError:
+            continue
+        atomicwrite.replace(destination, data)
+    return where
 
 
 def _plain_copy(root: Path, paths: tuple[str, ...]) -> Path:

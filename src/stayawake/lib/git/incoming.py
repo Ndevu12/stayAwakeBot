@@ -14,7 +14,7 @@ from pathlib import Path
 
 from stayawake.lib.git import owned
 from stayawake.lib.git.borrowed import BorrowError, place
-from stayawake.lib.git.run import OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run_ok, stdout, stdout_bytes
+from stayawake.lib.git.run import OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run_ok, stdout, stdout_bytes
 from stayawake.lib.git.write.branch import refs_under, update_refs
 from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.lib.git.write.transfer import adopt_objects
@@ -27,6 +27,10 @@ _GLOBAL = frozenset({
 _OPTION_VALUE = frozenset({"-b", "-B", "-c", "-C", "-m", "--orphan", "--recurse-submodules", "--conflict"})
 _RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
 _GH_INBOUND = frozenset({("pr", "checkout"), ("repo", "sync"), ("release", "download"), ("run", "download")})
+_TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "prune"}),
+                  "branch": frozenset({"remote", "merge", "rebase"})}
+_PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
+_IDENTITY_KEYS = ("user.name", "user.email")
 
 
 @dataclass(frozen=True)
@@ -98,6 +102,8 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
                        ("core.hooksPath", str(into / "no-hooks"))):
         if not run_ok(borrowed.path, ["config", key, value], context=SAW_OWNED):
             return "saw could not prepare a place to check the update"
+    if not _carry_tracking(repo, borrowed.path):
+        return "saw could not prepare a place to check the update"
     if not run_ok(work, ["checkout", "-f", "--detach", base], context=SAW_OWNED):
         return "saw could not prepare a place to check the update"
     if head.startswith("ref: "):
@@ -284,6 +290,8 @@ def _run_command(work: Path, tool: str, args: list[str], kind: str) -> str:
     if parsed is None:
         return "saw does not check that command"
     sub, rest = parsed
+    if kind in ("pull", "fetch") and not stdout(work, ["remote"], context=SAW_OWNED).strip():
+        return "the repository has no remote to fetch from"
     if kind == "pull":
         return _pull(work, rest)
     if kind == "fetch":
@@ -292,18 +300,79 @@ def _run_command(work: Path, tool: str, args: list[str], kind: str) -> str:
 
 
 def _pull(work: Path, args: list[str]) -> str:
-    rebase = "--rebase" in args or any(a.startswith("--rebase=") and a.split("=", 1)[1] != "false" for a in args)
     positionals = _positionals(args)
     if not run_ok(work, ["fetch", *positionals[:1]], context=OPERATOR_PUSH):
         return "the fetch did not finish"
-    if len(positionals) >= 2:
-        onto = [f"{positionals[0]}/{positionals[1]}"]
-    elif rebase:
-        onto = positionals[:1]
+    onto = [f"{positionals[0]}/{positionals[1]}"] if len(positionals) >= 2 else ["@{upstream}"]
+    rebase = _pull_rebases(work, args)
+    if rebase:
+        command = ["rebase", *(["--rebase-merges"] if rebase == "merges" else []), *onto]
     else:
-        onto = ["@{upstream}"]
-    command = ["rebase", *onto] if rebase else ["merge", *onto]
+        command = ["merge", *_pull_ff(work, args), *onto]
     return "" if run_ok(work, command, context=SAW_OWNED) else "the update did not finish cleanly"
+
+
+def _pull_rebases(work: Path, args: list[str]) -> str:
+    """Return how a pull rebases. Takes the holding checkout and the pull's arguments. Returns ""
+    when it merges, else the rebase mode."""
+    for arg in reversed(args):
+        if arg in ("--rebase", "-r"):
+            return "true"
+        if arg.startswith("--rebase="):
+            return _rebase_mode(arg.split("=", 1)[1])
+        if arg == "--no-rebase":
+            return ""
+    branch = stdout(work, ["symbolic-ref", "--quiet", "--short", "HEAD"], context=SAW_OWNED).strip()
+    for key in ([f"branch.{branch}.rebase"] if branch else []) + ["pull.rebase"]:
+        value = stdout(work, ["config", "--get", key], context=SAW_OWNED).strip()
+        if value:
+            return _rebase_mode(value)
+    return ""
+
+
+def _rebase_mode(value: str) -> str:
+    """Return the rebase mode a `pull.rebase`-style value names, or "" for no rebase."""
+    lowered = value.strip().lower()
+    return "" if lowered in ("false", "no", "off", "0") else ("true" if lowered in ("yes", "on", "1") else lowered)
+
+
+def _pull_ff(work: Path, args: list[str]) -> list[str]:
+    """Return the fast-forward option a pull's merge takes, or none."""
+    for arg in reversed(args):
+        if arg in ("--ff-only", "--no-ff", "--ff"):
+            return [arg]
+    value = stdout(work, ["config", "--get", "pull.ff"], context=SAW_OWNED).strip().lower()
+    return {"only": ["--ff-only"], "false": ["--no-ff"]}.get(value, [])
+
+
+def _carry_tracking(repo: Path, copy: Path) -> bool:
+    """Copy into the holding repository the remotes, branch tracking, pull settings and identity a
+    replay needs, read from the open folder. Takes the open folder and the holding repository.
+    Returns whether every value was written."""
+    listed = stdout(repo, ["config", "--local", "--null", "--get-regexp", r"^(remote|branch|pull|user)\."],
+                    context=UNTRUSTED)
+    carried: list[tuple[str, str]] = []
+    for entry in listed.split("\0"):
+        key, _, value = entry.partition("\n")
+        if key and _carried(key):
+            carried.append((key, value))
+    present = {key.lower() for key, _ in carried}
+    for key in _IDENTITY_KEYS:
+        if key not in present:
+            value = stdout(None, ["config", "--get", key], context=OPERATOR_CONFIG).strip()
+            if value:
+                carried.append((key, value))
+    return all(run_ok(copy, ["config", "--add", key, value], context=SAW_OWNED) for key, value in carried)
+
+
+def _carried(key: str) -> bool:
+    """Return whether a config key is one a replay needs and that names no program."""
+    lowered = key.lower()
+    if lowered in _PLAIN_KEYS or lowered in _IDENTITY_KEYS:
+        return True
+    section, _, rest = lowered.partition(".")
+    name = rest.rpartition(".")[2]
+    return section in _TRACKING_KEYS and "." in rest and name in _TRACKING_KEYS[section]
 
 
 def _run_gh(work: Path, args: list[str]) -> str:
