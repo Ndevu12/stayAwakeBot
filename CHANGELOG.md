@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.17.4] - 2026-11-22
+
 ### Fixed
 - A signed pull, merge or rebase in a terminal `saw govern` covers is checked, and the commit
   that reaches the folder is signed as you asked.
@@ -2049,7 +2051,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.3...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.4...HEAD
+[0.17.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.3...v0.17.4
 [0.17.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.2...v0.17.3
 [0.17.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.0...v0.17.1
