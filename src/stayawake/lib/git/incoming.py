@@ -19,6 +19,7 @@ from stayawake.lib.git.write.branch import refs_under, update_refs
 from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.lib.git.write.transfer import adopt_objects
 from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way
+from stayawake.lib.signing.commits.git_command import fix_commit_signing
 
 _GLOBAL = frozenset({
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
@@ -108,7 +109,7 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
         return "saw could not prepare a place to check the update"
     if head.startswith("ref: "):
         run_ok(borrowed.path, ["symbolic-ref", "HEAD", head.removeprefix("ref: ").strip()], context=SAW_OWNED)
-    ran = _run_command(work, tool, args, kind)
+    ran = _run_command(work, tool, args, kind, fix_commit_signing(repo))
     if ran:
         return ran
     after = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
@@ -283,7 +284,7 @@ def _switch_brings(args: list[str]) -> bool:
     return len(_positionals(args)) > 0
 
 
-def _run_command(work: Path, tool: str, args: list[str], kind: str) -> str:
+def _run_command(work: Path, tool: str, args: list[str], kind: str, signing: tuple[str, ...] = ()) -> str:
     if tool == "gh":
         return _run_gh(work, args)
     parsed = _parse_git(args)
@@ -293,13 +294,13 @@ def _run_command(work: Path, tool: str, args: list[str], kind: str) -> str:
     if kind in ("pull", "fetch") and not stdout(work, ["remote"], context=SAW_OWNED).strip():
         return "the repository has no remote to fetch from"
     if kind == "pull":
-        return _pull(work, rest)
+        return _pull(work, rest, signing)
     if kind == "fetch":
         return "" if run_ok(work, ["fetch", *rest], context=OPERATOR_PUSH) else "the fetch did not finish"
-    return "" if run_ok(work, [sub, *rest], context=SAW_OWNED) else "the update did not finish cleanly"
+    return "" if run_ok(work, [*signing, sub, *rest], context=SAW_OWNED) else "the update did not finish cleanly"
 
 
-def _pull(work: Path, args: list[str]) -> str:
+def _pull(work: Path, args: list[str], signing: tuple[str, ...] = ()) -> str:
     positionals = _positionals(args)
     if not run_ok(work, ["fetch", *positionals[:1]], context=OPERATOR_PUSH):
         return "the fetch did not finish"
@@ -309,7 +310,7 @@ def _pull(work: Path, args: list[str]) -> str:
         command = ["rebase", *(["--rebase-merges"] if rebase == "merges" else []), *onto]
     else:
         command = ["merge", *_pull_ff(work, args), *onto]
-    return "" if run_ok(work, command, context=SAW_OWNED) else "the update did not finish cleanly"
+    return "" if run_ok(work, [*signing, *command], context=SAW_OWNED) else "the update did not finish cleanly"
 
 
 def _pull_rebases(work: Path, args: list[str]) -> str:
