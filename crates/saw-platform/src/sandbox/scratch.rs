@@ -69,7 +69,9 @@ fn private_folder() -> DirBuilder {
     DirBuilder::new()
 }
 
-fn make_unique_folder(base: &Path, prefix: &str) -> io::Result<PathBuf> {
+/// Make a folder of its own under a base, named with a prefix and random letters. Takes the base
+/// and the prefix. Returns the folder, or why none was made.
+pub fn make_unique_folder(base: &Path, prefix: &str) -> io::Result<PathBuf> {
     for _ in 0..100 {
         let candidate = base.join(format!("{prefix}{}", random_name()));
         match private_folder().create(&candidate) {
@@ -319,20 +321,15 @@ pub fn local_stamp() -> String {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::sandbox::Isolated;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
 
-    fn temp(name: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let folder = std::env::temp_dir().join(format!("saw-scratch-{unique}-{name}"));
-        fs::create_dir_all(&folder).unwrap();
-        folder
-    }
-
     #[test]
     fn a_folder_that_denies_removal_is_reopened_and_removed() {
-        let base = temp("denies");
+        let sandbox = Isolated::new("denies").unwrap();
+        let base = sandbox.folder("denies").unwrap();
         let inner = base.join("shut");
         fs::create_dir_all(inner.join("deeper")).unwrap();
         fs::write(inner.join("deeper/file"), b"x").unwrap();
@@ -343,7 +340,8 @@ mod tests {
 
     #[test]
     fn a_teardown_runs_before_its_area_is_removed() {
-        let run = Scratch::new(temp("teardown"));
+        let sandbox = Isolated::new("teardown").unwrap();
+        let run = sandbox.sandbox().scratch();
         let ran = Arc::new(AtomicBool::new(false));
         let seen = Arc::clone(&ran);
         let area = run.new_dir("a holding copy", Some(Box::new(move |_| {

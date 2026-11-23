@@ -246,24 +246,20 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
-    struct Sandbox {
+    struct GitFixture {
+        _held: crate::sandbox::Isolated,
         root: PathBuf,
         folders: Folders,
         inherited: BTreeMap<String, String>,
     }
 
-    impl Sandbox {
-        fn new(name: &str) -> Sandbox {
-            let root = std::env::temp_dir().join(format!("saw-git-{}-{name}", std::process::id()));
-            let _ = fs::remove_dir_all(&root);
-            let folders = Folders { empty_hooks: root.join("hooks"), neutral: root.join("neutral").join("dir") };
-            fs::create_dir_all(&folders.empty_hooks).unwrap();
-            fs::create_dir_all(&folders.neutral).unwrap();
-            let inherited = BTreeMap::from([
-                ("PATH".to_string(), std::env::var("PATH").unwrap_or_default()),
-                ("HOME".to_string(), root.display().to_string()),
-            ]);
-            Sandbox { root, folders, inherited }
+    impl GitFixture {
+        fn new(name: &str) -> GitFixture {
+            let isolated = crate::sandbox::Isolated::new(name).unwrap();
+            let root = isolated.root().to_path_buf();
+            let folders = Folders { empty_hooks: isolated.folder("hooks").unwrap(), neutral: isolated.folder("neutral/dir").unwrap() };
+            let inherited = isolated.sandbox().env().variables().clone();
+            GitFixture { _held: isolated, root, folders, inherited }
         }
 
         fn repo(&self) -> PathBuf {
@@ -301,15 +297,10 @@ mod tests {
         }
     }
 
-    impl Drop for Sandbox {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
 
     #[test]
     fn a_command_that_succeeds_answers_with_its_output() {
-        let sandbox = Sandbox::new("answers");
+        let sandbox = GitFixture::new("answers");
         let repo = sandbox.repo();
         let head = sandbox.ask(Context::Untrusted, &repo, &["rev-parse", "HEAD"]).unwrap();
         assert_eq!(String::from_utf8(head).unwrap().trim().len(), 40);
@@ -317,7 +308,7 @@ mod tests {
 
     #[test]
     fn a_command_that_fails_is_an_error_never_an_empty_answer() {
-        let sandbox = Sandbox::new("fails");
+        let sandbox = GitFixture::new("fails");
         let repo = sandbox.repo();
         let answer = sandbox.ask(Context::Untrusted, &repo, &["rev-parse", "--verify", "--quiet", "no-such-ref"]);
         assert!(matches!(answer, Err(GitError::Failed(_))));
@@ -325,7 +316,7 @@ mod tests {
 
     #[test]
     fn a_command_the_context_does_not_allow_is_refused_before_git_runs() {
-        let sandbox = Sandbox::new("refused");
+        let sandbox = GitFixture::new("refused");
         let repo = sandbox.repo();
         assert!(matches!(sandbox.ask(Context::Untrusted, &repo, &["checkout", "-q", "HEAD"]), Err(GitError::Refused(_))));
         disown(&repo);
@@ -334,7 +325,7 @@ mod tests {
 
     #[test]
     fn a_hook_the_repository_holds_never_runs() {
-        let sandbox = Sandbox::new("hook");
+        let sandbox = GitFixture::new("hook");
         let repo = sandbox.repo();
         let (program, marker) = sandbox.marker_program("pre-commit");
         fs::copy(&program, repo.join(".git/hooks/pre-commit")).unwrap();
@@ -347,7 +338,7 @@ mod tests {
 
     #[test]
     fn a_program_the_repository_configures_never_runs() {
-        let sandbox = Sandbox::new("fsmonitor");
+        let sandbox = GitFixture::new("fsmonitor");
         let repo = sandbox.repo();
         let (program, marker) = sandbox.marker_program("fsmonitor");
         let config = repo.join(".git/config");
@@ -360,13 +351,13 @@ mod tests {
         assert!(!marker.exists(), "a program the repository configures ran");
     }
 
-    fn git_of(sandbox: &Sandbox) -> Git {
+    fn git_of(sandbox: &GitFixture) -> Git {
         Git { program: PathBuf::from("git"), folders: sandbox.folders.clone(), inherited: sandbox.inherited.clone() }
     }
 
     #[test]
     fn a_repository_whose_configuration_would_wait_is_not_asked_and_is_recorded() {
-        let sandbox = Sandbox::new("waits");
+        let sandbox = GitFixture::new("waits");
         let repo = sandbox.repo();
         disown(&repo);
         let config = repo.join(".git/config");
@@ -387,7 +378,7 @@ mod tests {
 
     #[test]
     fn an_ordinary_repository_is_asked_within_a_pass() {
-        let sandbox = Sandbox::new("ordinary");
+        let sandbox = GitFixture::new("ordinary");
         let repo = sandbox.repo();
         disown(&repo);
         let pass = Pass::default();

@@ -8,7 +8,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
-use crate::write::{Mode, WriteError};
+use crate::sandbox::write::{Mode, WriteError};
 
 const MAX_LINKS: usize = 40;
 

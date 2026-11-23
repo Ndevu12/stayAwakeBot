@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use saw_platform::scratch::{Scratch, slug};
+use saw_platform::sandbox::scratch::{Scratch, slug};
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();

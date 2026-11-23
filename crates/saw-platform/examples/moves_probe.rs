@@ -4,7 +4,7 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
-use saw_platform::write::{self, WriteError};
+use saw_platform::sandbox::write::{self, WriteError};
 
 fn outcome(result: Result<String, WriteError>) -> String {
     match result {

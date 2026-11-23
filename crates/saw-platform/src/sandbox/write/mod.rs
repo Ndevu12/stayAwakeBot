@@ -126,16 +126,9 @@ fn open_target(where_: &Path, at_a_link: AtALink, create: bool) -> Result<(Folde
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::sandbox::Isolated;
     use std::fs;
     use std::os::unix::fs::{PermissionsExt, symlink};
-    use std::path::PathBuf;
-
-    fn folder(name: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("saw-write-{unique}-{name}"));
-        fs::create_dir_all(&root).unwrap();
-        fs::canonicalize(root).unwrap()
-    }
 
     fn mode_of(path: &Path) -> u32 {
         fs::metadata(path).unwrap().permissions().mode() & 0o7777
@@ -143,7 +136,8 @@ mod tests {
 
     #[test]
     fn a_file_is_written_in_one_step_and_reads_back() {
-        let root = folder("plain");
+        let sandbox = Isolated::new("plain").unwrap();
+        let root = sandbox.folder("work").unwrap();
         let file = root.join("made/on/the/way/state.json");
         replace(&file, b"{}", Mode::Set(0o600), AtALink::Refuse).unwrap();
         assert_eq!(fs::read(&file).unwrap(), b"{}");
@@ -155,7 +149,8 @@ mod tests {
 
     #[test]
     fn a_link_at_the_name_is_refused_followed_or_replaced() {
-        let root = folder("at-name");
+        let sandbox = Isolated::new("at-name").unwrap();
+        let root = sandbox.folder("work").unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
         fs::write(root.join("target.json"), b"old").unwrap();
         symlink(root.join("target.json"), root.join("link.json")).unwrap();
@@ -169,7 +164,8 @@ mod tests {
 
     #[test]
     fn a_link_others_could_have_placed_is_refused() {
-        let root = folder("others");
+        let sandbox = Isolated::new("others").unwrap();
+        let root = sandbox.folder("work").unwrap();
         fs::create_dir_all(root.join("real")).unwrap();
         for (holder, writable_by_others, expect_refused) in [("private", 0o755, false), ("shared", 0o757, true)] {
             fs::create_dir_all(root.join(holder)).unwrap();
@@ -182,7 +178,8 @@ mod tests {
 
     #[test]
     fn a_failed_write_leaves_nothing_behind() {
-        let root = folder("failed");
+        let sandbox = Isolated::new("failed").unwrap();
+        let root = sandbox.folder("work").unwrap();
         let answer = write_with(&root.join("never.json"), Mode::Set(0o600), AtALink::Refuse, |_| Err(io::Error::other("stopped")));
         assert!(answer.is_err());
         assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
@@ -190,7 +187,8 @@ mod tests {
 
     #[test]
     fn a_loop_of_links_is_refused() {
-        let root = folder("loop");
+        let sandbox = Isolated::new("loop").unwrap();
+        let root = sandbox.folder("work").unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
         symlink(root.join("b"), root.join("a")).unwrap();
         symlink(root.join("a"), root.join("b")).unwrap();

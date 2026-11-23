@@ -6,7 +6,7 @@ use std::io::{self, BufRead};
 use std::path::Path;
 
 use saw_platform::env::Environment;
-use saw_platform::stores::Stores;
+use saw_platform::sandbox::stores::Stores;
 
 fn main() -> Result<(), String> {
     for line in io::stdin().lock().lines() {
