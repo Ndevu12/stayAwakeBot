@@ -1,5 +1,4 @@
-//! Whether every git command in a repository would wait on its configuration: the repository's
-//! configuration, or a file it includes unconditionally, is a pipe git would open and wait on.
+//! Tells whether git would wait on a repository's configuration.
 
 use std::collections::HashSet;
 use std::fs;
@@ -7,17 +6,12 @@ use std::path::{Path, PathBuf};
 
 use crate::programs::git::{Context, Git, Request, records};
 
-/// The most configuration files one check reads.
 pub const MAX_WAIT_FILES: usize = 256;
-/// The deepest include one check follows.
 pub const MAX_INCLUDE_DEPTH: usize = 10;
-/// The largest configuration file read.
 pub const MAX_CONFIG_BYTES: u64 = 4 << 20;
 
-/// Whether every git command in the repository at `start` would wait on its configuration. True
-/// only when that is certain; false when the repository is not a plain one at `start` owned by
-/// this user, when an include cannot be followed exactly as git follows it, or when more than
-/// `MAX_WAIT_FILES` files would be read.
+/// Tell whether every git command in a repository would wait on its configuration. Takes the git
+/// handle and the repository. Returns the answer, false when it cannot be said.
 pub fn config_waits(git: &Git, start: &Path) -> bool {
     let Some(git_dir) = plain_git_dir(start) else { return false };
     let common = if fs::symlink_metadata(git_dir.join("commondir")).is_ok() {
@@ -47,7 +41,7 @@ fn plain_git_dir(start: &Path) -> Option<PathBuf> {
 #[allow(unsafe_code)]
 fn owned_by_this_user(path: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
-    // SAFETY: getuid takes no arguments, cannot fail, and touches no memory saw owns.
+    // SAFETY: getuid has no arguments and cannot fail.
     let me = unsafe { libc::getuid() };
     fs::metadata(path).is_ok_and(|found| found.uid() == me)
 }
@@ -73,7 +67,7 @@ fn followed(pointer: &Path, prefix: &str) -> Option<PathBuf> {
     fs::canonicalize(pointer.parent()?.join(value)).ok()
 }
 
-/// Whether `path` is a git directory: a HEAD git accepts, and an objects and a refs directory.
+/// Tell whether a path is a git directory. Takes the path. Returns the answer.
 pub fn is_git_directory(path: &Path) -> bool {
     let common = if fs::symlink_metadata(path.join("commondir")).is_ok() {
         followed(&path.join("commondir"), "")
@@ -142,9 +136,8 @@ fn waits_on(git: &Git, path: &Path, examined: &mut HashSet<PathBuf>, budget: &mu
     if unsure { None } else { Some(false) }
 }
 
-/// Read one configuration file's `(key, value)` pairs in file order, without following its
-/// includes. An absent file reads as empty; one that is not a regular file, is too large, or that
-/// git could not read gives `None`.
+/// Read one configuration file without its includes. Takes the git handle and the file. Returns its
+/// key and value pairs in order, or none when it could not be read.
 pub fn config_file_pairs(git: &Git, path: &Path) -> Option<Vec<(String, Option<String>)>> {
     if fs::symlink_metadata(path).is_err() {
         return Some(Vec::new());
@@ -196,13 +189,12 @@ fn home_of(user: &str) -> Option<PathBuf> {
     let mut buffer = vec![0 as libc::c_char; 16 * 1024];
     let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
     let mut found: *mut libc::passwd = std::ptr::null_mut();
-    // SAFETY: every pointer is to memory this function owns and that outlives the call; the
-    // buffer's length is passed with it, and `found` is only read after a zero return.
+    // SAFETY: the pointers are to locals that outlive the call, with the buffer's length.
     let status = unsafe { libc::getpwnam_r(name.as_ptr(), &mut entry, buffer.as_mut_ptr(), buffer.len(), &mut found) };
     if status != 0 || found.is_null() || entry.pw_dir.is_null() {
         return None;
     }
-    // SAFETY: on success `pw_dir` points into `buffer`, a NUL-terminated string that is still alive.
+    // SAFETY: on success `pw_dir` is a NUL-terminated string inside `buffer`.
     let dir = unsafe { CStr::from_ptr(entry.pw_dir) };
     Some(PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
 }

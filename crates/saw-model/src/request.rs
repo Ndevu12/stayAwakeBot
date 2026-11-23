@@ -1,11 +1,9 @@
-//! What a surface asks the engine to judge: the subject, how deep to read, how long it may take,
-//! and why it asks.
+//! The request a surface sends the engine.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// What to judge. A surface always names a whole subject; reading less is the engine's choice,
-/// and the engine says when it did.
+/// What to judge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Subject {
     /// A folder or file on this machine.
@@ -26,7 +24,7 @@ pub struct PushedRef {
     pub to: String,
 }
 
-/// How deep to read. Depth only adds: combining two depths keeps everything either asked for.
+/// How deep to read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Depth {
     /// Also read what the default scan leaves out.
@@ -39,13 +37,13 @@ impl Depth {
     /// The default depth.
     pub const DEFAULT: Depth = Depth { deep: false, history: false };
 
-    /// Return a depth that reads everything `self` and `other` read.
+    /// Combine two depths. Takes the other depth. Returns a depth that reads everything either reads.
     pub fn raised(self, other: Depth) -> Depth {
         Depth { deep: self.deep || other.deep, history: self.history || other.history }
     }
 }
 
-/// Why a surface asks. It changes the words saw uses, never the judgement.
+/// Why a surface asks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Purpose {
     Scan,

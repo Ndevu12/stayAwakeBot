@@ -1,5 +1,4 @@
-//! JSON written exactly as Python's `json.dumps` writes it, so every document saw prints keeps
-//! its bytes.
+//! Writes JSON in Python's `json.dumps` layouts.
 
 use std::io;
 
@@ -28,7 +27,7 @@ impl Style {
     pub const LINE_KEEPING_NON_ASCII: Style = Style { indent: None, compact_separators: false, ensure_ascii: false };
 }
 
-/// Write `value` in `style`. Returns the text, without a final newline.
+/// Write a value as JSON. Takes the value and the style. Returns the text, without a final newline.
 pub fn to_string<T: Serialize + ?Sized>(value: &T, style: Style) -> Result<String, serde_json::Error> {
     let mut out = Vec::new();
     let mut serializer = Serializer::with_formatter(&mut out, PythonFormatter::new(style));
@@ -36,8 +35,7 @@ pub fn to_string<T: Serialize + ?Sized>(value: &T, style: Style) -> Result<Strin
     Ok(String::from_utf8(out).expect("the writer writes UTF-8"))
 }
 
-/// Write a float as Python's `repr` does: the shortest digits that read back the same, with
-/// `.0` on a whole number and an exponent below 1e-4 or from 1e16.
+/// Write a float as Python's `repr` writes it. Takes the float. Returns the text.
 pub fn python_float(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();

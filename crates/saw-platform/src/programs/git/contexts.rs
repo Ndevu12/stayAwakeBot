@@ -1,13 +1,4 @@
-//! Who a git command runs on behalf of, and so what configuration and environment it may see.
-//!
-//! - `Untrusted`: any repository saw did not create. Only driver-free subcommands run, with every
-//!   command-running key overridden and the operator's global and system configuration hidden.
-//! - `SawOwned`: a repository this process created. Any local subcommand, with the same overrides
-//!   and isolation.
-//! - `OperatorPush`: push, fetch, ls-remote and clone, from no repository or a saw-owned one, with
-//!   the operator's own configuration and only the https and ssh transports.
-//! - `OperatorConfig`: reading or writing the operator's own configuration, and asking their
-//!   credential helper, from no repository at all.
+//! The contexts a git command runs under.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -48,10 +39,8 @@ const OPERATOR_NETWORK: &[(&str, &str)] = &[
 const OPERATOR_LOCAL: &[(&str, &str)] =
     &[("core.fsmonitor", "false"), ("core.pager", "cat"), ("core.editor", "false"), ("protocol.allow", "never")];
 
-/// The transports a push or fetch on the operator's behalf may use.
 pub const OPERATOR_TRANSPORTS: &[&str] = &["https", "ssh"];
 
-/// The git hook names, each switched off on every command saw runs.
 pub const HOOK_NAMES: &[&str] = &[
     "applypatch-msg", "commit-msg", "fsmonitor-watchman", "p4-changelist", "p4-post-changelist", "p4-pre-submit",
     "p4-prepare-changelist", "post-applypatch", "post-checkout", "post-commit", "post-index-change", "post-merge",
@@ -60,14 +49,12 @@ pub const HOOK_NAMES: &[&str] = &[
     "reference-transaction", "sendemail-validate", "update",
 ];
 
-/// Configuration keys a caller may never set with `-c`.
 pub const KEYS_A_CALLER_MAY_NOT_SET: &[&str] = &[
     "core.hookspath", "core.fsmonitor", "diff.external", "core.pager", "core.editor", "sequence.editor",
     "protocol.allow", "credential.helper", "core.askpass", "core.sshcommand", "gc.auto", "maintenance.auto",
     "submodule.recurse", "fetch.recursesubmodules",
 ];
 
-/// Configuration key prefixes a caller may never set with `-c`.
 pub const KEY_PREFIXES_A_CALLER_MAY_NOT_SET: &[&str] = &["protocol.", "hook.", "include.", "includeif."];
 
 const LOCATION_VARS: &[&str] = &[
@@ -77,13 +64,11 @@ const LOCATION_VARS: &[&str] = &[
 const CONFIG_INJECTION_PREFIXES: &[&str] = &["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
 const ISOLATION_VARS: &[&str] = &["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"];
 const STORED_VIEW: &[(&str, &str)] = &[("GIT_NO_REPLACE_OBJECTS", "1"), ("GIT_NO_LAZY_FETCH", "1")];
-/// The variables that switch saw's stand-in on; saw's own git never carries them.
 pub const GOVERN_ACTIVATION: &[&str] = &["SAW_GOVERN_SYSTEM", "SAW_GOVERN_HOLDING"];
-/// Set on every git saw runs, so saw's own hooks stand aside.
 pub const SAW_HOOK_DISABLED: &str = "SAW_HOOK_DISABLED";
 
 impl Context {
-    /// The context's name, as saw writes it.
+    /// Return the context's name.
     pub fn name(self) -> &'static str {
         match self {
             Context::Untrusted => "UNTRUSTED",
@@ -93,7 +78,7 @@ impl Context {
         }
     }
 
-    /// The `-c` pairs this context places before the caller's arguments.
+    /// Return the `-c` pairs this context sets.
     pub fn overrides(self) -> &'static [(&'static str, &'static str)] {
         match self {
             Context::Untrusted | Context::SawOwned => NO_EXECUTION,
@@ -102,12 +87,12 @@ impl Context {
         }
     }
 
-    /// Whether the operator's global and system configuration and inherited `GIT_*` are kept.
+    /// Return whether the operator's own configuration is kept.
     pub fn operator_scopes(self) -> bool {
         matches!(self, Context::OperatorPush | Context::OperatorConfig)
     }
 
-    /// Where this context may run.
+    /// Return where this context may run.
     pub fn place(self) -> Where {
         match self {
             Context::Untrusted => Where::AnyRepository,
@@ -116,14 +101,14 @@ impl Context {
         }
     }
 
-    /// Whether pathspec magic is switched off.
+    /// Return whether pathspecs are literal.
     pub fn literal_pathspecs(self) -> bool {
         matches!(self, Context::Untrusted | Context::SawOwned)
     }
 }
 
-/// The `-c` arguments and global options `context` places before the caller's arguments. Takes the
-/// context and saw's empty hooks folder.
+/// Build the options a context places before the caller's arguments. Takes the context and saw's
+/// empty hooks folder. Returns the options.
 pub fn config_prefix(context: Context, empty_hooks: &Path) -> Vec<String> {
     let mut out = vec!["-c".to_string(), format!("core.hooksPath={}", empty_hooks.display())];
     for event in HOOK_NAMES {
@@ -147,12 +132,9 @@ fn injects_config(key: &str) -> bool {
     key == "GIT_CONFIG" || CONFIG_INJECTION_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
 }
 
-/// The environment git runs in. Takes the context, the environment saw inherited, the caller's
-/// environment when it gave one (a whole environment), whether the command reads the operator's
-/// configuration, and saw's neutral folder when the command runs outside any repository. A `GIT_*` variable the caller set or
-/// changed is kept; one merely inherited is kept only where the operator's scopes are, and never
-/// when it relocates the repository or injects configuration. saw's own git is never governed by
-/// saw's stand-in.
+/// Build the environment git runs in. Takes the context, the inherited environment, the caller's
+/// environment or none, whether the command reads the operator's configuration, and saw's neutral
+/// folder or none. Returns the environment.
 pub fn child_env(
     context: Context,
     inherited: &BTreeMap<String, String>,
@@ -200,7 +182,7 @@ pub fn child_env(
     out
 }
 
-/// The path that reads as empty on this system.
+/// Return the path that reads as empty on this system.
 pub fn null_device() -> &'static str {
     if cfg!(windows) { "nul" } else { "/dev/null" }
 }

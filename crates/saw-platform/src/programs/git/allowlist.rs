@@ -1,20 +1,16 @@
-//! Which git commands each context may run, held as data.
+//! The git commands each context may run.
 
 use crate::programs::git::contexts::{Context, KEY_PREFIXES_A_CALLER_MAY_NOT_SET, KEYS_A_CALLER_MAY_NOT_SET};
 
 const GLOBAL_OPTIONS_WITH_VALUE: &[&str] = &["-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"];
 
-/// The subcommands an untrusted repository may be asked: none runs a driver it configures.
 pub const UNTRUSTED_SUBCOMMANDS: &[&str] = &[
     "cat-file", "ls-tree", "rev-list", "rev-parse", "for-each-ref", "show-ref", "merge-base", "diff", "diff-tree",
     "log", "show", "ls-files", "hash-object", "read-tree", "write-tree", "update-index", "commit-tree", "mktree",
     "update-ref", "config", "symbolic-ref", "remote", "tag", "worktree", "check-attr",
 ];
-/// Run with `--no-textconv --no-ext-diff` inserted, so no diff driver a repository names runs.
 pub const DIFF_SUBCOMMANDS: &[&str] = &["diff", "diff-tree", "log", "show"];
-/// The subcommands that reach a remote.
 pub const NETWORK_SUBCOMMANDS: &[&str] = &["push", "fetch", "ls-remote", "clone", "pull"];
-/// The subcommands that read the operator's own configuration.
 pub const OPERATOR_CONFIG_SUBCOMMANDS: &[&str] = &["config", "credential", "version"];
 
 const SIGNATURE_READERS: &[&str] = &["--show-signature"];
@@ -52,7 +48,7 @@ fn required_one_of(sub: &str) -> &'static [&'static str] {
     }
 }
 
-/// Whether a command may run, why not, and whether it reads configuration as data.
+/// Whether a command may run, and why not.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Verdict {
     pub refusal: String,
@@ -60,8 +56,8 @@ pub struct Verdict {
     pub reads_configuration: bool,
 }
 
-/// Separate git's own options from the subcommand and its arguments. Returns the global options,
-/// the subcommand (empty when there is none) and the rest.
+/// Separate git's own options from the subcommand. Takes the arguments. Returns the global options,
+/// the subcommand or an empty one, and the rest.
 pub fn split(args: &[String]) -> (Vec<String>, String, Vec<String>) {
     let mut i = 0;
     while i < args.len() && args[i].starts_with('-') {
@@ -152,8 +148,8 @@ fn reads_configuration(sub: &str, rest: &[String]) -> bool {
     sub == "config" || (sub == "rev-parse" && rest.iter().any(|a| a == "--git-path"))
 }
 
-/// Decide whether `args` may run under `context`. Takes the context, the arguments and whether the
-/// caller's environment names a private `GIT_INDEX_FILE`. Returns the verdict.
+/// Decide whether a command may run. Takes the context, the arguments and whether the caller names
+/// a private index. Returns the verdict.
 pub fn judge(context: Context, args: &[String], private_index: bool) -> Verdict {
     let (global_options, sub, rest) = split(args);
     let refuse = |why: String| Verdict { refusal: why, subcommand: sub.clone(), reads_configuration: false };
