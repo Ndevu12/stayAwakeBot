@@ -1,4 +1,4 @@
-//! Every JSON document saw prints, field for field, each in the schema version `main` writes.
+//! The JSON documents saw prints.
 
 pub mod audit;
 pub mod auth_status;

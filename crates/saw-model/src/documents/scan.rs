@@ -1,4 +1,4 @@
-//! The `scan` document: what `saw scan --json` prints, field for field.
+//! The `scan` document: what `saw scan --json` prints.
 
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ pub enum Verdict {
     Infected,
 }
 
-/// The counts for one target. Each count lists its keys in the order saw first met them.
+/// The counts for one target.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetSummary {

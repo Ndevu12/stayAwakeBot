@@ -74,7 +74,7 @@ pub struct Manifest {
     pub proposed: Option<String>,
 }
 
-/// One answer line a caller writes back. Fields saw does not read are ignored, as on `main`.
+/// One answer line a caller writes back.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Answer {
     pub id: String,

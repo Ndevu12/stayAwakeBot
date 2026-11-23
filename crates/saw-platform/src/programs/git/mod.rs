@@ -1,7 +1,4 @@
-//! The one place saw runs git. Every command runs under a context that fixes what configuration
-//! and environment it sees, is judged against that context's allowlist before it runs, and has a
-//! time limit. A refused command, one that could not run, and one that ran too long are errors,
-//! never an empty answer.
+//! Runs git for saw.
 
 pub mod allowlist;
 pub mod contexts;
@@ -16,9 +13,7 @@ pub use contexts::Context;
 
 use crate::programs::{self, Finished, Invocation, RunError};
 
-/// How long a local git command may take.
 pub const LOCAL_TIMEOUT: Duration = Duration::from_secs(60);
-/// How long a git command that reaches a remote may take.
 pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(180);
 
 const NO_DIFF_DRIVERS: &[&str] = &["--no-textconv", "--no-ext-diff"];
@@ -26,7 +21,7 @@ const NO_DIFF_DRIVERS: &[&str] = &["--no-textconv", "--no-ext-diff"];
 /// Why git gave no answer.
 #[derive(Debug)]
 pub enum GitError {
-    /// saw refused to run the command under its context; a defect in saw.
+    /// saw refused to run the command under its context.
     Refused(String),
     /// git could not run, or did not finish in time.
     NotRun(RunError),
@@ -58,17 +53,17 @@ fn key(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Record `path` as a repository this process created, the only kind `SawOwned` runs in.
+/// Record `path` as a repository this process created. Takes the path.
 pub fn own(path: &Path) {
     owned().lock().expect("the owned set is never poisoned").insert(key(path));
 }
 
-/// Forget `path`.
+/// Forget `path` as a repository this process created. Takes the path.
 pub fn disown(path: &Path) {
     owned().lock().expect("the owned set is never poisoned").remove(&key(path));
 }
 
-/// Whether `path` is a repository this process created.
+/// Return whether `path` is a repository this process created. Takes the path.
 pub fn is_owned(path: &Path) -> bool {
     owned().lock().expect("the owned set is never poisoned").contains(&key(path))
 }
@@ -93,14 +88,14 @@ pub struct Request<'a> {
 }
 
 impl<'a> Request<'a> {
-    /// A command under `context`, in `repo` or outside any repository, with the local time limit.
+    /// Make a request. Takes the context, the repository or none, and the arguments. Returns the request.
     pub fn new(context: Context, repo: Option<&'a Path>, args: &[&str]) -> Self {
         Request { context, repo, args: args.iter().map(|a| a.to_string()).collect(), env: None, stdin: None, timeout: LOCAL_TIMEOUT }
     }
 }
 
-/// The program, arguments, environment and folder one request runs with, or why it is refused.
-/// Takes the request, the git program, saw's folders and the environment saw inherited.
+/// Prepare one request to run. Takes the request, the git program, saw's folders and the inherited
+/// environment. Returns the invocation, or why it is refused.
 pub fn prepare(request: &Request, git: &Path, folders: &Folders, inherited: &BTreeMap<String, String>) -> Result<Invocation, GitError> {
     let shown = request.args.iter().take(3).cloned().collect::<Vec<_>>().join(" ");
     let refuse = |why: String| Err(GitError::Refused(format!("saw refused to run git {shown} as {}: {why}", request.context.name())));
@@ -145,22 +140,21 @@ pub fn prepare(request: &Request, git: &Path, folders: &Folders, inherited: &BTr
     })
 }
 
-/// Run one git command. Returns what git did, even when it exited non-zero (`merge-tree` exits 1
-/// on a conflict yet prints the tree), or why it gave no answer.
+/// Run one git command. Takes the request, the git program, saw's folders and the inherited
+/// environment. Returns what git did, whatever its exit code, or why it gave no answer.
 pub fn run(request: &Request, git: &Path, folders: &Folders, inherited: &BTreeMap<String, String>) -> Result<Finished, GitError> {
     let invocation = prepare(request, git, folders, inherited)?;
     programs::run(&invocation).map_err(GitError::NotRun)
 }
 
-/// Run one git command that must succeed. Returns its standard output, or why there is none: a
-/// failed command is an error, never an empty answer.
+/// Run one git command that must succeed. Takes the same as `run`. Returns its standard output, or
+/// why there is none.
 pub fn output(request: &Request, git: &Path, folders: &Folders, inherited: &BTreeMap<String, String>) -> Result<Vec<u8>, GitError> {
     let done = run(request, git, folders, inherited)?;
     if done.succeeded() { Ok(done.stdout) } else { Err(GitError::Failed(done)) }
 }
 
-/// The git program and what every command saw runs with it shares: saw's folders and the
-/// environment saw inherited.
+/// The git program, saw's folders and the inherited environment.
 #[derive(Debug, Clone)]
 pub struct Git {
     pub program: PathBuf,
@@ -169,18 +163,18 @@ pub struct Git {
 }
 
 impl Git {
-    /// Run one command. Returns what git did, or why it gave no answer.
+    /// Run one command. Takes the request. Returns what git did, or why it gave no answer.
     pub fn run(&self, request: &Request) -> Result<Finished, GitError> {
         run(request, &self.program, &self.folders, &self.inherited)
     }
 
-    /// Run one command that must succeed. Returns its standard output, or why there is none.
+    /// Run one command that must succeed. Takes the request. Returns its standard output, or why there is none.
     pub fn output(&self, request: &Request) -> Result<Vec<u8>, GitError> {
         output(request, &self.program, &self.folders, &self.inherited)
     }
 
-    /// Run one command within `pass`: a repository whose configuration every git command would
-    /// wait on is not asked, and a command that is not run or does not answer in time is recorded.
+    /// Run one command within a pass. Takes the pass and the request. Returns what git did, or why
+    /// it gave no answer.
     pub fn run_in(&self, pass: &Pass, request: &Request) -> Result<Finished, GitError> {
         if let Some(repo) = request.repo {
             if !reads_named_configuration_only(&request.args) && pass.would_wait(self, repo) {
@@ -198,8 +192,7 @@ impl Git {
     }
 }
 
-/// One pass over repositories: whether each one's configuration would make git wait is asked once,
-/// and every command not run or not answered in time is recorded.
+/// One pass over repositories, and the commands it did not run or that did not answer.
 #[derive(Debug, Default)]
 pub struct Pass {
     answers: Mutex<HashMap<PathBuf, bool>>,
@@ -207,7 +200,7 @@ pub struct Pass {
 }
 
 impl Pass {
-    /// Whether every git command in `repo` would wait, asked once per repository in this pass.
+    /// Return whether every git command in `repo` would wait. Takes the git handle and the repository.
     pub fn would_wait(&self, git: &Git, repo: &Path) -> bool {
         let key = key(repo);
         if let Some(known) = self.answers.lock().expect("the answers are never poisoned").get(&key) {
@@ -222,7 +215,7 @@ impl Pass {
         self.stalled.lock().expect("the record is never poisoned").push(line);
     }
 
-    /// The commands this pass did not run or that did not answer in time, in order.
+    /// Return the commands this pass did not run or that did not answer, in order.
     pub fn stalled(&self) -> Vec<String> {
         self.stalled.lock().expect("the record is never poisoned").clone()
     }
@@ -238,7 +231,7 @@ fn reads_named_configuration_only(args: &[String]) -> bool {
         })
 }
 
-/// Split `-z` output into its records, without the final empty one.
+/// Split `-z` output into its records. Takes the output. Returns the records.
 pub fn records(output: &[u8]) -> Vec<&[u8]> {
     let mut parts: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
     if parts.last().is_some_and(|last| last.is_empty()) {

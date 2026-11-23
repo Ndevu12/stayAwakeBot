@@ -1,10 +1,8 @@
-//! What the engine decides about one subject: the findings, how much of the subject was read,
-//! and the outcome.
+//! The engine's judgement of one subject.
 
 use crate::finding::Finding;
 
-/// The outcome of a judgement, ordered by precedence: a later outcome outranks every earlier
-/// one, and a judgement takes the highest that applies.
+/// The outcome of a judgement, lowest precedence first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Outcome {
     Clean,
@@ -43,7 +41,7 @@ pub struct Coverage {
 }
 
 impl Coverage {
-    /// Whether every part of the subject was read.
+    /// Return whether every part of the subject was read.
     pub fn is_complete(&self) -> bool {
         self.gaps.is_empty()
     }

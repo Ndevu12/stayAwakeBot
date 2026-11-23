@@ -1,6 +1,4 @@
-//! The one place saw runs another program. Every run has a time limit, an environment saw chose,
-//! and an answer that is either what the program did or an error: never an empty result that
-//! looks like an answer.
+//! Runs the programs saw calls.
 
 pub mod git;
 
@@ -34,7 +32,7 @@ pub struct Finished {
 }
 
 impl Finished {
-    /// Whether the program exited with 0.
+    /// Return whether the program exited with 0.
     pub fn succeeded(&self) -> bool {
         self.code == Some(0)
     }
@@ -65,7 +63,7 @@ impl std::error::Error for RunError {}
 
 const POLL: Duration = Duration::from_millis(5);
 
-/// Run one program to completion within its time limit. Returns what it did, or why it did not.
+/// Run one program to completion. Takes the invocation. Returns what it did, or why it did not finish.
 pub fn run(invocation: &Invocation) -> Result<Finished, RunError> {
     let mut command = Command::new(&invocation.program);
     command.args(&invocation.args).env_clear().envs(&invocation.env);
