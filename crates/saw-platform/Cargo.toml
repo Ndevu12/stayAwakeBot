@@ -7,13 +7,14 @@ publish.workspace = true
 
 [dependencies]
 saw-model = { path = "../saw-model" }
+serde_json = "1"
 sha2 = "0.11"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Shell"] }
 
 [dev-dependencies]
 serde_json = "1"

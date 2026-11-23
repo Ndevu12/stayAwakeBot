@@ -7,3 +7,4 @@ pub mod files;
 pub mod sandbox;
 pub mod elevate;
 pub mod system_programs;
+pub mod processes;

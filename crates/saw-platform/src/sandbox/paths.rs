@@ -47,7 +47,7 @@ pub fn real_path(path: &Path) -> PathBuf {
     normalized(&absolute)
 }
 
-fn normalized(path: &Path) -> PathBuf {
+pub(crate) fn normalized(path: &Path) -> PathBuf {
     let mut out: Vec<OsString> = Vec::new();
     for part in path.components() {
         match part {
