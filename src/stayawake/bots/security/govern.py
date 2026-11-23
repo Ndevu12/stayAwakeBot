@@ -44,11 +44,9 @@ def is_recognised(tool: str, args: list[str]) -> bool:
 
 def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None = None, *,
             deadline: float | None = None) -> tuple[dict, int]:
-    """Materialise the update outside the open folder and scan what arrived. Returns `(payload,
-    exit)`: `{"passthrough": true}` and CLEAN for a command that brings no files in, so the caller
-    runs it as typed; `{"scan": <document>}` with the scan's own exit; or, when the update could not be
-    checked, `{"reason": <sentence>, "decision": ...}` and INCOMPLETE, leaving the user to run the
-    command as typed or leave the folder unchanged."""
+    """Materialise the update outside the open folder and scan what arrived. Takes the open folder,
+    the holding directory, the tool, the arguments, the config and the deadline. Returns the answer
+    and its exit: a passthrough, a scan, or a reason with a decision."""
     if incoming.brings_nothing(tool, args):
         return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
     govern_status.write(repo, "checking", step="checking the incoming update")
@@ -102,11 +100,9 @@ def _unchecked(repo: str, reason: str) -> tuple[dict, int]:
 
 
 def apply(repo: str, into: str, accept: str | None = None, confirm: str | None = None) -> tuple[dict, int]:
-    """Make the open folder match the checked tree recorded by `prepare`, without fetching again.
-    Takes the open folder, the holding directory, and, to let in an update saw held, the checked
-    commit the user accepts and, for an infected one, the folder name the user typed. Returns
-    `(payload, exit)`: `{"applied": true}`, or `{"applied": false, "reason": <sentence>}` with the
-    open folder unchanged."""
+    """Make the open folder match the checked tree, without fetching again. Takes the open folder,
+    the holding directory, the accepted commit and the typed confirmation. Returns whether it was
+    applied, the reason when not, and the exit."""
     state = _read_state(Path(into))
     if state is None:
         return _applied(False, "there is no checked update to apply")
@@ -142,8 +138,8 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
 
 
 def _refuse_let_in(repo: str, state: dict, accept: str | None, confirm: str | None) -> str:
-    """Return why a held update cannot be let in as asked, or an empty string when it can. Takes
-    the open folder, the recorded check, the accepted commit and the typed confirmation."""
+    """Return why a held update cannot be let in, or an empty string when it can. Takes the open
+    folder, the recorded check, the accepted commit and the typed confirmation."""
     if state.get("verdict") not in govern_held.HELD_VERDICTS:
         return "the check did not finish, so there is nothing checked to let in"
     if not accept:
