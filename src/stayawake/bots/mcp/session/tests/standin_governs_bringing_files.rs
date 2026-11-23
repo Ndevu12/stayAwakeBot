@@ -37,6 +37,7 @@ impl Fixture {
                 "#!/bin/sh\n\
                  if [ \"$1\" = scan ]; then echo scanned >> {:?}; exit 0; fi\n\
                  if [ \"$2\" = prepare ]; then\n\
+                 \tif [ -n \"$SAW_FAKE_PASSTHROUGH\" ]; then echo '{{\"passthrough\":true,\"reason\":\"the command brings no files in\"}}'; exit 0; fi\n\
                  \tif [ -n \"$SAW_FAKE_LET_IN\" ]; then echo '{{\"scan\":{{\"results\":[{{\"verdict\":\"suspicious\"}}]}},\"next_steps\":[\"Check .claude/settings.json\"],\"decision\":{{\"choices\":[\"let-in\",\"leave-unchanged\"],\"let_in\":[\"saw\",\"govern\",\"apply\",\"--accept\",\"c0ffee\"],\"confirm\":\"yes\"}}}}'; exit 0; fi\n\
                  \tif [ -n \"$SAW_FAKE_UNCHECKED\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{}}}}'; exit 2; fi\n\
                  \t[ -n \"$SAW_FAKE_HELD\" ] && exit 2\n\
@@ -252,3 +253,26 @@ fn a_held_update_is_never_let_in_from_the_environment() {
     assert!(said.contains("Check .claude/settings.json"), "{said}");
     assert!(said.contains("govern apply --accept c0ffee"), "{said}");
 }
+
+#[test]
+fn a_command_that_brings_no_files_runs_as_typed() {
+    let f = Fixture::new("passthrough");
+    let out = Command::new(STANDIN)
+        .args(["switch", "-c", "try"])
+        .current_dir(&f.dir)
+        .env("SAW_STANDIN_TOOL", "git")
+        .env("SAW_REAL_GIT", &f.real_git)
+        .env("PATH", &f.dir)
+        .env("SAW_BIN", &f.saw)
+        .env("SAW_GOVERN_HOLDING", &f.holding)
+        .env("SAW_FAKE_PASSTHROUGH", "1")
+        .env("REAL_LOG", &f.real_log)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(f.real_ran(), "git did not run a command that brings no files");
+    assert!(!f.applied());
+    assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+

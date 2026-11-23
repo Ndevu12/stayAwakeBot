@@ -174,6 +174,9 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
     let prepared = output.status;
     let answer: serde_json::Value =
         serde_json::from_str(String::from_utf8_lossy(&output.stdout).trim()).unwrap_or_default();
+    if answer.get("passthrough").and_then(serde_json::Value::as_bool) == Some(true) {
+        return None;
+    }
     if offers_let_in(&answer) {
         let held = prepared.code().filter(|code| *code != 0).unwrap_or(1);
         return Some(let_in_or_leave(saw, &answer, held));

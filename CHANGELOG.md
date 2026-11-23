@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- In a terminal `saw govern` covers, creating a branch with `git switch -c` or `git checkout -b`
+  runs as typed. A new branch from another commit, going back with `git checkout -`, and a pull,
+  fetch, merge or rebase with `-n` are checked.
+
 ## [0.17.4] - 2026-11-22
 
 ### Fixed
