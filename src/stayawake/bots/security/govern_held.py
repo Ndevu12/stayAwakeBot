@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""What `saw govern` tells the user about an update it held: which findings the update brought and
-which were already in the folder, what to do next, and how to let the update in after review."""
+"""What `saw govern` tells the user about an update it held."""
 from __future__ import annotations
 
 import os
@@ -19,9 +18,8 @@ def _key(finding: Finding) -> tuple[str, str, str]:
 
 
 def set_aside_already_there(update: ScanResult, before: ScanResult) -> list[Finding]:
-    """Take out of the update's findings each one the folder already had, unchanged. A confirmed
-    finding always stays. Takes the update's result and the same files' result before the update.
-    Returns the findings taken out."""
+    """Set aside the update's findings the folder already had. Takes the update's result and the
+    same files' result before the update. Returns the findings set aside."""
     earlier = {_key(finding) for finding in before.findings}
     kept, already = [], []
     for finding in update.findings:
@@ -34,15 +32,13 @@ def set_aside_already_there(update: ScanResult, before: ScanResult) -> list[Find
 
 
 def folder_name(repo: str) -> str:
-    """Return the name the user types to let in an infected update: the open folder's own name."""
+    """Return the open folder's name. Takes the open folder."""
     return Path(os.path.abspath(repo)).name
 
 
 def decision(repo: str, into: str, commit: str, verdict: str) -> dict:
-    """Return the way through for a held update. Takes the open folder, the holding directory, the
-    checked commit and the verdict. Returns the choices, the command that lets the update in, and
-    the confirmation it needs: a yes for a suspicious update, the folder name typed for an infected
-    one."""
+    """Build the way through for a held update. Takes the open folder, the holding directory, the
+    checked commit and the verdict. Returns the choices, the let-in command and the confirmation."""
     body = {"choices": list(LET_IN_CHOICES),
             "let_in": ["saw", "govern", "apply", "--repo", str(repo), "--into", str(into),
                        "--accept", commit],
@@ -53,8 +49,8 @@ def decision(repo: str, into: str, commit: str, verdict: str) -> dict:
 
 
 def next_steps(verdict: str, findings: list[dict], already_there: list[dict], commit: str) -> list[str]:
-    """Return what the user should do about a held update, in saw's words. Takes the verdict, the
-    update's findings and the ones already in the folder, in plain words, and the checked commit."""
+    """Write what the user should do about a held update. Takes the verdict, the update's findings,
+    the ones already in the folder and the checked commit. Returns the steps."""
     steps: list[str] = []
     short = commit[:12]
     if verdict == INFECTED:

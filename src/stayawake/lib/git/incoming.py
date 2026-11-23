@@ -61,9 +61,8 @@ def classify(tool: str, args: list[str]) -> str | None:
 
 
 def brings_nothing(tool: str, args: list[str]) -> bool:
-    """Return whether a command moves nothing into the open folder: a checkout or switch that stays
-    on the folder's commit, such as a new branch with no start point, an orphan branch, or paths
-    taken from the index. Takes the tool and the arguments without the program name."""
+    """Tell whether a command moves nothing into the open folder. Takes the tool and the arguments
+    without the program name. Returns the answer."""
     parsed = _parse_git(args) if tool == "git" else None
     if parsed is None:
         return False
@@ -285,16 +284,16 @@ def _positionals(args: list[str]) -> list[str]:
 
 
 def _checkout_brings(args: list[str]) -> bool:
-    """Return whether a checkout moves the folder to another commit: one it names, or a new
-    branch's start point. A new branch with no start point stays where the folder is."""
+    """Tell whether a checkout moves the folder to another commit. Takes its arguments. Returns the
+    answer."""
     if "--orphan" in args:
         return False
     return len(_positionals(args[:args.index("--")] if "--" in args else args)) > 0
 
 
 def _switch_brings(args: list[str]) -> bool:
-    """Return whether a switch moves the folder to another commit: one it names, or a new
-    branch's start point. A new branch with no start point stays where the folder is."""
+    """Tell whether a switch moves the folder to another commit. Takes its arguments. Returns the
+    answer."""
     if "--orphan" in args:
         return False
     return len(_positionals(args)) > 0

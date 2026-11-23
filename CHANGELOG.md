@@ -15,8 +15,7 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 - In a terminal `saw govern` covers, creating a branch with `git switch -c` or `git checkout -b`
-  runs as typed. A new branch from another commit, going back with `git checkout -`, and a pull,
-  fetch, merge or rebase with `-n` are checked.
+  runs as typed.
 
 ## [0.17.4] - 2026-11-22
 
