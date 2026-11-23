@@ -24,6 +24,8 @@ impl Style {
     pub const INDENTED: Style = Style { indent: Some(2), compact_separators: false, ensure_ascii: true };
     /// `json.dumps(value, separators=(",", ":"))`.
     pub const COMPACT: Style = Style { indent: None, compact_separators: true, ensure_ascii: true };
+    /// `json.dumps(value, ensure_ascii=False)`.
+    pub const LINE_KEEPING_NON_ASCII: Style = Style { indent: None, compact_separators: false, ensure_ascii: false };
 }
 
 /// Write `value` in `style`. Returns the text, without a final newline.
