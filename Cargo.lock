@@ -90,6 +90,7 @@ name = "saw-platform"
 version = "0.0.0"
 dependencies = [
  "saw-model",
+ "serde_json",
 ]
 
 [[package]]
