@@ -96,8 +96,7 @@ impl Environment {
         home_of(&self.variables)
     }
 
-    /// Tell whether this is an ephemeral CI runner. Returns true only with a runner marker and no
-    /// private key in the home's `.ssh` folder.
+    /// Tell whether this is an ephemeral CI runner. Returns the answer.
     pub fn is_ephemeral_runner(&self) -> bool {
         self.any_set(RUNNER_MARKERS) && !self.has_persistent_home()
     }

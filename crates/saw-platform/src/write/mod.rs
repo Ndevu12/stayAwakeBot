@@ -1,5 +1,6 @@
 //! Writes saw's own files in one step, where they were named and nowhere else.
 
+mod moves;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -12,6 +13,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub use moves::{move_into, new_folder, rename_beside, rename_in, set_mode};
 #[cfg(unix)]
 pub use unix::{Folder, open_folder, open_parent};
 #[cfg(windows)]

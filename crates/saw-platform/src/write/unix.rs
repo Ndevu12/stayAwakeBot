@@ -266,3 +266,192 @@ impl Folder {
         checked(unsafe { libc::fchmod(self.0.as_raw_fd(), mode as libc::mode_t) }).map(|_| ())
     }
 }
+
+#[allow(unsafe_code)]
+fn entries_of(folder: libc::c_int) -> io::Result<Vec<OsString>> {
+    // SAFETY: dup returns a new descriptor that fdopendir takes over and closedir releases.
+    let copy = checked(unsafe { libc::dup(folder) })?;
+    // SAFETY: `copy` is an open folder descriptor this function owns.
+    let listing = unsafe { libc::fdopendir(copy) };
+    if listing.is_null() {
+        let error = io::Error::last_os_error();
+        // SAFETY: `copy` is an open descriptor this function still owns.
+        unsafe { libc::close(copy) };
+        return Err(error);
+    }
+    let mut names = Vec::new();
+    loop {
+        // SAFETY: `listing` is an open directory stream.
+        let entry = unsafe { libc::readdir(listing) };
+        if entry.is_null() {
+            break;
+        }
+        // SAFETY: `d_name` is a NUL-terminated name inside the entry readdir returned.
+        let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) };
+        let name = OsStr::from_bytes(name.to_bytes());
+        if name != "." && name != ".." {
+            names.push(name.to_os_string());
+        }
+    }
+    // SAFETY: `listing` is open and is closed once.
+    unsafe { libc::closedir(listing) };
+    Ok(names)
+}
+
+fn times_of(found: &libc::stat) -> std::fs::FileTimes {
+    let at = |seconds: i64, nanos: i64| {
+        let since = std::time::Duration::new(seconds.max(0) as u64, nanos.clamp(0, 999_999_999) as u32);
+        std::time::UNIX_EPOCH + since
+    };
+    std::fs::FileTimes::new()
+        .set_accessed(at(found.st_atime as i64, found.st_atime_nsec as i64))
+        .set_modified(at(found.st_mtime as i64, found.st_mtime_nsec as i64))
+}
+
+impl Folder {
+    /// Open a folder under this one, one step at a time, without being redirected. Takes the path.
+    /// Returns the open folder, or why it was not opened.
+    pub fn open_under(&self, path: &Path) -> Result<Folder, WriteError> {
+        walk(path, false, 0o777, Some(self))
+    }
+
+    /// Give a file in this folder a mode. Takes its name and the mode. Returns nothing, or why it
+    /// was not given.
+    #[allow(unsafe_code)]
+    pub fn set_mode_of(&self, name: &OsStr, mode: u32) -> Result<(), WriteError> {
+        let fd = open_at(self.0.as_raw_fd(), &c_name(name)?, libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK, 0)?;
+        let found = stat_of(fd.as_raw_fd())?;
+        if !is_kind(&found, libc::S_IFREG) || found.st_nlink != 1 {
+            return Err(WriteError::Redirected(format!("{} is not a file of its own", name.to_string_lossy())));
+        }
+        // SAFETY: the file's descriptor is open for this call.
+        checked(unsafe { libc::fchmod(fd.as_raw_fd(), mode as libc::mode_t) })?;
+        Ok(())
+    }
+
+    /// Make a folder in this one. Takes its name and mode. Returns nothing, or why it was not made.
+    #[allow(unsafe_code)]
+    pub fn make_dir(&self, name: &OsStr, mode: u32) -> io::Result<()> {
+        // SAFETY: the name is NUL-terminated and the folder is open.
+        checked(unsafe { libc::mkdirat(self.0.as_raw_fd(), c_name(name)?.as_ptr(), mode as libc::mode_t) }).map(|_| ())
+    }
+
+    /// Move an entry of this folder into another folder under a name, replacing what is there.
+    /// Takes the entry, the folder and the name. Returns nothing, or why it was not moved.
+    #[allow(unsafe_code)]
+    pub fn rename_to(&self, entry: &OsStr, folder: &Folder, name: &OsStr) -> io::Result<()> {
+        let (from, to) = (c_name(entry)?, c_name(name)?);
+        // SAFETY: both names are NUL-terminated and both folders are open.
+        checked(unsafe { libc::renameat(self.0.as_raw_fd(), from.as_ptr(), folder.0.as_raw_fd(), to.as_ptr()) }).map(|_| ())
+    }
+
+    /// Rename an entry of this folder without replacing what has the new name. Takes the entry and
+    /// the new name. Returns nothing, or why it was not renamed.
+    pub fn rename_no_replace(&self, entry: &OsStr, name: &OsStr) -> io::Result<()> {
+        let (from, to) = (c_name(entry)?, c_name(name)?);
+        match kernel_rename_no_replace(self.0.as_raw_fd(), &from, &to) {
+            Some(answer) => answer,
+            None => match stat_at(self.0.as_raw_fd(), &to) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => self.rename_to(entry, self, name),
+                Err(error) => Err(error),
+                Ok(_) => Err(io::Error::from_raw_os_error(libc::EEXIST)),
+            },
+        }
+    }
+
+    /// Copy an entry of this folder, a file, link or folder, into another folder under a name,
+    /// keeping modes and times. Takes the entry, the folder and the name. Returns whether it was a
+    /// folder, or why it was not copied.
+    #[allow(unsafe_code)]
+    pub fn copy_into(&self, entry: &OsStr, folder: &Folder, name: &OsStr) -> io::Result<bool> {
+        let (from, to) = (c_name(entry)?, c_name(name)?);
+        let found = stat_at(self.0.as_raw_fd(), &from)?;
+        if is_kind(&found, libc::S_IFLNK) {
+            let target = c_name(read_link_at(self.0.as_raw_fd(), &from)?.as_os_str())?;
+            // SAFETY: both strings are NUL-terminated and the folder is open.
+            checked(unsafe { libc::symlinkat(target.as_ptr(), folder.0.as_raw_fd(), to.as_ptr()) })?;
+            return Ok(false);
+        }
+        let mode = u32::from(found.st_mode) & 0o7777;
+        if is_kind(&found, libc::S_IFDIR) {
+            let given = Folder(open_dir(self.0.as_raw_fd(), &from, libc::O_NOFOLLOW)?);
+            folder.make_dir(name, mode | 0o700)?;
+            let inner = Folder(open_dir(folder.0.as_raw_fd(), &to, libc::O_NOFOLLOW)?);
+            for child in entries_of(given.0.as_raw_fd())? {
+                given.copy_into(&child, &inner, &child)?;
+            }
+            // SAFETY: the folder's descriptor is open for this call.
+            checked(unsafe { libc::fchmod(inner.0.as_raw_fd(), mode as libc::mode_t) })?;
+            File::from(inner.0).set_times(times_of(&found))?;
+            return Ok(true);
+        }
+        if !is_kind(&found, libc::S_IFREG) {
+            return Err(io::Error::other(format!("{} is not a file, link or folder", entry.to_string_lossy())));
+        }
+        let reading = open_at(self.0.as_raw_fd(), &from, libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK, 0)?;
+        if !is_kind(&stat_of(reading.as_raw_fd())?, libc::S_IFREG) {
+            return Err(io::Error::other(format!("{} is not a file", entry.to_string_lossy())));
+        }
+        let writing = open_at(folder.0.as_raw_fd(), &to, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW, 0o600)?;
+        let (mut source, mut out) = (File::from(reading), File::from(writing));
+        io::copy(&mut source, &mut out)?;
+        out.flush()?;
+        // SAFETY: the file's descriptor is open for this call.
+        checked(unsafe { libc::fchmod(out.as_raw_fd(), mode as libc::mode_t) })?;
+        out.set_times(times_of(&found))?;
+        Ok(false)
+    }
+
+    /// Remove an entry of this folder, and everything under it when it is a folder. Takes the
+    /// entry. Returns nothing, or why it was not removed.
+    #[allow(unsafe_code)]
+    pub fn remove(&self, entry: &OsStr) -> io::Result<()> {
+        let name = c_name(entry)?;
+        let found = stat_at(self.0.as_raw_fd(), &name)?;
+        if is_kind(&found, libc::S_IFDIR) {
+            let inner = Folder(open_dir(self.0.as_raw_fd(), &name, libc::O_NOFOLLOW)?);
+            for child in entries_of(inner.0.as_raw_fd())? {
+                inner.remove(&child)?;
+            }
+            // SAFETY: the name is NUL-terminated and the folder is open.
+            return checked(unsafe { libc::unlinkat(self.0.as_raw_fd(), name.as_ptr(), libc::AT_REMOVEDIR) }).map(|_| ());
+        }
+        // SAFETY: the name is NUL-terminated and the folder is open.
+        checked(unsafe { libc::unlinkat(self.0.as_raw_fd(), name.as_ptr(), 0) }).map(|_| ())
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn kernel_rename_no_replace(folder: libc::c_int, from: &CString, to: &CString) -> Option<io::Result<()>> {
+    // SAFETY: both names are NUL-terminated and the folder is open.
+    let result = unsafe { libc::renameat2(folder, from.as_ptr(), folder, to.as_ptr(), libc::RENAME_NOREPLACE) };
+    unsupported_or(result)
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn kernel_rename_no_replace(folder: libc::c_int, from: &CString, to: &CString) -> Option<io::Result<()>> {
+    // SAFETY: both names are NUL-terminated and the folder is open.
+    let result = unsafe { libc::renameatx_np(folder, from.as_ptr(), folder, to.as_ptr(), libc::RENAME_EXCL) };
+    unsupported_or(result)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn kernel_rename_no_replace(_folder: libc::c_int, _from: &CString, _to: &CString) -> Option<io::Result<()>> {
+    None
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn unsupported_or(result: libc::c_int) -> Option<io::Result<()>> {
+    if result == 0 {
+        return Some(Ok(()));
+    }
+    let error = io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::EINVAL | libc::ENOSYS | libc::ENOTSUP) => None,
+        #[cfg(target_os = "linux")]
+        Some(code) if code == libc::EOPNOTSUPP => None,
+        _ => Some(Err(error)),
+    }
+}

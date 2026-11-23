@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 pub struct Invocation {
     pub program: PathBuf,
     pub args: Vec<String>,
-    /// The whole environment the program sees; nothing else is inherited.
+    /// The whole environment the program sees.
     pub env: BTreeMap<String, String>,
     pub cwd: Option<PathBuf>,
     pub stdin: Option<Vec<u8>>,
