@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 saw-model = { path = "../saw-model" }
+sha2 = "0.11"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
