@@ -25,7 +25,8 @@ _GLOBAL = frozenset({
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
     "--config-env", "--exec-path",
 })
-_OPTION_VALUE = frozenset({"-b", "-B", "-c", "-C", "-m", "--orphan", "--recurse-submodules", "--conflict"})
+_OPTION_VALUE = frozenset({"-b", "-B", "-c", "-C", "-m", "--orphan", "--recurse-submodules", "--conflict",
+                           "--create", "--force-create"})
 _RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
 _GH_INBOUND = frozenset({("pr", "checkout"), ("repo", "sync"), ("release", "download"), ("run", "download")})
 _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "prune"}),
@@ -57,6 +58,17 @@ def classify(tool: str, args: list[str]) -> str | None:
         if tuple(words[:2]) in _GH_INBOUND:
             return "gh"
     return None
+
+
+def brings_nothing(tool: str, args: list[str]) -> bool:
+    """Return whether a command moves nothing into the open folder: a checkout or switch that stays
+    on the folder's commit, such as a new branch with no start point, an orphan branch, or paths
+    taken from the index. Takes the tool and the arguments without the program name."""
+    parsed = _parse_git(args) if tool == "git" else None
+    if parsed is None:
+        return False
+    sub, rest = parsed
+    return (sub == "checkout" and not _checkout_brings(rest)) or (sub == "switch" and not _switch_brings(rest))
 
 
 def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | str":
@@ -227,7 +239,7 @@ def _git_kind(args: list[str]) -> str | None:
     if parsed is None:
         return None
     sub, rest = parsed
-    if any(flag in rest for flag in ("--abort", "--quit", "--dry-run", "-n")):
+    if any(flag in rest for flag in ("--abort", "--quit", "--dry-run")):
         return None
     if sub in {"pull", "merge", "rebase", "fetch"}:
         return sub
@@ -264,7 +276,7 @@ def _positionals(args: list[str]) -> list[str]:
         arg = args[index]
         if arg == "--":
             break
-        if arg.startswith("-"):
+        if arg.startswith("-") and arg != "-":
             index += 2 if arg in _OPTION_VALUE and "=" not in arg else 1
             continue
         words.append(arg)
@@ -273,13 +285,17 @@ def _positionals(args: list[str]) -> list[str]:
 
 
 def _checkout_brings(args: list[str]) -> bool:
-    if "-b" in args or "--orphan" in args:
+    """Return whether a checkout moves the folder to another commit: one it names, or a new
+    branch's start point. A new branch with no start point stays where the folder is."""
+    if "--orphan" in args:
         return False
     return len(_positionals(args[:args.index("--")] if "--" in args else args)) > 0
 
 
 def _switch_brings(args: list[str]) -> bool:
-    if any(flag in args for flag in ("-c", "--create", "-C", "--force-create", "--orphan")):
+    """Return whether a switch moves the folder to another commit: one it names, or a new
+    branch's start point. A new branch with no start point stays where the folder is."""
+    if "--orphan" in args:
         return False
     return len(_positionals(args)) > 0
 
