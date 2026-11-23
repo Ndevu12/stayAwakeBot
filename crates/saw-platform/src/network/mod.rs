@@ -1,6 +1,7 @@
 //! Makes HTTPS requests through the system's own `curl`.
 
 pub mod proxy;
+pub mod system_proxy;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

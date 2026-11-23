@@ -107,10 +107,27 @@ pub fn parse_proxy(proxy: &str) -> Result<(Option<String>, Option<String>, Strin
 /// Return the proxy for a request to a host, none to go direct, or why the proxy cannot be read.
 /// Takes the host, with its port when it has one, and the environment in its order.
 pub fn proxy_for(host: &str, environment: &[(String, String)]) -> Result<Option<Proxy>, String> {
-    let proxies = proxies_from(environment);
+    proxy_for_with(host, environment, &super::system_proxy::read)
+}
+
+/// Return the proxy for a request to a host, none to go direct, or why the proxy cannot be read.
+/// Takes the host, with its port when it has one, the environment in its order, and the reader of
+/// the system's proxy settings.
+pub fn proxy_for_with(
+    host: &str,
+    environment: &[(String, String)],
+    read_system_settings: &dyn Fn() -> Result<super::system_proxy::SystemProxies, String>,
+) -> Result<Option<Proxy>, String> {
+    let from_environment = proxies_from(environment);
+    let settings = if from_environment.is_empty() { Some(read_system_settings()?) } else { None };
+    let proxies = settings.as_ref().map_or(&from_environment, |s| &s.proxies);
     let Some(proxy) = proxies.get("https") else { return Ok(None) };
     let (user, password, hostport) = parse_proxy(proxy)?;
-    if !host.is_empty() && bypass(host, &proxies) {
+    let goes_around = match &settings {
+        None => bypass(host, &from_environment),
+        Some(system) => system.bypasses(host),
+    };
+    if !host.is_empty() && goes_around {
         return Ok(None);
     }
     let authorization = match (user.filter(|u| !u.is_empty()), password.filter(|p| !p.is_empty())) {
