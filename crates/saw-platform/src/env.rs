@@ -40,7 +40,7 @@ pub struct Environment {
     variables: BTreeMap<String, String>,
 }
 
-fn is_python_space(c: char) -> bool {
+pub(crate) fn is_python_space(c: char) -> bool {
     c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
 }
 
