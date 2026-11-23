@@ -63,6 +63,30 @@ impl std::error::Error for RunError {}
 
 const POLL: Duration = Duration::from_millis(5);
 
+/// Run one program on saw's terminal. Takes the invocation. Returns the exit code, none when a
+/// signal ended it, or why it did not finish.
+pub fn run_on_terminal(invocation: &Invocation) -> Result<Option<i32>, RunError> {
+    let mut command = Command::new(&invocation.program);
+    command.args(&invocation.args).env_clear().envs(&invocation.env);
+    if let Some(cwd) = &invocation.cwd {
+        command.current_dir(cwd);
+    }
+    command.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    let mut child = command.spawn().map_err(RunError::NotStarted)?;
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(RunError::Io)? {
+            return Ok(status.code());
+        }
+        if started.elapsed() >= invocation.timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(RunError::TimedOut(invocation.timeout));
+        }
+        thread::sleep(POLL);
+    }
+}
+
 /// Return this process's id.
 pub fn process_id() -> u32 {
     std::process::id()
