@@ -8,6 +8,9 @@ publish.workspace = true
 [dependencies]
 saw-model = { path = "../saw-model" }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 serde_json = "1"
 

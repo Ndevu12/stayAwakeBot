@@ -5,8 +5,9 @@
 
 pub mod allowlist;
 pub mod contexts;
+pub mod waiting;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -31,6 +32,8 @@ pub enum GitError {
     NotRun(RunError),
     /// git ran and failed.
     Failed(Finished),
+    /// git was not run: every git command in this repository would wait on its configuration.
+    WouldWait(PathBuf),
 }
 
 impl std::fmt::Display for GitError {
@@ -39,6 +42,7 @@ impl std::fmt::Display for GitError {
             GitError::Refused(message) => write!(f, "{message}"),
             GitError::NotRun(error) => write!(f, "git {error}"),
             GitError::Failed(done) => write!(f, "git exited with {:?}", done.code),
+            GitError::WouldWait(repo) => write!(f, "every git command would wait on the configuration of {}", repo.display()),
         }
     }
 }
@@ -153,6 +157,85 @@ pub fn run(request: &Request, git: &Path, folders: &Folders, inherited: &BTreeMa
 pub fn output(request: &Request, git: &Path, folders: &Folders, inherited: &BTreeMap<String, String>) -> Result<Vec<u8>, GitError> {
     let done = run(request, git, folders, inherited)?;
     if done.succeeded() { Ok(done.stdout) } else { Err(GitError::Failed(done)) }
+}
+
+/// The git program and what every command saw runs with it shares: saw's folders and the
+/// environment saw inherited.
+#[derive(Debug, Clone)]
+pub struct Git {
+    pub program: PathBuf,
+    pub folders: Folders,
+    pub inherited: BTreeMap<String, String>,
+}
+
+impl Git {
+    /// Run one command. Returns what git did, or why it gave no answer.
+    pub fn run(&self, request: &Request) -> Result<Finished, GitError> {
+        run(request, &self.program, &self.folders, &self.inherited)
+    }
+
+    /// Run one command that must succeed. Returns its standard output, or why there is none.
+    pub fn output(&self, request: &Request) -> Result<Vec<u8>, GitError> {
+        output(request, &self.program, &self.folders, &self.inherited)
+    }
+
+    /// Run one command within `pass`: a repository whose configuration every git command would
+    /// wait on is not asked, and a command that is not run or does not answer in time is recorded.
+    pub fn run_in(&self, pass: &Pass, request: &Request) -> Result<Finished, GitError> {
+        if let Some(repo) = request.repo {
+            if !reads_named_configuration_only(&request.args) && pass.would_wait(self, repo) {
+                let sub = request.args.first().cloned().unwrap_or_default();
+                pass.record(format!("git {sub} was not run: every git command would wait on the configuration of {}", repo.display()));
+                return Err(GitError::WouldWait(repo.to_path_buf()));
+            }
+        }
+        let answer = self.run(request);
+        if let Err(GitError::NotRun(RunError::TimedOut(limit))) = &answer {
+            let sub = request.args.first().cloned().unwrap_or_default();
+            pass.record(format!("git {sub} did not answer within {}s", limit.as_secs()));
+        }
+        answer
+    }
+}
+
+/// One pass over repositories: whether each one's configuration would make git wait is asked once,
+/// and every command not run or not answered in time is recorded.
+#[derive(Debug, Default)]
+pub struct Pass {
+    answers: Mutex<HashMap<PathBuf, bool>>,
+    stalled: Mutex<Vec<String>>,
+}
+
+impl Pass {
+    /// Whether every git command in `repo` would wait, asked once per repository in this pass.
+    pub fn would_wait(&self, git: &Git, repo: &Path) -> bool {
+        let key = key(repo);
+        if let Some(known) = self.answers.lock().expect("the answers are never poisoned").get(&key) {
+            return *known;
+        }
+        let waits = waiting::config_waits(git, repo);
+        self.answers.lock().expect("the answers are never poisoned").insert(key, waits);
+        waits
+    }
+
+    fn record(&self, line: String) {
+        self.stalled.lock().expect("the record is never poisoned").push(line);
+    }
+
+    /// The commands this pass did not run or that did not answer in time, in order.
+    pub fn stalled(&self) -> Vec<String> {
+        self.stalled.lock().expect("the record is never poisoned").clone()
+    }
+}
+
+fn reads_named_configuration_only(args: &[String]) -> bool {
+    let (_, sub, rest) = allowlist::split(args);
+    sub == "config"
+        && rest.iter().any(|flag| {
+            matches!(flag.as_str(), "--global" | "--system" | "--file" | "-f" | "--blob")
+                || flag.starts_with("--file=")
+                || flag.starts_with("--blob=")
+        })
 }
 
 /// Split `-z` output into its records, without the final empty one.
@@ -282,6 +365,42 @@ mod tests {
         sandbox.ask(Context::Untrusted, &repo, &["ls-files", "-z"]).unwrap();
         sandbox.ask(Context::Untrusted, &repo, &["log", "-1"]).unwrap();
         assert!(!marker.exists(), "a program the repository configures ran");
+    }
+
+    fn git_of(sandbox: &Sandbox) -> Git {
+        Git { program: PathBuf::from("git"), folders: sandbox.folders.clone(), inherited: sandbox.inherited.clone() }
+    }
+
+    #[test]
+    fn a_repository_whose_configuration_would_wait_is_not_asked_and_is_recorded() {
+        let sandbox = Sandbox::new("waits");
+        let repo = sandbox.repo();
+        disown(&repo);
+        let config = repo.join(".git/config");
+        fs::remove_file(&config).unwrap();
+        let made = std::process::Command::new("mkfifo").arg(&config).status().unwrap();
+        assert!(made.success());
+        let git = git_of(&sandbox);
+        let pass = Pass::default();
+        let started = std::time::Instant::now();
+        for _ in 0..2 {
+            let answer = git.run_in(&pass, &Request::new(Context::Untrusted, Some(&repo), &["rev-parse", "HEAD"]));
+            assert!(matches!(answer, Err(GitError::WouldWait(_))));
+        }
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(pass.stalled().len(), 2);
+        assert!(pass.stalled()[0].starts_with("git rev-parse was not run"));
+    }
+
+    #[test]
+    fn an_ordinary_repository_is_asked_within_a_pass() {
+        let sandbox = Sandbox::new("ordinary");
+        let repo = sandbox.repo();
+        disown(&repo);
+        let pass = Pass::default();
+        let answer = git_of(&sandbox).run_in(&pass, &Request::new(Context::Untrusted, Some(&repo), &["rev-parse", "HEAD"]));
+        assert!(answer.unwrap().succeeded());
+        assert!(pass.stalled().is_empty());
     }
 
     #[test]

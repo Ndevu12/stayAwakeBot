@@ -1,0 +1,214 @@
+//! Whether every git command in a repository would wait on its configuration: the repository's
+//! configuration, or a file it includes unconditionally, is a pipe git would open and wait on.
+
+use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::programs::git::{Context, Git, Request, records};
+
+/// The most configuration files one check reads.
+pub const MAX_WAIT_FILES: usize = 256;
+/// The deepest include one check follows.
+pub const MAX_INCLUDE_DEPTH: usize = 10;
+/// The largest configuration file read.
+pub const MAX_CONFIG_BYTES: u64 = 4 << 20;
+
+/// Whether every git command in the repository at `start` would wait on its configuration. True
+/// only when that is certain; false when the repository is not a plain one at `start` owned by
+/// this user, when an include cannot be followed exactly as git follows it, or when more than
+/// `MAX_WAIT_FILES` files would be read.
+pub fn config_waits(git: &Git, start: &Path) -> bool {
+    let Some(git_dir) = plain_git_dir(start) else { return false };
+    let common = if fs::symlink_metadata(git_dir.join("commondir")).is_ok() {
+        match followed(&git_dir.join("commondir"), "") {
+            Some(common) => common,
+            None => return false,
+        }
+    } else {
+        git_dir
+    };
+    let mut budget = MAX_WAIT_FILES;
+    waits_on(git, &common.join("config"), &mut HashSet::new(), &mut budget, 0) == Some(true)
+}
+
+fn plain_git_dir(start: &Path) -> Option<PathBuf> {
+    let top = fs::canonicalize(start).ok()?;
+    let dot_git = top.join(".git");
+    let git_dir = match fs::symlink_metadata(&dot_git) {
+        Ok(found) if found.is_dir() => dot_git,
+        Ok(_) => followed(&dot_git, "gitdir:")?,
+        Err(_) => top,
+    };
+    (is_git_directory(&git_dir) && owned_by_this_user(&git_dir)).then_some(git_dir)
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn owned_by_this_user(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: getuid takes no arguments, cannot fail, and touches no memory saw owns.
+    let me = unsafe { libc::getuid() };
+    fs::metadata(path).is_ok_and(|found| found.uid() == me)
+}
+
+#[cfg(not(unix))]
+fn owned_by_this_user(_path: &Path) -> bool {
+    false
+}
+
+fn regular_text(path: &Path) -> Option<String> {
+    if !fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
+    fs::read(path).ok().map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn followed(pointer: &Path, prefix: &str) -> Option<PathBuf> {
+    let text = regular_text(pointer)?;
+    let value = text.strip_prefix(prefix)?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    fs::canonicalize(pointer.parent()?.join(value)).ok()
+}
+
+/// Whether `path` is a git directory: a HEAD git accepts, and an objects and a refs directory.
+pub fn is_git_directory(path: &Path) -> bool {
+    let common = if fs::symlink_metadata(path.join("commondir")).is_ok() {
+        followed(&path.join("commondir"), "")
+    } else {
+        Some(path.to_path_buf())
+    };
+    common.is_some_and(|common| valid_head(&path.join("HEAD")) && common.join("objects").is_dir() && common.join("refs").is_dir())
+}
+
+fn valid_head(head: &Path) -> bool {
+    if fs::symlink_metadata(head).is_ok_and(|found| found.file_type().is_symlink()) {
+        return fs::read_link(head).is_ok_and(|target| target.starts_with("refs/"));
+    }
+    let Some(text) = regular_text(head) else { return false };
+    if let Some(named) = text.strip_prefix("ref:") {
+        return named.trim_start().starts_with("refs/");
+    }
+    let word = text.split_whitespace().next().unwrap_or("");
+    matches!(word.len(), 40 | 64) && word.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+#[cfg(unix)]
+fn is_pipe(path: &Path) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    fs::metadata(path).is_ok_and(|found| found.file_type().is_fifo())
+}
+
+#[cfg(not(unix))]
+fn is_pipe(_path: &Path) -> bool {
+    false
+}
+
+fn waits_on(git: &Git, path: &Path, examined: &mut HashSet<PathBuf>, budget: &mut usize, depth: usize) -> Option<bool> {
+    if depth > MAX_INCLUDE_DEPTH {
+        return None;
+    }
+    if is_pipe(path) {
+        return Some(true);
+    }
+    let key = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if examined.contains(&key) {
+        return Some(false);
+    }
+    if *budget == 0 {
+        return None;
+    }
+    *budget -= 1;
+    examined.insert(key);
+    let Some(pairs) = config_file_pairs(git, path) else { return Some(false) };
+    let mut unsure = false;
+    for (name, value) in pairs {
+        let Some(value) = value.filter(|v| !v.is_empty()) else { continue };
+        if !name.eq_ignore_ascii_case("include.path") {
+            continue;
+        }
+        let Some(target) = include_target(path, &value) else {
+            unsure = true;
+            continue;
+        };
+        match waits_on(git, &target, examined, budget, depth + 1) {
+            Some(true) => return Some(true),
+            None => unsure = true,
+            Some(false) => {}
+        }
+    }
+    if unsure { None } else { Some(false) }
+}
+
+/// Read one configuration file's `(key, value)` pairs in file order, without following its
+/// includes. An absent file reads as empty; one that is not a regular file, is too large, or that
+/// git could not read gives `None`.
+pub fn config_file_pairs(git: &Git, path: &Path) -> Option<Vec<(String, Option<String>)>> {
+    if fs::symlink_metadata(path).is_err() {
+        return Some(Vec::new());
+    }
+    let found = fs::metadata(path).ok()?;
+    if !found.is_file() || found.len() > MAX_CONFIG_BYTES {
+        return None;
+    }
+    let shown = path.display().to_string();
+    let request = Request::new(Context::Untrusted, None, &["config", "--file", &shown, "--no-includes", "--list", "-z"]);
+    let listed = git.output(&request).ok()?;
+    Some(
+        records(&listed)
+            .into_iter()
+            .filter(|chunk| !chunk.is_empty())
+            .map(|chunk| {
+                let text = String::from_utf8_lossy(chunk);
+                match text.split_once('\n') {
+                    Some((key, value)) => (key.to_string(), Some(value.to_string())),
+                    None => (text.into_owned(), None),
+                }
+            })
+            .collect(),
+    )
+}
+
+fn include_target(including: &Path, value: &str) -> Option<PathBuf> {
+    if value.starts_with("%(") {
+        return None;
+    }
+    if let Some(rest) = value.strip_prefix('~') {
+        let (user, rest) = rest.split_once('/').unwrap_or((rest, ""));
+        let home = if user.is_empty() { std::env::var_os("HOME").map(PathBuf::from)? } else { home_of(user)? };
+        return Some(if rest.is_empty() { home } else { home.join(rest) });
+    }
+    let named = Path::new(value);
+    if named.is_absolute() {
+        return Some(named.to_path_buf());
+    }
+    Some(including.parent()?.join(named))
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn home_of(user: &str) -> Option<PathBuf> {
+    use std::ffi::{CStr, CString};
+    use std::os::unix::ffi::OsStrExt;
+    let name = CString::new(user).ok()?;
+    let mut buffer = vec![0 as libc::c_char; 16 * 1024];
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut found: *mut libc::passwd = std::ptr::null_mut();
+    // SAFETY: every pointer is to memory this function owns and that outlives the call; the
+    // buffer's length is passed with it, and `found` is only read after a zero return.
+    let status = unsafe { libc::getpwnam_r(name.as_ptr(), &mut entry, buffer.as_mut_ptr(), buffer.len(), &mut found) };
+    if status != 0 || found.is_null() || entry.pw_dir.is_null() {
+        return None;
+    }
+    // SAFETY: on success `pw_dir` points into `buffer`, a NUL-terminated string that is still alive.
+    let dir = unsafe { CStr::from_ptr(entry.pw_dir) };
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
+}
+
+#[cfg(not(unix))]
+fn home_of(_user: &str) -> Option<PathBuf> {
+    None
+}
+
