@@ -1,5 +1,6 @@
-//! Everything saw asks of the operating system: files, processes, the external programs it runs, and the system calls behind them. The only crate that may hold `unsafe` code.
+//! Asks the operating system for what saw needs.
 
 pub mod programs;
-
+pub mod account;
+pub mod env;
 pub mod files;
