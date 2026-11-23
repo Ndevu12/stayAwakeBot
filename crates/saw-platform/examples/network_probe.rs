@@ -31,7 +31,8 @@ fn main() -> Result<(), String> {
                 match network::fetch(&request, &env) {
                     Ok(r) => json!({"status": r.status}),
                     Err(NetworkError::Failed { code, .. }) => json!({"error": "failed", "code": code}),
-                    Err(other) => json!({"error": format!("{other:?}").split('(').next().unwrap_or("").to_string()}),
+                    Err(NetworkError::NotHttps) => json!({"error": "NotHttps"}),
+                    Err(other) => json!({"error": other.to_string()}),
                 }
             }
         };

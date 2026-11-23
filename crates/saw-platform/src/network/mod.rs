@@ -46,7 +46,7 @@ impl Response {
 pub enum NetworkError {
     CurlMissing(Vec<String>),
     CurlTooOld(String),
-    NotHttps(String),
+    NotHttps,
     BadRequest(String),
     BadProxy(String),
     Failed { code: Option<i32>, detail: String },
@@ -60,7 +60,7 @@ impl std::fmt::Display for NetworkError {
                 let (major, minor, patch) = MINIMUM_CURL;
                 write!(out, "curl {found} is older than {major}.{minor}.{patch}")
             }
-            NetworkError::NotHttps(url) => write!(out, "not an https address: {url}"),
+            NetworkError::NotHttps => write!(out, "not an https address"),
             NetworkError::BadRequest(detail) | NetworkError::BadProxy(detail) => write!(out, "{detail}"),
             NetworkError::Failed { detail, .. } => write!(out, "{detail}"),
         }
@@ -142,10 +142,10 @@ pub fn host_of(url: &str) -> Option<String> {
 /// request, the proxy, and the files for the body sent, the body received and the headers.
 pub fn configuration(request: &Request, proxy: Option<&proxy::Proxy>, sent: Option<&Path>, received: &Path, headers: &Path) -> Result<String, NetworkError> {
     if host_of(&request.url).is_none() {
-        return Err(NetworkError::NotHttps(request.url.clone()));
+        return Err(NetworkError::NotHttps);
     }
     if request.url.chars().any(|c| c <= ' ' || c == '\u{7f}') {
-        return Err(NetworkError::BadRequest(format!("URL can't contain control characters: {:?}", request.url)));
+        return Err(NetworkError::BadRequest("the address contains a control character".into()));
     }
     let seconds = request.timeout.as_secs().max(1);
     let mut lines = vec![
@@ -167,7 +167,7 @@ pub fn configuration(request: &Request, proxy: Option<&proxy::Proxy>, sent: Opti
     ];
     for (name, value) in &request.headers {
         if has_control(name) || has_control(value) || name.contains(':') {
-            return Err(NetworkError::BadRequest(format!("Invalid header {name:?}")));
+            return Err(NetworkError::BadRequest("a header contains a control character".into()));
         }
         lines.push(format!("header = {}", quoted(&format!("{name}: {value}"))));
     }
@@ -180,7 +180,7 @@ pub fn configuration(request: &Request, proxy: Option<&proxy::Proxy>, sent: Opti
     match proxy {
         Some(proxy) => {
             if has_control(&proxy.hostport) {
-                return Err(NetworkError::BadProxy(format!("Invalid proxy {:?}", proxy.hostport)));
+                return Err(NetworkError::BadProxy("the proxy setting contains a control character".into()));
             }
             lines.push(format!("proxy = {}", quoted(&format!("http://{}", proxy.hostport))));
             if let Some(authorization) = &proxy.authorization {
@@ -207,7 +207,7 @@ pub fn last_headers(text: &str) -> Vec<(String, String)> {
 /// there is none.
 pub fn fetch(request: &Request, environment: &[(String, String)]) -> Result<Response, NetworkError> {
     let curl = find_curl()?;
-    let host = host_of(&request.url).ok_or_else(|| NetworkError::NotHttps(request.url.clone()))?;
+    let host = host_of(&request.url).ok_or(NetworkError::NotHttps)?;
     let proxy = proxy::proxy_for(&host, environment).map_err(NetworkError::BadProxy)?;
     let folder = crate::sandbox::scratch::make_unique_folder(&std::env::temp_dir(), "saw-request-")
         .map_err(|error| NetworkError::Failed { code: None, detail: error.to_string() })?;
@@ -272,9 +272,8 @@ mod tests {
         let config = configuration(&request, None, Some(Path::new("/s/sent")), Path::new("/s/received"), Path::new("/s/headers")).unwrap();
         let run = invocation(Path::new("/usr/bin/curl"), config.clone());
         let argv = run.args.join(" ");
-        for secret in ["secret-token-value", "api.example.com", "body-value", "/s/sent"] {
-            assert!(!argv.contains(secret), "{secret} on the command line");
-        }
+        let leaked = ["secret-token-value", "api.example.com", "body-value", "/s/sent"].iter().filter(|value| argv.contains(**value)).count();
+        assert_eq!(leaked, 0);
         assert!(config.contains("secret-token-value"));
         assert!(run.env.keys().all(|name| name.eq_ignore_ascii_case("SystemRoot")));
     }
@@ -284,12 +283,31 @@ mod tests {
         let mut request = request_with_secret();
         let paths = (Path::new("/r"), Path::new("/h"));
         request.url = "http://api.example.com/".into();
-        assert!(matches!(configuration(&request, None, None, paths.0, paths.1), Err(NetworkError::NotHttps(_))));
+        assert!(matches!(configuration(&request, None, None, paths.0, paths.1), Err(NetworkError::NotHttps)));
         request.url = "https://api.example.com/\nx".replace("\\n", "\n");
         assert!(configuration(&request, None, None, paths.0, paths.1).is_err());
         request = request_with_secret();
         request.headers.push(("X-Injected".into(), "a\r\nHost: evil".into()));
         assert!(matches!(configuration(&request, None, None, paths.0, paths.1), Err(NetworkError::BadRequest(_))));
+    }
+
+    #[test]
+    fn no_error_repeats_an_address_or_a_header() {
+        let mut request = request_with_secret();
+        let paths = (Path::new("/r"), Path::new("/h"));
+        let mut messages = Vec::new();
+        request.url = "http://hooks.example.com/secret-path".into();
+        messages.push(configuration(&request, None, None, paths.0, paths.1).unwrap_err().to_string());
+        request.url = "https://hooks.example.com/secret-path\tx".into();
+        messages.push(configuration(&request, None, None, paths.0, paths.1).unwrap_err().to_string());
+        request = request_with_secret();
+        request.headers.push(("Authorization".into(), "Bearer secret-path\r\n".into()));
+        messages.push(configuration(&request, None, None, paths.0, paths.1).unwrap_err().to_string());
+        let proxy = proxy::Proxy { hostport: "secret-path\n".into(), authorization: None };
+        messages.push(configuration(&request_with_secret(), Some(&proxy), None, paths.0, paths.1).unwrap_err().to_string());
+        messages.push(proxy::parse_proxy("http:/user:secret-path@host").unwrap_err());
+        assert_eq!(messages.iter().filter(|m| m.contains("secret-path") || m.contains("hooks.example.com")).count(), 0);
+        assert_eq!(messages.len(), 5);
     }
 
     #[test]

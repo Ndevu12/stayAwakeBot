@@ -80,7 +80,7 @@ pub fn parse_proxy(proxy: &str) -> Result<(Option<String>, Option<String>, Strin
     let authority = match rest {
         Some(rest) if rest.starts_with('/') => {
             if !rest.starts_with("//") {
-                return Err(format!("proxy URL with no authority: {proxy:?}"));
+                return Err("the proxy setting has no host".into());
             }
             let end = match rest.find('@') {
                 Some(at) => rest[at..].find('/').map(|i| at + i),
