@@ -38,12 +38,9 @@ fn plain_git_dir(start: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(unix)]
-#[allow(unsafe_code)]
 fn owned_by_this_user(path: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
-    // SAFETY: getuid has no arguments and cannot fail.
-    let me = unsafe { libc::getuid() };
-    fs::metadata(path).is_ok_and(|found| found.uid() == me)
+    fs::metadata(path).is_ok_and(|found| found.uid() == crate::account::user_id())
 }
 
 #[cfg(not(unix))]
@@ -170,7 +167,7 @@ fn include_target(including: &Path, value: &str) -> Option<PathBuf> {
     }
     if let Some(rest) = value.strip_prefix('~') {
         let (user, rest) = rest.split_once('/').unwrap_or((rest, ""));
-        let home = if user.is_empty() { std::env::var_os("HOME").map(PathBuf::from)? } else { home_of(user)? };
+        let home = if user.is_empty() { std::env::var_os("HOME").map(PathBuf::from)? } else { crate::account::home_of_user(user)? };
         return Some(if rest.is_empty() { home } else { home.join(rest) });
     }
     let named = Path::new(value);
@@ -179,28 +176,3 @@ fn include_target(including: &Path, value: &str) -> Option<PathBuf> {
     }
     Some(including.parent()?.join(named))
 }
-
-#[cfg(unix)]
-#[allow(unsafe_code)]
-fn home_of(user: &str) -> Option<PathBuf> {
-    use std::ffi::{CStr, CString};
-    use std::os::unix::ffi::OsStrExt;
-    let name = CString::new(user).ok()?;
-    let mut buffer = vec![0 as libc::c_char; 16 * 1024];
-    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut found: *mut libc::passwd = std::ptr::null_mut();
-    // SAFETY: the pointers are to locals that outlive the call, with the buffer's length.
-    let status = unsafe { libc::getpwnam_r(name.as_ptr(), &mut entry, buffer.as_mut_ptr(), buffer.len(), &mut found) };
-    if status != 0 || found.is_null() || entry.pw_dir.is_null() {
-        return None;
-    }
-    // SAFETY: on success `pw_dir` is a NUL-terminated string inside `buffer`.
-    let dir = unsafe { CStr::from_ptr(entry.pw_dir) };
-    Some(PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
-}
-
-#[cfg(not(unix))]
-fn home_of(_user: &str) -> Option<PathBuf> {
-    None
-}
-
