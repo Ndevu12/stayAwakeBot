@@ -142,3 +142,78 @@ impl Folder {
         Ok(())
     }
 }
+
+impl Folder {
+    /// Open a folder under this one, refusing any link. Takes the path. Returns the open folder,
+    /// or why it was not opened.
+    pub fn open_under(&self, path: &Path) -> Result<Folder, WriteError> {
+        open_folder(&self.path.join(path), false, 0o777)
+    }
+
+    /// Check a file in this folder can be given a mode; modes do not apply on Windows. Takes its
+    /// name and the mode. Returns nothing, or why it is not a file of its own.
+    pub fn set_mode_of(&self, name: &OsStr, _mode: u32) -> Result<(), WriteError> {
+        let found = fs::symlink_metadata(self.path.join(name))?;
+        if is_reparse_point(&found) || !found.is_file() {
+            return Err(WriteError::Redirected(format!("{} is not a file of its own", name.to_string_lossy())));
+        }
+        Ok(())
+    }
+
+    /// Make a folder in this one. Takes its name and mode. Returns nothing, or why it was not made.
+    pub fn make_dir(&self, name: &OsStr, _mode: u32) -> io::Result<()> {
+        fs::create_dir(self.path.join(name))
+    }
+
+    /// Move an entry of this folder into another folder under a name, replacing what is there.
+    /// Takes the entry, the folder and the name. Returns nothing, or why it was not moved.
+    pub fn rename_to(&self, entry: &OsStr, folder: &Folder, name: &OsStr) -> io::Result<()> {
+        fs::rename(self.path.join(entry), folder.path.join(name))
+    }
+
+    /// Rename an entry of this folder without replacing what has the new name. Takes the entry and
+    /// the new name. Returns nothing, or why it was not renamed.
+    #[allow(unsafe_code)]
+    pub fn rename_no_replace(&self, entry: &OsStr, name: &OsStr) -> io::Result<()> {
+        use std::os::windows::ffi::OsStrExt;
+        let wide = |path: PathBuf| path.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+        let (from, to) = (wide(self.path.join(entry)), wide(self.path.join(name)));
+        // SAFETY: both strings are NUL-terminated locals that outlive the call.
+        let moved = unsafe { windows_sys::Win32::Storage::FileSystem::MoveFileExW(from.as_ptr(), to.as_ptr(), 0) };
+        if moved == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
+    }
+
+    /// Copy an entry of this folder, a file or folder, into another folder under a name, keeping
+    /// times; a link is refused. Takes the entry, the folder and the name. Returns whether it was a
+    /// folder, or why it was not copied.
+    pub fn copy_into(&self, entry: &OsStr, folder: &Folder, name: &OsStr) -> io::Result<bool> {
+        copy_path(&self.path.join(entry), &folder.path.join(name))
+    }
+
+    /// Remove an entry of this folder, and everything under it when it is a folder. Takes the
+    /// entry. Returns nothing, or why it was not removed.
+    pub fn remove(&self, entry: &OsStr) -> io::Result<()> {
+        let path = self.path.join(entry);
+        if fs::symlink_metadata(&path)?.is_dir() { fs::remove_dir_all(path) } else { fs::remove_file(path) }
+    }
+}
+
+fn copy_path(from: &Path, to: &Path) -> io::Result<bool> {
+    let found = fs::symlink_metadata(from)?;
+    if is_reparse_point(&found) {
+        return Err(io::Error::other(format!("{} is a link", from.display())));
+    }
+    let times = fs::FileTimes::new().set_accessed(found.accessed()?).set_modified(found.modified()?);
+    if found.is_dir() {
+        fs::create_dir(to)?;
+        for child in fs::read_dir(from)? {
+            let child = child?;
+            copy_path(&child.path(), &to.join(child.file_name()))?;
+        }
+        hold(to)?.set_times(times)?;
+        return Ok(true);
+    }
+    fs::copy(from, to)?;
+    OpenOptions::new().write(true).open(to)?.set_times(times)?;
+    Ok(false)
+}
