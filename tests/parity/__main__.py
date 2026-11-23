@@ -3,6 +3,8 @@
 
     python -m tests.parity                  # main at the pinned commit against this checkout
     python -m tests.parity --actual main    # main against itself
+
+Set SAW_PARITY_REPOSITORIES to a list of real repositories to add them to the corpus.
 """
 from __future__ import annotations
 
@@ -12,7 +14,7 @@ import os
 import sys
 from pathlib import Path
 
-from tests.parity import compare, corpus, sides
+from tests.parity import compare, corpus, real_repositories, sides
 from tests.support import isolation
 
 PIN = Path(__file__).with_name("main.pin")
@@ -33,7 +35,8 @@ def cache_dir() -> Path:
 def corpus_version() -> str:
     """Return a fingerprint of what builds the corpus."""
     sources = (Path(corpus.__file__), Path(sys.modules["tests.support.samples"].__file__))
-    return hashlib.sha256(b"".join(p.read_bytes() for p in sources)).hexdigest()[:16]
+    listed = real_repositories.fingerprint(real_repositories.list_path())
+    return hashlib.sha256(b"".join(p.read_bytes() for p in sources) + listed).hexdigest()[:16]
 
 
 def expected_answer(main: sides.Side, commit: str, variant: str, args: list[str], cache: Path) -> str:
@@ -57,6 +60,9 @@ def main(argv: list[str] | None = None) -> int:
     main_saw = sides.main_at(commit, cache)
     actual = main_saw if options.actual == "main" else sides.this_checkout()
     targets = [str(t) for t in corpus.build(cache / "corpus")]
+    listing = real_repositories.list_path()
+    if listing:
+        targets += [str(t) for t in real_repositories.fetched(real_repositories.listed(listing), cache / "real")]
     mismatched = 0
     for variant, extra in VARIANTS.items():
         args = ["scan", *targets, "--json", "--no-stream", *extra]
