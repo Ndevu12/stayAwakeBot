@@ -48,6 +48,21 @@ fn truthy(value: Option<&str>) -> bool {
     !matches!(value.unwrap_or("").to_lowercase().as_str(), "" | "0" | "false" | "no" | "off")
 }
 
+/// Read a whole number as Python's `int` reads one that fits an account id. Takes the text.
+/// Returns the number, or none.
+pub fn python_int(text: &str) -> Option<u32> {
+    let trimmed = text.trim_matches(is_python_space);
+    let digits = trimmed.strip_prefix('+').unwrap_or(trimmed);
+    let bytes = digits.as_bytes();
+    if bytes.is_empty() || bytes[0] == b'_' || bytes[bytes.len() - 1] == b'_' || digits.contains("__") {
+        return None;
+    }
+    if !digits.chars().all(|c| c.is_ascii_digit() || c == '_') {
+        return None;
+    }
+    digits.replace('_', "").parse::<u32>().ok()
+}
+
 /// Read a number as Python's `float` reads it. Takes the text. Returns the number, or none.
 pub fn python_float(text: &str) -> Option<f64> {
     let trimmed = text.trim_matches(is_python_space);
