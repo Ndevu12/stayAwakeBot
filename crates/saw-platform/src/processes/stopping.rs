@@ -119,9 +119,7 @@ pub fn has_ended_with(known: &Identity, read: &dyn Fn(u32) -> (Option<Identity>,
     }
 }
 
-fn kill_program() -> Option<String> {
-    ["/bin/kill", "/usr/bin/kill"].iter().find(|candidate| std::path::Path::new(candidate).exists()).map(|c| c.to_string())
-}
+const KILL_PROGRAMS: &[&str] = &["/bin/kill", "/usr/bin/kill"];
 
 /// End processes as root, asking once for all of them. Takes the process ids, the
 /// signature each had when it was found, the way to run a command as root and the reader of a
@@ -132,11 +130,22 @@ pub fn end_as_root(
     run_as_root: &dyn Fn(&[String]) -> (elevate::Outcome, String),
     signature: &dyn Fn(u32) -> Option<String>,
 ) -> (elevate::Outcome, Vec<u32>) {
+    end_as_root_using(KILL_PROGRAMS, pids, signatures, run_as_root, signature)
+}
+
+fn end_as_root_using(
+    kill_programs: &[&str],
+    pids: &[u32],
+    signatures: &BTreeMap<u32, String>,
+    run_as_root: &dyn Fn(&[String]) -> (elevate::Outcome, String),
+    signature: &dyn Fn(u32) -> Option<String>,
+) -> (elevate::Outcome, Vec<u32>) {
     let still: Vec<u32> = pids.iter().copied().filter(|pid| signature(*pid).as_ref() == signatures.get(pid)).collect();
     if still.is_empty() {
         return (elevate::Outcome::Granted, Vec::new());
     }
-    let Some(binary) = kill_program() else { return (elevate::Outcome::NotAvailable, Vec::new()) };
+    let Some(binary) = crate::system_programs::system_program(kill_programs) else { return (elevate::Outcome::NotAvailable, Vec::new()) };
+    let binary = binary.display().to_string();
     let named: Vec<String> = still.iter().map(u32::to_string).collect();
     let command = |flag: &str| -> Vec<String> { [binary.clone(), flag.to_string()].into_iter().chain(named.iter().cloned()).collect() };
     let (outcome, _) = run_as_root(&command("-STOP"));
@@ -145,6 +154,30 @@ pub fn end_as_root(
     }
     run_as_root(&command("-KILL"));
     (elevate::Outcome::Granted, still.into_iter().filter(|pid| signature(*pid).is_none()).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sandbox::Isolated;
+
+    #[test]
+    fn a_kill_program_root_does_not_own_is_never_run_as_root() {
+        let sandbox = Isolated::new("kill").unwrap();
+        let planted = sandbox.file("kill", b"#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&planted, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let planted = planted.display().to_string();
+        let asked = std::cell::RefCell::new(0);
+        let run = |_: &[String]| {
+            *asked.borrow_mut() += 1;
+            (elevate::Outcome::Granted, String::new())
+        };
+        let found = BTreeMap::from([(7, "a".to_string())]);
+        let outcome = end_as_root_using(&[planted.as_str()], &[7], &found, &run, &|_| Some("a".to_string()));
+        assert_eq!(outcome, (elevate::Outcome::NotAvailable, Vec::new()));
+        assert_eq!(*asked.borrow(), 0);
+    }
 }
 
 #[cfg(windows)]
