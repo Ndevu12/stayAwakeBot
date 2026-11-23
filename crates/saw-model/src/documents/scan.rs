@@ -76,6 +76,9 @@ pub struct Finding {
     pub package: Option<String>,
     pub package_name: Option<String>,
     pub reference: Option<String>,
+    /// Set by `saw govern` on a finding the folder already had before an update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_existing: Option<bool>,
 }
 
 /// The counts for one target. Each count lists its keys in the order saw first met them.
