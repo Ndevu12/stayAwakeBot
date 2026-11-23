@@ -130,6 +130,18 @@ pub fn home_of_user(user: &str) -> Option<PathBuf> {
     account_by_name(user).map(|account| account.home)
 }
 
+/// Return the account with an id, or none. Takes the id.
+#[cfg(not(unix))]
+pub fn account_by_uid(_uid: u32) -> Option<Account> {
+    None
+}
+
+/// Return the account with a name, or none. Takes the name.
+#[cfg(not(unix))]
+pub fn account_by_name(_name: &str) -> Option<Account> {
+    None
+}
+
 /// Return the home folder the account database names for the user saw runs as, or none.
 #[cfg(not(unix))]
 pub fn home_folder() -> Option<PathBuf> {
@@ -153,7 +165,7 @@ pub fn acting_for(env: &Environment) -> Option<Operator> {
     #[cfg(unix)]
     return acting_for_with(env, Some(effective_user_id()), &account_by_uid, &account_by_name);
     #[cfg(not(unix))]
-    return acting_for_with(env, None, &|_| None, &|_| None);
+    return acting_for_with(env, None, &account_by_uid, &account_by_name);
 }
 
 /// Return the account a command acts for, from given facts. Takes the environment, the effective
