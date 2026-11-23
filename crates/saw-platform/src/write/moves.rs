@@ -56,8 +56,7 @@ pub fn rename_in(folder: &Path, old: &str, new: &str) -> Result<(), WriteError> 
 }
 
 /// Move a file, link or folder, whole, into a folder under a new name. Takes the source, the
-/// folder and the name. Returns nothing, or why it was not moved; a copy that could not be made in
-/// full leaves the source in place.
+/// folder and the name. Returns nothing, or why it was not moved.
 pub fn move_into(source: &Path, folder: &Path, name: &str) -> Result<(), WriteError> {
     one_entry(name)?;
     let (origin_path, entry) = named(source)?;

@@ -46,8 +46,7 @@ fn checked_folder(path: &Path, original: &Path) -> Result<File, WriteError> {
     Ok(held)
 }
 
-/// Open a folder for writing in, holding every folder on the way so none can be replaced, and
-/// refusing any link. Takes the folder, whether to make missing parts, and their mode. Returns the
+/// Open a folder for writing in, holding every folder on the way. Takes the folder, whether to make missing parts, and their mode. Returns the
 /// open folder, or why it was not opened.
 pub fn open_folder(path: &Path, create: bool, _mode: u32) -> Result<Folder, WriteError> {
     let absolute = std::path::absolute(path)?;
@@ -150,8 +149,8 @@ impl Folder {
         open_folder(&self.path.join(path), false, 0o777)
     }
 
-    /// Check a file in this folder can be given a mode; modes do not apply on Windows. Takes its
-    /// name and the mode. Returns nothing, or why it is not a file of its own.
+    /// Check a file in this folder is a file of its own. Takes its name and the mode. Returns
+    /// nothing, or why it is not.
     pub fn set_mode_of(&self, name: &OsStr, _mode: u32) -> Result<(), WriteError> {
         let found = fs::symlink_metadata(self.path.join(name))?;
         if is_reparse_point(&found) || !found.is_file() {
@@ -183,9 +182,8 @@ impl Folder {
         if moved == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
     }
 
-    /// Copy an entry of this folder, a file or folder, into another folder under a name, keeping
-    /// times; a link is refused. Takes the entry, the folder and the name. Returns whether it was a
-    /// folder, or why it was not copied.
+    /// Copy an entry of this folder into another folder under a name, keeping times. Takes the
+    /// entry, the folder and the name. Returns whether it was a folder, or why it was not copied.
     pub fn copy_into(&self, entry: &OsStr, folder: &Folder, name: &OsStr) -> io::Result<bool> {
         copy_path(&self.path.join(entry), &folder.path.join(name))
     }

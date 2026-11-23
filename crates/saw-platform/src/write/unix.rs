@@ -275,7 +275,7 @@ fn entries_of(folder: libc::c_int) -> io::Result<Vec<OsString>> {
     let listing = unsafe { libc::fdopendir(copy) };
     if listing.is_null() {
         let error = io::Error::last_os_error();
-        // SAFETY: `copy` is still owned here, as fdopendir failed.
+        // SAFETY: `copy` is an open descriptor this function still owns.
         unsafe { libc::close(copy) };
         return Err(error);
     }
