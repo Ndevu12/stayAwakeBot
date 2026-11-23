@@ -6,7 +6,7 @@ use std::io::{self, Read, Write};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 
-use crate::write::{Mode, WriteError};
+use crate::sandbox::write::{Mode, WriteError};
 
 const FILE_READ_ATTRIBUTES: u32 = 0x0080;
 const FILE_SHARE_READ: u32 = 0x0001;

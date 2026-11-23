@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::write::{WriteError, open_folder, open_parent};
+use crate::sandbox::write::{WriteError, open_folder, open_parent};
 
 fn one_entry(name: &str) -> Result<(), WriteError> {
     let separators: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };

@@ -4,7 +4,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use saw_platform::write::{self, AtALink, Mode, WriteError};
+use saw_platform::sandbox::write::{self, AtALink, Mode, WriteError};
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
