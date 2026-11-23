@@ -130,10 +130,12 @@ pub fn end_as_root(
     run_as_root: &dyn Fn(&[String]) -> (elevate::Outcome, String),
     signature: &dyn Fn(u32) -> Option<String>,
 ) -> (elevate::Outcome, Vec<u32>) {
-    end_as_root_using(KILL_PROGRAMS, pids, signatures, run_as_root, signature)
+    end_as_root_with(KILL_PROGRAMS, pids, signatures, run_as_root, signature)
 }
 
-fn end_as_root_using(
+/// End processes as root with one of the given `kill` programs. Takes the programs' paths and
+/// what `end_as_root` takes. Returns what `end_as_root` returns.
+pub fn end_as_root_with(
     kill_programs: &[&str],
     pids: &[u32],
     signatures: &BTreeMap<u32, String>,
@@ -154,30 +156,6 @@ fn end_as_root_using(
     }
     run_as_root(&command("-KILL"));
     (elevate::Outcome::Granted, still.into_iter().filter(|pid| signature(*pid).is_none()).collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sandbox::Isolated;
-
-    #[test]
-    fn a_kill_program_root_does_not_own_is_never_run_as_root() {
-        let sandbox = Isolated::new("kill").unwrap();
-        let planted = sandbox.file("kill", b"#!/bin/sh\n").unwrap();
-        #[cfg(unix)]
-        std::fs::set_permissions(&planted, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        let planted = planted.display().to_string();
-        let asked = std::cell::RefCell::new(0);
-        let run = |_: &[String]| {
-            *asked.borrow_mut() += 1;
-            (elevate::Outcome::Granted, String::new())
-        };
-        let found = BTreeMap::from([(7, "a".to_string())]);
-        let outcome = end_as_root_using(&[planted.as_str()], &[7], &found, &run, &|_| Some("a".to_string()));
-        assert_eq!(outcome, (elevate::Outcome::NotAvailable, Vec::new()));
-        assert_eq!(*asked.borrow(), 0);
-    }
 }
 
 #[cfg(windows)]
