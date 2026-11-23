@@ -45,9 +45,12 @@ def is_recognised(tool: str, args: list[str]) -> bool:
 def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None = None, *,
             deadline: float | None = None) -> tuple[dict, int]:
     """Materialise the update outside the open folder and scan what arrived. Returns `(payload,
-    exit)`: `{"scan": <document>}` with the scan's own exit, or, when the update could not be
+    exit)`: `{"passthrough": true}` and CLEAN for a command that brings no files in, so the caller
+    runs it as typed; `{"scan": <document>}` with the scan's own exit; or, when the update could not be
     checked, `{"reason": <sentence>, "decision": ...}` and INCOMPLETE, leaving the user to run the
     command as typed or leave the folder unchanged."""
+    if incoming.brings_nothing(tool, args):
+        return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
     govern_status.write(repo, "checking", step="checking the incoming update")
     current().step("materialise", "checking the incoming update")
     arrived = incoming.prepare(Path(repo), Path(into), tool, list(args))

@@ -152,7 +152,8 @@ def child_env(context: Context, env: dict | None, *, operator_scopes: bool | Non
     as `os.environ` is) and whether the command reads the operator's configuration. Returns it.
 
     A `GIT_*` variable the caller set or changed is kept; one merely inherited is kept only where the
-    operator's scopes are, and never when it relocates the repository or injects configuration."""
+    operator's scopes are, and never when it relocates the repository or injects configuration.
+    saw's own git is never governed by saw's stand-in."""
     scopes = context.operator_scopes if operator_scopes is None else operator_scopes
     inherited = os.environ
     source = inherited if env is None else env
@@ -173,6 +174,8 @@ def child_env(context: Context, env: dict | None, *, operator_scopes: bool | Non
         out["GIT_CONFIG_GLOBAL"] = os.devnull
     out["GIT_TERMINAL_PROMPT"] = "0"
     out[saw_env.SAW_HOOK_DISABLED] = "1"
+    for key in saw_env.GOVERN_ACTIVATION:
+        out.pop(key, None)
     out["GIT_ALLOW_PROTOCOL"] = ":".join(OPERATOR_TRANSPORTS) if context is OPERATOR_PUSH else ""
     out.update(_STORED_VIEW)
     if repository_less:

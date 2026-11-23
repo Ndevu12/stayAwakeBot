@@ -37,12 +37,22 @@ pub struct UncheckedDecision {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum GovernDocument {
+    Passthrough(Passthrough),
     Checked(Checked),
     Unchecked(Unchecked),
     Verdict(Verdict),
     Applied(Applied),
     Restored(Restored),
     Refused(Refused),
+}
+
+/// A command that brings nothing in, for the caller to run as typed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Passthrough {
+    pub schema_version: u32,
+    pub passthrough: bool,
+    pub reason: String,
 }
 
 /// An update saw checked.

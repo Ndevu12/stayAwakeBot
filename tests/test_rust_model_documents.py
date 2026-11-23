@@ -119,6 +119,7 @@ class _GovernAnswers(unittest.TestCase):
         class Updates(_TrackingCheckout):
             def runTest(self):
                 open_, into = str(self.open), str(self.into)
+                answers.append(govern.prepare(open_, into, "git", ["switch", "-c", "caf\u00e9"])[0])
                 answers.append(govern.prepare(open_, into, "git", ["pull"])[0])
                 answers.append(govern.apply(open_, into)[0])
                 answers.append(govern.verdict(open_)[0])

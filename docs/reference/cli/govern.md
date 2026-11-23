@@ -31,6 +31,8 @@ was. The answer says what to do in `next_steps`, and its `decision` lets you let
 you review it: `saw govern apply --repo <folder> --into <dir> --accept <commit>` applies exactly the
 commit saw checked. For an infected update, saw recommends leaving the folder unchanged; to let it in
 anyway, add `--confirm <folder name>`. `saw govern verdict` then answers that you let that tree in.
+A command that brings nothing into the folder, such as creating a branch where the folder already is, answers `passthrough` and runs as typed.
+
 When the update cannot be checked, you get the reason and the decision: run the command as
 typed, then scan the folder with `saw scan`, or leave the folder as it is. These commands
 never push and never open a pull request.
