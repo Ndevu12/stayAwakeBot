@@ -19,12 +19,14 @@ from stayawake.lib.git.write.branch import refs_under, update_refs
 from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.lib.git.write.transfer import adopt_objects
 from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way
+from stayawake.lib.signing.commits.git_command import fix_commit_signing
 
 _GLOBAL = frozenset({
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
     "--config-env", "--exec-path",
 })
-_OPTION_VALUE = frozenset({"-b", "-B", "-c", "-C", "-m", "--orphan", "--recurse-submodules", "--conflict"})
+_OPTION_VALUE = frozenset({"-b", "-B", "-c", "-C", "-m", "--orphan", "--recurse-submodules", "--conflict",
+                           "--create", "--force-create"})
 _RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
 _GH_INBOUND = frozenset({("pr", "checkout"), ("repo", "sync"), ("release", "download"), ("run", "download")})
 _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "prune"}),
@@ -56,6 +58,17 @@ def classify(tool: str, args: list[str]) -> str | None:
         if tuple(words[:2]) in _GH_INBOUND:
             return "gh"
     return None
+
+
+def brings_nothing(tool: str, args: list[str]) -> bool:
+    """Return whether a command moves nothing into the open folder: a checkout or switch that stays
+    on the folder's commit, such as a new branch with no start point, an orphan branch, or paths
+    taken from the index. Takes the tool and the arguments without the program name."""
+    parsed = _parse_git(args) if tool == "git" else None
+    if parsed is None:
+        return False
+    sub, rest = parsed
+    return (sub == "checkout" and not _checkout_brings(rest)) or (sub == "switch" and not _switch_brings(rest))
 
 
 def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | str":
@@ -108,7 +121,7 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
         return "saw could not prepare a place to check the update"
     if head.startswith("ref: "):
         run_ok(borrowed.path, ["symbolic-ref", "HEAD", head.removeprefix("ref: ").strip()], context=SAW_OWNED)
-    ran = _run_command(work, tool, args, kind)
+    ran = _run_command(work, tool, args, kind, fix_commit_signing(repo))
     if ran:
         return ran
     after = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
@@ -226,7 +239,7 @@ def _git_kind(args: list[str]) -> str | None:
     if parsed is None:
         return None
     sub, rest = parsed
-    if any(flag in rest for flag in ("--abort", "--quit", "--dry-run", "-n")):
+    if any(flag in rest for flag in ("--abort", "--quit", "--dry-run")):
         return None
     if sub in {"pull", "merge", "rebase", "fetch"}:
         return sub
@@ -263,7 +276,7 @@ def _positionals(args: list[str]) -> list[str]:
         arg = args[index]
         if arg == "--":
             break
-        if arg.startswith("-"):
+        if arg.startswith("-") and arg != "-":
             index += 2 if arg in _OPTION_VALUE and "=" not in arg else 1
             continue
         words.append(arg)
@@ -272,18 +285,22 @@ def _positionals(args: list[str]) -> list[str]:
 
 
 def _checkout_brings(args: list[str]) -> bool:
-    if "-b" in args or "--orphan" in args:
+    """Return whether a checkout moves the folder to another commit: one it names, or a new
+    branch's start point. A new branch with no start point stays where the folder is."""
+    if "--orphan" in args:
         return False
     return len(_positionals(args[:args.index("--")] if "--" in args else args)) > 0
 
 
 def _switch_brings(args: list[str]) -> bool:
-    if any(flag in args for flag in ("-c", "--create", "-C", "--force-create", "--orphan")):
+    """Return whether a switch moves the folder to another commit: one it names, or a new
+    branch's start point. A new branch with no start point stays where the folder is."""
+    if "--orphan" in args:
         return False
     return len(_positionals(args)) > 0
 
 
-def _run_command(work: Path, tool: str, args: list[str], kind: str) -> str:
+def _run_command(work: Path, tool: str, args: list[str], kind: str, signing: tuple[str, ...] = ()) -> str:
     if tool == "gh":
         return _run_gh(work, args)
     parsed = _parse_git(args)
@@ -293,13 +310,13 @@ def _run_command(work: Path, tool: str, args: list[str], kind: str) -> str:
     if kind in ("pull", "fetch") and not stdout(work, ["remote"], context=SAW_OWNED).strip():
         return "the repository has no remote to fetch from"
     if kind == "pull":
-        return _pull(work, rest)
+        return _pull(work, rest, signing)
     if kind == "fetch":
         return "" if run_ok(work, ["fetch", *rest], context=OPERATOR_PUSH) else "the fetch did not finish"
-    return "" if run_ok(work, [sub, *rest], context=SAW_OWNED) else "the update did not finish cleanly"
+    return "" if run_ok(work, [*signing, sub, *rest], context=SAW_OWNED) else "the update did not finish cleanly"
 
 
-def _pull(work: Path, args: list[str]) -> str:
+def _pull(work: Path, args: list[str], signing: tuple[str, ...] = ()) -> str:
     positionals = _positionals(args)
     if not run_ok(work, ["fetch", *positionals[:1]], context=OPERATOR_PUSH):
         return "the fetch did not finish"
@@ -309,7 +326,7 @@ def _pull(work: Path, args: list[str]) -> str:
         command = ["rebase", *(["--rebase-merges"] if rebase == "merges" else []), *onto]
     else:
         command = ["merge", *_pull_ff(work, args), *onto]
-    return "" if run_ok(work, command, context=SAW_OWNED) else "the update did not finish cleanly"
+    return "" if run_ok(work, [*signing, *command], context=SAW_OWNED) else "the update did not finish cleanly"
 
 
 def _pull_rebases(work: Path, args: list[str]) -> str:
