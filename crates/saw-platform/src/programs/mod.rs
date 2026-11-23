@@ -87,6 +87,31 @@ pub fn run_on_terminal(invocation: &Invocation) -> Result<Option<i32>, RunError>
     }
 }
 
+/// Runs one command and reports its exit code.
+pub trait Runner {
+    /// Run a command. Takes the command and the environment to run it with, none to keep saw's.
+    /// Returns its exit code.
+    fn run(&self, argv: &[String], env: Option<&BTreeMap<String, String>>) -> std::io::Result<Option<i32>>;
+}
+
+/// Runs commands on this machine, each within a time limit.
+pub struct SystemRunner {
+    pub timeout: Duration,
+}
+
+impl Runner for SystemRunner {
+    fn run(&self, argv: &[String], env: Option<&BTreeMap<String, String>>) -> std::io::Result<Option<i32>> {
+        let invocation = Invocation {
+            program: PathBuf::from(&argv[0]),
+            args: argv[1..].to_vec(),
+            env: env.cloned().unwrap_or_else(|| std::env::vars().collect()),
+            timeout: self.timeout,
+            ..Invocation::default()
+        };
+        run(&invocation).map(|done| done.code).map_err(|error| std::io::Error::other(error.to_string()))
+    }
+}
+
 /// Return this process's id.
 pub fn process_id() -> u32 {
     std::process::id()
