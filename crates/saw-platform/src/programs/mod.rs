@@ -63,6 +63,11 @@ impl std::error::Error for RunError {}
 
 const POLL: Duration = Duration::from_millis(5);
 
+/// Return this process's id.
+pub fn process_id() -> u32 {
+    std::process::id()
+}
+
 /// Run one program to completion. Takes the invocation. Returns what it did, or why it did not finish.
 pub fn run(invocation: &Invocation) -> Result<Finished, RunError> {
     let mut command = Command::new(&invocation.program);

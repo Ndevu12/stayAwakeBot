@@ -6,3 +6,4 @@ pub mod env;
 pub mod files;
 pub mod write;
 pub mod stores;
+pub mod scratch;
