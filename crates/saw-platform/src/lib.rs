@@ -8,3 +8,6 @@ pub mod sandbox;
 pub mod elevate;
 pub mod system_programs;
 pub mod processes;
+pub mod registry;
+pub mod services;
+pub mod windows_security;
