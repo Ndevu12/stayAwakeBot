@@ -11,3 +11,4 @@ pub mod processes;
 pub mod registry;
 pub mod services;
 pub mod windows_security;
+pub mod network;
