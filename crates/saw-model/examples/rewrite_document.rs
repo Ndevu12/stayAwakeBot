@@ -1,5 +1,6 @@
 //! Read a document on standard input and write it back. Takes the document's name (`scan`,
-//! `govern`… or `any`) and the style (`line`, `indented` or `compact`).
+//! `govern`…, `progress`, `ask`, or `any`) and the style (`line`, `indented`, `compact` or
+//! `line-keeping-non-ascii`).
 
 use std::io::{self, Read, Write};
 
@@ -9,6 +10,7 @@ use serde::de::DeserializeOwned;
 use saw_model::document::Document;
 use saw_model::documents::{audit, auth_status, capabilities, doctor, fix, govern, guard_drift, hook_status, scan,
                            watch_status};
+use saw_model::events::{ask, progress};
 use saw_model::json::{self, Style};
 
 fn rewrite<T: DeserializeOwned + Serialize>(text: &str, style: Style) -> Result<String, serde_json::Error> {
@@ -20,6 +22,7 @@ fn main() -> Result<(), String> {
     let style = match args.get(1).map(String::as_str) {
         Some("indented") => Style::INDENTED,
         Some("compact") => Style::COMPACT,
+        Some("line-keeping-non-ascii") => Style::LINE_KEEPING_NON_ASCII,
         _ => Style::LINE,
     };
     let mut text = String::new();
@@ -35,6 +38,8 @@ fn main() -> Result<(), String> {
         Some("capabilities") => rewrite::<capabilities::CapabilitiesDocument>(&text, style),
         Some("govern") => rewrite::<govern::GovernDocument>(&text, style),
         Some("watch-status") => rewrite::<watch_status::WatchStatusDocument>(&text, style),
+        Some("progress") => rewrite::<progress::ProgressEvent>(&text, style),
+        Some("ask") => rewrite::<ask::AskEvent>(&text, style),
         _ => rewrite::<Document>(&text, style),
     };
     let out = written.map_err(|error| error.to_string())?;
