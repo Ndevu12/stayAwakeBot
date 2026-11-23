@@ -1,5 +1,4 @@
-//! Asks for privilege for one action, through the system's own prompt, rather than requiring it
-//! for a whole command.
+//! Asks for privilege for one action.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -51,7 +50,7 @@ pub trait Host {
     }
 }
 
-/// Return a `sudo` owned by root, set to run as its owner, that no one else can change, or none.
+/// Return a `sudo` saw may trust, or none.
 #[cfg(unix)]
 pub fn trusted_sudo() -> Option<PathBuf> {
     use std::os::unix::fs::MetadataExt;
@@ -110,8 +109,8 @@ impl Host for System {
     }
 }
 
-/// Run a command as root, leaving it to the system's own prompt to ask for permission when it
-/// must. Takes the command and the machine. Returns how it ended and a sentence about it.
+/// Run a command as root. Takes the command and the machine. Returns how it ended and a sentence
+/// about it.
 pub fn run_as_root(argv: &[String], host: &dyn Host) -> (Outcome, String) {
     let Some(sudo) = host.trusted_sudo() else {
         return (Outcome::NotAvailable, "no trustworthy sudo was found on this machine".into());

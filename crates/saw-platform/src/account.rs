@@ -184,7 +184,7 @@ pub fn acting_for_with(
     Some(Operator { name: variables.get("USER").cloned().unwrap_or_default(), uid: effective, home: PathBuf::from(home), via: Via::Environment })
 }
 
-/// Return the user id a denial belongs to when it is not root's. Takes the environment.
+/// Return the user id of the account a command acts for. Takes the environment.
 pub fn acting_uid(env: &Environment) -> Option<u32> {
     match acting_for(env) {
         Some(Operator { uid: Some(uid), .. }) => Some(uid),

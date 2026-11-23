@@ -1,4 +1,4 @@
-//! Finds a program the operating system ships, by absolute path and never through `PATH`.
+//! Finds a program the operating system ships.
 
 use std::path::{Path, PathBuf};
 
