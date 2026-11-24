@@ -192,6 +192,56 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  provenance:
+    name: Checksums and signed build provenance for every release file
+    needs: [build, wheels, wheels-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # keyless signing through Sigstore — no stored key
+      attestations: write
+    steps:
+      - name: Download the sdist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with:
+          name: sdist
+          path: dist/
+      - name: Download the platform wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with:
+          pattern: wheel-*
+          path: dist/
+          merge-multiple: true
+      - name: Download SBOM
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with:
+          name: sbom
+          path: sbom/
+      - name: Write the checksums of every release file
+        run: |
+          cp sbom/sbom.cdx.json dist/
+          (cd dist && sha256sum -- * > ../SHA256SUMS)
+          cat SHA256SUMS
+      - name: Sign build provenance for every file the checksums name
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8   # v4.2.2
+        with:
+          subject-checksums: SHA256SUMS
+      - name: Name the signed provenance and add it to the checksums
+        run: |
+          bundle="stayawakebot-${GITHUB_REF_NAME#v}.provenance.sigstore.json"
+          cp "${{ steps.attest.outputs.bundle-path }}" "$bundle"
+          sha256sum -- "$bundle" >> SHA256SUMS
+          cat SHA256SUMS
+      - name: Upload the checksums and the signed provenance
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        with:
+          name: provenance
+          path: |
+            SHA256SUMS
+            stayawakebot-*.provenance.sigstore.json
+          if-no-files-found: error
+
   self-scan:
     name: Self-scan release commit for worm indicators
     runs-on: ubuntu-latest
@@ -221,7 +271,7 @@ jobs:
   publish-testpypi:
     name: Publish to TestPyPI (manual dry-run)
     if: github.event_name == 'workflow_dispatch'
-    needs: [build, wheels, wheels-linux, self-scan]
+    needs: [build, wheels, wheels-linux, self-scan, provenance]
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -250,7 +300,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, wheels, wheels-linux, self-scan]
+    needs: [build, wheels, wheels-linux, self-scan, provenance]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -303,18 +353,24 @@ jobs:
         with:
           name: sbom
           path: sbom/
+      - name: Download the checksums and the signed provenance
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with:
+          name: provenance
+          path: provenance/
       - name: Create release with auto-generated notes + artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          extras=(provenance/*)
           # Idempotent: if the release was pre-created (e.g. by hand) the create call would
           # fail with "release already exists", so upload the artifacts to the existing
           # release instead. A fresh run still creates it with generated notes.
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             echo "Release ${GITHUB_REF_NAME} already exists — uploading artifacts to it."
-            gh release upload "${GITHUB_REF_NAME}" dist/* sbom/sbom.cdx.json --clobber
+            gh release upload "${GITHUB_REF_NAME}" dist/* sbom/sbom.cdx.json "${extras[@]}" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" dist/* sbom/sbom.cdx.json \
+            gh release create "${GITHUB_REF_NAME}" dist/* sbom/sbom.cdx.json "${extras[@]}" \
               --title "${GITHUB_REF_NAME}" \
               --generate-notes \
               --verify-tag
