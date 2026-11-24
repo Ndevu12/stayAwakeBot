@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+_FILES_TO_OUTLAST_THE_INTERRUPT = 20_000
 
 
 @unittest.skipUnless(os.name == "posix", "needs POSIX process groups")
@@ -19,7 +20,7 @@ class CtrlCEndsSawQuietly(unittest.TestCase):
 
     def setUp(self):
         self.tree = Path(tempfile.mkdtemp(prefix="ctrl-c-"))
-        for index in range(1200):
+        for index in range(_FILES_TO_OUTLAST_THE_INTERRUPT):
             (self.tree / f"f{index}.js").write_text(f"module.exports = function f{index}(a) {{ return a + {index}; }};\n")
 
     def _interrupted(self, *, after_line: bytes | None, after_seconds: float) -> tuple[int, str]:
@@ -44,7 +45,7 @@ class CtrlCEndsSawQuietly(unittest.TestCase):
         return run.returncode, (seen + out + err).decode(errors="replace")
 
     def test_a_scan_with_workers_running_ends_with_one_line(self):
-        code, printed = self._interrupted(after_line=b"workers", after_seconds=1.0)
+        code, printed = self._interrupted(after_line=b"workers", after_seconds=0.2)
         self.assertNotIn("Traceback", printed)
         self.assertIn("saw: stopped.", printed)
         self.assertEqual(code, -signal.SIGINT)

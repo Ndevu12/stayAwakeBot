@@ -14,6 +14,7 @@ from pathlib import Path
 from stayawake.bots.security.service.run import DEADLINE_REASON
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+_FILES_TO_OUTLAST_THE_DEADLINE = 20_000
 _PLAN_FIELDS = {"event", "target", "files", "bytes", "commits", "workers", "estimate_seconds", "budget_seconds"}
 
 
@@ -45,7 +46,7 @@ class AScanSaysItsPace(unittest.TestCase):
         self.assertFalse(report["any_error"])
 
     def test_a_scan_that_reaches_its_deadline_reports_what_it_did_not_finish(self):
-        code, events, report = self._scan(self._tree(1200), "--deadline", "0.5")
+        code, events, report = self._scan(self._tree(_FILES_TO_OUTLAST_THE_DEADLINE), "--deadline", "0.5")
         self.assertEqual(code, 2)
         self.assertTrue(report["any_error"])
         self.assertEqual([result["error"] for result in report["results"]], [DEADLINE_REASON])
