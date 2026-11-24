@@ -7,7 +7,6 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 try:
     import pwd
@@ -82,11 +81,10 @@ def _with_home(entry, home: Path):
     return pwd.struct_passwd(fields)
 
 
-def account_database_for(home: Path) -> list:
-    """Return patches that make the account database name `home` as this account's home. Takes the
-    home."""
+def point_account_database_at(home: Path) -> None:
+    """Make the account database name `home` as this account's home. Takes the home."""
     if pwd is None or not hasattr(os, "getuid"):
-        return []
+        return
     this_account = os.getuid()
     by_uid, by_name = pwd.getpwuid, pwd.getpwnam
 
@@ -98,14 +96,14 @@ def account_database_for(home: Path) -> list:
         entry = by_name(name)
         return _with_home(entry, home) if entry.pw_uid == this_account else entry
 
-    return [mock.patch.object(pwd, "getpwuid", getpwuid), mock.patch.object(pwd, "getpwnam", getpwnam)]
+    pwd.getpwuid, pwd.getpwnam = getpwuid, getpwnam
 
 
 def isolate(home: Path) -> None:
     """Point the environment and the account database at `home`. Takes the home."""
     kept = {name: os.environ[name] for name in KEPT_FROM_THE_CALLER if name in os.environ}
-    for patch in [mock.patch.dict(os.environ, {**environment_for(home), **kept}), *account_database_for(home)]:
-        patch.start()
+    os.environ.update({**environment_for(home), **kept})
+    point_account_database_at(home)
 
 
 def install() -> None:
