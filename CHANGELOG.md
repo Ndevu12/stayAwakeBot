@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.17.5] - 2026-11-24
+
 ### Fixed
 - In a terminal `saw govern` covers, creating a branch with `git switch -c` or `git checkout -b`
   runs as typed.
@@ -2057,7 +2059,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.4...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.5...HEAD
+[0.17.5]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.4...v0.17.5
 [0.17.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.3...v0.17.4
 [0.17.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.2...v0.17.3
 [0.17.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.1...v0.17.2
