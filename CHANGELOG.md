@@ -13,6 +13,9 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- A wheel for Linux on ARM (aarch64), so `pip install stayawakebot` there installs saw complete.
+
 ### Fixed
 - In a terminal `saw govern` covers, creating a branch with `git switch -c` or `git checkout -b`
   runs as typed.
