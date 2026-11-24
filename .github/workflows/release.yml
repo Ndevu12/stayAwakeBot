@@ -107,8 +107,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {name: macOS arm64, os: macos-14, slug: macos-arm64}
-          - {name: macOS x86_64, os: macos-14, slug: macos-x86_64, cross_target: x86_64-apple-darwin, wheel_plat: macosx_11_0_x86_64, macos_min: '11.0'}
+          - {name: macOS arm64, os: macos-15, slug: macos-arm64}
+          - {name: macOS x86_64, os: macos-15, slug: macos-x86_64, cross_target: x86_64-apple-darwin, wheel_plat: macosx_11_0_x86_64, macos_min: '11.0'}
           - {name: Windows x86_64, os: windows-latest, slug: windows-x86_64}
     runs-on: ${{ matrix.os }}
     steps:
