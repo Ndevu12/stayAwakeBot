@@ -17,6 +17,8 @@ reader, not the mechanism or the weakness it closed.
 
 ### Added
 - A wheel for Linux on ARM (aarch64), so `pip install stayawakebot` there installs saw complete.
+- Every file of a release is listed in its `SHA256SUMS` and carries signed build provenance; check
+  downloads with `sha256sum -c SHA256SUMS` or `gh attestation verify`.
 
 ### Fixed
 - In a terminal `saw govern` covers, creating a branch with `git switch -c` or `git checkout -b`
