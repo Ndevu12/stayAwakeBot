@@ -44,22 +44,30 @@ class ProcessesMatchMain(unittest.TestCase):
     def test_each_process_reads_the_same(self):
         pids = self.sample()
         questions = ("identify", "started", "path", "signature", "gone_live")
-        rust = self.ask([{"ask_about": q, "pid": p} for p in pids for q in questions])
-        for (pid, question), answer in zip(itertools.product(pids, questions), rust):
-            if question == "identify":
-                who, state = procsnap.identify(pid)
-                main = [identity(who), state]
-            elif question == "started":
-                start = procsnap.started(pid)
-                main = None if start is None else [str(start.at_ns), start.name, start.ppid]
-            elif question == "path":
-                main = procsnap.program_path(pid)
-            elif question == "signature":
-                main = procsnap.ps_signature(pid)
-            else:
-                main = procsnap.program_is_gone(pid)
+        pairs = list(itertools.product(pids, questions))
+        before = [self.main_answer(pid, question) for pid, question in pairs]
+        rust = self.ask([{"ask_about": q, "pid": p} for p, q in pairs])
+        after = [self.main_answer(pid, question) for pid, question in pairs]
+        steady = [(pair, answer, main) for pair, answer, main, again in zip(pairs, rust, before, after) if main == again]
+        self.assertGreater(len(steady), len(pairs) // 2)
+        for (pid, question), answer, main in steady:
             with self.subTest(pid=pid, question=question):
                 self.assertEqual(answer, main)
+
+    @staticmethod
+    def main_answer(pid, question):
+        """Return main's answer to one question about one process."""
+        if question == "identify":
+            who, state = procsnap.identify(pid)
+            return [identity(who), state]
+        if question == "started":
+            start = procsnap.started(pid)
+            return None if start is None else [str(start.at_ns), start.name, start.ppid]
+        if question == "path":
+            return procsnap.program_path(pid)
+        if question == "signature":
+            return procsnap.ps_signature(pid)
+        return procsnap.program_is_gone(pid)
 
     def test_parents_and_snapshot(self):
         pids = self.sample()

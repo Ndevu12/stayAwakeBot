@@ -3,6 +3,7 @@
 import os
 import subprocess
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from stayawake.bots.security import watchrecord
@@ -40,6 +41,13 @@ class TheSuiteHasAHomeOfItsOwn(unittest.TestCase):
         self.assertEqual(provenance.classify_path(str(self._home() / "program")), "unknown")
         if os.name == "posix":
             self.assertFalse(isolation._others_can_write(self._home()), self._home())
+
+    def test_the_home_holds_after_a_test_stops_every_patch(self):
+        mock.patch.stopall()
+        self.assertTrue(Path.home().name.startswith(isolation.PREFIX), Path.home())
+        self.assertTrue(Path(os.environ["GIT_CONFIG_GLOBAL"]).is_relative_to(self._home()))
+        if pwd is not None:
+            self.assertEqual(Path(pwd.getpwuid(os.getuid()).pw_dir), self._home())
 
     @unittest.skipIf(pwd is None, "this platform has no account database")
     def test_the_account_database_names_the_test_home(self):
