@@ -14,6 +14,11 @@ fn status(_path: &Path) -> Option<(u32, u32)> {
     None
 }
 
+/// Return an account's runtime folder. Takes the account id and the folder given, if any.
+pub fn runtime_folder(user: u32, runtime: Option<&str>) -> String {
+    runtime.filter(|r| !r.is_empty()).map(String::from).unwrap_or_else(|| format!("/run/user/{user}"))
+}
+
 /// Return the environment this account's service manager is reached with, or an empty one.
 pub fn user_manager_env() -> BTreeMap<String, String> {
     #[cfg(unix)]
@@ -25,7 +30,7 @@ pub fn user_manager_env() -> BTreeMap<String, String> {
 /// Return the environment an account's service manager is reached with, or an empty one. Takes
 /// the account id, the runtime folder to try first and the one saw was given.
 pub fn user_manager_env_for(user: u32, runtime: Option<&str>, given: Option<&str>) -> BTreeMap<String, String> {
-    let first = runtime.map(String::from).unwrap_or_else(|| format!("/run/user/{user}"));
+    let first = runtime_folder(user, runtime);
     for folder in [Some(first.as_str()), given].into_iter().flatten().filter(|f| !f.is_empty()) {
         if status(Path::new(folder)) == Some((0o040000, user)) {
             let mut env = BTreeMap::from([("XDG_RUNTIME_DIR".to_string(), folder.to_string())]);
@@ -39,7 +44,7 @@ pub fn user_manager_env_for(user: u32, runtime: Option<&str>, given: Option<&str
 /// Return the environment a program needs to reach an account's session bus, or none. Takes the
 /// account id and the runtime folder.
 pub fn session_bus_env_for(user: u32, runtime: Option<&str>) -> Option<BTreeMap<String, String>> {
-    let folder = runtime.map(String::from).unwrap_or_else(|| format!("/run/user/{user}"));
+    let folder = runtime_folder(user, runtime);
     let socket = format!("{folder}/bus");
     if status(Path::new(&socket))? != (0o140000, user) {
         return None;
