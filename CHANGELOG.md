@@ -16,6 +16,8 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - In a terminal `saw govern` covers, creating a branch with `git switch -c` or `git checkout -b`
   runs as typed.
+- Pressing Ctrl-C while a scan is starting its workers ends it with saw's one line, never a Python
+  error.
 
 ## [0.17.4] - 2026-11-22
 

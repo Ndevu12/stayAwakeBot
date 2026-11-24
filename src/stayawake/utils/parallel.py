@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures as cf
+import contextlib
 import multiprocessing as mp
 import os
 from pathlib import Path
@@ -232,10 +233,42 @@ _WORKER_START_Q = None
 _PARENT_CHECK_SECONDS = 0.5
 
 
+@contextlib.contextmanager
+def _ctrl_c_held():
+    """Hold Ctrl-C off this thread while the block runs, and deliver it after."""
+    if not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
+_SPAWN = mp.get_context("spawn")
+
+
+class _WorkerProcess(_SPAWN.Process):
+    """A worker process that starts with Ctrl-C held off."""
+
+    def start(self) -> None:
+        with _ctrl_c_held():
+            super().start()
+
+
+class _WorkerContext(type(_SPAWN)):
+    """The spawn context, starting each worker with Ctrl-C held off."""
+
+    Process = _WorkerProcess
+
+
 def _worker_init(start_q, parent_pid: int | None = None) -> None:
     global _WORKER_START_Q
     _WORKER_START_Q = start_q
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if hasattr(signal, "pthread_sigmask"):
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
     _leave_the_callers_streams()
     if parent_pid is not None:
         threading.Thread(target=_exit_when_the_parent_is_gone, args=(parent_pid,), daemon=True).start()
@@ -328,8 +361,9 @@ def _terminate_pool(ex) -> None:
 
 
 def _run_process(fn, work, workers, on_start, on_done) -> list[Outcome]:
-    ctx = mp.get_context("spawn")
-    start_q = ctx.Queue() if on_start else None
+    ctx = _WorkerContext()
+    with _ctrl_c_held():
+        start_q = ctx.Queue() if on_start else None
     ex = cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx,
                                 initializer=_worker_init, initargs=(start_q, os.getpid()))
     interrupted = False
