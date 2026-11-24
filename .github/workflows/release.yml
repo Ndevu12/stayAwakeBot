@@ -152,8 +152,18 @@ jobs:
           if-no-files-found: error
 
   wheels-linux:
-    name: Wheel — Linux x86_64 (manylinux)
-    runs-on: ubuntu-latest
+    name: Wheel — Linux ${{ matrix.arch }} (manylinux)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            image: quay.io/pypa/manylinux_2_28_x86_64@sha256:7e41b1c7fd64dfc69703a1124b43c404382973ee06ec5d764b85c34d2221fded
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:54b271d9562a3686298880df05367909e949ed317e7b1b79b59c696d75f78676
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout (full history + tags for hatch-vcs versioning)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -161,25 +171,24 @@ jobs:
           fetch-depth: 0
       - name: Build in a manylinux container (old glibc), then tag the wheel manylinux
         # Build inside manylinux so the bundled binary runs on older glibc, then retag the
-        # py3-none-linux_x86_64 wheel to manylinux so PyPI accepts it. Pin the image by digest
-        # pinned by digest (manylinux_2_28, 2026.11.01-2); bump deliberately at review, like the
-        # SHA-pinned actions.
+        # py3-none-linux_<arch> wheel to manylinux so PyPI accepts it. Each image is pinned by digest
+        # (manylinux_2_28, 2026.11.01-2); bump deliberately at review, like the SHA-pinned actions.
         run: |
-          docker run --rm -v "$PWD":/io -w /io             quay.io/pypa/manylinux_2_28_x86_64@sha256:7e41b1c7fd64dfc69703a1124b43c404382973ee06ec5d764b85c34d2221fded bash -euo pipefail -c '
+          docker run --rm -v "$PWD":/io -w /io             ${{ matrix.image }} bash -euo pipefail -c '
               git config --global --add safe.directory /io
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
               . "$HOME/.cargo/env"
               PY=/opt/python/cp311-cp311/bin/python
               "$PY" -m pip install --upgrade pip build wheel "twine>=6.1"
               "$PY" -m build --wheel
-              "$PY" -m wheel tags --platform-tag manylinux_2_28_x86_64 --remove dist/*.whl
+              "$PY" -m wheel tags --platform-tag manylinux_2_28_${{ matrix.arch }} --remove dist/*.whl
               "$PY" -m twine check --strict dist/*.whl
               test -n "$(unzip -l dist/*.whl | grep bots/mcp/bin/ || true)"
             '
       - name: Upload the wheel
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
-          name: wheel-linux
+          name: wheel-linux-${{ matrix.arch }}
           path: dist/*.whl
           if-no-files-found: error
 
