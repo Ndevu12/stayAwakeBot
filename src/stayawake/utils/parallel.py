@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures as cf
+import contextlib
 import multiprocessing as mp
 import os
 from pathlib import Path
@@ -232,10 +233,52 @@ _WORKER_START_Q = None
 _PARENT_CHECK_SECONDS = 0.5
 
 
+_STOP_SIGNALS = tuple(getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, name))
+
+
+@contextlib.contextmanager
+def _ctrl_c_held():
+    """Hold Ctrl-C and the other stop signals off while the block runs, and deliver them after."""
+    arrived: list[int] = []
+    previous_handlers = {}
+    if threading.current_thread() is threading.main_thread():
+        for number in _STOP_SIGNALS:
+            previous_handlers[number] = signal.signal(number, lambda signum, _frame: arrived.append(signum))
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT}) if hasattr(signal, "pthread_sigmask") else None
+    try:
+        yield
+    finally:
+        if previous_mask is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        for number, handler in previous_handlers.items():
+            signal.signal(number, handler)
+        for number in dict.fromkeys(arrived):
+            signal.raise_signal(number)
+
+
+_SPAWN = mp.get_context("spawn")
+
+
+class _WorkerProcess(_SPAWN.Process):
+    """A worker process that starts with Ctrl-C held off."""
+
+    def start(self) -> None:
+        with _ctrl_c_held():
+            super().start()
+
+
+class _WorkerContext(type(_SPAWN)):
+    """The spawn context, starting each worker with Ctrl-C held off."""
+
+    Process = _WorkerProcess
+
+
 def _worker_init(start_q, parent_pid: int | None = None) -> None:
     global _WORKER_START_Q
     _WORKER_START_Q = start_q
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if hasattr(signal, "pthread_sigmask"):
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
     _leave_the_callers_streams()
     if parent_pid is not None:
         threading.Thread(target=_exit_when_the_parent_is_gone, args=(parent_pid,), daemon=True).start()
@@ -328,15 +371,19 @@ def _terminate_pool(ex) -> None:
 
 
 def _run_process(fn, work, workers, on_start, on_done) -> list[Outcome]:
-    ctx = mp.get_context("spawn")
-    start_q = ctx.Queue() if on_start else None
+    ctx = _WorkerContext()
+    with _ctrl_c_held():
+        start_q = ctx.Queue() if on_start else None
     ex = cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx,
                                 initializer=_worker_init, initargs=(start_q, os.getpid()))
     interrupted = False
     restore_signals = _stop_signals_interrupt()
     try:
-        return _pump(lambda i, item: ex.submit(_process_task, fn, i, item),
-                     start_q, work, on_start, on_done)
+        def submit(index, item):
+            with _ctrl_c_held():
+                return ex.submit(_process_task, fn, index, item)
+
+        return _pump(submit, start_q, work, on_start, on_done)
     except KeyboardInterrupt as stopped:
         interrupted = True
         _terminate_pool(ex)                            # stop in-flight workers FIRST (shutdown nils _processes)
