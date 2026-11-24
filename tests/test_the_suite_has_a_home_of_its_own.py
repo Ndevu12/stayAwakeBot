@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 
 from stayawake.bots.security import watchrecord
+from stayawake.bots.security.hygiene import mechanism
+from stayawake.bots.security.hygiene.autorun import provenance
 from tests.support import isolation
 
 try:
@@ -32,6 +34,12 @@ class TheSuiteHasAHomeOfItsOwn(unittest.TestCase):
             self.fail("git's global config is not in a test home, so this test does not write to it")
         subprocess.run(["git", "config", "--global", "saw.isolation", "held"], check=True)
         self.assertIn("held", (self._home() / ".gitconfig").read_text())
+
+    def test_the_home_is_an_ordinary_place_for_a_users_files(self):
+        self.assertFalse(mechanism._under_scratch(self._home()), self._home())
+        self.assertEqual(provenance.classify_path(str(self._home() / "program")), "unknown")
+        if os.name == "posix":
+            self.assertFalse(isolation._others_can_write(self._home()), self._home())
 
     @unittest.skipIf(pwd is None, "this platform has no account database")
     def test_the_account_database_names_the_test_home(self):

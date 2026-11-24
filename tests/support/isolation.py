@@ -38,9 +38,39 @@ def environment_for(home: Path) -> dict[str, str]:
     }
 
 
+def _others_can_write(folder: Path) -> bool:
+    """Tell whether another account can write to a folder or any folder above it. Takes the folder."""
+    for each in (folder, *folder.parents):
+        try:
+            if each.stat().st_mode & 0o002:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def homes_folder() -> Path:
+    """Return the folder test homes are made in."""
+    temporary = Path(tempfile.gettempdir()).resolve()
+    if os.name != "posix" or not _others_can_write(temporary):
+        return temporary
+    homes = REAL_HOME / "saw-test-homes"
+    homes.mkdir(mode=0o700, exist_ok=True)
+    atexit.register(_remove_if_empty, homes)
+    return homes
+
+
+def _remove_if_empty(folder: Path) -> None:
+    """Remove a folder when nothing is left in it. Takes the folder."""
+    try:
+        folder.rmdir()
+    except OSError:
+        pass
+
+
 def new_home() -> Path:
     """Create a home whose git config holds only a test identity. Returns its path."""
-    home = Path(tempfile.mkdtemp(prefix=PREFIX)).resolve()
+    home = Path(tempfile.mkdtemp(prefix=PREFIX, dir=homes_folder())).resolve()
     (home / ".gitconfig").write_text(TEST_IDENTITY)
     return home
 
