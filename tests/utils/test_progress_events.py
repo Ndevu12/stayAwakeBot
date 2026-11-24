@@ -90,6 +90,10 @@ class TestASweepNamesEachTarget(unittest.TestCase):
         self.assertNotIn("[clean", buf.getvalue())
 
 
+_PROCESS_NOTE = ("1 of 2 running processes did not yield their arguments (processes of other users); "
+                 "their command lines were not examined")
+
+
 class TestAuditProgress(unittest.TestCase):
     def _run(self, progress):
         out, err = io.StringIO(), io.StringIO()
@@ -100,6 +104,8 @@ class TestAuditProgress(unittest.TestCase):
         with mock.patch.object(hygiene, "audit_checks", return_value=checks), \
              mock.patch.object(hygiene, "run_check", side_effect=outcome), \
              mock.patch("stayawake.cli.commands.audit.auth.resolve_token", return_value=(None, None)), \
+             mock.patch("stayawake.bots.security.hygiene.document.live_process_scope_note",
+                        return_value=_PROCESS_NOTE), \
              redirect_stdout(out), redirect_stderr(err):
             rc = audit.run(args)
         return rc, out.getvalue(), err.getvalue()
