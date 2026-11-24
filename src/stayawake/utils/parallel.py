@@ -233,17 +233,27 @@ _WORKER_START_Q = None
 _PARENT_CHECK_SECONDS = 0.5
 
 
+_STOP_SIGNALS = tuple(getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, name))
+
+
 @contextlib.contextmanager
 def _ctrl_c_held():
-    """Hold Ctrl-C off this thread while the block runs, and deliver it after."""
-    if not hasattr(signal, "pthread_sigmask"):
-        yield
-        return
-    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    """Hold Ctrl-C and the other stop signals off while the block runs, and deliver them after."""
+    arrived: list[int] = []
+    previous_handlers = {}
+    if threading.current_thread() is threading.main_thread():
+        for number in _STOP_SIGNALS:
+            previous_handlers[number] = signal.signal(number, lambda signum, _frame: arrived.append(signum))
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT}) if hasattr(signal, "pthread_sigmask") else None
     try:
         yield
     finally:
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+        if previous_mask is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        for number, handler in previous_handlers.items():
+            signal.signal(number, handler)
+        for number in dict.fromkeys(arrived):
+            signal.raise_signal(number)
 
 
 _SPAWN = mp.get_context("spawn")
@@ -369,8 +379,11 @@ def _run_process(fn, work, workers, on_start, on_done) -> list[Outcome]:
     interrupted = False
     restore_signals = _stop_signals_interrupt()
     try:
-        return _pump(lambda i, item: ex.submit(_process_task, fn, i, item),
-                     start_q, work, on_start, on_done)
+        def submit(index, item):
+            with _ctrl_c_held():
+                return ex.submit(_process_task, fn, index, item)
+
+        return _pump(submit, start_q, work, on_start, on_done)
     except KeyboardInterrupt as stopped:
         interrupted = True
         _terminate_pool(ex)                            # stop in-flight workers FIRST (shutdown nils _processes)

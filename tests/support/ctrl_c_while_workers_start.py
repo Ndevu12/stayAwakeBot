@@ -9,6 +9,22 @@ import time
 from stayawake.utils import parallel
 
 
+def ctrl_c_mid_launch() -> None:
+    """Send Ctrl-C to this process in the middle of starting each worker, and print what stopped."""
+    from multiprocessing import popen_spawn_posix
+    launch = popen_spawn_posix.Popen._launch
+
+    def launch_after_ctrl_c(self, process_obj):
+        os.kill(os.getpid(), signal.SIGINT)
+        return launch(self, process_obj)
+
+    popen_spawn_posix.Popen._launch = launch_after_ctrl_c
+    try:
+        parallel.run_ordered(abs, range(-64, 0), jobs=8)
+    except KeyboardInterrupt:
+        print("stopped")
+
+
 def main() -> None:
     """Run the work under the Ctrl-C barrage and print its total."""
     signal.signal(signal.SIGINT, lambda *_: None)
@@ -26,4 +42,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    ctrl_c_mid_launch() if sys.argv[1:] == ["mid-launch"] else main()
