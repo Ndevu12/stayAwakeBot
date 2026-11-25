@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 from stayawake.lib.git.borrowed import object_directory
 from stayawake.lib.git.contexts import Context
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes_fed
-from stayawake.utils import scratch
 
 _EMPTY_PACK_BYTES = 32
 
@@ -52,6 +52,24 @@ def _place(src: Path, dest_dir: Path) -> None:
     os.replace(staging, dest)
 
 
+def _temporary_packs(pack_dir: Path) -> set[str]:
+    """Return the names of git's unfinished pack files in a pack folder. Takes the folder."""
+    try:
+        return {entry.name for entry in pack_dir.iterdir() if entry.name.startswith("tmp_")}
+    except OSError:
+        return set()
+
+
+def _remove_temporary_packs(pack_dir: Path, before: set[str]) -> None:
+    """Remove the unfinished pack files in a pack folder, keeping the ones named in `before`. Takes
+    the folder and those names."""
+    for name in _temporary_packs(pack_dir) - before:
+        try:
+            (pack_dir / name).unlink()
+        except OSError:
+            pass
+
+
 def adopt_objects(repo: str | Path, source: str | Path, tips: list[str],
                   known: list[str]) -> str:
     """Make every object `tips` reach in `source` and `known` do not present in `repo`.
@@ -71,12 +89,20 @@ def adopt_objects(repo: str | Path, source: str | Path, tips: list[str],
     store = object_directory(repo)
     if store is None:
         return f"{repo} has no object store"
-    staging = scratch.new_dir("objects handed to the operator repository")
+    source_store = object_directory(source)
+    if source_store is None:
+        return "the checked update's repository has no object store"
+    try:
+        staging = Path(tempfile.mkdtemp(prefix="saw-handover-", dir=source_store))
+    except OSError as exc:
+        return f"the new objects could not be packed: {exc.strerror or exc}"
+    unfinished = _temporary_packs(source_store / "pack")
     try:
         named = stdout_bytes_fed(source, ["pack-objects", "--revs", "--local", "-q",
                                           str(staging / "pack")],
                                  _rev_input(tips, known), context=SAW_OWNED)
         if not named:
+            _remove_temporary_packs(source_store / "pack", unfinished)
             return "the new objects could not be packed"
         name = f"pack-{named.decode().strip()}"
         pack, index = staging / f"{name}.pack", staging / f"{name}.idx"
@@ -90,7 +116,7 @@ def adopt_objects(repo: str | Path, source: str | Path, tips: list[str],
             except OSError as exc:
                 return f"the new objects could not be written to {store}: {exc}"
     finally:
-        scratch.release_path(staging)
+        shutil.rmtree(staging, ignore_errors=True)
     still = missing_objects(repo, missing)
     if still is None:
         return "the operator repository could not confirm the new objects"

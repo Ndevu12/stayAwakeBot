@@ -16,6 +16,8 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - The macOS wheel for Apple silicon is tagged for Apple silicon on macOS 11 or later, so an Intel Mac
   never installs it.
+- A clean update `saw govern` checked lands in the folder even when the system's temporary folder is on
+  another filesystem, as it is by default on Arch and Fedora. When an update cannot land, saw says why.
 
 ## [0.17.5] - 2026-11-24
 
