@@ -38,13 +38,14 @@ RECORD_NOT_WRITTEN = "record not written"
 SETTINGS_NOT_SET = "settings not set"
 SETTINGS_SWITCHED_OFF = "settings switched off"
 HOOKS_FOLDER_REFUSED = "hooks folder refused"
+NOT_REWRITTEN = "not rewritten"
 STILL_IN_SETTINGS = "still in settings"
 
 
 @dataclass(frozen=True)
 class Action:
     """One thing `saw hook` did, or could not do, at one place: its state, the place, what kind of
-    thing it was, the repository it was in, and the reason a folder git uses was refused."""
+    thing it was, the repository it was in, and the reason a folder was refused or not written."""
     state: str
     path: Path
     kind: str = ""
@@ -72,10 +73,13 @@ def lines(actions: list[Action], *, again: str, removing: bool = False) -> list[
     in_repositories: dict[str, list[Path]] = {}
     elsewhere: set[str] = set()
     refused: list[Action] = []
+    not_rewritten: list[Action] = []
     still_set: list[str] = []
     for a in actions:
         if a.kind == HOOKS_FOLDER_REFUSED:
             refused.append(a)
+        elif a.kind == NOT_REWRITTEN:
+            not_rewritten.append(a)
         elif a.kind == STILL_IN_SETTINGS:
             still_set.append(str(a.path))
         elif a.repository is None:
@@ -132,4 +136,7 @@ def lines(actions: list[Action], *, again: str, removing: bool = False) -> list[
     for a in refused:
         out.append((f"saw's hooks were not put in {_shown([a.path])}, the folder git runs every "
                     f"repository's hooks from: it {a.reason}.", "dim"))
+    for a in not_rewritten:
+        out.append((f"saw's hooks in {_shown([a.path])} were not rewritten: it {a.reason}. Correct that, "
+                    f"then run `{again}`.", "warn"))
     return out

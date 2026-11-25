@@ -392,24 +392,34 @@ def seeded_repositories() -> list[Path]:
             and os.path.lexists(os.path.join(root, ".git"))]
 
 
-def hook_dirs(unread: list | None = None) -> list[Path]:
-    """Return every distinct hooks directory git runs on this account because of a template saw
-    manages or an operator configured: the template directories and each seeded repository's.
-    A seeded repository git cannot answer for is appended to `unread`."""
-    dirs: list[Path] = [hooks_dir()]
+def hook_folders(unread: list | None = None) -> list[tuple[Path, Path | None]]:
+    """List every distinct hooks directory git runs on this account through a template saw manages or
+    an operator configured: the template directories and each seeded repository's. Takes a list
+    each seeded repository git cannot answer for is appended to. Returns each directory once, with the
+    repository it runs hooks for, or None for a template or a folder git runs every repository's
+    hooks from."""
+    folders: list[tuple[Path, Path | None]] = [(hooks_dir(), None)]
     configured = global_template_dir()
-    candidates = [Path(os.path.expanduser(configured)) / "hooks"] if configured else []
-    candidates += installed_hooks_folders()
+    candidates: list[tuple[Path, Path | None]] = (
+        [(Path(os.path.expanduser(configured)) / "hooks", None)] if configured else [])
+    candidates += [(folder, None) for folder in installed_hooks_folders()]
     for repo in seeded_repositories():
         found = repository_hooks_dir(repo)
         if found is not None:
-            candidates.append(found)
+            candidates.append((found, repo))
         elif unread is not None:
             unread.append(repo)
-    for candidate in candidates:
-        if not any(_same(candidate, d) for d in dirs):
-            dirs.append(candidate)
-    return dirs
+    for candidate, repo in candidates:
+        if not any(_same(candidate, d) for d, _ in folders):
+            folders.append((candidate, repo))
+    return folders
+
+
+def hook_dirs(unread: list | None = None) -> list[Path]:
+    """Return every distinct hooks directory git runs on this account through a template saw manages
+    or an operator configured: the template directories and each seeded repository's.
+    A seeded repository git cannot answer for is appended to `unread`."""
+    return [folder for folder, _ in hook_folders(unread)]
 
 
 def repository_redirects_hooks(repo: Path) -> bool:
@@ -437,6 +447,12 @@ def repository_own_hooks_dir(repo: Path) -> Path | None:
         return None
     path = Path(os.path.expanduser(answer))
     return (path if path.is_absolute() else Path(os.path.normpath(repo / path))) / "hooks"
+
+
+def inside_a_git_directory(path: Path) -> bool:
+    """Tell whether git counts `path` as inside a repository's git directory. Takes the path. Returns
+    False when git cannot say."""
+    return _ask(path, ["rev-parse", "--is-inside-git-dir"]).strip() == "true"
 
 
 def _ask(repo: Path, args: list[str]) -> str:
@@ -524,10 +540,23 @@ def recorded_saw_runs() -> bool:
     return recorded is None or runs(recorded[0])
 
 
-def copies_that_cannot_run(hooks: Path) -> list[Path]:
-    """List the hooks saw installs in the folder `hooks` whose `saw` is not a program that runs. Takes
-    the folder. Returns those files."""
-    found: list[Path] = []
+def runs_as_git_runs_it(program: str, runs_in: Path | None) -> bool | None:
+    """Tell whether a program a hook names runs when git runs the hook: a bare name is found through
+    PATH, a relative path is taken from the repository the hook runs in. Takes the program as the hook
+    names it and that repository, or None. Returns the answer, or None for a relative path with no
+    repository to take it from."""
+    if os.path.isabs(program):
+        return runs(program)
+    if not any(sep and sep in program for sep in (os.sep, os.altsep)):
+        return shutil.which(program) is not None
+    return runs(os.path.join(runs_in, program)) if runs_in is not None else None
+
+
+def copies_that_cannot_run(hooks: Path, runs_in: Path | None = None) -> list[tuple[Path, str]]:
+    """List the hooks saw installs in the folder `hooks` whose `saw` does not run when git runs them.
+    Takes the folder and the repository its hooks run in, or None. Returns each file with the `saw` it
+    names."""
+    found: list[tuple[Path, str]] = []
     for event in HOOKS:
         path = hooks / event
         try:
@@ -535,20 +564,22 @@ def copies_that_cannot_run(hooks: Path) -> list[Path]:
         except OSError:
             continue
         command = saw_command(raw.decode("utf-8", "replace")) if raw is not None else None
-        if command and not runs(command[0]):
-            found.append(path)
+        if command and runs_as_git_runs_it(command[0], runs_in) is False:
+            found.append((path, command[0]))
     return found
 
 
-def altered_hooks(unread: list | None = None) -> list[Path]:
+def altered_hooks(unread: list | None = None, dirs: list[Path] | None = None) -> list[Path]:
     """Return every file git runs on this account that saw should have installed and did not, or
     that sits in the directory saw manages for itself alone: altered saw hooks in every hooks
     directory, anything but a pristine saw hook in saw's own, and a saw hook that is gone from
-    saw's own directory or from a repository saw seeded."""
+    saw's own directory or from a repository saw seeded. Takes a list each folder or repository that
+    cannot be read is appended to, and the hooks directories to look in, by default `hook_dirs()`.
+    Returns those files."""
     found: list[Path] = []
     recorded = installed()
     expected = recorded or (saw_executable() or "saw", None)
-    for d in hook_dirs(unread):
+    for d in hook_dirs(unread) if dirs is None else dirs:
         if not d.is_dir():
             continue
         try:

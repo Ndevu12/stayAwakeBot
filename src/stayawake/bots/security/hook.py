@@ -36,7 +36,7 @@ from stayawake.bots.security.matchers.git_history import MOST_MERGES_CHECKED
 from stayawake.bots.security.hook_report import BRAND as _BRAND, command as _cmd, paint_at as _paint
 from stayawake.bots.security.hook_outcome import (
     BROKEN_LINK, CHAINED, CHANGED, HOOKS_FOLDER_REFUSED, HOOKS_FOLDER_UNKNOWN, IN_PLACE, LEFT, NOT_PUT_IN_PLACE,
-    NOT_SAWS, NOTED, OUT_OF_DATE, PRESERVED, PUT_BACK, RECORD_NOT_WRITTEN, REPAIRED, REPOSITORYS_OWN,
+    NOT_REWRITTEN, NOT_SAWS, NOTED, OUT_OF_DATE, PRESERVED, PUT_BACK, RECORD_NOT_WRITTEN, REPAIRED, REPOSITORYS_OWN,
     RESTORED, RUNS_FROM_ELSEWHERE, SAVED_COPY_IN_THE_WAY, SET_ASIDE, SETTINGS_NOT_SET, SETTINGS_SWITCHED_OFF,
     SETTLED as _SETTLED, STILL_IN_SETTINGS, UNREAD, UNVERIFIED, UPDATED, WRITTEN, YOUR_PUSH_HOOK_KEPT,
     YOURS_RUNS_AFTER, Action, lines as _outcome_lines)
@@ -823,10 +823,10 @@ def repair(*, no_stream: bool = False, as_json: bool = False, standing_in: bool 
                 seeded_by.append(Path(configured) / "hooks")
                 actions += _repair_repository(Path(configured) / "hooks", saw, config, restore=False)
             actions += _keep_seeded_current(saw, config, seeded_by)
-            actions += _repair_where_you_are(here, saw, config, seeded_by)
             actions += _settle_settings_hooks(saw, config)
             hooks_folder, folder_actions = _settle_hooks_folder(saw, config)
             actions += folder_actions
+            actions += _put_back_saws_copies(here, saw, config)
     except HookError as exc:
         print(f"error: {exc}", file=sys.stderr)
         if as_json:
@@ -872,36 +872,76 @@ def _keep_seeded_current(saw: str, config: str | None, seeded_by: list[Path]) ->
     return actions
 
 
-def _own_hooks_dir_of(root: Path | None) -> Path | None:
-    """Find the hooks folder git runs for a repository from inside it. Takes the repository's root, or
-    None. Returns the folder, or None when there is no repository, git cannot say, or the repository
-    runs its hooks from elsewhere."""
-    if root is None or hookscript.repository_redirects_hooks(root):
+def _hooks_folders_to_check(here: Path | None,
+                            tracked: list[tuple[Path, Path | None]]) -> list[tuple[Path, Path | None]]:
+    """List every hooks folder git runs saw's hooks from on this account and the one git runs for the
+    repository the command runs in. Takes that repository's root or None, and the folders
+    `hookscript.hook_folders()` found. Returns each folder once, with the repository its hooks run in,
+    or None."""
+    folders = list(tracked)
+    found = hookscript.repository_hooks_dir(here) if here is not None else None
+    if found is None:
+        return folders
+    for at, (folder, repository) in enumerate(folders):
+        if _same_path(found, folder):
+            folders[at] = (folder, repository or here)
+            return folders
+    return folders + [(found, here)]
+
+
+def _template_hooks_folders() -> list[Path]:
+    """List the template hooks folders `saw hook repair` puts saw's hooks back in: saw's own, the one
+    the record names and the one git is set to give new clones. Returns them."""
+    configured = _global_template_dir()
+    recorded = hookscript.installed_into()
+    return ([_hooks_dir()] + ([recorded] if recorded is not None else [])
+            + ([Path(configured) / "hooks"] if configured and os.path.isabs(configured) else []))
+
+
+def _why_saw_does_not_write(folder: Path, templates: list[Path]) -> str | None:
+    """Say why `saw hook repair` does not write saw's hooks in a hooks folder. Takes the folder and the
+    template hooks folders. Returns the reason, or None when repair rewrites them there."""
+    if folder.is_symlink() or folder.parent.is_symlink():
+        return "is a link"
+    if any(_same_path(folder, template) for template in templates):
         return None
-    return hookscript.repository_hooks_dir(root)
+    if _inside_what_saw_keeps(folder):
+        return "lies inside a folder saw keeps for itself"
+    if hookscript.inside_a_git_directory(folder if folder.is_dir() else folder.parent):
+        return None
+    return _hooks_folder_problem(str(folder))
 
 
-def _hooks_folders_to_check(here: Path | None) -> list[Path]:
-    """List every hooks folder git runs saw's hooks from on this account, and the repository's own
-    the command runs in. Takes that repository's root, or None. Returns each folder once."""
-    folders = hookscript.hook_dirs()
-    own = _own_hooks_dir_of(here)
-    if own is not None and not any(_same_path(own, f) for f in folders):
-        folders.append(own)
-    return folders
+def _left_by_repair(paths: list[Path], reasons: dict[Path, str | None]) -> list[Path]:
+    """List the files whose hooks folder `saw hook repair` does not write. Takes the files and the
+    reason already found for each folder, which it extends. Returns those files."""
+    unjudged = {path.parent for path in paths} - reasons.keys()
+    templates = _template_hooks_folders() if unjudged else []
+    for folder in unjudged:
+        reasons[folder] = _why_saw_does_not_write(folder, templates)
+    return [path for path in paths if reasons[path.parent]]
 
 
-def _repair_where_you_are(here: Path | None, saw: str, config: str | None,
-                          seeded_by: list[Path]) -> list[Action]:
-    """Put back saw's hooks in the hooks folder of the repository the command runs in, when saw's hooks
-    are there; what is not saw's stays. Takes that repository's root or None, the saw executable, the
-    operator config and the hooks folders already handled, which it extends. Returns what was done."""
-    hooks_dir = _own_hooks_dir_of(here)
-    if (hooks_dir is None or any(_same_path(hooks_dir, t) for t in seeded_by)
-            or not any(_is_ours(hooks_dir / event) for event in _HOOKS)):
-        return []
-    seeded_by.append(hooks_dir)
-    return [replace(a, repository=here) for a in _repair_repository(hooks_dir, saw, config, restore=False)]
+_REWRITTEN_BY_REPAIR = frozenset({hookscript.ALTERED, hookscript.STALE, hookscript.OUTDATED})
+
+
+def _put_back_saws_copies(here: Path | None, saw: str, config: str | None) -> list[Action]:
+    """Put back saw's hooks that are changed or out of date in every hooks folder `saw hook status`
+    reads and saw writes, leaving what is not saw's. Takes the root of the repository the command runs
+    in or None, the saw executable and the operator config. Returns what was done, with each folder saw
+    does not write and the reason."""
+    actions: list[Action] = []
+    templates = _template_hooks_folders()
+    for folder, repository in _hooks_folders_to_check(here, hookscript.hook_folders()):
+        if not any(hookscript.verdict(folder / event, (saw, config)) in _REWRITTEN_BY_REPAIR for event in _HOOKS):
+            continue
+        reason = _why_saw_does_not_write(folder, templates)
+        if reason is not None:
+            actions.append(Action(UNVERIFIED, folder, NOT_REWRITTEN, repository, reason))
+            continue
+        actions += [replace(a, repository=repository)
+                    for a in _repair_repository(folder, saw, config, restore=False)]
+    return actions
 
 
 def _keep_current(root: Path) -> list[Action]:
@@ -1151,32 +1191,42 @@ def _posture(here: Path | None = None) -> hook_status.Posture:
             "saw has no record of what it installed here; run `saw hook install` once "
             "(with -c if you used one) so `saw hook repair` knows what to put back.",
             "saw hook install"))
-    if not hookscript.recorded_saw_runs():
+    recorded_runs = hookscript.recorded_saw_runs()
+    if not recorded_runs:
         problems.append(hook_status.problem(
             "stale-binary-path",
             "the saw your hooks run is gone or cannot run. Run `saw hook repair` so clones "
             "are scanned again.",
             "saw hook repair"))
-    cannot_run = [path for folder in (_hooks_folders_to_check(here) if recorded else [])
-                  for path in hookscript.copies_that_cannot_run(folder)]
+    tracked = hookscript.hook_folders()
+    fix, fix_in_words = _put_back_command(recorded)
+    reasons: dict[Path, str | None] = {}
+    dead = [(path, saw) for folder, repository in _hooks_folders_to_check(here, tracked)
+            for path, saw in hookscript.copies_that_cannot_run(folder, repository)]
+    dead_left = _left_by_repair([path for path, _ in dead], reasons)
+    cannot_run = [path for path, saw in dead
+                  if path not in dead_left and (recorded_runs or saw != recorded[0])]
     if cannot_run:
         problems.append(hook_status.problem(
             "hook-copy-cannot-run",
-            f"{len(cannot_run)} of saw's hook file(s) call a saw that cannot run. Run `saw hook repair`.",
-            "saw hook repair"))
+            f"{len(cannot_run)} of saw's hook file(s) call a saw that cannot run. Run {fix_in_words}.",
+            fix))
     if recorded and recorded[1] and not _config_usable(recorded[1]):
         problems.append(hook_status.problem(
             "config-gone",
             "the config your hooks scan with is gone, so clones are scanned without your "
             "allowlist. Run `saw hook install -c <your config>`.",
             "saw hook install -c <your config>"))
-    altered = hookscript.altered_hooks()
+    altered = hookscript.altered_hooks(dirs=[folder for folder, _ in tracked])
+    altered_left = _left_by_repair(altered, reasons)
+    altered = [path for path in altered if path not in altered_left]
     if altered:
         problems.append(hook_status.problem(
             "altered-hooks",
             f"{len(altered)} file(s) are not what saw installs, where saw's hooks run "
-            "— see `saw audit`; put them back with `saw hook repair`.",
-            "saw hook repair"))
+            f"— see `saw audit`; put them back with {fix_in_words}.",
+            fix))
+    problems += _problems_where_repair_does_not_write(dead_left, altered_left, reasons, fix_in_words)
     if installed and not existing:
         problems.append(hook_status.problem(
             "clones-not-seeded",
@@ -1192,6 +1242,32 @@ def _posture(here: Path | None = None) -> hook_status.Posture:
         problems.append(hook_status.problem(obstacle.code, obstacle.message, obstacle.repair))
     return hook_status.Posture(installed, tuple(present), tuple(via), env.hook_disabled(),
                                tuple(problems))
+
+
+def _put_back_command(recorded: tuple[str, str | None] | None) -> tuple[str, str]:
+    """Name the command that puts saw's hooks back. Takes what was recorded at install, or None. Returns
+    the command line and the words a sentence names it with."""
+    if recorded:
+        return "saw hook repair", "`saw hook repair`"
+    return "saw hook install && saw hook repair", "`saw hook install`, then `saw hook repair`"
+
+
+def _problems_where_repair_does_not_write(dead: list[Path], altered: list[Path], reasons: dict[Path, str | None],
+                                          fix_in_words: str) -> list[hook_status.Problem]:
+    """Name each hooks folder `saw hook repair` does not write, with how many of saw's hook files there
+    call a saw that cannot run or are not what saw installs. Takes those files of each kind, the reason
+    found for each folder and the words naming the command that puts saw's hooks back. Returns one
+    problem for each folder."""
+    problems: list[hook_status.Problem] = []
+    for folder in sorted({path.parent for path in dead + altered}):
+        count = len({path for path in dead + altered if path.parent == folder})
+        audit = " — see `saw audit`" if any(path.parent == folder for path in altered) else ""
+        problems.append(hook_status.problem(
+            "hooks-saw-does-not-rewrite",
+            f"{count} of saw's hook file(s) in {_shown(str(folder))} are not what saw installs{audit}, "
+            f"and saw does not write there: it {reasons[folder]}. Correct that, then run {fix_in_words}.",
+            ""))
+    return problems
 
 
 def _write_status(posture: hook_status.Posture, out) -> None:
