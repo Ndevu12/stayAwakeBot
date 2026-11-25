@@ -31,7 +31,7 @@ class CreatingABranch(_TrackingCheckout):
             with self.subTest(args=args):
                 answer, _code = govern.prepare(str(self.open), str(self.into), "git", args)
                 self.assertIn("scan", answer, answer)
-                self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+                self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
                 self.assertEqual(self._head(), upstream)
                 self.assertEqual(self.git(self.open, "branch", "--show-current").strip(), branch)
                 self.assertTrue((self.open / "new.txt").exists())

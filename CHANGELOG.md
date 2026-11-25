@@ -15,6 +15,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [0.17.6] - 2026-11-25
 
+### Added
+- `saw govern apply --expect <state_id>` brings in exactly the update its own `prepare` checked, one
+  saw run at a time per holding directory, and `--json` names what happened in `outcome`. `saw govern
+  verdict` says where a folder is after an apply that did not finish.
+
 ### Changed
 - Reports saw keeps for you now stay in one place and survive a restart: a full report too large for
   the terminal, a SARIF log that could not be written where asked, and reports whose folder cannot be

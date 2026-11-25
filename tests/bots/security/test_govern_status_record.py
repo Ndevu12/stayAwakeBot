@@ -80,9 +80,9 @@ class GovernStatusRecord(GitSandbox):
         steps = []
         real = gs.write
 
-        def spy(repo, phase, *, verdict=None, reasons=None, step=None):
+        def spy(repo, phase, *, verdict=None, reasons=None, step=None, applying=None):
             steps.append((phase, step))
-            return real(repo, phase, verdict=verdict, reasons=reasons, step=step)
+            return real(repo, phase, verdict=verdict, reasons=reasons, step=step, applying=applying)
 
         with mock.patch.object(gs, "write", spy):
             self._govern()
