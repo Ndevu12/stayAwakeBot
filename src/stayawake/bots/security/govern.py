@@ -10,6 +10,7 @@ the payload is stamped with the schema by the CLI.
 from __future__ import annotations
 
 import json
+import secrets
 import shutil
 from pathlib import Path
 
@@ -23,13 +24,18 @@ from stayawake.bots.security.targets.local import LocalRepoTarget
 from stayawake.lib.git import incoming, objects
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.write.working_tree import uncommitted_paths
-from stayawake.utils import atomicwrite, exitcodes, pathsafe, scratch
+from stayawake.utils import atomicwrite, exitcodes, folderlock, pathsafe, scratch
 from stayawake.utils.pace import DeadlineReached, Pace
 from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
 
 SCHEMA = 1
 _STATE = "state.json"
+_HOLD_WAIT_SECONDS = 30.0
+_BUSY = "another saw run is using this holding folder"
+BROUGHT_IN, NOT_BROUGHT_IN, STATE_CHANGED, HELD, FOLDER_MAY_HAVE_CHANGED, NOTHING_TO_APPLY, BUSY = (
+    "brought_in", "not_brought_in", "state_changed", "held", "folder_may_have_changed",
+    "nothing_to_apply", "busy")
 
 TOOLS = ("gh", "git")
 
@@ -46,9 +52,20 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
             deadline: float | None = None) -> tuple[dict, int]:
     """Materialise the update outside the open folder and scan what arrived. Takes the open folder,
     the holding directory, the tool, the arguments, the config and the deadline. Returns the answer
-    and its exit: a passthrough, a scan, or a reason with a decision."""
+    and its exit: a passthrough, a scan with the id of the state it recorded, or a reason with a
+    decision."""
     if incoming.brings_nothing(tool, args):
         return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
+    try:
+        with folderlock.held(Path(into), wait=_HOLD_WAIT_SECONDS):
+            return _prepare_held(repo, into, tool, args, config, deadline)
+    except folderlock.Busy:
+        return {"reason": _BUSY, "outcome": BUSY}, exitcodes.INCOMPLETE
+
+
+def _prepare_held(repo: str, into: str, tool: str, args: list[str], config: str | None,
+                  deadline: float | None) -> tuple[dict, int]:
+    """Prepare while holding the holding folder. Takes what `prepare` takes. Returns what it returns."""
     govern_status.write(repo, "checking", step="checking the incoming update")
     current().step("materialise", "checking the incoming update")
     arrived = incoming.prepare(Path(repo), Path(into), tool, list(args))
@@ -76,8 +93,9 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     else:
         govern_status.write(repo, "held", verdict=verdict,
                             reasons=["the update was not applied; the open folder is unchanged"])
-    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict)
-    answer: dict = {"scan": payload}
+    state_id = secrets.token_hex(16)
+    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict, state_id)
+    answer: dict = {"scan": payload, "state_id": state_id}
     if already_there:
         answer["pre_existing"] = already_there
     findings = (payload.get("results") or [{}])[0].get("findings") or []
@@ -99,18 +117,40 @@ def _unchecked(repo: str, reason: str) -> tuple[dict, int]:
     return {"reason": reason, "decision": decision}, exitcodes.INCOMPLETE
 
 
-def apply(repo: str, into: str, accept: str | None = None, confirm: str | None = None) -> tuple[dict, int]:
+def apply(repo: str, into: str, accept: str | None = None, confirm: str | None = None,
+          expect: str | None = None) -> tuple[dict, int]:
     """Make the open folder match the checked tree, without fetching again. Takes the open folder,
-    the holding directory, the accepted commit and the typed confirmation. Returns whether it was
-    applied, the reason when not, and the exit."""
+    the holding directory, the accepted commit, the typed confirmation and the id of the state the
+    caller's prepare recorded. Returns whether it was applied, the outcome, the reason when not, and
+    the exit."""
+    try:
+        with folderlock.held(Path(into), wait=_HOLD_WAIT_SECONDS):
+            return _apply_held(repo, into, accept, confirm, expect)
+    except folderlock.Busy:
+        return _applied(False, _BUSY, BUSY)
+
+
+def _apply_held(repo: str, into: str, accept: str | None, confirm: str | None,
+                expect: str | None) -> tuple[dict, int]:
+    """Apply while holding the holding folder. Takes what `apply` takes. Returns what it returns."""
+    matches = interrupted_apply(repo)
+    if matches is not None:
+        govern_status.write(repo, "finished", reasons=["an earlier apply of this folder was interrupted"])
+        body, code = _applied(False, "an earlier apply of this folder was interrupted, so the folder may "
+                                     "have changed", FOLDER_MAY_HAVE_CHANGED)
+        body["matches"] = matches
+        return body, code
     state = _read_state(Path(into))
     if state is None:
-        return _applied(False, "there is no checked update to apply")
+        return _applied(False, "there is no checked update to apply", NOTHING_TO_APPLY)
+    if expect is not None and state.get("state_id") != expect:
+        return _applied(False, "the checked update changed after it was released, so it was not "
+                               "applied", STATE_CHANGED)
     accepted_verdict = None
     if not state.get("releasable"):
         refused = _refuse_let_in(repo, state, accept, confirm)
         if refused:
-            return _applied(False, refused)
+            return _applied(False, refused, HELD)
         accepted_verdict = state.get("verdict")
     try:
         arrived = incoming.Arrived(
@@ -118,9 +158,11 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
             commit=state["commit"], base=state["base"], head=state["head"],
             refs=tuple(tuple(item) for item in state["refs"]))
     except (KeyError, TypeError):
-        return _applied(False, "the checked update could not be read")
+        return _applied(False, "the checked update could not be read", NOT_BROUGHT_IN)
     current().step("apply", "applying the checked update")
-    govern_status.write(repo, "checking", step="applying the checked update")
+    govern_status.write(repo, "checking", step="applying the checked update",
+                        applying={"base": arrived.base, "commit": arrived.commit,
+                                  "paths": list(arrived.paths)})
     reason = incoming.apply(Path(repo), Path(into), arrived)
     if not reason and accepted_verdict:
         clean_ledger.remember_accepted(Path(repo), state["commit"], accepted_verdict)
@@ -134,7 +176,25 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
         govern_status.write(repo, "applied", verdict=state.get("verdict"))
     else:
         govern_status.write(repo, "finished", reasons=[reason])
-    return _applied(not reason, reason)
+    return _applied(not reason, reason, NOT_BROUGHT_IN if reason else BROUGHT_IN)
+
+
+def interrupted_apply(repo: str) -> str | None:
+    """Say where the open folder is after an apply that did not finish. Takes the open folder.
+    Returns `base`, `update` or `neither`, or none."""
+    record = govern_status.read(repo)
+    if not (record and record.get("phase") == "checking" and isinstance(record.get("applying"), dict)):
+        return None
+    applying = record["applying"]
+    head = stdout(Path(repo), ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
+    changed = uncommitted_paths(Path(repo))
+    touched = changed is None or any(p.decode("utf-8", "surrogateescape") in set(applying.get("paths") or [])
+                                     for p in changed)
+    if not touched and head == applying.get("commit"):
+        return "update"
+    if not touched and head == applying.get("base"):
+        return "base"
+    return "neither"
 
 
 def _refuse_let_in(repo: str, state: dict, accept: str | None, confirm: str | None) -> str:
@@ -155,7 +215,18 @@ def verdict(repo: str, config: str | None = None) -> tuple[dict, int]:
     """Answer whether the open folder's current tree is one saw let in. Takes the open folder and the
     operator config. Returns `(payload, exit)`; `governed` is `let-in` (scanned clean by a hook, or
     applied by govern, clean or residue, with the tree still matching), `not-let-in` (an unknown
-    commit, or a working tree changed on top of one saw let in), or `could-not-answer`."""
+    commit, or a working tree changed on top of one saw let in), or `could-not-answer`, and
+    `interrupted` names where the folder is when an apply did not finish."""
+    body, code = _verdict_of(repo, config)
+    matches = interrupted_apply(repo)
+    if matches is not None:
+        body["interrupted"] = {"matches": matches}
+    return body, code
+
+
+def _verdict_of(repo: str, config: str | None) -> tuple[dict, int]:
+    """Answer the verdict question. Takes the open folder and the operator config. Returns what
+    `verdict` returns, without the interruption."""
     root = Path(repo)
     head = stdout(root, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip() or None
     let_in = clean_ledger.let_in_commit(root, config)
@@ -184,6 +255,7 @@ def verdict(repo: str, config: str | None = None) -> tuple[dict, int]:
 def _governed(verdict: str, code: str, sentence: str,
               head: str | None = None, let_in: str | None = None) -> dict:
     body = {"governed": verdict, "code": code, "reason": sentence}
+
     if head:
         body["head"] = head
     if let_in:
@@ -292,8 +364,8 @@ def _verdict(payload: dict) -> str:
     return ""
 
 
-def _applied(done: bool, sentence: str) -> tuple[dict, int]:
-    body: dict = {"applied": done}
+def _applied(done: bool, sentence: str, outcome: str) -> tuple[dict, int]:
+    body: dict = {"applied": done, "outcome": outcome}
     if sentence:
         body["reason"] = sentence
     return body, exitcodes.CLEAN if done else exitcodes.INCOMPLETE
@@ -301,8 +373,8 @@ def _applied(done: bool, sentence: str) -> tuple[dict, int]:
 
 def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
                  clean_mark: str | None = None, applied_mark: str | None = None,
-                 verdict: str | None = None) -> None:
-    body = {"schema": SCHEMA, "releasable": releasable, "root": str(arrived.root),
+                 verdict: str | None = None, state_id: str | None = None) -> None:
+    body = {"schema": SCHEMA, "state_id": state_id, "releasable": releasable, "root": str(arrived.root),
             "paths": list(arrived.paths), "mode": arrived.mode, "commit": arrived.commit,
             "base": arrived.base, "head": arrived.head, "refs": [list(i) for i in arrived.refs],
             "clean_mark": clean_mark, "applied_mark": applied_mark, "verdict": verdict}

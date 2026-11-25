@@ -23,6 +23,23 @@ changed, and nothing from the incoming repository runs.
 The extension calls it only when the verdict was clean or residue, and your uncommitted work is
 kept — or the folder is not changed and saw says why.
 
+`saw govern prepare --json` gives the update it checked a `state_id`. Pass it to
+`saw govern apply --expect <state_id>` and saw brings in exactly that update; if another check of
+the same folder has replaced it since, the folder is not changed and saw says so. One saw run at a
+time uses a holding directory: a second one waits for the first, then answers `busy`.
+
+`saw govern apply --json` says what happened in `outcome`:
+
+| `outcome` | What it means |
+| --- | --- |
+| `brought_in` | The folder now has the checked update. |
+| `not_brought_in` | The update was released but could not land; the folder is unchanged and `reason` says why. |
+| `held` | saw held the update after its check; see `next_steps`. |
+| `state_changed` | Another check replaced the update you released, so nothing was applied. |
+| `nothing_to_apply` | No check has recorded an update in this holding directory. |
+| `busy` | Another saw run is using the holding directory. |
+| `folder_may_have_changed` | An earlier apply of this folder did not finish; `matches` says whether the folder is on the update, on the tree it had before (`base`), or `neither`. |
+
 saw judges what the update brings. A finding a changed file already had before the update is
 listed under `pre_existing` and does not hold the update, unless it is confirmed.
 
@@ -74,6 +91,9 @@ unknown commit, a tree changed on top of one saw let in, or a held tree you let 
 `could-not-answer`. It reads what saw
 already recorded, so it scans nothing and changes nothing. An editor uses it to tell a change saw let
 in from one that reached the folder another way.
+
+When an apply of the folder did not finish, the answer also carries `interrupted`, whose `matches`
+says whether the folder is on the update, on the tree it had before (`base`), or `neither`.
 
 ## Putting the open folder back
 
