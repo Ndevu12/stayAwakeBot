@@ -22,7 +22,7 @@ class ASignedUpdate(_TrackingCheckout):
     def _checked_and_applied(self, *args: str) -> None:
         answer, _code = govern.prepare(str(self.open), str(self.into), "git", list(args))
         self.assertIn("scan", answer, answer)
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         self.assertTrue((self.open / "new.txt").exists())
 
     def _signed(self, commit: str = "HEAD") -> bool:
