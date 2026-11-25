@@ -542,8 +542,8 @@ def recorded_saw_runs() -> bool:
 
 def runs_as_git_runs_it(program: str, runs_in: Path | None) -> bool | None:
     """Tell whether a program a hook names runs when git runs the hook: a bare name is found through
-    PATH, a relative path is taken from the repository the hook runs in. Takes the program as the hook
-    names it and that repository, or None. Returns the answer, or None for a relative path with no
+    PATH, a relative path is taken from the repository the hook runs in. Takes the program the hook
+    names and that repository, or None. Returns the answer, or None for a relative path with no
     repository to take it from."""
     if os.path.isabs(program):
         return runs(program)

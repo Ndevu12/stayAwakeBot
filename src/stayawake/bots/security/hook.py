@@ -1226,7 +1226,7 @@ def _posture(here: Path | None = None) -> hook_status.Posture:
         problems.append(hook_status.problem(
             "altered-hooks",
             f"{len(altered)} file(s) are not what saw installs, where saw's hooks run "
-            f"— see `saw audit`; put them back with {fix_in_words}.",
+            f"— see `saw audit`. {fix_in_words} puts them back.",
             fix))
     obstacle = why_saws_hooks_may_not_run()
     named = Path(os.path.expanduser(obstacle.folder)) if obstacle is not None and obstacle.folder else None

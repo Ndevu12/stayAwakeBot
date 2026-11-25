@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`saw hook status` names saw's hooks that call a saw that cannot run, in the repository it runs in
-and in every hooks folder saw keeps current, judged as git runs them, with the command that puts them
-back. `saw hook repair` rewrites them wherever status sends the operator to it."""
+and in every hooks folder saw keeps current, judged the way git runs them, with the command that puts
+them back. `saw hook repair` rewrites them wherever status sends the operator to it."""
 from __future__ import annotations
 
 import contextlib
