@@ -40,6 +40,7 @@ impl Fixture {
                  \tif [ -n \"$SAW_FAKE_PASSTHROUGH\" ]; then echo '{{\"passthrough\":true,\"reason\":\"the command brings no files in\"}}'; exit 0; fi\n\
                  \tif [ -n \"$SAW_FAKE_LET_IN\" ]; then echo '{{\"scan\":{{\"results\":[{{\"verdict\":\"suspicious\"}}]}},\"next_steps\":[\"Check .claude/settings.json\"],\"decision\":{{\"choices\":[\"let-in\",\"leave-unchanged\"],\"let_in\":[\"saw\",\"govern\",\"apply\",\"--accept\",\"c0ffee\"],\"confirm\":\"yes\"}}}}'; exit 0; fi\n\
                  \tif [ -n \"$SAW_FAKE_UNCHECKED\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{}}}}'; exit 2; fi\n\
+                 \tif [ -n \"$SAW_FAKE_CHECKED_LEFT_OUT\" ]; then echo '{{\"scan\":{{\"results\":[{{\"verdict\":\"clean\"}}]}},\"reason\":\"the update stops for conflicts that cannot be brought into the folder\",\"decision\":{{}}}}'; exit 2; fi\n\
                  \t[ -n \"$SAW_FAKE_HELD\" ] && exit 2\n\
                  \techo '{{\"schema_version\":1,\"scan\":{{}}}}'; exit 0\n\
                  fi\n\
@@ -228,6 +229,29 @@ fn an_update_saw_could_not_check_stays_out_when_the_user_decides_so() {
     assert_eq!(f.run_unchecked(Some("leave-unchanged")).status.code(), Some(2));
     assert!(!f.real_ran());
     assert!(!f.scanned());
+}
+
+#[test]
+fn a_checked_update_whose_conflicts_stay_out_says_it_was_checked() {
+    let f = Fixture::new("checked-left-out");
+    let out = Command::new(STANDIN)
+        .args(["rebase", "--apply", "main"])
+        .current_dir(&f.dir)
+        .env("SAW_STANDIN_TOOL", "git")
+        .env("SAW_REAL_GIT", &f.real_git)
+        .env("PATH", &f.dir)
+        .env("SAW_BIN", &f.saw)
+        .env("SAW_GOVERN_HOLDING", &f.holding)
+        .env("SAW_FAKE_CHECKED_LEFT_OUT", "1")
+        .env_remove("SAW_GOVERN_DECISION")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!f.real_ran(), "the command ran without the user deciding");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("checked this update: the update stops for conflicts"), "{said}");
+    assert!(!said.contains("cannot be checked"), "{said}");
 }
 
 #[test]

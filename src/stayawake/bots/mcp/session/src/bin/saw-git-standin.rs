@@ -183,7 +183,8 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
     }
     if !prepared.success() {
         if let Some(reason) = unchecked_reason(&String::from_utf8_lossy(&output.stdout)) {
-            return Some(match decide(tool, args, &reason) {
+            let checked = answer.get("scan").is_some();
+            return Some(match decide(tool, args, &reason, checked) {
                 Decision::RunAsTyped => run_then_scan(real, saw, args, &repo),
                 Decision::LeaveUnchanged => {
                     eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
@@ -281,20 +282,25 @@ fn unchecked_reason(answer: &str) -> Option<String> {
     Some(reason.unwrap_or("the update could not be checked").to_string())
 }
 
-/// Ask the user whether to run a command saw could not check. Returns leave-unchanged when there is
-/// no one to ask.
-fn decide(tool: &str, args: &[String], reason: &str) -> Decision {
+/// Ask the user whether to run a command saw could not check, or checked and could not bring in.
+/// Returns their decision, leave-unchanged with no one to ask.
+fn decide(tool: &str, args: &[String], reason: &str, checked: bool) -> Decision {
     match env::var("SAW_GOVERN_DECISION").as_deref() {
         Ok("run-as-typed") => return Decision::RunAsTyped,
         Ok("leave-unchanged") => return Decision::LeaveUnchanged,
         _ => {}
     }
+    let said = if checked {
+        format!("saw: checked this update: {reason}.")
+    } else {
+        format!("saw: this update cannot be checked: {reason}.")
+    };
     if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
-        eprintln!("saw: this update cannot be checked: {reason}.");
+        eprintln!("{said}");
         return Decision::LeaveUnchanged;
     }
-    eprint!("saw: this update cannot be checked: {reason}.\nRun `{tool} {}` as typed anyway? It will not \
-             be checked first. [y/N] ", args.join(" "));
+    let unchecked = if checked { "" } else { " It will not be checked first." };
+    eprint!("{said}\nRun `{tool} {}` as typed anyway?{unchecked} [y/N] ", args.join(" "));
     let mut answer = String::new();
     let _ = io::stdin().lock().read_line(&mut answer);
     if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
