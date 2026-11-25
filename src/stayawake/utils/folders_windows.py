@@ -4,52 +4,18 @@ them, refusing any link or junction on the way."""
 from __future__ import annotations
 
 import contextlib
-import ctypes
 import errno
 import msvcrt
 import os
 import shutil
 import stat
-from ctypes import wintypes
 from pathlib import Path
 
-from stayawake.utils import pathsafe, winlock
+from stayawake.utils import pathsafe, winlock, winopen
 
-_GENERIC_READ = 0x80000000
-_GENERIC_WRITE = 0x40000000
-_FILE_READ_DATA = 0x0001
-_FILE_LIST_DIRECTORY = 0x0001
-_FILE_READ_ATTRIBUTES = 0x0080
-_DELETE = 0x00010000
-_READ_CONTROL = 0x00020000
-_SYNCHRONIZE = 0x00100000
-_FILE_SHARE_READ = 0x0001
-_FILE_SHARE_WRITE = 0x0002
-_FILE_SHARE_DELETE = 0x0004
-_CREATE_NEW = 1
-_OPEN_EXISTING = 3
-_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
-_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-_ENTRY_ITSELF = _FILE_FLAG_BACKUP_SEMANTICS | _FILE_FLAG_OPEN_REPARSE_POINT
-_HOLD_A_FOLDER = _FILE_LIST_DIRECTORY | _FILE_READ_ATTRIBUTES | _READ_CONTROL | _SYNCHRONIZE
-_OTHERS_MAY_READ_AND_WRITE = _FILE_SHARE_READ | _FILE_SHARE_WRITE
-_OTHERS_MAY_DO_ANYTHING = _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE
-_FILE_DISPOSITION_INFO_EX = 21
-_DELETE_NOW_EVEN_READ_ONLY = 0x0001 | 0x0002 | 0x0010
+_HOLD_A_FOLDER = (winopen.FILE_LIST_DIRECTORY | winopen.FILE_READ_ATTRIBUTES | winopen.READ_CONTROL
+                  | winopen.SYNCHRONIZE)
 _ERROR_NOT_SAME_DEVICE = 17
-_INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-
-_KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
-_CREATE_FILE = _KERNEL32.CreateFileW
-_CREATE_FILE.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
-                         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
-_CREATE_FILE.restype = wintypes.HANDLE
-_CLOSE_HANDLE = _KERNEL32.CloseHandle
-_CLOSE_HANDLE.argtypes = (wintypes.HANDLE,)
-_CLOSE_HANDLE.restype = wintypes.BOOL
-_SET_FILE_INFORMATION = _KERNEL32.SetFileInformationByHandle
-_SET_FILE_INFORMATION.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
-_SET_FILE_INFORMATION.restype = wintypes.BOOL
 
 
 class Folder:
@@ -75,24 +41,22 @@ class Folder:
     def is_link(self, name: str) -> bool:
         """Tell whether a name in the folder is a link, a junction or another reparse point. Takes the
         name. Returns the answer."""
-        return _names_a_link(self._child(name))
+        return winopen.names_a_link(self._child(name))
 
     def link_at(self, name: str) -> tuple[bool, Path | None] | None:
         """Look at a link at a name in the folder, held against change while it is read. Takes the name.
-        Returns None for anything but a link, else whether it is a symbolic link a trusted account owns
-        (the system, the Administrators group or the account saw acts for) and, for such a link, where
-        it points."""
+        Returns None for anything but a link, else whether it is a symbolic link placed as
+        `_placed_by_trusted` asks and, for such a link, where it points."""
         link = self._child(name)
-        if not _names_a_link(link):
+        if not winopen.names_a_link(link):
             return None
-        fd = _open(link, _FILE_READ_DATA | _FILE_READ_ATTRIBUTES | _READ_CONTROL, _FILE_SHARE_READ,
-                   _OPEN_EXISTING, _ENTRY_ITSELF)
+        fd = winopen.open_entry(link, winopen.FILE_READ_DATA | winopen.FILE_READ_ATTRIBUTES | winopen.READ_CONTROL, winopen.FILE_SHARE_READ,
+                   winopen.OPEN_EXISTING, winopen.ENTRY_ITSELF)
         try:
             held, seen = os.fstat(fd), os.lstat(link)
             if not (stat.S_ISLNK(seen.st_mode) and seen.st_reparse_tag == stat.IO_REPARSE_TAG_SYMLINK
                     and (held.st_dev, held.st_ino) == (seen.st_dev, seen.st_ino)
-                    and winlock.trusted_owner(winlock.held_owner_sid(msvcrt.get_osfhandle(fd)),
-                                              winlock.current_sid())):
+                    and _placed_by_trusted(fd, self._own)):
                 return False, None
             return True, Path(os.readlink(link))
         finally:
@@ -109,7 +73,7 @@ class Folder:
         ends without an error. Takes the file's name, the staging name, a mode, which Windows does not
         apply, and whether the handle takes bytes. Yields the handle."""
         target, staged = self._child(name), self._child(staging)
-        fd = _open(staged, _GENERIC_WRITE, 0, _CREATE_NEW, _FILE_FLAG_OPEN_REPARSE_POINT)
+        fd = winopen.open_entry(staged, winopen.GENERIC_WRITE, 0, winopen.CREATE_NEW, winopen.FILE_FLAG_OPEN_REPARSE_POINT)
         try:
             with os.fdopen(fd, "wb" if binary else "w", **({} if binary else
                                                           {"encoding": "utf-8", "newline": ""})) as handle:
@@ -126,11 +90,11 @@ class Folder:
         """Read a regular file in the folder itself, never what a link or junction at its name points
         to. Takes the name and how many bytes to read at most. Returns up to `limit` + 1 bytes, or None
         for anything but a regular file. Raises `OSError` when it cannot be opened or read."""
-        fd = _open(self._child(name), _GENERIC_READ, _OTHERS_MAY_DO_ANYTHING, _OPEN_EXISTING,
-                   _FILE_FLAG_OPEN_REPARSE_POINT)
+        fd = winopen.open_entry(self._child(name), winopen.GENERIC_READ, winopen.OTHERS_MAY_DO_ANYTHING, winopen.OPEN_EXISTING,
+                   winopen.FILE_FLAG_OPEN_REPARSE_POINT)
         with os.fdopen(fd, "rb") as reading:
             found = os.fstat(reading.fileno())
-            if _is_a_link(found) or not stat.S_ISREG(found.st_mode):
+            if winopen.is_a_link(found) or not stat.S_ISREG(found.st_mode):
                 return None
             return reading.read(limit + 1)
 
@@ -140,8 +104,8 @@ class Folder:
     def set_mode_of(self, name: str, mode: int) -> bool:
         """Check that a file in the folder is a regular file itself, Windows giving files no mode. Takes
         its name and the mode. Returns whether it is one."""
-        found = _look_at(self._child(name))
-        return not _is_a_link(found) and stat.S_ISREG(found.st_mode)
+        found = winopen.look_at(self._child(name))
+        return not winopen.is_a_link(found) and stat.S_ISREG(found.st_mode)
 
     def make_dir(self, name: str, mode: int) -> None:
         """Make a folder in this one. Takes its name and mode. Raises `FileExistsError` when the name is
@@ -184,7 +148,7 @@ class Folder:
     def is_at(self, path: Path) -> bool:
         """Tell whether `path` names the folder held open. Takes the path. Returns the answer."""
         try:
-            here, opened = _look_at(Path(path)), os.fstat(self._own)
+            here, opened = winopen.look_at(Path(path)), os.fstat(self._own)
         except OSError:
             return False
         return (here.st_dev, here.st_ino) == (opened.st_dev, opened.st_ino)
@@ -194,12 +158,12 @@ class Folder:
         from there. Takes the path. Returns whether `path` names the folder held open and it is now
         held there."""
         try:
-            fd = _open(Path(path), _HOLD_A_FOLDER | _DELETE, _OTHERS_MAY_READ_AND_WRITE, _OPEN_EXISTING,
-                       _ENTRY_ITSELF)
+            fd = winopen.open_entry(Path(path), _HOLD_A_FOLDER | winopen.DELETE, winopen.OTHERS_MAY_READ_AND_WRITE, winopen.OPEN_EXISTING,
+                       winopen.ENTRY_ITSELF)
         except OSError:
             return False
         found, opened = os.fstat(fd), os.fstat(self._own)
-        if _is_a_link(found) or (found.st_dev, found.st_ino) != (opened.st_dev, opened.st_ino):
+        if winopen.is_a_link(found) or (found.st_dev, found.st_ino) != (opened.st_dev, opened.st_ino):
             os.close(fd)
             return False
         self._held.append(fd)
@@ -228,7 +192,7 @@ class Folder:
             raise OSError(errno.EBUSY, "the folder is not held where it is deleted", str(path))
         settled, self._settled = self._settled, None
         try:
-            _delete_held(settled, Path(path))
+            winopen.delete_held(settled, Path(path))
         finally:
             for fd in (settled, self._own):
                 self._held.remove(fd)
@@ -270,17 +234,98 @@ def hold(path: Path) -> Folder:
     pathsafe.one_entry(name)
     parent = open_folder(path.parent)
     try:
-        own = _hold_folder(parent.path / name, path, sharing=_OTHERS_MAY_DO_ANYTHING)
+        own = _hold_folder(parent.path / name, path, sharing=winopen.OTHERS_MAY_DO_ANYTHING)
     except BaseException:
         parent.close()
         raise
     return Folder(parent.path / name, [*parent._held, own])
 
 
+def hold_entry(path: Path, *, folder: bool) -> int:
+    """Open a folder or a regular file by its own name, reached without a link or junction on the way
+    and refusing one at the name, without keeping anyone, saw included, from renaming or deleting it.
+    Takes its path and whether it is a folder. Returns a descriptor the caller closes. Raises `OSError`
+    when it is reached through a link, is one, or is not what was asked for."""
+    path = Path(path)
+    name = path.name
+    pathsafe.one_entry(name)
+    with open_folder(path.parent) as parent:
+        fd = winopen.open_entry(parent.path / name, winopen.FILE_READ_ATTRIBUTES | winopen.SYNCHRONIZE,
+                                winopen.OTHERS_MAY_DO_ANYTHING, winopen.OPEN_EXISTING,
+                                winopen.ENTRY_ITSELF if folder else winopen.FILE_FLAG_OPEN_REPARSE_POINT)
+    found = os.fstat(fd)
+    if winopen.is_a_link(found) or stat.S_ISDIR(found.st_mode) != folder:
+        os.close(fd)
+        raise pathsafe.RedirectedPath(f"{path} is a link or not what was asked for")
+    return fd
+
+
+def owner_of(path: Path) -> str:
+    """Name who owns an entry. Takes its path. Returns their sid. Raises `OSError` when it cannot be
+    read."""
+    owner = winlock.owner_sid(path)
+    if not owner:
+        raise OSError(errno.EACCES, "who owns it could not be read", str(path))
+    return owner
+
+
+def give_to(path: Path, owner: str | None) -> None:
+    """Give an entry back to an account. Takes its path and the sid `owner_of` named. Raises `OSError`
+    when it cannot be given."""
+    if not isinstance(owner, str) or not owner:
+        raise OSError(errno.EINVAL, "no account to give it to", str(path))
+    current = winlock.owner_sid(path)
+    if current and current.upper() == owner.upper():
+        return
+    if not winlock.give_to(path, owner):
+        raise OSError(errno.EPERM, "it could not be given to that account", str(path))
+
+
+def give_to_root(path: Path) -> None:
+    """Give an entry to the Administrators group. Takes its path. Raises `OSError` when it cannot be
+    given."""
+    if not winlock.give_to_administrators(path):
+        raise OSError(errno.EPERM, "it could not be given to an administrator", str(path))
+
+
+def close_to_writes(path: Path) -> None:
+    """Do nothing: Windows gives folders no mode, and the lock that stops writes is the denial set
+    on the folder's permissions. Takes its path. Returns nothing."""
+
+
+def open_to_its_owner(path: Path) -> None:
+    """Do nothing: Windows gives folders no mode. Takes its path. Returns nothing."""
+
+
+def reachable_by(path: Path, owner: str | None) -> bool:
+    """Tell whether an account owns a folder and is not denied adding or removing anything in it.
+    Takes its path and the sid `owner_of` named. Returns the answer."""
+    if not isinstance(owner, str) or not owner:
+        return False
+    current = winlock.owner_sid(path)
+    return bool(current) and current.upper() == owner.upper() and not winlock.write_denied(path, owner)
+
+
 def is_another_disk(error: OSError) -> bool:
     """Tell whether an error is a rename refused across two volumes. Takes the error. Returns the
     answer."""
     return error.winerror == _ERROR_NOT_SAME_DEVICE
+
+
+def _placed_by_trusted(link: int, holder: int) -> bool:
+    """Tell whether only a trusted account could have put a link where it is: the link and the folder
+    holding it belong to the system, the Administrators group or, unless saw runs elevated, the
+    account it acts for, and nobody else can add, delete or re-own entries in that folder. Takes the
+    link's descriptor and the folder's, both opened with READ_CONTROL. Returns the answer."""
+    acting, elevated = winlock.current_sid(), winlock.administrator()
+    holder_owner = winlock.held_owner_sid(msvcrt.get_osfhandle(holder))
+    if not (winlock.trusted_owner(winlock.held_owner_sid(msvcrt.get_osfhandle(link)), acting, elevated)
+            and winlock.trusted_owner(holder_owner, acting, elevated)):
+        return False
+    writers = {holder_owner, winlock.SYSTEM, winlock.ADMINISTRATORS, winlock.OWNER_RIGHTS}
+    if not elevated and acting:
+        writers.add(acting)
+    return not winlock.others_may_write(msvcrt.get_osfhandle(holder), writers)
 
 
 def _hold_or_make_folder(path: Path, named: Path, create: bool, mode: int) -> int:
@@ -298,14 +343,14 @@ def _hold_or_make_folder(path: Path, named: Path, create: bool, mode: int) -> in
 
 
 def _hold_folder(path: Path, named: Path, *, access: int = _HOLD_A_FOLDER,
-                 sharing: int = _OTHERS_MAY_READ_AND_WRITE) -> int:
+                 sharing: int = winopen.OTHERS_MAY_READ_AND_WRITE) -> int:
     """Hold one folder open. Takes its path, the path being opened, the access and what others may do
     with it while held. Returns a descriptor the caller closes. Raises `RedirectedPath` at a link or
     junction, and `NotADirectoryError` at anything else that is not a folder."""
-    fd = _open(path, access, sharing, _OPEN_EXISTING, _ENTRY_ITSELF)
+    fd = winopen.open_entry(path, access, sharing, winopen.OPEN_EXISTING, winopen.ENTRY_ITSELF)
     try:
         found = os.fstat(fd)
-        if _is_a_link(found):
+        if winopen.is_a_link(found):
             raise pathsafe.RedirectedPath(f"{named} reaches elsewhere through a link at {path}")
         if not stat.S_ISDIR(found.st_mode):
             raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(path))
@@ -315,70 +360,22 @@ def _hold_folder(path: Path, named: Path, *, access: int = _HOLD_A_FOLDER,
     return fd
 
 
-def _open(path: Path, access: int, sharing: int, disposition: int, flags: int) -> int:
-    """Open a path with the system's own open call. Takes the path, the access, what others may do
-    with it while it is open, whether it must exist or be new, and the open flags. Returns a
-    descriptor the caller closes."""
-    handle = _CREATE_FILE(str(path), access, sharing, None, disposition, flags, None)
-    if handle == _INVALID_HANDLE_VALUE:
-        _raise_last_error(path)
-    try:
-        return msvcrt.open_osfhandle(handle, 0)
-    except OSError:
-        _CLOSE_HANDLE(handle)
-        raise
-
-
-def _look_at(path: Path) -> os.stat_result:
-    """Read an entry's own attributes, those of the link or junction and not of what it points to.
-    Takes its path. Returns them."""
-    fd = _open(path, _FILE_READ_ATTRIBUTES, _OTHERS_MAY_DO_ANYTHING, _OPEN_EXISTING, _ENTRY_ITSELF)
-    try:
-        return os.fstat(fd)
-    finally:
-        os.close(fd)
-
-
-def _names_a_link(path: Path) -> bool:
-    """Tell whether a path names a link or junction itself. Takes the path. Returns the answer, False
-    when nothing is there."""
-    try:
-        return _is_a_link(_look_at(path))
-    except FileNotFoundError:
-        return False
-
-
-def _is_a_link(found: os.stat_result) -> bool:
-    """Tell whether an entry points elsewhere: a link, a junction or any other reparse point. Takes its
-    attributes. Returns the answer."""
-    return bool(found.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
-
-
-def _delete_held(fd: int, path: Path) -> None:
-    """Delete the entry a descriptor holds, opened with DELETE, and its name at once, even when it is
-    marked read-only. Takes the descriptor and its path. Raises `OSError` when it was not deleted."""
-    flags = wintypes.DWORD(_DELETE_NOW_EVEN_READ_ONLY)
-    if not _SET_FILE_INFORMATION(msvcrt.get_osfhandle(fd), _FILE_DISPOSITION_INFO_EX,
-                                 ctypes.byref(flags), ctypes.sizeof(flags)):
-        _raise_last_error(path)
-
-
 def _remove_on_one_volume(path: Path, volume: int) -> bool:
     """Delete an entry and everything under it on `volume`: a link or junction itself, never what it
     points to, and never a folder on another volume. Takes the entry and the volume. Returns True when
     the entry is gone."""
     try:
-        found = _look_at(path)
+        found = winopen.look_at(path)
     except FileNotFoundError:
         return True
     except OSError:
         return False
-    if _is_a_link(found) or not stat.S_ISDIR(found.st_mode):
+    if winopen.is_a_link(found) or not stat.S_ISDIR(found.st_mode):
         return _delete_entry(path)
     if found.st_dev != volume:
         return False
     try:
-        held = _hold_folder(path, path, access=_HOLD_A_FOLDER | _DELETE)
+        held = _hold_folder(path, path, access=_HOLD_A_FOLDER | winopen.DELETE)
     except OSError:
         return False
     try:
@@ -390,7 +387,7 @@ def _remove_on_one_volume(path: Path, volume: int) -> bool:
             if not _remove_on_one_volume(path / child, volume):
                 complete = False
         if complete:
-            _delete_held(held, path)
+            winopen.delete_held(held, path)
         return complete
     except (OSError, RecursionError):
         return False
@@ -401,14 +398,14 @@ def _remove_on_one_volume(path: Path, volume: int) -> bool:
 def _delete_entry(path: Path) -> bool:
     """Delete a file, link or junction itself. Takes its path. Returns True when it is gone."""
     try:
-        fd = _open(path, _DELETE | _FILE_READ_ATTRIBUTES, _OTHERS_MAY_DO_ANYTHING, _OPEN_EXISTING,
-                   _ENTRY_ITSELF)
+        fd = winopen.open_entry(path, winopen.DELETE | winopen.FILE_READ_ATTRIBUTES, winopen.OTHERS_MAY_DO_ANYTHING, winopen.OPEN_EXISTING,
+                   winopen.ENTRY_ITSELF)
     except FileNotFoundError:
         return True
     except OSError:
         return False
     try:
-        _delete_held(fd, path)
+        winopen.delete_held(fd, path)
     except OSError:
         return False
     finally:
@@ -419,8 +416,8 @@ def _delete_entry(path: Path) -> bool:
 def _copy(source: Path, copy: Path) -> bool:
     """Copy a file or folder, whole, keeping its times. Takes the source and the copy's path. Returns
     whether it was a folder. Raises `OSError` at a link or junction in it."""
-    found = _look_at(source)
-    if _is_a_link(found):
+    found = winopen.look_at(source)
+    if winopen.is_a_link(found):
         raise OSError(f"{source} is a link")
     times = (found.st_atime_ns, found.st_mtime_ns)
     if stat.S_ISDIR(found.st_mode):
@@ -432,10 +429,3 @@ def _copy(source: Path, copy: Path) -> bool:
     shutil.copyfile(source, copy)
     os.utime(copy, ns=times)
     return False
-
-
-def _raise_last_error(path: Path) -> None:
-    """Raise the error the last system call on this thread left. Takes the path it was about. Raises
-    the matching `OSError`."""
-    failed = ctypes.get_last_error()
-    raise OSError(None, ctypes.FormatError(failed), str(path), failed)

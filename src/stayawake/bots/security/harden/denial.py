@@ -7,8 +7,8 @@ import stat
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from stayawake.utils import hostdenial
-from stayawake.utils.pathsafe import directory_flag, no_follow_flag, trusted_ancestor
+from stayawake.utils import folders, hostdenial
+from stayawake.utils.pathsafe import trusted_ancestor
 
 from stayawake.bots.security.hygiene import staging_kit
 
@@ -135,13 +135,13 @@ def _take_ownership(path: Path) -> PathOutcome:
     sealed in whatever arrived and reported a reason that never mentioned it.
     """
     try:
-        owner_before = path.lstat().st_uid
+        owner_before = folders.owner_of(path)
     except OSError:
         return _unknown(path, "could not be raised to root")
     if not hostdenial.clear_immutable(path):
         return _unknown(path, "could not be raised to root")
     try:
-        _chown(path, 0, 0)
+        folders.give_to_root(path)
     except (OSError, NotImplementedError):
         return _lock_back_over_nothing(path, owner_before, "could not be raised to root")
     if not _sealed_over_nothing(path):
@@ -184,8 +184,8 @@ def _hand_back(path: Path, owner: int, failure: str | None = None) -> PathOutcom
     sudo over a directory already theirs. `failure` is the caller's own reason for being here.
     """
     try:
-        os.chmod(path, 0o700, follow_symlinks=False)
-        _chown(path, owner, -1)
+        folders.open_to_its_owner(path)
+        folders.give_to(path, owner)
     except (OSError, NotImplementedError):
         pass
     locked = hostdenial.immutable(path)
@@ -197,7 +197,7 @@ def _hand_back(path: Path, owner: int, failure: str | None = None) -> PathOutcom
                            "something is in it and the lock could not be taken off — look at it "
                            "before anything else")
     opening = "something arrived while the lock was off; the lock was NOT put back, so nothing is "
-    if _reachable_by(path, owner):
+    if folders.reachable_by(path, owner):
         return PathOutcome(path, LEFT_OPEN_OVER_CONTENT,
                            opening + "sealed in and you can read and remove what is in it")
     return PathOutcome(path, LEFT_OPEN_OVER_CONTENT,
@@ -243,36 +243,14 @@ def _held_open(path: Path) -> int | None:
     """Open the folder this run just created at `path` and hold it. Takes the location. Returns the
     descriptor, which the caller closes, or None when it cannot be opened as a folder."""
     try:
-        return os.open(path, os.O_RDONLY | directory_flag() | no_follow_flag())
+        return folders.hold_entry(path, folder=True)
     except OSError:
         return None
 
 
-def _reachable_by(path: Path, owner: int) -> bool:
-    """Whether `owner` can now open the directory and remove what is in it.
-
-    Not `os.access`: it answers for the EFFECTIVE uid, and every caller here is root, where it says
-    yes to everything. `lstat`, so a link swapped in at the last moment answers for itself.
-    """
-    try:
-        st = path.lstat()
-    except OSError:
-        return False
-    return st.st_uid == owner and bool(st.st_mode & stat.S_IWUSR)
-
-
-def _chown(path: Path, uid: int, gid: int) -> None:
-    """Give `path` to `uid`. Takes the path and the account. Raises OSError when it cannot."""
-    try:
-        os.chown(path, uid, gid, follow_symlinks=False)
-    except AttributeError:
-        if uid != 0 or not hostdenial.give_to_root(path):
-            raise OSError(0, "could not be given to an administrator")
-
-
 def _owner_of(path: Path) -> int:
     try:
-        return path.lstat().st_uid
+        return folders.owner_of(path)
     except OSError:
         return -1
 
@@ -391,9 +369,9 @@ def _seal(path: Path, made: int | None, may_move: bool) -> PathOutcome:
     when it was there before) and whether what arrives may still be moved aside. Returns the outcome."""
     owner_before = _owner_of(path)
     try:
-        os.chmod(path, 0o555, follow_symlinks=False)
+        folders.close_to_writes(path)
         if hostdenial.privileged():
-            _chown(path, 0, 0)
+            folders.give_to_root(path)
     except (OSError, NotImplementedError):
         return _hand_back_what_was_made(path, owner_before, "could not be written", made)[0]
     if not _still_empty_dir(path):

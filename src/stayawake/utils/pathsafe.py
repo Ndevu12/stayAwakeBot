@@ -285,3 +285,7 @@ def one_entry(name: str) -> None:
     `RedirectedPath` for an empty name, `.`, `..`, or one with a separator in it."""
     if name in ("", ".", "..") or os.sep in name or (os.altsep and os.altsep in name):
         raise RedirectedPath(f"{name!r} is not one entry of a folder")
+
+
+if os.name == "nt":
+    from stayawake.utils.winopen import read_regular_no_follow
