@@ -56,11 +56,18 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     decision."""
     if incoming.brings_nothing(tool, args):
         return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
+    refused = incoming.refusal(Path(repo), Path(into), tool, list(args))
+    if refused:
+        return _unchecked(repo, refused)
     try:
+        Path(into).mkdir(parents=True, exist_ok=True)
         with folderlock.held(Path(into), wait=_HOLD_WAIT_SECONDS):
             return _prepare_held(repo, into, tool, args, config, deadline)
     except folderlock.Busy:
-        return {"reason": _BUSY, "outcome": BUSY}, exitcodes.INCOMPLETE
+        body = {"reason": _BUSY, "outcome": BUSY, "decision": _decision(repo)}
+        return body, exitcodes.INCOMPLETE
+    except OSError as error:
+        return _unchecked(repo, f"the holding directory could not be used: {error.strerror or error}")
 
 
 def _prepare_held(repo: str, into: str, tool: str, args: list[str], config: str | None,
@@ -113,8 +120,12 @@ def _unchecked(repo: str, reason: str) -> tuple[dict, int]:
     """Answer an update saw could not check, leaving the decision to the user. Takes the open folder
     and the reason. Returns the payload and INCOMPLETE."""
     govern_status.write(repo, "finished", reasons=[reason])
-    decision = {"choices": list(DECISION_CHOICES), "scan_after": ["saw", "scan", str(repo)]}
-    return {"reason": reason, "decision": decision}, exitcodes.INCOMPLETE
+    return {"reason": reason, "decision": _decision(repo)}, exitcodes.INCOMPLETE
+
+
+def _decision(repo: str) -> dict:
+    """Return the choices left to the user for an update saw did not check. Takes the open folder."""
+    return {"choices": list(DECISION_CHOICES), "scan_after": ["saw", "scan", str(repo)]}
 
 
 def apply(repo: str, into: str, accept: str | None = None, confirm: str | None = None,
@@ -123,11 +134,16 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
     the holding directory, the accepted commit, the typed confirmation and the id of the state the
     caller's prepare recorded. Returns whether it was applied, the outcome, the reason when not, and
     the exit."""
+    if not Path(into).is_dir():
+        return _applied(False, "there is no checked update to apply", NOTHING_TO_APPLY)
     try:
         with folderlock.held(Path(into), wait=_HOLD_WAIT_SECONDS):
             return _apply_held(repo, into, accept, confirm, expect)
     except folderlock.Busy:
         return _applied(False, _BUSY, BUSY)
+    except OSError as error:
+        return _applied(False, f"the holding directory could not be used: {error.strerror or error}",
+                        NOT_BROUGHT_IN)
 
 
 def _apply_held(repo: str, into: str, accept: str | None, confirm: str | None,

@@ -7,7 +7,7 @@ import os
 import time
 from pathlib import Path
 
-_LOCK = ".saw-lock"
+LOCK_NAME = ".saw-lock"
 _RETRY_SECONDS = 0.1
 
 
@@ -34,10 +34,10 @@ def _take(fd: int) -> bool:
 
 @contextlib.contextmanager
 def held(folder: Path, *, wait: float):
-    """Hold a folder for this run. Takes the folder and how long to wait for another run to let go.
-    Raises `Busy` when another run still holds it after that."""
-    Path(folder).mkdir(parents=True, exist_ok=True)
-    fd = os.open(Path(folder) / _LOCK, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    """Hold an existing folder for this run. Takes the folder and how long to wait for another run
+    to let go. Raises `Busy` when another run still holds it after that, and `OSError` when the
+    folder cannot be held."""
+    fd = os.open(Path(folder) / LOCK_NAME, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
         deadline = time.monotonic() + wait
         while not _take(fd):

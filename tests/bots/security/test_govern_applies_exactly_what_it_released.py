@@ -83,7 +83,32 @@ class GovernAppliesExactlyWhatItReleased(GitSandbox):
         self.assertEqual((applied["applied"], applied["outcome"]), (False, "busy"))
         self.assertEqual(self._apply()["outcome"], "brought_in")
 
+    def test_the_hold_lasts_through_the_whole_check(self):
+        tried: list[bool] = []
+
+        def second_run_meanwhile(*args, **kwargs):
+            try:
+                with folderlock.held(self.into, wait=0):
+                    tried.append(True)
+            except folderlock.Busy:
+                tried.append(False)
+            return {"results": [{"verdict": "clean", "findings": []}]}, exitcodes.CLEAN, []
+        self._prepare("next")
+        with mock.patch(_SCAN, side_effect=second_run_meanwhile):
+            self._prepare("next")
+        self.assertEqual(tried, [False])
+
+    def test_a_busy_check_leaves_the_decision_to_the_caller(self):
+        self.into.mkdir()
+        with folderlock.held(self.into, wait=0), mock.patch.object(govern, "_HOLD_WAIT_SECONDS", 0.2):
+            code, body = self._run("govern", "prepare", "--json", "--repo", str(self.repo), "--into",
+                                   str(self.into), "--tool", "git", "--", "checkout", "next")
+        self.assertEqual((code, body["outcome"]), (exitcodes.INCOMPLETE, "busy"))
+        self.assertIn("run-as-typed", body["decision"]["choices"])
+        self.assertEqual(self.rev(self.repo), self.base)
+
     def test_a_run_that_dies_leaves_no_hold_behind(self):
+        self.into.mkdir()
         holder = subprocess.Popen([sys.executable, "-c",
                                    "import sys, time; from pathlib import Path; from stayawake.utils import folderlock\n"
                                    "with folderlock.held(Path(sys.argv[1]), wait=5):\n print('held', flush=True); time.sleep(60)",

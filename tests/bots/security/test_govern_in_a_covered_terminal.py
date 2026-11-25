@@ -40,7 +40,7 @@ class ACoveredTerminal(_TrackingCheckout):
                     answer, _code = govern.prepare(str(self.open), str(self.into), "git", ["pull"])
                     applied = govern.apply(str(self.open), str(self.into))[0]
                 self.assertIn("scan", answer, answer)
-                self.assertEqual(applied, {"applied": True})
+                self.assertEqual(applied, {"applied": True, "outcome": "brought_in"})
                 self.assertTrue((self.open / "new.txt").exists())
                 self.assertFalse(self.governed.exists(), self.governed.exists() and self.governed.read_text())
                 self.git(self.open, "reset", "-q", "--hard", "HEAD~1")

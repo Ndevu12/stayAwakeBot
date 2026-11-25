@@ -20,6 +20,7 @@ from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.lib.git.write.transfer import adopt_objects
 from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way
 from stayawake.lib.signing.commits.git_command import fix_commit_signing
+from stayawake.utils import folderlock
 
 _GLOBAL = frozenset({
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
@@ -70,25 +71,33 @@ def brings_nothing(tool: str, args: list[str]) -> bool:
     return (sub == "checkout" and not _checkout_brings(rest)) or (sub == "switch" and not _switch_brings(rest))
 
 
-def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | str":
-    """Produce `args` under `into` and leave `repo` as it was. Takes the open folder, the holding
-    directory, `git` or `gh`, and the arguments. Returns what arrived, or a sentence when it could
-    not."""
-    kind = classify(tool, args)
-    if kind is None:
+def refusal(repo: Path, into: Path, tool: str, args: list[str]) -> str:
+    """Say why a command cannot be prepared, before anything is written. Takes the open folder, the
+    holding directory, `git` or `gh`, and the arguments. Returns the sentence, or "" when it can."""
+    if classify(tool, args) is None:
         return "saw does not check that command"
     repo, into = Path(repo).resolve(), Path(into).resolve()
     if not (repo / ".git").exists() and _git_dir(repo) is None:
         return "the open folder is not a git checkout"
     if into == repo or repo in into.parents or into in repo.parents:
         return "the holding directory must be outside the open folder"
+    return ""
+
+
+def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | str":
+    """Produce `args` under `into`, leaving `repo` unchanged. Takes the open folder, the holding
+    directory, `git` or `gh`, and the arguments. Returns what arrived, or a sentence when it could
+    not."""
+    refused = refusal(repo, into, tool, args)
+    if refused:
+        return refused
+    kind = classify(tool, args)
+    repo, into = Path(repo).resolve(), Path(into).resolve()
     base = stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
     if not base:
         return "the open folder has no commit to check from"
     before = refs_under(repo, "refs/heads", "refs/remotes", "refs/tags")
-    if into.exists():
-        shutil.rmtree(into)
-    into.mkdir(parents=True)
+    _empty_keeping_the_hold(into)
     try:
         borrowed = place(repo, into / "repo.git")
     except (BorrowError, OSError):
@@ -298,6 +307,18 @@ def _switch_brings(args: list[str]) -> bool:
     if "--orphan" in args:
         return False
     return len(_positionals(args)) > 0
+
+
+def _empty_keeping_the_hold(into: Path) -> None:
+    """Remove everything in the holding directory except a run's hold on it. Takes the directory."""
+    into.mkdir(parents=True, exist_ok=True)
+    for child in into.iterdir():
+        if child.name == folderlock.LOCK_NAME:
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
 
 
 def _run_command(work: Path, tool: str, args: list[str], kind: str, signing: tuple[str, ...] = ()) -> str:
