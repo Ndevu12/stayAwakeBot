@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- Each release on GitHub carries a platform manifest naming the wheel for each system and
+  architecture, a requirements lock that pins saw and every dependency by hash, and the SBOM under
+  the release's name. The release's signed build provenance covers all three. See "Verify a release"
+  in the docs to check a file and install with every dependency pinned.
+
 ### Changed
 - Reports saw keeps for you now stay in one place and survive a restart: a full report too large for
   the terminal, a SARIF log that could not be written where asked, and reports whose folder cannot be
