@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""resolve_writable_dir: report writing must degrade gracefully on an unwritable dir,
-never crash a completed run."""
+"""Reports go to the folder that was asked for, or nowhere with an error naming it."""
 from __future__ import annotations
 
 import contextlib
@@ -25,25 +24,23 @@ class TestResolveWritableDir(unittest.TestCase):
             self.assertTrue(got.is_dir())
             self.assertEqual(err.getvalue(), "")            # no warning on the happy path
 
-    def test_unwritable_preferred_falls_back_and_warns(self):
-        # Force an unwritable preferred path in a uid-independent way: make its parent a
-        # regular FILE so mkdir raises NotADirectoryError for any user — unlike chmod, which
-        # root ignores (and CI/test runners are often root).
+    def test_an_unwritable_folder_gets_no_reports_and_an_error_naming_it(self):
         with tempfile.TemporaryDirectory() as d:
             blocker = Path(d) / "blocker"
             blocker.write_text("not a dir\n")
-            target = blocker / "security"               # parent is a file -> mkdir fails
+            target = blocker / "security"
             err = _io.StringIO()
             with contextlib.redirect_stderr(err):
                 got = resolve_writable_dir(target, label="security reports")
-            self.assertNotEqual(got, target)
-            self.assertTrue(got.is_dir())
-            warning = err.getvalue()
-            self.assertIn("not writable", warning)          # warned…
-            self.assertIn(str(target), warning)             # …naming the path we couldn't use
-            # and the fallback is genuinely writable
-            write_json(got / "latest.json", {"ok": True})
-            self.assertTrue((got / "latest.json").exists())
+            self.assertIsNone(got)
+            self.assertIn(f"error: security reports directory {target} cannot be written", err.getvalue())
+            self.assertEqual(sorted(p.name for p in Path(d).iterdir()), ["blocker"])
+
+    def test_a_writable_folder_keeps_no_trace_of_the_check(self):
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "reports"
+            self.assertEqual(resolve_writable_dir(target), target)
+            self.assertEqual(list(target.iterdir()), [])
 
 
 class TestResolveReportsDir(unittest.TestCase):
