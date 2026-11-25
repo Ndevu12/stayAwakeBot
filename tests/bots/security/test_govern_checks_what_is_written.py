@@ -4,6 +4,8 @@ bytes, and nothing the command would run runs while it is checked."""
 from __future__ import annotations
 
 import json
+import os
+import unicodedata
 from unittest import mock
 
 from stayawake.bots.security import govern
@@ -59,6 +61,24 @@ class AnUpdateIsCheckedAsItIsWritten(_TrackingCheckout):
         applied, _code = govern.apply(str(self.open), str(self.into))
         self.assertTrue(applied["applied"], applied)
         self.assertEqual((self.open / "lines.txt").read_bytes(), b"one\r\ntwo\r\n")
+
+    def test_a_file_stored_under_a_decomposed_name_lands_and_is_checked(self):
+        name = unicodedata.normalize("NFD", "café.js")
+        stage_blob(self.upstream, name, "module.exports = 1;\n")
+        self.git(self.upstream, "commit", "-qm", "decomposed name")
+        before = self.rev(self.open)
+        self._prepare()
+        state = self._state()
+        self.assertIn(name, state["written"])
+        state["written"][name] = "0" * 64
+        (self.into / "state.json").write_text(json.dumps(state), encoding="utf-8")
+        self.assertFalse(govern.apply(str(self.open), str(self.into))[0]["applied"])
+        self.assertEqual(self.rev(self.open), before)
+        answer, code = self._prepare()
+        self.assertEqual(code, exitcodes.CLEAN, answer)
+        applied, _code = govern.apply(str(self.open), str(self.into))
+        self.assertTrue(applied["applied"], applied)
+        self.assertIn(os.fsencode(name), self.git(self.open, "ls-files", "-z").encode().split(b"\0"))
 
     def test_a_file_that_differs_from_what_was_checked_is_not_left_in_the_folder(self):
         before = self.rev(self.open)

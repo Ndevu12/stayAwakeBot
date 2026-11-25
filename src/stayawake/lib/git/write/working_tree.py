@@ -36,8 +36,10 @@ class TreeStateUnknown(OSError):
     """git could not list what a checkout holds."""
 
 
-def _tree_entries(worktree: Path, commit: str) -> dict[bytes, tuple[bytes, bytes]]:
-    """`{path: (mode, id)}` for every file `commit` records."""
+def landing_entries(worktree: Path, commit: str) -> dict[bytes, tuple[bytes, bytes]]:
+    """List every entry `commit` records under the name a move writes it. Takes a repository holding
+    the commit and the commit. Returns `{path: (mode, id)}`. Raises TreeStateUnknown when git could
+    not list them."""
     out = stdout_bytes(worktree, ["ls-tree", "-r", "-z", "--full-tree", commit], context=UNTRUSTED)
     if out is None:
         raise TreeStateUnknown(f"{commit[:12]} could not be listed")
@@ -222,7 +224,7 @@ def uncommitted_paths(worktree: str | Path, *, _depth: int = 0) -> list[bytes] |
     try:
         head = stdout(worktree, ["rev-parse", "--verify", "--quiet", "HEAD"],
                       context=UNTRUSTED).strip()
-        committed = _tree_entries(worktree, head) if head else {}
+        committed = landing_entries(worktree, head) if head else {}
         indexed = _index_entries(worktree)
     except (TreeStateUnknown, ValueError):
         return None
@@ -322,8 +324,8 @@ def changes_in_the_way(worktree: str | Path, commit: str) -> ChangesInTheWay | N
     try:
         head = stdout(worktree, ["rev-parse", "--verify", "--quiet", "HEAD"],
                       context=UNTRUSTED).strip()
-        committed = _tree_entries(worktree, head) if head else {}
-        target = _tree_entries(worktree, commit)
+        committed = landing_entries(worktree, head) if head else {}
+        target = landing_entries(worktree, commit)
         indexed = _index_entries(worktree)
     except (TreeStateUnknown, ValueError):
         return None
@@ -550,8 +552,8 @@ class PreparedMove:
         happened; on False nothing is held, and False when a path the move rewrites passes
         through a filter."""
         try:
-            before = _tree_entries(self.holder.worktree, self.old)
-            self.target = _tree_entries(self.holder.worktree, self.new)
+            before = landing_entries(self.holder.worktree, self.old)
+            self.target = landing_entries(self.holder.worktree, self.new)
         except (TreeStateUnknown, ValueError):
             return False
         self.paths = sorted(p for p in set(before) | set(self.target)
@@ -626,7 +628,7 @@ class PreparedMove:
     def restore_files(self) -> bool:
         """Write the changed paths back to what `old` records. Returns whether all were."""
         try:
-            before = _tree_entries(self.holder.worktree, self.old)
+            before = landing_entries(self.holder.worktree, self.old)
             return _write_paths(self.repo, self.holder.worktree, self.old, before,
                                 [p for p in self.paths if p not in self.keep])
         except (TreeStateUnknown, OSError, ValueError):
@@ -638,7 +640,7 @@ class PreparedMove:
         from HEAD exactly where it did then."""
         dirty = set(before)
         try:
-            entries = _tree_entries(self.holder.worktree, self.old)
+            entries = landing_entries(self.holder.worktree, self.old)
             _write_paths(self.repo, self.holder.worktree, self.old, entries,
                          [p for p in self.paths if p not in self.keep and p not in dirty])
         except (TreeStateUnknown, OSError, ValueError):

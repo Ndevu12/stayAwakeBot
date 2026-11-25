@@ -11,8 +11,7 @@ from pathlib import Path
 from stayawake.lib.git import objects
 from stayawake.lib.git.borrowed import object_directory
 from stayawake.lib.git.objects import FILE_AND_LINK_MODES
-from stayawake.lib.git.run import UNTRUSTED, stdout_bytes
-from stayawake.lib.git.write.working_tree import bytes_as_written
+from stayawake.lib.git.write.working_tree import TreeStateUnknown, bytes_as_written, landing_entries
 from stayawake.utils import atomicwrite, scratch
 
 _BLOBS_PER_READ = 256
@@ -68,8 +67,8 @@ def copy_out_as_written(repo: Path, holding: Path, commit: str, paths: tuple[str
         blob = stored.get(recorded[os.fsencode(rel)])
         if landing is not None and blob is not None and blob != landing:
             files.append((rel, blob))
-    digests = tuple((rel, hashlib.sha256(written[os.fsencode(rel)]).hexdigest())
-                    for rel in wanted if os.fsencode(rel) in written)
+    digests = tuple((os.fsdecode(name), hashlib.sha256(written[name]).hexdigest())
+                    for name in recorded if name in written)
     return _in_folders(files, purpose, digests)
 
 
@@ -163,18 +162,14 @@ def _remove(destination: Path) -> None:
 
 
 def _file_entries(repo: Path, commit: str) -> dict[bytes, str] | None:
-    """List every file `commit` records with its blob. Takes the repository and the commit. Returns
-    each path's blob id, or None when git could not list them."""
-    listed = stdout_bytes(repo, ["ls-tree", "-r", "-z", "--full-tree", commit], context=UNTRUSTED)
-    if listed is None:
+    """List every file and link `commit` records with its blob, under the name a move writes it.
+    Takes the repository and the commit. Returns each name's blob id, or None when git could not
+    list them."""
+    try:
+        listed = landing_entries(repo, commit)
+    except (TreeStateUnknown, ValueError):
         return None
-    entries: dict[bytes, str] = {}
-    for record in listed.split(b"\0"):
-        described, _, path = record.partition(b"\t")
-        parts = described.split(b" ")
-        if len(parts) == 3 and parts[0] in FILE_AND_LINK_MODES and parts[1] == b"blob":
-            entries[path] = parts[2].decode()
-    return entries
+    return {path: oid.decode() for path, (mode, oid) in listed.items() if mode in FILE_AND_LINK_MODES}
 
 
 def _read(repo: Path, oids: list[str]) -> dict[str, bytes]:
