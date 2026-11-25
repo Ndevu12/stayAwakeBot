@@ -28,5 +28,5 @@ def stage_blob(repo: Path, name: str, text: str) -> None:
     and the text."""
     blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input=text,
                           capture_output=True, text=True, check=True).stdout.strip()
-    subprocess.run(["git", "-C", str(repo), "update-index", "--add", "--cacheinfo", f"100644,{blob},{name}"],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "update-index", "-z", "--add", "--index-info"],
+                   input=b"100644 %s\t%s\0" % (blob.encode(), os.fsencode(name)), check=True, capture_output=True)

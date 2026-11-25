@@ -17,7 +17,9 @@ reader, not the mechanism or the weakness it closed.
 - `saw govern` checks every file an update brings, including names that differ only in case and
   paths too long to read the usual way.
 - After a pull, merge, checkout or rebase, saw's git hook checks every file it brought, including
-  paths too long to read the usual way.
+  names that differ only in case and paths too long to read the usual way.
+- `saw govern` checks each file exactly as it will be written into your folder. A command that has
+  git run other programs, such as `git rebase --exec`, is left for you to decide on.
 
 ## [0.17.6] - 2026-11-25
 

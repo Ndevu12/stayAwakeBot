@@ -6,6 +6,7 @@ A checkout follows its branch by writing the changed paths with those same conve
 saw-owned repository and swapping in an index prepared on a private copy."""
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -14,12 +15,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git import operator_config
-from stayawake.lib.git.borrowed import borrow
+from stayawake.lib.git.borrowed import BorrowError, borrow
 from stayawake.lib.git.objects import blob_id
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes, stdout_bytes_fed
 from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.utils import scratch
-from stayawake.utils.pathsafe import passes_through_a_link
+from stayawake.utils.pathsafe import passes_through_a_link, read_regular_no_follow
 
 _GITLINK = b"160000"
 _SYMLINK = b"120000"
@@ -402,21 +403,82 @@ def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[b
             parent = parent.parent
     if not written:
         return True
-    with borrow(repo) as borrowed, borrowed.attributes_then(_NO_FILTER):
-        index = scratch.new_file("an index to write a checkout from")
-        try:
-            index.unlink()
-            env = {"GIT_INDEX_FILE": str(index)}
-            loaded = borrowed.run(["read-tree", commit], env=env)
-            if loaded is None or loaded.returncode != 0:
-                return False
-            done = stdout_bytes_fed(borrowed.path, [*_conversion_config(worktree), "--work-tree",
-                                                    str(worktree), "checkout-index", "-f", "-z",
-                                                    "--stdin"],
-                                    b"\0".join(written) + b"\0", env=env, context=SAW_OWNED)
-            return done is not None
-        finally:
-            scratch.release_path(index)
+    with borrow(repo) as borrowed, borrowed.own_attributes_then(_NO_FILTER):
+        return _checked_out(borrowed, _conversion_config(worktree), commit, written, worktree,
+                            to_temporary_files=False) is not None
+
+
+def _checked_out(borrowed, conversion: list[str], commit: str, paths: list[bytes], destination: Path, *,
+                 to_temporary_files: bool) -> bytes | None:
+    """Check out `paths` as `commit` records them into `destination`, converted by the operator's
+    end-of-line settings and the attributes the borrowed repository holds. Takes the borrowed
+    repository, the settings as `-c` arguments, the commit, the paths, the folder and whether each
+    file goes to a temporary name there. Returns git's listing, or None when git could not."""
+    index = scratch.new_file("an index to write a checkout from")
+    try:
+        index.unlink()
+        env = {"GIT_INDEX_FILE": str(index)}
+        loaded = borrowed.run(["read-tree", commit], env=env)
+        if loaded is None or loaded.returncode != 0:
+            return None
+        return stdout_bytes_fed(borrowed.path, [*conversion, "--work-tree", str(destination), "checkout-index",
+                                                "-f", "-z", *(["--temp"] if to_temporary_files else []),
+                                                "--stdin"],
+                                b"\0".join(paths) + b"\0", env=env, context=SAW_OWNED)
+    finally:
+        scratch.release_path(index)
+
+
+def bytes_as_written(repo: Path, commit: str, paths: list[bytes],
+                     also_objects: Path | None = None) -> dict[bytes, bytes] | None:
+    """Produce each path's bytes in the form a move to `commit` writes into `repo`'s working tree.
+    Takes the operator's repository, the commit, the paths and a further object directory holding
+    the commit. Returns each path's bytes, or None when git could not produce every one."""
+    if not paths:
+        return {}
+    where = scratch.new_dir("the files an update writes")
+    try:
+        with borrow(repo, also_objects) as borrowed, borrowed.own_attributes_then(_NO_FILTER):
+            listed = _checked_out(borrowed, _conversion_config(repo), commit, paths, where,
+                                  to_temporary_files=True)
+        if listed is None:
+            return None
+        made: dict[bytes, bytes] = {}
+        for record in listed.split(b"\0"):
+            temporary, _, path = record.partition(b"\t")
+            if not path:
+                continue
+            data = _whole_file(where / os.fsdecode(temporary))
+            if data is None:
+                return None
+            made[path] = data
+        return made if set(made) == set(paths) else None
+    except (BorrowError, OSError):
+        return None
+    finally:
+        scratch.release_path(where)
+
+
+def written_digest(path: Path) -> str | None:
+    """Hash what a checkout left at `path`: a link's target, else the file's bytes. Takes the path.
+    Returns the sha256, or None when nothing readable is there."""
+    try:
+        if os.path.islink(path):
+            return hashlib.sha256(os.fsencode(os.readlink(path))).hexdigest()
+    except OSError:
+        return None
+    data = _whole_file(path)
+    return None if data is None else hashlib.sha256(data).hexdigest()
+
+
+def _whole_file(path: Path) -> bytes | None:
+    """Read a regular file whole without following a link. Takes the path. Returns its bytes, or
+    None for anything other than a readable regular file."""
+    try:
+        found = os.lstat(path)
+    except OSError:
+        return None
+    return read_regular_no_follow(path, found.st_size) if stat.S_ISREG(found.st_mode) else None
 
 
 def rewrite_index(worktree: str | Path, feed: bytes) -> bool:
@@ -531,12 +593,16 @@ class PreparedMove:
             return False
         return True
 
-    def apply(self) -> bool:
-        """Write the changed paths and swap in the prepared index. Returns whether both landed;
-        on False the index is untouched and the lock released."""
+    def apply(self, expected: dict[bytes, str] | None = None) -> bool:
+        """Write the changed paths and swap in the prepared index. Takes, when given, the sha256 each
+        written file must hold. Returns whether both landed and every written file holds its
+        digest. On False the index is untouched and the lock released."""
         try:
-            if not _write_paths(self.repo, self.holder.worktree, self.new, self.target,
-                                [p for p in self.paths if p not in self.keep]):
+            written = [p for p in self.paths if p not in self.keep]
+            if not _write_paths(self.repo, self.holder.worktree, self.new, self.target, written):
+                self.release()
+                return False
+            if expected is not None and not self._holds(expected, written):
                 self.release()
                 return False
             shutil.copyfile(self.staged, self.lock)
@@ -546,6 +612,16 @@ class PreparedMove:
         except OSError:
             self.release()
             return False
+
+    def _holds(self, expected: dict[bytes, str], written: list[bytes]) -> bool:
+        """Tell whether each written file holds the digest expected of it. Takes the digests and the
+        paths written. Returns the answer."""
+        for rel in written:
+            if rel in self.target and self.target[rel][0] != _GITLINK:
+                found = written_digest(self.holder.worktree / os.fsdecode(rel))
+                if found is None or expected.get(rel) != found:
+                    return False
+        return True
 
     def restore_files(self) -> bool:
         """Write the changed paths back to what `old` records. Returns whether all were."""

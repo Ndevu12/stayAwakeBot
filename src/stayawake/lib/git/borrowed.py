@@ -50,6 +50,20 @@ class Borrowed:
         return auto_merge(self.path, a, b)
 
     @contextlib.contextmanager
+    def own_attributes_then(self, extra: bytes) -> Iterator[None]:
+        """Hold the operator's own `info/attributes` followed by `extra` while the block runs, with
+        no line from the working tree's `.gitattributes`: a checkout then reads the attributes of
+        the tree it writes. Takes the lines to append."""
+        own = attributes.read_regular(self.operator_objects.parent / "info" / "attributes") or b""
+        info = self.path / "info" / "attributes"
+        info.write_bytes(own + extra)
+        try:
+            yield
+        finally:
+            with contextlib.suppress(OSError):
+                info.write_bytes(self.attributes)
+
+    @contextlib.contextmanager
     def attributes_then(self, extra: bytes) -> Iterator[None]:
         """Hold the operator's attributes followed by `extra` while the block runs. Takes the
         lines to append."""
@@ -116,22 +130,23 @@ def _carried_attributes(repo: Path, worktree: Path | None, common: Path) -> byte
 
 
 @contextlib.contextmanager
-def borrow(operator_repo: str | Path) -> Iterator[Borrowed]:
+def borrow(operator_repo: str | Path, also_objects: Path | None = None) -> Iterator[Borrowed]:
     """Make a borrowed-objects repository over `operator_repo`, yield it, and remove it after.
-    Raises BorrowError when it cannot be made."""
+    Takes the operator repository and a further object directory to read from. Raises BorrowError
+    when it cannot be made."""
     operator_repo = Path(operator_repo)
     objects, worktree, fmt = _operator_layout(operator_repo)
     where = scratch.new_dir("a borrowed object store")
     bare = where / "repo.git"
     try:
-        yield _make(bare, operator_repo, objects, worktree, fmt)
+        yield _make(bare, operator_repo, objects, worktree, fmt, also_objects)
     finally:
         owned.disown(bare)
         scratch.release_path(where)
 
 
 def _make(bare: Path, operator_repo: Path, objects: Path, worktree: Path | None,
-          fmt: str) -> Borrowed:
+          fmt: str, also_objects: Path | None = None) -> Borrowed:
     made = run(None, ["init", "--bare", "--quiet", f"--object-format={fmt}", "--template=",
                       str(bare)], context=SAW_OWNED)
     if made is None or made.returncode != 0:
@@ -139,7 +154,8 @@ def _make(bare: Path, operator_repo: Path, objects: Path, worktree: Path | None,
     owned.own(bare)
     try:
         (bare / "objects" / "info").mkdir(parents=True, exist_ok=True)
-        (bare / "objects" / "info" / "alternates").write_text(f"{objects}\n", encoding="utf-8")
+        alternates = f"{objects}\n" + (f"{also_objects}\n" if also_objects else "")
+        (bare / "objects" / "info" / "alternates").write_text(alternates, encoding="utf-8")
         shallow = attributes.read_regular(objects.parent / "shallow", limit=64 << 20)
         if shallow is not None:
             (bare / "shallow").write_bytes(shallow)

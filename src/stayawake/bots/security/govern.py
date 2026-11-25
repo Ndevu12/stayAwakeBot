@@ -15,7 +15,7 @@ from pathlib import Path
 from stayawake.bots.security import clean_ledger, govern_held, govern_status
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.models import CLEAN, INFECTED, RESIDUE_VERDICT, ScanReport, ScanResult
-from stayawake.bots.security.scanner import scan_target, unreadable
+from stayawake.bots.security.scanner import joined, scan_target, unreadable
 from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
@@ -56,7 +56,9 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     current().step("scan", "scanning what arrived")
     govern_status.write(repo, "checking", step="scanning what arrived")
     try:
-        payload, code, already_there = _scan_arrived(arrived.root, arrived.commit, arrived.paths, config,
+        landing = blob_copies.copy_out_as_written(Path(repo).resolve(), arrived.root, arrived.commit,
+                                                  arrived.paths, "the files an update brought in")
+        payload, code, already_there = _scan_arrived(arrived.root, landing, arrived.paths, config,
                                                      arrived.base, deadline)
     except DeadlineReached:
         return _unchecked(repo, "the check did not finish before its deadline")
@@ -75,7 +77,7 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     else:
         govern_status.write(repo, "held", verdict=verdict,
                             reasons=["the update was not applied; the open folder is unchanged"])
-    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict)
+    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict, dict(landing.digests))
     answer: dict = {"scan": payload}
     if already_there:
         answer["pre_existing"] = already_there
@@ -115,7 +117,8 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
         arrived = incoming.Arrived(
             root=Path(state["root"]), paths=tuple(state["paths"]), mode=state["mode"],
             commit=state["commit"], base=state["base"], head=state["head"],
-            refs=tuple(tuple(item) for item in state["refs"]))
+            refs=tuple(tuple(item) for item in state["refs"]),
+            written=tuple((state.get("written") or {}).items()))
     except (KeyError, TypeError):
         return _applied(False, "the checked update could not be read")
     current().step("apply", "applying the checked update")
@@ -214,22 +217,21 @@ def _scan_files(files: Path, paths: tuple[str, ...], policy) -> ScanResult:
         return scan_target(target, policy.signatures, policy.allowlist)
 
 
-def _scan_arrived(root: Path, commit: str, paths: tuple[str, ...], config: str | None,
+def _scan_arrived(root: Path, landing: "blob_copies.BlobCopies", paths: tuple[str, ...], config: str | None,
                   base: str | None = None, deadline: float | None = None) -> tuple[dict, int, list[dict]]:
-    """Scan the files an update brought, each by its blob, within `deadline` seconds when given.
-    Takes the holding work tree, the commit the update brought, the arrived paths, the operator
+    """Scan the files an update brought, as they will be written, within `deadline` seconds when
+    given. Takes the holding work tree, the copies of what lands, the arrived paths, the operator
     config, the commit the folder had before and the deadline. Returns the scan document, its exit,
     and the findings the folder already had before the update, which do not count toward the
     verdict. Raises DeadlineReached at the deadline."""
     policy = operator_policy(config)
-    arrived = blob_copies.copy_out(Path(root), commit, paths, "the files an update brought in")
-    size = sum(pathsafe.regular_size(folder, names) for folder, names in arrived.folders)
+    size = sum(pathsafe.regular_size(folder, names) for folder, names in landing.folders)
     already = []
     with Pace(current(), deadline) as pace:
         pace.plan(str(root), files=len(paths), size=size, commits=0, workers=1)
         pace.begin(str(root), "files", len(paths), counted=False)
         try:
-            result = _scan_copies(arrived, policy)
+            result = _scan_copies(landing, policy)
             if base and result.findings:
                 before = blob_copies.copy_out(Path(root), base, paths,
                                               "the files an update changed, as they were before")
@@ -261,25 +263,12 @@ def _scan_copies(copies: "blob_copies.BlobCopies", policy) -> ScanResult:
     result = None
     for folder, names in copies.folders:
         found = _scan_files(folder, names, policy)
-        result = found if result is None else _joined(result, found)
+        result = found if result is None else joined(result, found)
     if result is None:
         result = _scan_files(scratch.new_dir("the files an update brought in"), (), policy)
     if copies.not_copied:
         result.error = result.error or unreadable(copies.not_copied)
     return result
-
-
-def _joined(first: ScanResult, second: ScanResult) -> ScanResult:
-    """Join a second scan of the same update into the first. Takes both results. Returns the first,
-    now holding each finding, advisory, note and error of both once."""
-    for kept, added in ((first.findings, second.findings), (first.advisories, second.advisories),
-                        (first.informational, second.informational)):
-        seen = [item.to_dict() for item in kept]
-        kept.extend(item for item in added if item.to_dict() not in seen)
-    first.notes.extend(note for note in second.notes if note not in first.notes)
-    first.error = first.error or second.error
-    first.stored_payload = first.stored_payload or second.stored_payload
-    return first
 
 
 def _verdict(payload: dict) -> str:
@@ -298,11 +287,12 @@ def _applied(done: bool, sentence: str) -> tuple[dict, int]:
 
 def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
                  clean_mark: str | None = None, applied_mark: str | None = None,
-                 verdict: str | None = None) -> None:
+                 verdict: str | None = None, written: dict | None = None) -> None:
     body = {"schema": SCHEMA, "releasable": releasable, "root": str(arrived.root),
             "paths": list(arrived.paths), "mode": arrived.mode, "commit": arrived.commit,
             "base": arrived.base, "head": arrived.head, "refs": [list(i) for i in arrived.refs],
-            "clean_mark": clean_mark, "applied_mark": applied_mark, "verdict": verdict}
+            "clean_mark": clean_mark, "applied_mark": applied_mark, "verdict": verdict,
+            "written": written or {}}
     path = Path(into) / _STATE
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(body), encoding="utf-8")

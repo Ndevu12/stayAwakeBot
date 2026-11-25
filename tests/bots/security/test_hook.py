@@ -902,6 +902,23 @@ class TestRunEventScope(_Isolated):
         _run(repo, "update-ref", "ORIG_HEAD", first)
         self.assertNotEqual(hook.run_event("post-merge", ["0"]), 0)
 
+    def test_names_that_share_a_file_on_disk_are_each_scanned_after_a_pull(self):
+        import unicodedata
+        for label, payload, benign in (("case", "Loader.js", "loader.js"),
+                                       ("composed", unicodedata.normalize("NFD", "café.js"),
+                                        unicodedata.normalize("NFC", "café.js"))):
+            with self.subTest(label=label):
+                repo = _repo({"app.js": "export const x = 1;\n"})
+                self._in_repo(repo)
+                first = hook.gitutil.stdout(repo, ["rev-parse", "HEAD"]).strip()
+                stage_blob(repo, payload, _LOADER)
+                stage_blob(repo, benign, "module.exports = 1;\n")
+                _run(repo, "commit", "-qm", "pulled")
+                _run(repo, "reset", "-q", "--hard")
+                _run(repo, "update-ref", "ORIG_HEAD", first)
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(hook.run_event("post-merge", ["0"]), 1)
+
     def test_pull_diff_scans_only_changed_files(self):
         repo = _repo({"app.js": "export const x = 1;\n"})
         self._in_repo(repo)

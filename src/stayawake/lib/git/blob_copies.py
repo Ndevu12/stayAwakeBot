@@ -3,13 +3,16 @@
 folders where no two names share a file."""
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git import objects
+from stayawake.lib.git.borrowed import object_directory
 from stayawake.lib.git.objects import FILE_AND_LINK_MODES
 from stayawake.lib.git.run import UNTRUSTED, stdout_bytes
+from stayawake.lib.git.write.working_tree import bytes_as_written
 from stayawake.utils import atomicwrite, scratch
 
 _BLOBS_PER_READ = 256
@@ -24,25 +27,58 @@ _CANNOT_HOLD_A_FILE = "cannot hold a file"
 
 @dataclass(frozen=True)
 class BlobCopies:
-    """The copied files: each folder with the names it holds, and the names whose bytes could not
-    be copied."""
+    """The copied files: each folder with the names it holds, the names whose bytes could not be
+    copied, and each name's sha256 of the bytes that land in the folder, when copied as written."""
 
     folders: tuple[tuple[Path, tuple[str, ...]], ...]
     not_copied: tuple[str, ...]
+    digests: tuple[tuple[str, str], ...] = ()
 
 
 def copy_out(repo: Path, commit: str, paths: tuple[str, ...], purpose: str) -> BlobCopies:
-    """Copy each path's blob at `commit` under its own name. The first folder holds every name that
-    shares a file with no name before it. Each further folder holds names that would share a file
-    in the folders before it, with every file of the first folder whose name is still free there.
-    Takes the repository, the commit, the paths and what the copies are for. Returns the folders
-    and the names that could not be copied, leaving out each path the commit records no file for."""
+    """Copy each path's blob at `commit` under its own name, into folders laid out as `_in_folders`
+    lays them. Takes the repository, the commit, the paths and what the copies are for. Returns the
+    copies, leaving out each path the commit records no file for."""
     recorded = _file_entries(repo, commit)
     if recorded is None:
         return BlobCopies((), tuple(paths))
     wanted = [rel for rel in paths if os.fsencode(rel) in recorded]
     contents = _read(repo, [recorded[os.fsencode(rel)] for rel in wanted])
-    files = [(rel, contents.get(recorded[os.fsencode(rel)])) for rel in wanted]
+    return _in_folders([(rel, contents.get(recorded[os.fsencode(rel)])) for rel in wanted], purpose)
+
+
+def copy_out_as_written(repo: Path, holding: Path, commit: str, paths: tuple[str, ...],
+                        purpose: str) -> BlobCopies:
+    """Copy each path in the form a move to `commit` writes into `repo`'s working tree, and its
+    stored blob too where the two differ, into folders laid out by `_in_folders`. Takes the
+    operator's repository, a repository holding the commit, the commit, the paths and what the
+    copies are for. Returns the copies with the digest of each written file, leaving out each path
+    the commit records no file for."""
+    recorded = _file_entries(holding, commit)
+    store = object_directory(holding)
+    if recorded is None or store is None:
+        return BlobCopies((), tuple(paths))
+    wanted = [rel for rel in paths if os.fsencode(rel) in recorded]
+    written = bytes_as_written(repo, commit, [os.fsencode(rel) for rel in wanted], store) or {}
+    stored = _read(holding, [recorded[os.fsencode(rel)] for rel in wanted])
+    files: list[tuple[str, bytes | None]] = []
+    for rel in wanted:
+        landing = written.get(os.fsencode(rel))
+        files.append((rel, landing))
+        blob = stored.get(recorded[os.fsencode(rel)])
+        if landing is not None and blob is not None and blob != landing:
+            files.append((rel, blob))
+    digests = tuple((rel, hashlib.sha256(written[os.fsencode(rel)]).hexdigest())
+                    for rel in wanted if os.fsencode(rel) in written)
+    return _in_folders(files, purpose, digests)
+
+
+def _in_folders(files: list[tuple[str, bytes | None]], purpose: str,
+                digests: tuple[tuple[str, str], ...] = ()) -> BlobCopies:
+    """Write each file under its own name. The first folder holds every name that shares a file with
+    no name before it. Each further folder holds names that would share a file in the folders before
+    it, with every file of the first folder whose name is still free there. Takes the files as
+    (name, bytes or None), what the copies are for and the digests to carry. Returns the copies."""
     not_copied = [rel for rel, data in files if data is None]
     waiting = [(rel, data) for rel, data in files if data is not None]
     folders: list[tuple[Path, tuple[str, ...]]] = []
@@ -58,7 +94,7 @@ def copy_out(repo: Path, commit: str, paths: tuple[str, ...], purpose: str) -> B
         else:
             shared = placed
         folders.append((folder, tuple(rel for rel, _ in placed)))
-    return BlobCopies(tuple(folders), tuple(not_copied))
+    return BlobCopies(tuple(folders), tuple(dict.fromkeys(not_copied)), digests)
 
 
 def _fill(folder: Path, files: list[tuple[str, bytes]],

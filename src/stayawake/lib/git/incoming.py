@@ -34,6 +34,18 @@ _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "pru
                   "branch": frozenset({"remote", "merge", "rebase"})}
 _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
 _IDENTITY_KEYS = ("user.name", "user.email")
+_LONG_OPTIONS_THAT_RUN_A_PROGRAM = {
+    "rebase": ("--exec", "--interactive", "--edit-todo"),
+    "merge": ("--edit",),
+    "pull": ("--edit", "--upload-pack"),
+    "fetch": ("--upload-pack",),
+}
+_SHORT_OPTIONS_THAT_RUN_A_PROGRAM = {"rebase": "xi", "merge": "e", "pull": "e"}
+_SHORT_OPTIONS_TAKING_THE_NEXT_WORD = {"rebase": "sXC", "merge": "sXmF", "pull": "sX"}
+_SHORT_OPTIONS_TAKING_THE_REST = "S"
+_TAKES_A_STRATEGY = frozenset({"merge", "pull", "rebase"})
+_BUILT_IN_STRATEGIES = frozenset({"ort", "recursive", "resolve", "octopus", "ours", "subtree"})
+RUNS_OTHER_COMMANDS = "a command that runs other commands cannot be checked"
 
 WRITE_LEFT_PART_WAY = ("the update could not be written into the open folder, and the folder may have "
                        "changed; check it with git status")
@@ -42,7 +54,8 @@ PUT_BACK_LEFT_PART_WAY = "the folder could not be put back, and it may have chan
 
 @dataclass(frozen=True)
 class Arrived:
-    """What a command produced outside the open folder."""
+    """What a command produced outside the open folder. `written` holds the sha256 each file it
+    writes into the folder must hold, by path."""
 
     root: Path
     paths: tuple[str, ...]
@@ -51,6 +64,7 @@ class Arrived:
     base: str
     head: str
     refs: tuple[tuple[str, str, str], ...]
+    written: tuple[tuple[str, str], ...] = ()
 
 
 def classify(tool: str, args: list[str]) -> str | None:
@@ -82,6 +96,9 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
     kind = classify(tool, args)
     if kind is None:
         return "saw does not check that command"
+    parsed = _parse_git(args) if tool == "git" else None
+    if parsed is not None and runs_other_commands(*parsed):
+        return RUNS_OTHER_COMMANDS
     repo, into = Path(repo).resolve(), Path(into).resolve()
     if not (repo / ".git").exists() and _git_dir(repo) is None:
         return "the open folder is not a git checkout"
@@ -183,7 +200,8 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     if arrived.refs and not update_refs(repo, list(arrived.refs)):
         move.release()
         return "the open folder changed while the update was checked"
-    if move.apply() and _write_head(gitdir, arrived.head):
+    expected = {os.fsencode(rel): digest for rel, digest in arrived.written}
+    if move.apply(expected) and _write_head(gitdir, arrived.head):
         move.release()
         return ""
     move.release()
@@ -270,6 +288,53 @@ def _parse_git(args: list[str]) -> "tuple[str, list[str]] | None":
             continue
         return arg, args[index + 1:]
     return None
+
+
+def runs_other_commands(sub: str, args: list[str]) -> bool:
+    """Tell whether a git command, as typed, would have git run another program or an editor: an
+    exec line, an interactive edit, a merge strategy git does not build in, or a program to fetch
+    with. Takes the subcommand and its arguments. Returns the answer."""
+    long_options = _LONG_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, ())
+    short_options = _SHORT_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, "")
+    taking_the_next_word = _SHORT_OPTIONS_TAKING_THE_NEXT_WORD.get(sub, "")
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg == "--":
+            return False
+        if arg.startswith("--"):
+            name, has_value, value = arg.partition("=")
+            if len(name) <= 2:
+                continue
+            if any(option.startswith(name) for option in long_options):
+                return True
+            if sub == "pull" and "--rebase".startswith(name) and value.lower().startswith("i"):
+                return True
+            if sub in _TAKES_A_STRATEGY and "--strategy".startswith(name):
+                strategy = value if has_value else (args[index] if index < len(args) else "")
+                index += 0 if has_value else 1
+                if strategy not in _BUILT_IN_STRATEGIES:
+                    return True
+            continue
+        if not arg.startswith("-") or arg == "-":
+            continue
+        for position, flag in enumerate(arg[1:], start=2):
+            attached = arg[position:]
+            if flag in short_options:
+                return True
+            if flag == "s" and sub in _TAKES_A_STRATEGY:
+                strategy = attached or (args[index] if index < len(args) else "")
+                index += 0 if attached else 1
+                if strategy not in _BUILT_IN_STRATEGIES:
+                    return True
+                break
+            if flag in taking_the_next_word:
+                index += 0 if attached else 1
+                break
+            if flag in _SHORT_OPTIONS_TAKING_THE_REST:
+                break
+    return False
 
 
 def _positionals(args: list[str]) -> list[str]:

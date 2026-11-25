@@ -94,6 +94,19 @@ def run_matchers(target, matcher_names: list[str],
     return out
 
 
+def joined(first: ScanResult, second: ScanResult) -> ScanResult:
+    """Join a second scan of the same update into the first. Takes both results. Returns the first,
+    now holding each finding, advisory, note and error of both once."""
+    for kept, added in ((first.findings, second.findings), (first.advisories, second.advisories),
+                        (first.informational, second.informational)):
+        seen = [item.to_dict() for item in kept]
+        kept.extend(item for item in added if item.to_dict() not in seen)
+    first.notes.extend(note for note in second.notes if note not in first.notes)
+    first.error = first.error or second.error
+    first.stored_payload = first.stored_payload or second.stored_payload
+    return first
+
+
 def unreadable(names) -> str:
     """Name the paths a scan could not read. Takes the paths. Returns the sentence a result carries
     as its error."""

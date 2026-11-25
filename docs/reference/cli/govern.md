@@ -34,7 +34,8 @@ anyway, add `--confirm <folder name>`. `saw govern verdict` then answers that yo
 A command that brings nothing into the folder, such as creating a branch where the folder already is, answers `passthrough` and runs as typed.
 
 When the update cannot be checked, you get the reason and the decision: run the command as
-typed, then scan the folder with `saw scan`, or leave the folder as it is. These commands
+typed, then scan the folder with `saw scan`, or leave the folder as it is. A command that has git
+run other programs, such as `git rebase --exec` or an interactive rebase, is one of these. These commands
 never push and never open a pull request.
 
 ## Covering your terminals
