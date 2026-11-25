@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- The macOS wheel for Apple silicon is tagged for Apple silicon on macOS 11 or later, so an Intel Mac
+  never installs it.
+
 ## [0.17.5] - 2026-11-24
 
 ### Added
