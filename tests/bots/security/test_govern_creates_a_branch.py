@@ -77,6 +77,7 @@ class WhatACommandBrings(_TrackingCheckout):
 
     def test_an_end_or_try_word_inside_a_value_or_a_path_is_still_checked(self):
         for args in (["merge", "-m", "--abort", "origin/main"], ["merge", "-m", "--quit", "origin/main"],
+                     ["merge", "--mess", "--abort", "origin/main"], ["merge", "--message", "--abort", "origin/main"],
                      ["pull", "-o", "--dry-run"], ["checkout", "origin/main", "--", "--abort"]):
             with self.subTest(args=args):
                 self.assertEqual(incoming.classify("git", args), args[0])

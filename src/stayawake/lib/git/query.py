@@ -105,24 +105,41 @@ def ancestry(repo: str | Path, ancestor: str, descendant: str) -> bool | None:
     return res.returncode == 0
 
 
-def hook_files(repo: str | Path, paths: tuple[str, ...]) -> tuple[str, ...] | None:
+def hook_files(repo: str | Path, paths: tuple[str, ...], folds_case=None) -> tuple[str, ...] | None:
     """Pick the paths that lie in the folder git runs `repo`'s hooks from: `core.hooksPath`, taken
     from the top of the working tree when relative, else the git directory's `hooks`. Names compare
-    composed and case-folded. Takes the repository and paths relative to its working tree. Returns
-    those paths, or None when git could not say where its hooks run from."""
+    composed, and case-folded where that folder's filesystem folds case. Takes the repository, paths
+    relative to its working tree and the test of whether a filesystem folds case, `case_folds` when
+    none is given. Returns those paths, or None when git could not say where its hooks run from."""
     top = stdout(repo, ["rev-parse", "--show-toplevel"]).strip()
     configured = stdout(repo, ["config", "--get", "core.hooksPath"]).strip()
     gitdir = stdout(repo, ["rev-parse", "--path-format=absolute", "--git-dir"]).strip()
     if not top or not gitdir:
         return None
-    folder = Path(os.path.expanduser(configured)) if configured else Path(gitdir) / "hooks"
-    hooks = composed_path(os.path.realpath(Path(top) / folder), fold=True)
+    folder = Path(top) / (Path(os.path.expanduser(configured)) if configured else Path(gitdir) / "hooks")
+    fold = (folds_case or case_folds)(folder)
+    hooks = composed_path(os.path.realpath(folder), fold=fold)
     picked = []
     for rel in paths:
-        where = composed_path(os.path.normpath(Path(top) / rel), fold=True)
+        where = composed_path(os.path.normpath(Path(top) / rel), fold=fold)
         if where == hooks or where.startswith(hooks.rstrip(os.sep) + os.sep):
             picked.append(rel)
     return tuple(picked)
+
+
+def case_folds(path: str | Path) -> bool:
+    """Tell whether the filesystem holding `path` reads names without regard to letter case: the
+    nearest existing folder with a cased letter in its name is the same folder spelled with its case
+    swapped. Takes the path. Returns the answer, and True for a path with no such folder above it."""
+    probe = Path(path)
+    while probe.parent != probe:
+        if probe.name.swapcase() != probe.name and os.path.isdir(probe):
+            try:
+                return os.path.samefile(probe, probe.with_name(probe.name.swapcase()))
+            except OSError:
+                return False
+        probe = probe.parent
+    return True
 
 
 def files_brought(repo: str | Path, base: str, head: str, *, context=UNTRUSTED) -> tuple[str, ...] | None:

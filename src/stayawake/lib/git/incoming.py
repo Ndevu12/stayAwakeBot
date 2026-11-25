@@ -27,18 +27,20 @@ _GLOBAL = frozenset({
     "--config-env", "--exec-path",
 })
 _OPTIONS_TAKING_THE_NEXT_WORD = {
-    "checkout": frozenset({"-b", "-B", "--orphan", "--conflict", "--pathspec-from-file"}),
+    "checkout": frozenset({"-b", "-B", "--orphan", "--conflict", "--pathspec-from-file", "-U", "--unified",
+                           "--inter-hunk-context"}),
     "switch": frozenset({"-c", "-C", "--create", "--force-create", "--orphan", "--conflict"}),
     "pull": frozenset({"-s", "--strategy", "-X", "--strategy-option", "--depth", "--deepen", "--shallow-since",
-                       "--shallow-exclude", "-o", "--server-option", "--upload-pack", "-j", "--jobs",
-                       "--negotiation-tip", "--cleanup", "--refmap", "--filter"}),
-    "merge": frozenset({"-m", "-F", "--file", "-s", "--strategy", "-X", "--strategy-option", "--into-name",
-                        "--cleanup"}),
+                       "--shallow-exclude", "-o", "--server-option", "--upload-pack", "--negotiation-tip",
+                       "--negotiation-include", "--negotiation-restrict", "--cleanup", "--refmap"}),
+    "merge": frozenset({"-m", "--message", "-F", "--file", "-s", "--strategy", "-X", "--strategy-option",
+                        "--into-name", "--cleanup"}),
     "rebase": frozenset({"--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec", "-C",
-                         "--whitespace", "--empty"}),
+                         "--whitespace", "--empty", "--trailer"}),
     "fetch": frozenset({"-o", "--server-option", "--depth", "--deepen", "--shallow-since", "--shallow-exclude",
-                        "-j", "--jobs", "--upload-pack", "--negotiation-tip", "--refmap", "--filter",
-                        "--recurse-submodules-default", "--submodule-prefix"}),
+                        "-j", "--jobs", "--upload-pack", "--negotiation-tip", "--negotiation-include",
+                        "--negotiation-restrict", "--refmap", "--filter", "--recurse-submodules-default",
+                        "--submodule-prefix"}),
 }
 _ENDS_OR_ONLY_TRIES = frozenset({"--abort", "--quit", "--dry-run"})
 _OPTIONS_TAKING_NO_WORD = {
@@ -64,7 +66,6 @@ _LONG_OPTIONS_THAT_RUN_A_PROGRAM = {
     "fetch": ("--upload-pack",),
 }
 _SHORT_OPTIONS_THAT_RUN_A_PROGRAM = {"rebase": "xi", "merge": "e", "pull": "e"}
-_SHORT_OPTIONS_TAKING_THE_NEXT_WORD = {"rebase": "sXC", "merge": "sXmF", "pull": "sX"}
 _SHORT_OPTIONS_TAKING_THE_REST = "S"
 _TAKES_A_STRATEGY = frozenset({"merge", "pull", "rebase"})
 _BUILT_IN_STRATEGIES = frozenset({"ort", "recursive", "resolve", "octopus", "ours", "subtree"})
@@ -322,7 +323,8 @@ def runs_other_commands(sub: str, args: list[str]) -> bool:
     with. Takes the subcommand and its arguments. Returns the answer."""
     long_options = _LONG_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, ())
     short_options = _SHORT_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, "")
-    taking_the_next_word = _SHORT_OPTIONS_TAKING_THE_NEXT_WORD.get(sub, "")
+    taking_the_next_word = "".join(option[1] for option in _OPTIONS_TAKING_THE_NEXT_WORD.get(sub, ())
+                                   if len(option) == 2)
     index = 0
     while index < len(args):
         arg = args[index]
@@ -374,7 +376,7 @@ def _positionals(sub: str, args: list[str]) -> list[str]:
         if arg == "--":
             break
         if arg.startswith("-") and arg != "-":
-            index += 2 if arg in taking_a_word else 1
+            index += 2 if _takes_the_next_word(arg, taking_a_word) else 1
             continue
         words.append(arg)
         index += 1
@@ -394,8 +396,18 @@ def _options(sub: str, args: list[str]) -> list[str]:
             break
         if arg.startswith("-") and arg != "-":
             options.append(arg)
-            index += 1 if arg in taking_a_word else 0
+            index += 1 if _takes_the_next_word(arg, taking_a_word) else 0
     return options
+
+
+def _takes_the_next_word(arg: str, taking_a_word: frozenset[str]) -> bool:
+    """Tell whether git reads the word after `arg` as its value: `arg` names an option that takes one,
+    in full or by a leading part of its long name. Takes the argument and the options that take a
+    word. Returns the answer."""
+    if arg in taking_a_word:
+        return True
+    return arg.startswith("--") and "=" not in arg and len(arg) > 2 and any(
+        option.startswith(arg) for option in taking_a_word if option.startswith("--"))
 
 
 def _options_read_as_git_reads_them(sub: str, args: list[str]) -> bool:
