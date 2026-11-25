@@ -12,6 +12,9 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+_SAW_STARTS = b"saw is starting"
+_START_SAW = ("import sys; sys.stderr.write('saw is starting\\n'); sys.stderr.flush(); "
+              "from stayawake.cli import main; sys.exit(main())")
 _FILES_TO_OUTLAST_THE_INTERRUPT = 20_000
 
 
@@ -24,7 +27,7 @@ class CtrlCEndsSawQuietly(unittest.TestCase):
             (self.tree / f"f{index}.js").write_text(f"module.exports = function f{index}(a) {{ return a + {index}; }};\n")
 
     def _interrupted(self, *, after_line: bytes | None, after_seconds: float) -> tuple[int, str]:
-        run = subprocess.Popen([sys.executable, "-m", "stayawake", "scan", str(self.tree), "--no-stream",
+        run = subprocess.Popen([sys.executable, "-c", _START_SAW, "scan", str(self.tree), "--no-stream",
                                 "--progress", "jsonl"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}, start_new_session=True)
         self.addCleanup(lambda: run.poll() is None and run.kill())
@@ -56,8 +59,34 @@ class CtrlCEndsSawQuietly(unittest.TestCase):
     def test_a_ctrl_c_while_saw_is_still_starting_shows_no_traceback(self):
         for moment in (0.05, 0.2, 0.4):
             with self.subTest(moment=moment):
-                _code, printed = self._interrupted(after_line=None, after_seconds=moment)
+                _code, printed = self._interrupted(after_line=_SAW_STARTS, after_seconds=moment)
                 self.assertNotIn("Traceback", printed)
+
+class ACtrlCPythonSwallowsIsDeliveredAgain(unittest.TestCase):
+
+    def test_a_ctrl_c_raised_inside_a_callback_still_stops_saw(self):
+        import io
+        import weakref
+        from contextlib import redirect_stderr
+
+        import stayawake.cli  # noqa: F401
+
+        class Held:
+            pass
+
+        def interrupted(_ref):
+            raise KeyboardInterrupt
+
+        held = Held()
+        watcher = weakref.ref(held, interrupted)
+        printed = io.StringIO()
+        with redirect_stderr(printed), self.assertRaises(KeyboardInterrupt):
+            del held
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                pass
+        self.assertIsNone(watcher())
+        self.assertNotIn("Exception ignored", printed.getvalue())
 
 
 if __name__ == "__main__":

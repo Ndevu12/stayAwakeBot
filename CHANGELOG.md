@@ -19,6 +19,8 @@ reader, not the mechanism or the weakness it closed.
   `saw watch` keep, refusing any link on the way as it does on macOS and Linux.
 - Each release publishes its container image to GHCR again, built from the same Linux wheel as the
   release on PyPI.
+- A Ctrl-C that lands while saw is loading stops it with its one line, instead of sometimes printing a
+  traceback and carrying on.
 
 ## [0.17.6] - 2026-11-25
 
