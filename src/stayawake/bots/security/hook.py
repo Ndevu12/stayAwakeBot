@@ -293,7 +293,7 @@ def why_saws_hooks_may_not_run() -> hook_status.Obstacle | None:
             f"git is set to run every repository's hooks from {textsafe.plain(hp, limit=4096)}, "
             "so saw's hooks will not run." + (also or ("" if git_runs_settings_hooks() else
                                                        " Update git to 2.54 or later.")),
-            "")
+            "", hp)
     template = os.environ.get("GIT_TEMPLATE_DIR")
     if template is not None and not _same_path(os.path.expanduser(template), template_dir()):
         return hook_status.Obstacle(
@@ -928,16 +928,18 @@ _REWRITTEN_BY_REPAIR = frozenset({hookscript.ALTERED, hookscript.STALE, hookscri
 def _put_back_saws_copies(here: Path | None, saw: str, config: str | None) -> list[Action]:
     """Put back saw's hooks that are changed or out of date in every hooks folder `saw hook status`
     reads and saw writes, leaving what is not saw's. Takes the root of the repository the command runs
-    in or None, the saw executable and the operator config. Returns what was done, with each folder saw
-    does not write and the reason."""
+    in or None, the saw executable and the operator config. Returns what was done, with each file in a
+    folder saw does not write and the reason."""
     actions: list[Action] = []
     templates = _template_hooks_folders()
     for folder, repository in _hooks_folders_to_check(here, hookscript.hook_folders()):
-        if not any(hookscript.verdict(folder / event, (saw, config)) in _REWRITTEN_BY_REPAIR for event in _HOOKS):
+        to_rewrite = [folder / event for event in _HOOKS
+                      if hookscript.verdict(folder / event, (saw, config)) in _REWRITTEN_BY_REPAIR]
+        if not to_rewrite:
             continue
         reason = _why_saw_does_not_write(folder, templates)
         if reason is not None:
-            actions.append(Action(UNVERIFIED, folder, NOT_REWRITTEN, repository, reason))
+            actions += [Action(UNVERIFIED, path, NOT_REWRITTEN, repository, reason) for path in to_rewrite]
             continue
         actions += [replace(a, repository=repository)
                     for a in _repair_repository(folder, saw, config, restore=False)]
@@ -1226,7 +1228,14 @@ def _posture(here: Path | None = None) -> hook_status.Posture:
             f"{len(altered)} file(s) are not what saw installs, where saw's hooks run "
             f"— see `saw audit`; put them back with {fix_in_words}.",
             fix))
-    problems += _problems_where_repair_does_not_write(dead_left, altered_left, reasons, fix_in_words)
+    obstacle = why_saws_hooks_may_not_run()
+    named = Path(os.path.expanduser(obstacle.folder)) if obstacle is not None and obstacle.folder else None
+    left = _folders_repair_does_not_write(dead_left, altered_left)
+    folded = next((entry for entry in left if named is not None and _same_path(entry[0], named)), None)
+    problems += [hook_status.problem(
+        "hooks-saw-does-not-rewrite",
+        _not_written(f"in {_shown(str(folder))}", count, changed, reasons[folder], fix_in_words), "")
+        for folder, count, changed in left if (folder, count, changed) != folded]
     if installed and not existing:
         problems.append(hook_status.problem(
             "clones-not-seeded",
@@ -1237,9 +1246,10 @@ def _posture(here: Path | None = None) -> hook_status.Posture:
             "disabled-by-env",
             "SAW_HOOK_DISABLED is set — the hook is currently a no-op.",
             ""))
-    obstacle = why_saws_hooks_may_not_run()
     if obstacle is not None:
-        problems.append(hook_status.problem(obstacle.code, obstacle.message, obstacle.repair))
+        also = (" " + _not_written("there", folded[1], folded[2], reasons[folded[0]], fix_in_words)
+                if folded else "")
+        problems.append(hook_status.problem(obstacle.code, obstacle.message + also, obstacle.repair))
     return hook_status.Posture(installed, tuple(present), tuple(via), env.hook_disabled(),
                                tuple(problems))
 
@@ -1252,22 +1262,22 @@ def _put_back_command(recorded: tuple[str, str | None] | None) -> tuple[str, str
     return "saw hook install && saw hook repair", "`saw hook install`, then `saw hook repair`"
 
 
-def _problems_where_repair_does_not_write(dead: list[Path], altered: list[Path], reasons: dict[Path, str | None],
-                                          fix_in_words: str) -> list[hook_status.Problem]:
-    """Name each hooks folder `saw hook repair` does not write, with how many of saw's hook files there
-    call a saw that cannot run or are not what saw installs. Takes those files of each kind, the reason
-    found for each folder and the words naming the command that puts saw's hooks back. Returns one
-    problem for each folder."""
-    problems: list[hook_status.Problem] = []
-    for folder in sorted({path.parent for path in dead + altered}):
-        count = len({path for path in dead + altered if path.parent == folder})
-        audit = " — see `saw audit`" if any(path.parent == folder for path in altered) else ""
-        problems.append(hook_status.problem(
-            "hooks-saw-does-not-rewrite",
-            f"{count} of saw's hook file(s) in {_shown(str(folder))} are not what saw installs{audit}, "
-            f"and saw does not write there: it {reasons[folder]}. Correct that, then run {fix_in_words}.",
-            ""))
-    return problems
+def _folders_repair_does_not_write(dead: list[Path], altered: list[Path]) -> list[tuple[Path, int, bool]]:
+    """Group the files `saw hook repair` does not write by hooks folder. Takes the files that call a saw
+    that cannot run and those that are not what saw installs. Returns each folder with how many of them
+    it holds and whether any is not what saw installs."""
+    return [(folder, len({path for path in dead + altered if path.parent == folder}),
+             any(path.parent == folder for path in altered))
+            for folder in sorted({path.parent for path in dead + altered})]
+
+
+def _not_written(where: str, count: int, changed: bool, reason: str | None, fix_in_words: str) -> str:
+    """Write the sentence for saw's hook files in a folder `saw hook repair` does not write. Takes where
+    they are in words, how many, whether any is not what saw installs, the reason and the words naming
+    the command that puts saw's hooks back. Returns the sentence."""
+    audit = " — see `saw audit`" if changed else ""
+    return (f"{count} of saw's hook file(s) {where} are not what saw installs{audit}, and saw does not "
+            f"write there: it {reason}. Correct that, then run {fix_in_words}.")
 
 
 def _write_status(posture: hook_status.Posture, out) -> None:

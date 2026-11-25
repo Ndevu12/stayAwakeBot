@@ -193,6 +193,26 @@ class TestAHookThatCallsASawThatCannotRun(_Isolated):
         self._all_put_back(folder)
         self.assertNotIn(_CANNOT_RUN, self._problems())
 
+    def test_the_folder_git_runs_every_repositorys_hooks_from_is_named_once(self):
+        folder = self.home / "every-repository-hooks"
+        folder.mkdir()
+        self._copies_calling(self.module, folder)
+        saw, config = hookscript.installed()
+        self.assertTrue(hookscript.declare(saw, config, hookscript.installed_into(), [folder]))
+        os.chmod(folder, 0o775)
+        self.assertTrue(hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(folder)],
+                                            context=hook.gitutil.OPERATOR_CONFIG))
+        found = self._problems()
+        self.assertNotIn(_LEFT, found)
+        named = found["hooks-path-elsewhere"]["message"]
+        self.assertIn(f"{len(hookscript.HOOKS)} of saw's hook file(s) there are not what saw installs", named)
+        self.assertIn("it can be written by others. Correct that, then run `saw hook repair`.", named)
+        code, out, err = _split(hook.repair, no_stream=True)
+        self.assertEqual(code, 3, out + err)
+        lines = [line for line in (out + err).splitlines() if folder.name in line]
+        self.assertEqual(len(lines), 1, out + err)
+        self.assertIn(f"{len(hookscript.HOOKS)} of saw's hook file(s) there were not rewritten", lines[0])
+
     def test_a_recorded_saw_that_cannot_run_is_named_once(self):
         self._copies_calling(self.saw)
         os.chmod(self.saw, 0o644)
