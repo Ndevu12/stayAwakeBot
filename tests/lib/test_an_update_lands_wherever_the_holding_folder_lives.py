@@ -2,12 +2,14 @@
 failure says why."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest import mock
 
 from stayawake.lib.git import incoming, owned
 from stayawake.lib.git.borrowed import object_directory
 from stayawake.lib.git.write import transfer
+from stayawake.utils import scratch
 from tests.support.gitrepo import GitSandbox
 
 
@@ -26,8 +28,7 @@ class AnUpdateLandsWhereverTheHoldingFolderLives(GitSandbox):
         owned.own(holding)
         return operator, holding, base, update
 
-    def test_the_new_objects_are_packed_inside_the_holding_repository(self):
-        operator, holding, base, update = self._operator_and_holding()
+    def _adopt_recording_where_it_packs(self, operator, holding, base, update) -> Path:
         packed_at = []
         real = transfer.stdout_bytes_fed
 
@@ -38,11 +39,24 @@ class AnUpdateLandsWhereverTheHoldingFolderLives(GitSandbox):
 
         with mock.patch.object(transfer, "stdout_bytes_fed", recording):
             self.assertEqual(transfer.adopt_objects(operator, holding, [update], [base]), "")
-        store = object_directory(holding)
         self.assertEqual(len(packed_at), 1)
-        self.assertIn(store, packed_at[0].parents)
         self.assertEqual(self.git(operator, "cat-file", "-t", update).strip(), "commit")
-        self.assertEqual([p.name for p in store.iterdir() if p.name.startswith("saw-handover-")], [])
+        self.assertFalse(packed_at[0].parent.exists())
+        return packed_at[0]
+
+    def test_the_new_objects_are_packed_on_the_holding_repositorys_filesystem(self):
+        operator, holding, base, update = self._operator_and_holding()
+        store = object_directory(holding)
+        packed = self._adopt_recording_where_it_packs(operator, holding, base, update)
+        self.assertEqual(os.stat(packed.parent.parent).st_dev, os.stat(store).st_dev)
+
+    def test_with_scratch_on_another_filesystem_the_objects_are_packed_beside_the_holding_repository(self):
+        operator, holding, base, update = self._operator_and_holding()
+        store = object_directory(holding)
+        with mock.patch.object(scratch, "_same_filesystem", return_value=False):
+            packed = self._adopt_recording_where_it_packs(operator, holding, base, update)
+        self.assertEqual(packed.parent.parent, store)
+        self.assertEqual([p.name for p in store.iterdir() if p.name.startswith(scratch.ROOT_PREFIX)], [])
 
     def test_a_failed_pack_leaves_no_unfinished_files_in_the_holding_repository(self):
         operator, holding, base, update = self._operator_and_holding()
@@ -62,7 +76,7 @@ class AnUpdateLandsWhereverTheHoldingFolderLives(GitSandbox):
             why = transfer.adopt_objects(operator, holding, [update], [base])
         self.assertEqual(why, "the new objects could not be packed")
         self.assertEqual(sorted(p.name for p in pack_dir.iterdir() if p.name.startswith("tmp_")), ["tmp_pack_earlier"])
-        self.assertEqual([p.name for p in pack_dir.parent.iterdir() if p.name.startswith("saw-handover-")], [])
+        self.assertEqual([p.name for p in pack_dir.parent.iterdir() if p.name.startswith(scratch.ROOT_PREFIX)], [])
 
     def test_apply_says_why_the_update_did_not_arrive(self):
         operator = self.new_repo("operator")

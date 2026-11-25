@@ -121,3 +121,26 @@ class TestATeardownThatFailsIsReported(OwnTempRoot):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAnAreaSharesAFolderFilesystem(OwnTempRoot):
+    """Check that an area can be made on the filesystem of a given folder."""
+
+    def test_on_the_runs_filesystem_the_area_is_under_the_root(self):
+        folder = Path(tempfile.mkdtemp(dir=str(self.tmp))).resolve()
+        made = scratch.new_dir("handover", on_filesystem_of=folder)
+        self.assertIn(scratch.root(), made.parents)
+
+    def test_on_another_filesystem_the_area_is_made_in_the_folder_and_released(self):
+        folder = Path(tempfile.mkdtemp(dir=str(self.tmp))).resolve()
+        with mock.patch.object(scratch, "_same_filesystem", return_value=False):
+            made = scratch.new_dir("handover", on_filesystem_of=folder)
+            second = scratch.new_dir("handover", on_filesystem_of=folder)
+        self.assertEqual((made.parent, second.parent), (folder, folder))
+        self.assertTrue(made.name.startswith(f"{scratch.ROOT_PREFIX}handover-"))
+        self.assertIn(made, [area.path for area in scratch.held()])
+        self.assertEqual(scratch.release_path(made), "")
+        self.assertFalse(made.exists())
+        self.assertEqual(scratch.release(), [])
+        self.assertFalse(second.exists())
+        self.assertTrue(folder.is_dir())

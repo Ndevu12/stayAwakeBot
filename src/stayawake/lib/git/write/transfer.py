@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 from pathlib import Path
 
 from stayawake.lib.git.borrowed import object_directory
 from stayawake.lib.git.contexts import Context
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes_fed
+from stayawake.utils import scratch
 
 _EMPTY_PACK_BYTES = 32
 
@@ -93,7 +93,7 @@ def adopt_objects(repo: str | Path, source: str | Path, tips: list[str],
     if source_store is None:
         return "the checked update's repository has no object store"
     try:
-        staging = Path(tempfile.mkdtemp(prefix="saw-handover-", dir=source_store))
+        staging = scratch.new_dir("objects handed to the operator repository", on_filesystem_of=source_store)
     except OSError as exc:
         return f"the new objects could not be packed: {exc.strerror or exc}"
     unfinished = _temporary_packs(source_store / "pack")
@@ -116,7 +116,7 @@ def adopt_objects(repo: str | Path, source: str | Path, tips: list[str],
             except OSError as exc:
                 return f"the new objects could not be written to {store}: {exc}"
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        scratch.release_path(staging)
     still = missing_objects(repo, missing)
     if still is None:
         return "the operator repository could not confirm the new objects"
