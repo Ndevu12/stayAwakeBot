@@ -57,8 +57,9 @@ Resolve the conflicts, then run `git commit` for a merge or a pull that merges, 
 `git rebase --continue` for a rebase. In a terminal, saw prints that next step, and the command
 does not report success, so a command chained after it with `&&` does not run. A held update that
 stops for conflicts is let in the same way, with `--accept` and, for an infected one, `--confirm`.
-When the conflicts cannot be brought into the folder, you get that reason and the same decision as
-for an update that cannot be checked.
+When the conflicts cannot be brought into the folder, the update is still checked. A clean one
+brings that reason and the same decision as an update that cannot be checked. One saw holds stays
+out of the folder, and there is no way to let it in.
 
 ## Covering your terminals
 

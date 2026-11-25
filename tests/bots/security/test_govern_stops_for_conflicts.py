@@ -15,8 +15,10 @@ from stayawake import cli
 from stayawake.bots.security import govern
 from stayawake.utils import exitcodes
 from tests.bots.security.test_govern_replays_a_tracking_checkout import _TrackingCheckout
+from tests.support import samples
 
 _SCAN = "stayawake.bots.security.govern._scan_arrived"
+_PAYLOAD = "var _0x=[String.%s(127)];eval(_0x.join(\"\"));\n" % samples.FROM_CHAR_CODE
 
 
 def _verdict_doc(verdict: str) -> dict:
@@ -24,7 +26,7 @@ def _verdict_doc(verdict: str) -> dict:
                                                "findings": [], "advisories": [], "notes": []}]}
 
 
-class AnUpdateThatStopsForConflicts(_TrackingCheckout):
+class _StopsForConflicts(_TrackingCheckout):
     """The upstream and the open folder each changed kept.txt, and the upstream also added new.txt."""
 
     def setUp(self):
@@ -53,6 +55,9 @@ class AnUpdateThatStopsForConflicts(_TrackingCheckout):
         self.assertFalse((self.open / ".git" / "MERGE_HEAD").exists())
         self.assertFalse((self.open / ".git" / "rebase-merge").exists())
         self.assertEqual(self.git(self.open, "status", "--porcelain"), "")
+
+
+class AnUpdateThatStopsForConflicts(_StopsForConflicts):
 
     def test_a_conflicting_merge_is_checked_and_says_it_stops_for_conflicts(self):
         self.git(self.open, "fetch", "-q")
@@ -194,6 +199,58 @@ class AnUpdateThatStopsForConflicts(_TrackingCheckout):
         self.assertIn("stops for conflicts in kept.txt", err.getvalue())
         self.assertIn("git commit", err.getvalue())
         self.assertTrue(json.loads(out.getvalue())["applied"])
+
+
+class WhatTheCheckPins(_StopsForConflicts):
+
+    def test_a_state_file_changed_after_the_check_is_not_carried(self):
+        self.git(self.open, "config", "pull.rebase", "true")
+        answer, _code = self._prepare("pull")
+        self.assertEqual(answer["conflicts"], ["kept.txt"], answer)
+        todo = self.into / "repo.git" / "rebase-merge" / "git-rebase-todo"
+        todo.write_bytes(todo.read_bytes() + b"pick %s # added after the check\n" % self.incoming.encode())
+        refused, _code = self._apply()
+        self.assertFalse(refused["applied"], refused)
+        self.assertEqual(refused["reason"], "the checked update is no longer in the holding directory; check it again")
+        self._untouched()
+
+
+class ConflictsThatCannotBeBroughtIn(_StopsForConflicts):
+    """The rebase runs on git's patch-applying backend, whose stopped state saw does not carry."""
+
+    def _not_brought_in(self, code: int) -> None:
+        self.assertNotEqual(code, exitcodes.CLEAN)
+        refused, _code = self._apply(accept=self.incoming)
+        self.assertFalse(refused["applied"], refused)
+        self.assertEqual(refused["reason"], "the update stops for conflicts that cannot be brought into the folder")
+        self._untouched()
+
+    def test_a_clean_one_is_checked_then_left_to_you(self):
+        self.git(self.open, "fetch", "-q")
+        answer, code = self._prepare("rebase", "--apply", "origin/main")
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "clean", answer)
+        self.assertEqual(answer["reason"], "the update stops for conflicts that cannot be brought into the folder")
+        self.assertEqual(answer["decision"]["choices"], ["run-as-typed", "leave-unchanged"])
+        self._not_brought_in(code)
+
+    def test_one_that_brings_a_payload_is_held_with_no_way_to_run_it(self):
+        self.write(self.upstream, "loader.js", _PAYLOAD)
+        self.incoming = self.commit(self.upstream, "payload")
+        self.git(self.open, "fetch", "-q")
+        answer, code = self._prepare("rebase", "--apply", "origin/main")
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "infected", answer)
+        self.assertEqual(code, exitcodes.FINDINGS)
+        self.assertNotIn("decision", answer)
+        self.assertIn("cannot be brought into the folder", answer["next_steps"][-1])
+        self._not_brought_in(code)
+
+    def test_a_suspicious_one_is_held_with_no_way_to_run_it(self):
+        self.git(self.open, "fetch", "-q")
+        with mock.patch(_SCAN, return_value=(_verdict_doc("suspicious"), exitcodes.CLEAN, [])):
+            answer, code = self._prepare("rebase", "--apply", "origin/main")
+        self.assertNotIn("decision", answer)
+        self.assertFalse(any("let" in step and "in;" in step for step in answer["next_steps"]), answer)
+        self._not_brought_in(code)
 
 
 class AConflictTheUpdateDeletes(_TrackingCheckout):

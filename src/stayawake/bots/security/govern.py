@@ -69,6 +69,8 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     verdict = _verdict(payload) or "incomplete"
     current().step("verdict", "verdict: %s" % verdict)
     scanned_clean = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
+    if arrived.mode == incoming.UNCARRIED_CONFLICTS:
+        return _checked_and_left_out(repo, into, arrived, payload, code, already_there, scanned_clean)
     strictly_clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN and not already_there
     lands_whole = arrived.stopped is None
     applied_mark = clean_ledger.clean_key(arrived.commit, config) if scanned_clean and lands_whole else None
@@ -103,6 +105,29 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     return answer, code
 
 
+def _checked_and_left_out(repo: str, into: str, arrived: "incoming.Arrived", payload: dict, code: int,
+                          already_there: list[dict], clean: bool) -> tuple[dict, int]:
+    """Answer a checked update whose conflicts cannot be brought into the folder: a clean one with
+    the decision of an update that cannot be checked, any other held with no way to let it in.
+    Takes the open folder, the holding directory, what arrived, the scan, its exit, the findings the
+    folder already had and whether the scan was clean. Returns the answer and an exit that is never
+    a success."""
+    verdict = _verdict(payload) or "incomplete"
+    _write_state(Path(into), arrived, False, verdict=verdict)
+    if clean:
+        answer, unchecked_code = _unchecked(repo, conflicted.CANNOT_CARRY)
+        return {"scan": payload, **answer}, unchecked_code
+    govern_status.write(repo, "held", verdict=verdict,
+                        reasons=["the update was not applied; the open folder is unchanged"])
+    findings = (payload.get("results") or [{}])[0].get("findings") or []
+    steps = govern_held.next_steps(verdict, findings, already_there, arrived.commit, can_let_in=False)
+    steps.append("The update stops for conflicts that cannot be brought into the folder.")
+    answer: dict = {"scan": payload, "next_steps": steps}
+    if already_there:
+        answer["pre_existing"] = already_there
+    return answer, exitcodes.INCOMPLETE if code == exitcodes.CLEAN else code
+
+
 def _unchecked(repo: str, reason: str) -> tuple[dict, int]:
     """Answer an update saw could not check, leaving the decision to the user. Takes the open folder
     and the reason. Returns the payload and INCOMPLETE."""
@@ -118,6 +143,8 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
     state = _read_state(Path(into))
     if state is None:
         return _applied(False, "there is no checked update to apply")
+    if state.get("mode") == incoming.UNCARRIED_CONFLICTS:
+        return _applied(False, conflicted.CANNOT_CARRY)
     accepted_verdict = None
     if not state.get("releasable"):
         refused = _refuse_let_in(repo, state, accept, confirm)

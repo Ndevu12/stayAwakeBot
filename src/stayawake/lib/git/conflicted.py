@@ -3,6 +3,7 @@
 the files that carry it into the open folder's git directory."""
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import stat
@@ -48,16 +49,18 @@ _REBASE_STATE_NEEDED = ("head-name", "onto", "orig-head", "git-rebase-todo", "do
 
 @dataclass(frozen=True)
 class Stopped:
-    """A merge or rebase that stopped for conflicts in the holding copy: the operation, the commit
+    """A merge or rebase stopped for conflicts in the holding copy: the operation, the commit
     the update brings, the tree the open folder's files take, the commit the holding copy's HEAD is
-    on, and each conflicted index entry as (path, mode, object, stage). `files` holds what git keeps
-    for the operation, by its place in a git directory."""
+    on, each conflicted index entry as (path, mode, object, stage), and each file git keeps for the
+    operation as (place, sha256 of its bytes). `files` holds those files' bytes, by their place in a
+    git directory."""
 
     operation: str
     incoming: str
     landed: str
     head: str
     stages: tuple[tuple[str, str, str, str], ...]
+    file_digests: tuple[tuple[str, str], ...]
     files: dict = field(default_factory=dict, compare=False)
 
     @property
@@ -76,14 +79,16 @@ class Stopped:
     def record(self) -> dict:
         """Write what identifies this stop as JSON-ready values. Returns them."""
         return {"operation": self.operation, "incoming": self.incoming, "landed": self.landed,
-                "head": self.head, "stages": [list(entry) for entry in self.stages]}
+                "head": self.head, "stages": [list(entry) for entry in self.stages],
+                "file_digests": [list(entry) for entry in self.file_digests]}
 
     @classmethod
     def from_record(cls, record: dict) -> "Stopped":
         """Read a stop back from what `record` wrote. Takes the record. Returns the stop. Raises
         KeyError or TypeError for anything else."""
         return cls(record["operation"], record["incoming"], record["landed"], record["head"],
-                   tuple(tuple(entry) for entry in record["stages"]))
+                   tuple(tuple(entry) for entry in record["stages"]),
+                   tuple(tuple(entry) for entry in record["file_digests"]))
 
 
 def stopped_for_conflicts(work: Path, holding: Path) -> bool:
@@ -121,7 +126,20 @@ def read(work: Path, holding: Path, base: str) -> "Stopped | str":
         return CANNOT_CARRY
     entries = tuple(sorted((os.fsdecode(path), mode.decode(), oid.decode(), stage.decode())
                            for path, listed in stages.items() for mode, oid, stage in listed))
-    return Stopped(operation, incoming, landed, head, entries, files)
+    digests = tuple(sorted((place, hashlib.sha256(data).hexdigest()) for place, data in files.items()))
+    return Stopped(operation, incoming, landed, head, entries, digests, files)
+
+
+def incoming_commits(holding: Path) -> tuple[str, ...]:
+    """Read the commits a merge or rebase in progress in the holding copy brings. Takes the holding
+    git directory. Returns their ids, or none when they cannot be read."""
+    for place in ("MERGE_HEAD", f"{_REBASE_STATE}/onto", "rebase-apply/onto"):
+        data = pathsafe.read_regular_no_follow(holding / place, _LARGEST_STATE_FILE)
+        if data is None:
+            continue
+        named = tuple(line.decode() for line in data.split())
+        return named if named and all(_is_object_id(line.encode()) for line in named) else ()
+    return ()
 
 
 def unmerged_entries(work: Path) -> dict[bytes, tuple[tuple[bytes, bytes, bytes], ...]] | None:
@@ -142,25 +160,28 @@ def unmerged_entries(work: Path) -> dict[bytes, tuple[tuple[bytes, bytes, bytes]
     return {path: tuple(entries) for path, entries in found.items()}
 
 
-def versions_brought(work: Path, base: str, stopped: Stopped) -> tuple[tuple[str, tuple[str, ...]], ...] | None:
-    """List the other versions of files the stopped update brings: the incoming commit's version
-    of each path it changes from the commit it shares with the open folder, and the holding copy's
+def versions_brought(work: Path, base: str, incoming: tuple[str, ...],
+                     head: str) -> tuple[tuple[str, tuple[str, ...]], ...] | None:
+    """List the other versions of files a stopped update brings: each incoming commit's version of
+    each path it changes from the commit it shares with the open folder, and the holding copy's
     HEAD's version of each path a rebase changed by moving HEAD. Takes the holding work tree, the
-    open folder's commit and the stop. Returns (commit, paths) pairs, or None when they cannot be
-    listed."""
-    parted = stdout(work, ["merge-base", base, stopped.incoming], context=SAW_OWNED).strip()
-    if parted:
-        incoming = _names(work, ["diff", "--name-only", "-z", parted, stopped.incoming])
-    else:
-        incoming = _names(work, ["ls-tree", "-r", "-z", "--name-only", stopped.incoming])
-    if incoming is None:
-        return None
-    versions = [(stopped.incoming, incoming)]
-    if stopped.head not in (base, stopped.incoming):
-        moved = _names(work, ["diff", "--name-only", "-z", base, stopped.head])
+    open folder's commit, the incoming commits and the holding copy's HEAD. Returns (commit, paths)
+    pairs, or None when they cannot be listed."""
+    versions = []
+    for commit in incoming:
+        parted = stdout(work, ["merge-base", base, commit], context=SAW_OWNED).strip()
+        if parted:
+            names = _names(work, ["diff", "--name-only", "-z", parted, commit])
+        else:
+            names = _names(work, ["ls-tree", "-r", "-z", "--name-only", commit])
+        if names is None:
+            return None
+        versions.append((commit, names))
+    if head not in (base, *incoming):
+        moved = _names(work, ["diff", "--name-only", "-z", base, head])
         if moved is None:
             return None
-        versions.append((stopped.head, moved))
+        versions.append((head, moved))
     return tuple(versions)
 
 

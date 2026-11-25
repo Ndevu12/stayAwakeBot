@@ -74,6 +74,7 @@ RUNS_OTHER_COMMANDS = "a command that runs other commands cannot be checked"
 WRITE_LEFT_PART_WAY = ("the update could not be written into the open folder, and the folder may have "
                        "changed; check it with git status")
 PUT_BACK_LEFT_PART_WAY = "the folder could not be put back, and it may have changed; check it with git status"
+UNCARRIED_CONFLICTS = "uncarried-conflicts"
 
 
 @dataclass(frozen=True)
@@ -203,6 +204,8 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     repo = Path(repo).resolve()
     claim(into)
     bare = Path(into) / "repo.git"
+    if arrived.mode == UNCARRIED_CONFLICTS:
+        return conflicted.CANNOT_CARRY
     if arrived.mode == "conflicts":
         return _apply_conflicts(repo, bare, arrived)
     if arrived.mode == "refs":
@@ -248,18 +251,31 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
 
 
 def _arrived_with_conflicts(work: Path, holding: Path, base: str) -> "Arrived | str":
-    """Describe a merge or rebase that stopped for conflicts in the holding copy as what arrived.
-    Takes the holding work tree, its git directory and the open folder's commit. Returns what
-    arrived, or a sentence when it cannot be carried into the folder."""
+    """Describe what a merge or rebase stopped for conflicts in the holding copy brings. Takes the
+    holding work tree, its git directory and the open folder's commit. Returns what arrived: the
+    conflicts to carry into the folder, or an update to check that stays out of it. Returns a
+    sentence when neither can be described."""
     stopped = conflicted.read(work, holding, base)
     if isinstance(stopped, str):
-        return stopped
+        return _arrived_uncarried(work, holding, base)
     names = files_brought(work, base, stopped.landed, context=SAW_OWNED)
-    versions = conflicted.versions_brought(work, base, stopped)
+    versions = conflicted.versions_brought(work, base, (stopped.incoming,), stopped.head)
     if names is None or versions is None:
         return "the files the update brings could not be listed"
     return Arrived(work, names, "conflicts", stopped.incoming, base, _head_text(holding), (),
                    versions=versions, stopped=stopped)
+
+
+def _arrived_uncarried(work: Path, holding: Path, base: str) -> "Arrived | str":
+    """Describe a stop whose conflicts cannot be carried into the folder: an update to check that
+    stays out of it. Takes the holding work tree, its git directory and the open folder's commit.
+    Returns what arrived, or a sentence when its incoming commits cannot be read."""
+    incoming = conflicted.incoming_commits(holding)
+    head = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
+    versions = conflicted.versions_brought(work, base, incoming, head) if incoming and head else None
+    if versions is None:
+        return conflicted.CANNOT_CARRY
+    return Arrived(work, (), UNCARRIED_CONFLICTS, incoming[0], base, _head_text(holding), (), versions=versions)
 
 
 def _apply_conflicts(repo: Path, bare: Path, arrived: Arrived) -> str:
