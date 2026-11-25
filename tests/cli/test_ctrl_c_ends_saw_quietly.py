@@ -72,19 +72,23 @@ class ACtrlCPythonSwallowsIsDeliveredAgain(unittest.TestCase):
             "    pass\n"
             "def interrupted(_ref):\n"
             "    raise KeyboardInterrupt\n"
-            "held = Held()\n"
-            "watcher = weakref.ref(held, interrupted)\n"
-            "try:\n"
-            "    del held\n"
+            "def wait():\n"
             "    deadline = time.monotonic() + 10\n"
             "    while time.monotonic() < deadline:\n"
             "        pass\n"
-            "    print('not stopped')\n"
-            "except KeyboardInterrupt:\n"
-            "    print('stopped')\n")
+            "def run():\n"
+            "    held = Held()\n"
+            "    watcher = weakref.ref(held, interrupted)\n"
+            "    try:\n"
+            "        del held\n"
+            "        wait()\n"
+            "        print('not stopped', flush=True)\n"
+            "    except KeyboardInterrupt:\n"
+            "        print('stopped', flush=True)\n"
+            "run()\n")
         run = subprocess.run([sys.executable, "-c", swallowed_then_waited], capture_output=True, text=True,
                              timeout=60, env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")})
-        self.assertEqual(run.stdout.strip(), "stopped")
+        self.assertEqual(run.stdout.strip(), "stopped", run.stderr)
         self.assertNotIn("Exception ignored", run.stderr)
 
 if __name__ == "__main__":
