@@ -19,6 +19,8 @@ reader, not the mechanism or the weakness it closed.
   written. saw gives the full path each time.
 
 ### Fixed
+- saw runs the real git even in a terminal where an editor's git stand-in comes first, so its own
+  git work is not slowed down or given the stand-in's settings.
 - `saw govern` no longer lets an update in over uncommitted work on a file the update changes. It
   leaves the folder as it was and says uncommitted work would be overwritten, as `git pull` does.
 - The macOS wheel for Apple silicon is tagged for Apple silicon on macOS 11 or later, so an Intel Mac
