@@ -105,12 +105,14 @@ def ancestry(repo: str | Path, ancestor: str, descendant: str) -> bool | None:
     return res.returncode == 0
 
 
-def hook_files(repo: str | Path, paths: tuple[str, ...], folds_case=None) -> tuple[str, ...] | None:
+def hook_files(repo: str | Path, paths: tuple[str, ...], folds_case=None,
+               composes=None) -> tuple[str, ...] | None:
     """Pick the paths that lie in the folder git runs `repo`'s hooks from: `core.hooksPath`, taken
     from the top of the working tree when relative, else the git directory's `hooks`. Names compare
-    composed, and case-folded where that folder's filesystem folds case. Takes the repository, paths
-    relative to its working tree and the test of whether a filesystem folds case, `case_folds` when
-    none is given. Returns those paths, or None when git could not say where its hooks run from."""
+    composed where that folder's filesystem composes them, and case-folded where it folds case.
+    Takes the repository, paths relative to its working tree, and the tests of whether a filesystem
+    folds case and composes names, `case_folds` and `composes_names` when none is given. Returns
+    those paths, or None when git could not say where its hooks run from."""
     top = stdout(repo, ["rev-parse", "--show-toplevel"]).strip()
     configured = stdout(repo, ["config", "--get", "core.hooksPath"]).strip()
     gitdir = stdout(repo, ["rev-parse", "--path-format=absolute", "--git-dir"]).strip()
@@ -118,13 +120,39 @@ def hook_files(repo: str | Path, paths: tuple[str, ...], folds_case=None) -> tup
         return None
     folder = Path(top) / (Path(os.path.expanduser(configured)) if configured else Path(gitdir) / "hooks")
     fold = (folds_case or case_folds)(folder)
-    hooks = composed_path(os.path.realpath(folder), fold=fold)
+    compose = (composes or composes_names)(folder)
+    hooks = _compared(os.path.realpath(folder), fold, compose)
     picked = []
     for rel in paths:
-        where = composed_path(os.path.normpath(Path(top) / rel), fold=fold)
+        where = _compared(os.path.normpath(Path(top) / rel), fold, compose)
         if where == hooks or where.startswith(hooks.rstrip(os.sep) + os.sep):
             picked.append(rel)
     return tuple(picked)
+
+
+def _compared(path: str, fold: bool, compose: bool) -> str:
+    """Spell a path the way a filesystem compares it. Takes the path and whether that filesystem folds
+    case and composes names. Returns the spelling."""
+    spelled = unicodedata.normalize("NFC", path) if compose else path
+    return spelled.casefold() if fold else spelled
+
+
+def composes_names(path: str | Path) -> bool:
+    """Tell whether the filesystem holding `path` reads a name and its other Unicode composition as
+    one: the nearest existing folder whose name has two compositions is the same folder spelled the
+    other way. Takes the path. Returns the answer, and True for a path with no such folder above it."""
+    probe = Path(path)
+    while probe.parent != probe:
+        other = unicodedata.normalize("NFD", probe.name)
+        if other == probe.name:
+            other = unicodedata.normalize("NFC", probe.name)
+        if other != probe.name and os.path.isdir(probe):
+            try:
+                return os.path.samefile(probe, probe.with_name(other))
+            except OSError:
+                return False
+        probe = probe.parent
+    return True
 
 
 def case_folds(path: str | Path) -> bool:
