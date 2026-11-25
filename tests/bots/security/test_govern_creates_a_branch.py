@@ -75,6 +75,15 @@ class WhatACommandBrings(_TrackingCheckout):
                 if "--made-up-option" not in args:
                     self.assertEqual(answer["scan"]["results"][0]["verdict"], "infected", answer)
 
+    def test_an_end_or_try_word_inside_a_value_or_a_path_is_still_checked(self):
+        for args in (["merge", "-m", "--abort", "origin/main"], ["merge", "-m", "--quit", "origin/main"],
+                     ["pull", "-o", "--dry-run"], ["checkout", "origin/main", "--", "--abort"]):
+            with self.subTest(args=args):
+                self.assertEqual(incoming.classify("git", args), args[0])
+        for args in (["merge", "--abort"], ["rebase", "--quit"], ["fetch", "--dry-run"]):
+            with self.subTest(args=args):
+                self.assertIsNone(incoming.classify("git", args))
+
     def test_no_stat_and_no_tags_are_still_checked(self):
         for args in (["pull", "-n"], ["fetch", "-n"], ["merge", "-n", "origin/main"], ["rebase", "-n"]):
             with self.subTest(args=args):

@@ -31,8 +31,16 @@ _OPTIONS_TAKING_THE_NEXT_WORD = {
     "switch": frozenset({"-c", "-C", "--create", "--force-create", "--orphan", "--conflict"}),
     "pull": frozenset({"-s", "--strategy", "-X", "--strategy-option", "--depth", "--deepen", "--shallow-since",
                        "--shallow-exclude", "-o", "--server-option", "--upload-pack", "-j", "--jobs",
-                       "--negotiation-tip"}),
+                       "--negotiation-tip", "--cleanup", "--refmap", "--filter"}),
+    "merge": frozenset({"-m", "-F", "--file", "-s", "--strategy", "-X", "--strategy-option", "--into-name",
+                        "--cleanup"}),
+    "rebase": frozenset({"--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec", "-C",
+                         "--whitespace", "--empty"}),
+    "fetch": frozenset({"-o", "--server-option", "--depth", "--deepen", "--shallow-since", "--shallow-exclude",
+                        "-j", "--jobs", "--upload-pack", "--negotiation-tip", "--refmap", "--filter",
+                        "--recurse-submodules-default", "--submodule-prefix"}),
 }
+_ENDS_OR_ONLY_TRIES = frozenset({"--abort", "--quit", "--dry-run"})
 _OPTIONS_TAKING_NO_WORD = {
     "checkout": frozenset({"-q", "--quiet", "--progress", "--no-progress", "-f", "--force", "--ours", "--theirs",
                            "-t", "--track", "--no-track", "--guess", "--no-guess", "-l", "-d", "--detach", "-m",
@@ -278,7 +286,7 @@ def _git_kind(args: list[str]) -> str | None:
     if parsed is None:
         return None
     sub, rest = parsed
-    if any(flag in rest for flag in ("--abort", "--quit", "--dry-run")):
+    if any(option in _ENDS_OR_ONLY_TRIES for option in _options(sub, rest)):
         return None
     if sub in {"pull", "merge", "rebase", "fetch"}:
         return sub
@@ -371,6 +379,23 @@ def _positionals(sub: str, args: list[str]) -> list[str]:
         words.append(arg)
         index += 1
     return words
+
+
+def _options(sub: str, args: list[str]) -> list[str]:
+    """List the options of a git command, up to `--`, leaving out the value an option takes. Takes the
+    subcommand and its arguments. Returns the options as written."""
+    taking_a_word = _OPTIONS_TAKING_THE_NEXT_WORD.get(sub, frozenset())
+    options: list[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg == "--":
+            break
+        if arg.startswith("-") and arg != "-":
+            options.append(arg)
+            index += 1 if arg in taking_a_word else 0
+    return options
 
 
 def _options_read_as_git_reads_them(sub: str, args: list[str]) -> bool:

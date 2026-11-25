@@ -20,8 +20,10 @@ reader, not the mechanism or the weakness it closed.
   names that differ only in case and paths too long to read the usual way.
 - `saw govern` checks each file exactly as it will be written into your folder. A command that has
   git run other programs, such as `git rebase --exec`, is left for you to decide on.
-- `saw govern` checks a checkout or switch to another commit however its options are written, such
-  as `git checkout -m <branch>` or `git checkout --recurse-submodules <branch>`.
+- `saw govern` checks a checkout, switch, merge or pull however its options are written, such as
+  `git checkout -m <branch>` or `git merge -m --abort <branch>`.
+- `saw govern` holds an update that changes the folder git runs your hooks from until you let it in,
+  even when nothing is found in it.
 
 ## [0.17.6] - 2026-11-25
 

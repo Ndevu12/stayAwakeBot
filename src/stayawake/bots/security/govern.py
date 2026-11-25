@@ -19,7 +19,7 @@ from stayawake.bots.security.scanner import joined, scan_target, unreadable
 from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
-from stayawake.lib.git import blob_copies, incoming
+from stayawake.lib.git import blob_copies, incoming, query
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.utils import exitcodes, pathsafe, scratch
@@ -68,24 +68,30 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
         return _unchecked(repo, "the check could not finish")
     verdict = _verdict(payload) or "incomplete"
     current().step("verdict", "verdict: %s" % verdict)
-    releasable = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
+    scanned_clean = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
     strictly_clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN and not already_there
-    applied_mark = clean_ledger.clean_key(arrived.commit, config) if releasable else None
+    applied_mark = clean_ledger.clean_key(arrived.commit, config) if scanned_clean else None
     clean_mark = applied_mark if strictly_clean else None
+    hooks = query.hook_files(Path(repo), arrived.paths)
+    asks = scanned_clean and (hooks is None or bool(hooks))
+    releasable = scanned_clean and not asks
     if releasable:
         govern_status.write(repo, "checking", verdict=verdict, step="checked; ready to apply")
     else:
         govern_status.write(repo, "held", verdict=verdict,
                             reasons=["the update was not applied; the open folder is unchanged"])
-    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict, dict(landing.digests))
+    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict, dict(landing.digests), asks)
     answer: dict = {"scan": payload}
     if already_there:
         answer["pre_existing"] = already_there
     findings = (payload.get("results") or [{}])[0].get("findings") or []
     steps = govern_held.next_steps(verdict, findings, already_there, arrived.commit)
+    if asks:
+        steps.append(f"The update changes {', '.join(hooks or ('the folder git runs hooks from',))}, which "
+                     f"git runs as a hook in this folder. Check it, then let {arrived.commit[:12]} in.")
     if steps:
         answer["next_steps"] = steps
-    if not releasable and verdict in govern_held.HELD_VERDICTS:
+    if not releasable and (asks or verdict in govern_held.HELD_VERDICTS):
         answer["decision"] = govern_held.decision(repo, into, arrived.commit, verdict)
     elif not releasable:
         answer["decision"] = _unchecked(repo, "")[0]["decision"]
@@ -112,7 +118,7 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
         refused = _refuse_let_in(repo, state, accept, confirm)
         if refused:
             return _applied(False, refused)
-        accepted_verdict = state.get("verdict")
+        accepted_verdict = state.get("verdict") if state.get("verdict") in govern_held.HELD_VERDICTS else None
     try:
         arrived = incoming.Arrived(
             root=Path(state["root"]), paths=tuple(state["paths"]), mode=state["mode"],
@@ -142,7 +148,7 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
 def _refuse_let_in(repo: str, state: dict, accept: str | None, confirm: str | None) -> str:
     """Return why a held update cannot be let in, or an empty string when it can. Takes the open
     folder, the recorded check, the accepted commit and the typed confirmation."""
-    if state.get("verdict") not in govern_held.HELD_VERDICTS:
+    if state.get("verdict") not in govern_held.HELD_VERDICTS and not state.get("asks"):
         return "the check did not finish, so there is nothing checked to let in"
     if not accept:
         return "saw held this update; review it, then let it in with --accept and its commit"
@@ -287,12 +293,12 @@ def _applied(done: bool, sentence: str) -> tuple[dict, int]:
 
 def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
                  clean_mark: str | None = None, applied_mark: str | None = None,
-                 verdict: str | None = None, written: dict | None = None) -> None:
+                 verdict: str | None = None, written: dict | None = None, asks: bool = False) -> None:
     body = {"schema": SCHEMA, "releasable": releasable, "root": str(arrived.root),
             "paths": list(arrived.paths), "mode": arrived.mode, "commit": arrived.commit,
             "base": arrived.base, "head": arrived.head, "refs": [list(i) for i in arrived.refs],
             "clean_mark": clean_mark, "applied_mark": applied_mark, "verdict": verdict,
-            "written": written or {}}
+            "written": written or {}, "asks": asks}
     path = Path(into) / _STATE
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(body), encoding="utf-8")

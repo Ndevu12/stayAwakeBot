@@ -131,6 +131,29 @@ class AttributesTheUpdateChanges(_TrackingCheckout):
             self.assertFalse(os.path.lexists(landed), "a file the check did not see was left in the folder")
 
 
+class AnUpdateToTheHooksFolder(_TrackingCheckout):
+    """The folder runs its hooks from `.githooks`, and the update changes one."""
+
+    def test_it_is_held_until_you_let_it_in(self):
+        self.write(self.upstream, ".githooks/pre-commit", "#!/bin/sh\nexit 0\n")
+        self.commit(self.upstream, "hooks")
+        self.git(self.open, "pull", "-q", "--ff-only")
+        self.git(self.open, "config", "core.hooksPath", ".githooks")
+        self.write(self.upstream, ".githooks/pre-commit", "#!/bin/sh\necho changed\nexit 0\n")
+        incoming = self.commit(self.upstream, "tweak hook")
+        self.git(self.open, "fetch", "-q")
+        answer, _code = govern.prepare(str(self.open), str(self.into), "git", ["merge", "origin/main"])
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "clean", answer)
+        self.assertIn("let-in", answer["decision"]["choices"])
+        self.assertTrue(any(".githooks/pre-commit" in step for step in answer["next_steps"]), answer)
+        self.assertFalse(govern.apply(str(self.open), str(self.into))[0]["applied"])
+        hook = self.open / ".githooks" / "pre-commit"
+        self.assertEqual(hook.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n")
+        applied, _code = govern.apply(str(self.open), str(self.into), incoming)
+        self.assertTrue(applied["applied"], applied)
+        self.assertEqual(hook.read_text(encoding="utf-8"), "#!/bin/sh\necho changed\nexit 0\n")
+
+
 class NothingRunsWhileAnUpdateIsChecked(_TrackingCheckout):
 
     def test_a_command_that_runs_other_commands_is_left_to_you(self):

@@ -24,7 +24,9 @@ The extension calls it only when the verdict was clean or residue, and your unco
 kept — or the folder is not changed and saw says why.
 
 saw judges what the update brings. A finding a changed file already had before the update is
-listed under `pre_existing` and does not hold the update, unless it is confirmed.
+listed under `pre_existing` and does not hold the update, unless it is confirmed. An update that
+changes a file in the folder git runs your hooks from is held until you let it in, even when
+nothing is found in it.
 
 When the verdict is suspicious or infected, the update is held and your open folder stays as it
 was. The answer says what to do in `next_steps`, and its `decision` lets you let the update in after
