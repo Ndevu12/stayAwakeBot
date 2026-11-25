@@ -125,6 +125,7 @@ nav:
       - how-to/harden-this-machine.md
       - how-to/harden-a-repo.md
       - how-to/gate-ci.md
+      - how-to/verify-a-release.md
   - Reference:
       - CLI:
           - reference/cli/index.md
