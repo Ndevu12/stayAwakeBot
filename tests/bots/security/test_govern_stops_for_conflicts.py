@@ -215,6 +215,39 @@ class WhatTheCheckPins(_StopsForConflicts):
         self._untouched()
 
 
+class WhatIsWrittenIsWhatWasChecked(_StopsForConflicts):
+
+    def test_a_conflicted_file_unlike_the_one_checked_is_not_left_in_the_folder(self):
+        self.git(self.open, "fetch", "-q")
+        self._prepare("merge", "origin/main")
+        state = self._state()
+        state["written"]["kept.txt"] = "0" * 64
+        (self.into / "state.json").write_text(json.dumps(state), encoding="utf-8")
+        refused, _code = self._apply()
+        self.assertFalse(refused["applied"], refused)
+        self._untouched()
+
+
+class APullWhoseConflictsStayOut(_TrackingCheckout):
+    """Both sides changed where a symbolic link points, which saw does not carry into the folder."""
+
+    def test_it_offers_only_to_leave_the_folder_and_names_the_command_for_the_checked_commit(self):
+        os.symlink("a", self.upstream / "link")
+        self.commit(self.upstream, "link")
+        self.git(self.open, "pull", "-q", "--ff-only")
+        os.remove(self.upstream / "link")
+        os.symlink("c", self.upstream / "link")
+        incoming = self.commit(self.upstream, "theirs")
+        os.remove(self.open / "link")
+        os.symlink("b", self.open / "link")
+        self.commit(self.open, "mine")
+        answer, code = govern.prepare(str(self.open), str(self.into), "git", ["pull"])
+        self.assertEqual(code, exitcodes.INCOMPLETE, answer)
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "clean", answer)
+        self.assertEqual(answer["decision"]["choices"], ["leave-unchanged"])
+        self.assertIn(f"run `git merge {incoming}`", answer["next_steps"][0])
+
+
 class ConflictsThatCannotBeBroughtIn(_StopsForConflicts):
     """The rebase runs on git's patch-applying backend, whose stopped state saw does not carry."""
 
@@ -263,6 +296,14 @@ class AConflictTheUpdateDeletes(_TrackingCheckout):
         self.write(self.open, "kept.txt", "mine\n")
         self.base = self.commit(self.open, "local edit")
         self.git(self.open, "fetch", "-q")
+
+    def test_it_is_brought_in_with_the_file_left_to_resolve(self):
+        answer, _code = govern.prepare(str(self.open), str(self.into), "git", ["merge", "origin/main"])
+        self.assertEqual(answer.get("conflicts"), ["kept.txt"], answer)
+        applied, _code = govern.apply(str(self.open), str(self.into))
+        self.assertTrue(applied["applied"], applied)
+        self.assertEqual((self.open / "kept.txt").read_text(encoding="utf-8"), "mine\n")
+        self.assertIn("UD kept.txt", self.git(self.open, "status", "--porcelain").splitlines())
 
     def test_uncommitted_work_on_a_file_left_as_it_was_stops_the_update(self):
         answer, _code = govern.prepare(str(self.open), str(self.into), "git", ["merge", "origin/main"])

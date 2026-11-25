@@ -33,7 +33,8 @@ _STATE = "state.json"
 TOOLS = ("gh", "git")
 
 
-DECISION_CHOICES = ("run-as-typed", "leave-unchanged")
+LEAVE_UNCHANGED = "leave-unchanged"
+DECISION_CHOICES = ("run-as-typed", LEAVE_UNCHANGED)
 
 def is_recognised(tool: str, args: list[str]) -> bool:
     """Whether `(tool, args)` is an incoming command saw governs. Takes the tool and the operator's
@@ -108,12 +109,18 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
 def _checked_and_left_out(repo: str, into: str, arrived: "incoming.Arrived", payload: dict, code: int,
                           already_there: list[dict], clean: bool) -> tuple[dict, int]:
     """Answer a checked update whose conflicts cannot be brought into the folder: a clean one with
-    the decision of an update that cannot be checked, any other held with no way to let it in.
-    Takes the open folder, the holding directory, what arrived, the scan, its exit, the findings the
-    folder already had and whether the scan was clean. Returns the answer and an exit that is never
-    a success."""
+    the decision of an update that cannot be checked, or for a pull the command that brings in the
+    checked commit with no other choice than leaving the folder, and any other held with no way to
+    let it in. Takes the open folder, the holding directory, what arrived, the scan, its exit, the
+    findings the folder already had and whether the scan was clean. Returns the answer and an exit
+    that is never a success."""
     verdict = _verdict(payload) or "incomplete"
     _write_state(Path(into), arrived, False, verdict=verdict)
+    if clean and arrived.bring_in:
+        answer, unchecked_code = _unchecked(repo, conflicted.CANNOT_CARRY)
+        answer["decision"] = {"choices": [LEAVE_UNCHANGED]}
+        step = f"To bring in exactly the commit saw checked, run `git {' '.join(arrived.bring_in)}`."
+        return {"scan": payload, **answer, "next_steps": [step]}, unchecked_code
     if clean:
         answer, unchecked_code = _unchecked(repo, conflicted.CANNOT_CARRY)
         return {"scan": payload, **answer}, unchecked_code

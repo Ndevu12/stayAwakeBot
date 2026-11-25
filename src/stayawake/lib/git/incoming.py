@@ -82,7 +82,8 @@ class Arrived:
     """What a command produced outside the open folder. `written` holds the sha256 each file it
     writes into the folder must hold, by path. `versions` names other versions of files the update
     brings, as (commit, paths), and `stopped` the merge or rebase that stopped for conflicts, when
-    it did."""
+    it did. `bring_in` is the git subcommand and commit that bring in exactly the checked commit,
+    for a pull that stopped for conflicts that cannot be carried."""
 
     root: Path
     paths: tuple[str, ...]
@@ -94,6 +95,7 @@ class Arrived:
     written: tuple[tuple[str, str], ...] = ()
     versions: tuple[tuple[str, tuple[str, ...]], ...] = ()
     stopped: "conflicted.Stopped | None" = None
+    bring_in: tuple[str, ...] = ()
 
 
 def classify(tool: str, args: list[str]) -> str | None:
@@ -176,7 +178,7 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
         run_ok(borrowed.path, ["symbolic-ref", "HEAD", head.removeprefix("ref: ").strip()], context=SAW_OWNED)
     ran = _run_command(work, tool, args, kind, fix_commit_signing(repo))
     if ran and conflicted.stopped_for_conflicts(work, borrowed.path):
-        return _arrived_with_conflicts(work, borrowed.path, base)
+        return _arrived_with_conflicts(work, borrowed.path, base, kind)
     if ran:
         return ran
     after = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
@@ -250,15 +252,16 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     return WRITE_LEFT_PART_WAY
 
 
-def _arrived_with_conflicts(work: Path, holding: Path, base: str) -> "Arrived | str":
+def _arrived_with_conflicts(work: Path, holding: Path, base: str, kind: str) -> "Arrived | str":
     """Describe what a merge or rebase stopped for conflicts in the holding copy brings. Takes the
-    holding work tree, its git directory and the open folder's commit. Returns what arrived: the
-    conflicts to carry into the folder, or an update to check that stays out of it. Returns a
-    sentence when neither can be described."""
+    holding work tree, its git directory, the open folder's commit and the command's kind. Returns
+    what arrived: the conflicts to carry into the folder, or an update to check that stays out of
+    it. Returns a sentence when neither can be described."""
     stopped = conflicted.read(work, holding, base)
     if isinstance(stopped, str):
-        return _arrived_uncarried(work, holding, base)
-    names = files_brought(work, base, stopped.landed, context=SAW_OWNED)
+        return _arrived_uncarried(work, holding, base, kind)
+    changed = files_brought(work, base, stopped.landed, context=SAW_OWNED)
+    names = None if changed is None else tuple(dict.fromkeys((*changed, *stopped.conflicts)))
     versions = conflicted.versions_brought(work, base, (stopped.incoming,), stopped.head)
     if names is None or versions is None:
         return "the files the update brings could not be listed"
@@ -266,16 +269,19 @@ def _arrived_with_conflicts(work: Path, holding: Path, base: str) -> "Arrived | 
                    versions=versions, stopped=stopped)
 
 
-def _arrived_uncarried(work: Path, holding: Path, base: str) -> "Arrived | str":
+def _arrived_uncarried(work: Path, holding: Path, base: str, kind: str) -> "Arrived | str":
     """Describe a stop whose conflicts cannot be carried into the folder: an update to check that
-    stays out of it. Takes the holding work tree, its git directory and the open folder's commit.
-    Returns what arrived, or a sentence when its incoming commits cannot be read."""
+    stays out of it. Takes the holding work tree, its git directory, the open folder's commit and
+    the command's kind. Returns what arrived, or a sentence when its incoming commits cannot be
+    read."""
     incoming = conflicted.incoming_commits(holding)
     head = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
     versions = conflicted.versions_brought(work, base, incoming, head) if incoming and head else None
     if versions is None:
         return conflicted.CANNOT_CARRY
-    return Arrived(work, (), UNCARRIED_CONFLICTS, incoming[0], base, _head_text(holding), (), versions=versions)
+    bring_in = (conflicted.operation_in(holding), incoming[0]) if kind == "pull" else ()
+    return Arrived(work, (), UNCARRIED_CONFLICTS, incoming[0], base, _head_text(holding), (), versions=versions,
+                   bring_in=bring_in)
 
 
 def _apply_conflicts(repo: Path, bare: Path, arrived: Arrived) -> str:
@@ -318,7 +324,8 @@ def _apply_conflicts(repo: Path, bare: Path, arrived: Arrived) -> str:
     if placed is None:
         move.release()
         return "the update could not be written into the open folder"
-    if move.apply() and (stopped.operation == conflicted.MERGE or _write_head(gitdir, stopped.head)):
+    expected = {os.fsencode(rel): digest for rel, digest in arrived.written}
+    if move.apply(expected) and (stopped.operation == conflicted.MERGE or _write_head(gitdir, stopped.head)):
         move.release()
         return ""
     move.release()

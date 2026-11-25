@@ -183,7 +183,17 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
     }
     if !prepared.success() {
         if let Some(reason) = unchecked_reason(&String::from_utf8_lossy(&output.stdout)) {
-            let checked = answer.get("scan").is_some();
+            let checked = scan_finished(&answer);
+            if !may_run_as_typed(&answer) {
+                eprintln!("{}", said(&reason, checked));
+                for step in answer.get("next_steps").and_then(serde_json::Value::as_array).into_iter().flatten() {
+                    if let Some(text) = step.as_str() {
+                        eprintln!("  - {text}");
+                    }
+                }
+                eprintln!("saw: left the folder unchanged; {tool} did not run.");
+                return Some(2);
+            }
             return Some(match decide(tool, args, &reason, checked) {
                 Decision::RunAsTyped => run_then_scan(real, saw, args, &repo),
                 Decision::LeaveUnchanged => {
@@ -282,6 +292,30 @@ fn unchecked_reason(answer: &str) -> Option<String> {
     Some(reason.unwrap_or("the update could not be checked").to_string())
 }
 
+/// Whether saw's answer finished a scan of the update, with nothing left unread.
+fn scan_finished(answer: &serde_json::Value) -> bool {
+    answer.get("scan").is_some()
+        && answer.pointer("/scan/any_error").and_then(serde_json::Value::as_bool) == Some(false)
+}
+
+/// Whether saw's answer leaves running the command as typed among its choices. An answer that names
+/// no choices leaves it.
+fn may_run_as_typed(answer: &serde_json::Value) -> bool {
+    match answer.pointer("/decision/choices").and_then(serde_json::Value::as_array) {
+        Some(choices) => choices.iter().any(|choice| choice == "run-as-typed"),
+        None => true,
+    }
+}
+
+/// The line that tells the user why the update was not brought in.
+fn said(reason: &str, checked: bool) -> String {
+    if checked {
+        format!("saw: checked this update: {reason}.")
+    } else {
+        format!("saw: this update cannot be checked: {reason}.")
+    }
+}
+
 /// Ask the user whether to run a command saw could not check, or checked and could not bring in.
 /// Returns their decision, leave-unchanged with no one to ask.
 fn decide(tool: &str, args: &[String], reason: &str, checked: bool) -> Decision {
@@ -290,11 +324,7 @@ fn decide(tool: &str, args: &[String], reason: &str, checked: bool) -> Decision 
         Ok("leave-unchanged") => return Decision::LeaveUnchanged,
         _ => {}
     }
-    let said = if checked {
-        format!("saw: checked this update: {reason}.")
-    } else {
-        format!("saw: this update cannot be checked: {reason}.")
-    };
+    let said = said(reason, checked);
     if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
         eprintln!("{said}");
         return Decision::LeaveUnchanged;

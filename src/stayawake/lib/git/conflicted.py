@@ -142,6 +142,12 @@ def incoming_commits(holding: Path) -> tuple[str, ...]:
     return ()
 
 
+def operation_in(holding: Path) -> str:
+    """Name the operation in progress in the holding copy. Takes its git directory. Returns merge
+    when a merge is under way, else rebase."""
+    return MERGE if os.path.lexists(holding / "MERGE_HEAD") else REBASE
+
+
 def unmerged_entries(work: Path) -> dict[bytes, tuple[tuple[bytes, bytes, bytes], ...]] | None:
     """Read the conflicted entries of the holding copy's index. Takes the holding work tree. Returns
     each conflicted path's (mode, object, stage) entries, or None when the index cannot be read."""

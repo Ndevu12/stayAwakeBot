@@ -58,8 +58,10 @@ Resolve the conflicts, then run `git commit` for a merge or a pull that merges, 
 does not report success, so a command chained after it with `&&` does not run. A held update that
 stops for conflicts is let in the same way, with `--accept` and, for an infected one, `--confirm`.
 When the conflicts cannot be brought into the folder, the update is still checked. A clean one
-brings that reason and the same decision as an update that cannot be checked. One saw holds stays
-out of the folder, and there is no way to let it in.
+brings that reason and the same decision as an update that cannot be checked, except for a pull,
+where the only choice is to leave the folder as it is and `next_steps` names the command that brings
+in exactly the commit saw checked. One saw holds stays out of the folder, and there is no way to let
+it in.
 
 ## Covering your terminals
 
