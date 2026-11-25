@@ -221,11 +221,18 @@ class Folder:
         return _remove_on_one_volume(self._child(name), device)
 
     def remove_at(self, path: Path) -> None:
-        """Delete the empty folder held open where it was settled. Takes its path. Raises `OSError`
-        when it was not settled there or was not deleted."""
+        """Delete the empty folder held open where it was settled, and let go of it, which is when
+        Windows takes its name away. Takes its path. Raises `OSError` when it was not settled there or
+        was not deleted."""
         if self._settled is None:
             raise OSError(errno.EBUSY, "the folder is not held where it is deleted", str(path))
-        _delete_held(self._settled, Path(path))
+        settled, self._settled = self._settled, None
+        try:
+            _delete_held(settled, Path(path))
+        finally:
+            for fd in (settled, self._own):
+                self._held.remove(fd)
+                os.close(fd)
 
     def _child(self, name: str) -> Path:
         """Name an entry of the folder. Takes its name. Returns its path. Raises `RedirectedPath` when
