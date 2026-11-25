@@ -90,6 +90,41 @@ class GovernIncoming(GitSandbox):
         self.assertEqual((self.repo / "notes.txt").read_text(encoding="utf-8"), "mine\n")
         self.assertTrue((self.repo / "arrived.txt").exists())
 
+    def _update_changing_keep(self, text: str) -> None:
+        self.git(self.repo, "checkout", "-q", "-b", "changes-keep", "main")
+        self.write(self.repo, "keep.txt", text)
+        self.commit(self.repo, "change keep")
+        self.git(self.repo, "checkout", "-q", "main")
+
+    def _refused_and_untouched(self, expected: dict[str, str]) -> None:
+        code, applied = self._apply()
+        self.assertFalse(applied["applied"], applied)
+        self.assertEqual(applied["reason"], "uncommitted work would be overwritten, so the folder was not changed")
+        self.assertEqual(self.rev(self.repo), self.base)
+        for name, text in expected.items():
+            self.assertEqual((self.repo / name).read_text(encoding="utf-8"), text)
+
+    def test_uncommitted_work_on_a_file_the_update_changes_stops_the_update(self):
+        self._update_changing_keep("from upstream\n")
+        self.write(self.repo, "keep.txt", "already\nmine\n")
+        self.assertEqual(self._prepare("checkout", "changes-keep")[0], exitcodes.CLEAN)
+        self._refused_and_untouched({"keep.txt": "already\nmine\n"})
+
+    def test_uncommitted_work_identical_to_the_update_lets_it_in(self):
+        self._update_changing_keep("from upstream\n")
+        self.write(self.repo, "keep.txt", "from upstream\n")
+        self.assertEqual(self._prepare("checkout", "changes-keep")[0], exitcodes.CLEAN)
+        code, applied = self._apply()
+        self.assertTrue(applied["applied"], applied)
+        self.assertEqual(self.git(self.repo, "status", "--porcelain").strip(), "")
+
+    def test_a_staged_change_unlike_either_side_stops_the_update(self):
+        self._update_changing_keep("from upstream\n")
+        self.write(self.repo, "keep.txt", "staged here\n")
+        self.git(self.repo, "add", "keep.txt")
+        self.assertEqual(self._prepare("checkout", "changes-keep")[0], exitcodes.CLEAN)
+        self._refused_and_untouched({"keep.txt": "staged here\n"})
+
     def test_an_infected_check_leaves_the_folder_and_refuses_apply(self):
         with mock.patch(_SCAN, return_value=(_verdict_doc("infected"), exitcodes.FINDINGS, [])):
             code, body = self._prepare("checkout", "next")
