@@ -4,46 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
-from stayawake.utils import atomicwrite, env, pathsafe, scratch
-
-
-def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Path:
-    """Return a directory we can actually write into, preferring `preferred`.
-
-    Report persistence is best-effort: a CI gate's verdict is its exit code, so a scan that
-    completed must never crash because it couldn't save its report. This tries `preferred`,
-    then a shared temp dir, confirming each with a real write probe — a directory can exist
-    yet be unwritable for the current user (e.g. a host bind-mount under a non-root container
-    user), which `mkdir(exist_ok=True)` alone wouldn't catch. On a fallback it warns once on
-    stderr (naming both paths) and never raises.
-    """
-    preferred = Path(preferred)
-    why = "is not writable"
-    for candidate in (preferred, Path(tempfile.gettempdir()) / "stayawake-reports"):
-        try:
-            atomicwrite.make_folder(candidate)
-            fd, probe = tempfile.mkstemp(dir=str(candidate), prefix=".probe-")
-            os.close(fd)
-            os.remove(probe)
-        except pathsafe.RedirectedPath:
-            if candidate == preferred:
-                why = "is reached through a link saw does not follow"
-            continue
-        except OSError:
-            continue
-        if candidate != preferred:
-            print(f"warning: {label} directory {preferred} {why}; "
-                  f"writing to {candidate} instead", file=sys.stderr)
-        return candidate
-    last = scratch.kept_dir("the reports directory")
-    print(f"warning: {label} directory {preferred} {why}; "
-          f"writing to {last} instead", file=sys.stderr)
-    return last
+from stayawake.utils import atomicwrite, env, scratch
 
 
 def reports_dir_choice(explicit: str | Path | None = None, *,
@@ -64,15 +28,10 @@ def reports_dir_choice(explicit: str | Path | None = None, *,
 def resolve_reports_dir(explicit: str | Path | None = None, *,
                         settings_value: str | Path | None = None,
                         default: str | Path, label: str = "reports") -> Path:
-    """Where reports go, guaranteed writable — one place for the precedence so the report writers
-    don't each re-implement it.
-
-    `reports_dir_choice` picks the source; `default` applies when none asked. The result is passed
-    through `resolve_writable_dir`, so an unwritable choice falls back to a temp dir instead of
-    crashing a completed run.
-    """
+    """Return the folder reports go to, ready for them. Takes the folder named on the command line,
+    the one in the settings, the default and what the reports are."""
     chosen = reports_dir_choice(explicit, settings_value=settings_value) or default
-    return resolve_writable_dir(chosen, label=label)
+    return scratch.destination_dir(chosen, label)
 
 
 def read_json(path: str | Path, default: Any = None) -> Any:

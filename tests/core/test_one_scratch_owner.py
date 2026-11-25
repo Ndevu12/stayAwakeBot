@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""`utils.scratch` is the only thing that makes scratch.
-
-A temp created with no `dir=` lands in the system temp directory: that is scratch, it outlives the
-run unless something removes it, and it belongs to the one owner. A temp created with `dir=` sits
-beside the file it will replace — that is an atomic write, which must stay on the destination's
-filesystem, and is not scratch.
-"""
+"""`utils.scratch` is the only thing that makes a temporary folder or file, wherever it is made."""
 from __future__ import annotations
 
 import ast
@@ -45,8 +39,6 @@ class TestNothingMakesItsOwnScratch(unittest.TestCase):
                     continue
                 if isinstance(fn, ast.Attribute) and not (
                         isinstance(fn.value, ast.Name) and fn.value.id == "tempfile"):
-                    continue
-                if any(kw.arg == "dir" for kw in node.keywords):
                     continue
                 offenders.append(f"{_where(path, node)}: tempfile.{name}(…)")
         self.assertEqual([], offenders,

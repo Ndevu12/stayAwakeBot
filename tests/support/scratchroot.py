@@ -18,7 +18,7 @@ class OwnTempRoot(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="scratch-test-")).resolve()
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        isolated = mock.patch.dict(os.environ, {"TMPDIR": str(self.tmp)})
+        isolated = mock.patch.dict(os.environ, {"TMPDIR": str(self.tmp), "XDG_STATE_HOME": str(self.tmp / "state")})
         isolated.start()
         self.addCleanup(isolated.stop)
         tempfile.tempdir = None

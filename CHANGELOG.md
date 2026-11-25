@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- Reports saw keeps for you now stay in one place and survive a restart: a full report too large for
+  the terminal, a SARIF log that could not be written where asked, and reports whose folder cannot be
+  written. saw gives the full path each time.
+
 ### Fixed
 - The macOS wheel for Apple silicon is tagged for Apple silicon on macOS 11 or later, so an Intel Mac
   never installs it.

@@ -12,9 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from stayawake.utils import atomicwrite, env, pathsafe
+
 ROOT_PREFIX = "saw-run-"
 RECORD = "run.json"
-KEPT = "reports"
 
 Teardown = Callable[[Path], str]
 
@@ -78,14 +79,40 @@ def _same_filesystem(one: Path, other: Path) -> bool:
         return False
 
 
+def kept_home() -> Path:
+    """Return the folder saw keeps what it gives the operator in."""
+    return Path(env.xdg_state_home()) / "saw" / "reports"
+
+
 def kept_dir(purpose: str) -> Path:
-    """Make a directory the operator is given, which the run does not remove. Takes what it is for.
-    Returns the path."""
-    base = root() / KEPT / _slug(purpose)
-    base.mkdir(parents=True, exist_ok=True)
+    """Make a directory the operator is given, in saw's own durable folder, which the run does not
+    remove. Takes what it is for. Returns the path."""
+    base = kept_home() / _slug(purpose)
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
     made = Path(tempfile.mkdtemp(dir=str(base), prefix=time.strftime("%Y-%m-%d-%H%M%S-")))
     _areas.append(Area(made, purpose, None, True))
     return made
+
+
+def destination_dir(preferred: str | Path, purpose: str) -> Path:
+    """Return the folder for what the operator asked for: the one they named, or one saw keeps for
+    them after saying on standard error why the named one cannot take it. Takes the folder and what
+    it is for."""
+    preferred = Path(preferred)
+    try:
+        atomicwrite.make_folder(preferred)
+        check = preferred / ".saw-write-check"
+        atomicwrite.replace(check, "")
+        check.unlink()
+        return preferred
+    except pathsafe.RedirectedPath:
+        why = "is reached through a link saw does not follow"
+    except OSError as exc:
+        why = f"cannot be written ({exc.strerror or exc})"
+    kept = kept_dir(purpose)
+    print(f"error: {purpose} directory {preferred} {why}; saw wrote the {purpose} to {kept} instead.",
+          file=sys.stderr)
+    return kept
 
 
 def new_file(purpose: str, *, suffix: str = "", mode: int = 0o600) -> Path:
@@ -146,11 +173,8 @@ def _remove(area: Area) -> str:
 
 
 def _drop_root(where: Path) -> list[str]:
-    """Remove the run's own root once its areas are gone, unless the operator was given something
-    under it. Takes the root. Returns a reason for each failure."""
-    kept = where / KEPT
-    if kept.is_dir() and any(kept.iterdir()):
-        return []
+    """Remove the run's own root once its areas are gone. Takes the root. Returns a reason for each
+    failure."""
     record = where / RECORD
     if record.exists():
         try:

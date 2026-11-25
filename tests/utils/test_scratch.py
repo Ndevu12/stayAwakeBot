@@ -2,6 +2,8 @@
 """One root per run, its release, and what survives it."""
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import shutil
 import tempfile
@@ -84,10 +86,13 @@ class TestWhatTheOperatorWasGivenSurvives(OwnTempRoot):
         scratch.release()
         self.assertEqual("# report", (report / "latest.md").read_text())
 
-    def test_the_root_survives_while_it_holds_one(self):
-        scratch.kept_dir("report")
+    def test_a_kept_area_is_in_saws_reports_home_and_the_root_still_goes(self):
+        report = scratch.kept_dir("the full report")
+        scratch.new_dir("rollback")
         scratch.release()
-        self.assertEqual(1, len(self._roots()))
+        self.assertEqual(report.parent, self.tmp / "state" / "saw" / "reports" / "the-full-report")
+        self.assertTrue(report.is_dir())
+        self.assertEqual([], self._roots())
 
     def test_the_root_goes_when_nothing_was_kept(self):
         scratch.new_dir("rollback")
@@ -144,3 +149,27 @@ class TestAnAreaSharesAFolderFilesystem(OwnTempRoot):
         self.assertEqual(scratch.release(), [])
         self.assertFalse(second.exists())
         self.assertTrue(folder.is_dir())
+
+
+class TestADestinationIsTheNamedFolderOrOneSawKeeps(OwnTempRoot):
+    """Check where what the operator asked for is written."""
+
+    def test_a_writable_folder_is_the_destination_and_keeps_no_trace_of_the_check(self):
+        target = self.tmp / "reports"
+        self.assertEqual(scratch.destination_dir(target, "security reports"), target)
+        self.assertEqual(list(target.iterdir()), [])
+
+    def test_an_unwritable_folder_sends_it_to_saws_reports_home_and_says_so(self):
+        blocker = self.tmp / "blocker"
+        blocker.write_text("not a folder\n")
+        target = blocker / "security"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            got = scratch.destination_dir(target, "security reports")
+        self.assertEqual(got.parent, self.tmp / "state" / "saw" / "reports" / "security-reports")
+        self.assertTrue(got.is_dir())
+        self.assertIn(f"error: security reports directory {target} cannot be written", err.getvalue())
+        self.assertIn(f"saw wrote the security reports to {got} instead.", err.getvalue())
+        scratch.release()
+        self.assertTrue(got.is_dir())
+
