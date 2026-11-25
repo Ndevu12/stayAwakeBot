@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import functools
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +40,62 @@ def _refuse(context: Context, args: list[str], why: str) -> None:
     print(f"saw: {message} — this is a defect in saw; please report it", file=sys.stderr)
 
 
+STANDIN_MARK = b"saw-govern-standin"
+_STANDIN_PROGRAMS = frozenset({"saw-git-standin", "saw-git-standin.exe"})
+_HEAD_BYTES = 512
+
+
+def _names() -> tuple[str, ...]:
+    """Return the file names git can have on this system."""
+    if os.name != "nt":
+        return ("git",)
+    extensions = [e for e in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(os.pathsep) if e]
+    return tuple(f"git{e.lower()}" for e in extensions)
+
+
+def is_standin(program: Path) -> bool:
+    """Tell whether a program is a git stand-in or cannot be read. Takes the program's path."""
+    try:
+        target = program.resolve(strict=True)
+        if target.name.lower() in _STANDIN_PROGRAMS:
+            return True
+        if not stat.S_ISREG(os.stat(target).st_mode):
+            return True
+        with open(target, "rb") as handle:
+            return STANDIN_MARK in handle.read(_HEAD_BYTES)
+    except (OSError, RuntimeError):
+        return True
+
+
+@functools.lru_cache(maxsize=8)
+def _first_real(path_value: str) -> str | None:
+    for folder in path_value.split(os.pathsep):
+        if not folder or not os.path.isabs(folder):
+            continue
+        for name in _names():
+            candidate = Path(folder) / name
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK) and not is_standin(candidate):
+                return str(candidate)
+    return None
+
+
+def real_git() -> str | None:
+    """Return the git saw runs: the first on PATH that is not a stand-in, or none."""
+    return _first_real(os.environ.get("PATH", os.defpath))
+
+
+_told_no_git = False
+
+
+def _no_git() -> None:
+    """Say once that no git outside a stand-in was found."""
+    global _told_no_git
+    if not _told_no_git:
+        _told_no_git = True
+        print("saw: no git was found on PATH apart from a git stand-in, so saw ran no git command.",
+              file=sys.stderr)
+
+
 def _prepare(repo: str | Path | None, args: list[str], env: dict | None,
              context: Context) -> tuple[list[str], dict, str | None] | None:
     """Build the argv, environment and working directory for one command, or None when it is
@@ -57,7 +115,11 @@ def _prepare(repo: str | Path | None, args: list[str], env: dict | None,
     callers_globals, sub, rest = allowlist.split(list(args))
     if context in (UNTRUSTED, SAW_OWNED) and sub in allowlist.DIFF_SUBCOMMANDS:
         rest = _NO_DIFF_DRIVERS + rest
-    argv = ["git"]
+    program = real_git()
+    if program is None:
+        _no_git()
+        return None
+    argv = [program]
     if repo is not None:
         argv += ["-C", str(repo)]
     if not verdict.reads_configuration:

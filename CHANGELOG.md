@@ -19,6 +19,8 @@ reader, not the mechanism or the weakness it closed.
   written. saw gives the full path each time.
 
 ### Fixed
+- saw runs the real git even in a terminal where an editor's git stand-in comes first, so its own
+  git work is not slowed down or given the stand-in's settings.
 - The macOS wheel for Apple silicon is tagged for Apple silicon on macOS 11 or later, so an Intel Mac
   never installs it.
 - A clean update `saw govern` checked lands in the folder even when the system's temporary folder is on
