@@ -221,6 +221,57 @@ def hold(path: Path) -> Folder:
     return Folder(os.open(path, os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag()))
 
 
+def hold_entry(path: Path, *, folder: bool) -> int:
+    """Open a folder or a regular file by its own name, refusing a link there, without keeping anyone
+    from renaming or deleting it. Takes its path and whether it is a folder. Returns a descriptor the
+    caller closes. Raises `OSError` when it cannot be opened as one."""
+    if folder:
+        flags = os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag()
+    else:
+        flags = os.O_RDONLY | pathsafe.no_follow_flag() | getattr(os, "O_NONBLOCK", 0)
+    return os.open(path, flags)
+
+
+def owner_of(path: Path) -> int:
+    """Name who owns an entry itself, never what a link at its name points to. Takes its path. Returns
+    their account id. Raises `OSError` when it cannot be read."""
+    return path.lstat().st_uid
+
+
+def give_to(path: Path, owner: int) -> None:
+    """Give an entry itself back to an account, never what a link at its name points to. Takes its
+    path and the account `owner_of` named. Raises `OSError` when it cannot be given."""
+    os.chown(path, owner, -1, follow_symlinks=False)
+
+
+def give_to_root(path: Path) -> None:
+    """Give an entry itself to the machine's administrator, never what a link at its name points to.
+    Takes its path. Raises `OSError` when it cannot be given."""
+    os.chown(path, 0, 0, follow_symlinks=False)
+
+
+def close_to_writes(path: Path) -> None:
+    """Let no one, the owner included, add or remove anything in a folder, never changing what a link
+    at its name points to. Takes its path. Raises `OSError` when it cannot be changed."""
+    os.chmod(path, 0o555, follow_symlinks=False)
+
+
+def open_to_its_owner(path: Path) -> None:
+    """Let a folder's owner, and only its owner, add and remove entries in it again, never changing
+    what a link at its name points to. Takes its path. Raises `OSError` when it cannot be changed."""
+    os.chmod(path, 0o700, follow_symlinks=False)
+
+
+def reachable_by(path: Path, owner: int) -> bool:
+    """Tell whether an account can open a folder and remove what is in it, reading the entry itself.
+    Takes its path and the account `owner_of` named. Returns the answer."""
+    try:
+        st = path.lstat()
+    except OSError:
+        return False
+    return st.st_uid == owner and bool(st.st_mode & stat.S_IWUSR)
+
+
 def is_another_disk(error: OSError) -> bool:
     """Tell whether an error is a rename refused across two disks. Takes the error. Returns the
     answer."""

@@ -22,9 +22,15 @@ class TestWhoHoldsIt(unittest.TestCase):
     def test_a_link_is_trusted_only_from_the_system_an_administrator_or_the_acting_account(self):
         acting = "S-1-5-21-1"
         for owner in (winlock.SYSTEM, winlock.ADMINISTRATORS, acting):
-            self.assertTrue(winlock.trusted_owner(owner, acting), owner)
+            self.assertTrue(winlock.trusted_owner(owner, acting, False), owner)
         for owner in ("S-1-5-21-2", "S-1-5-32-545", "", None):
-            self.assertFalse(winlock.trusted_owner(owner, acting), owner)
+            self.assertFalse(winlock.trusted_owner(owner, acting, False), owner)
+
+    def test_as_an_administrator_the_acting_accounts_own_link_is_not_trusted(self):
+        acting = "S-1-5-21-1"
+        self.assertFalse(winlock.trusted_owner(acting, acting, True))
+        for owner in (winlock.SYSTEM, winlock.ADMINISTRATORS):
+            self.assertTrue(winlock.trusted_owner(owner, acting, True), owner)
 
     def test_a_denial_is_graded_from_that_account(self):
         with tempfile.TemporaryDirectory() as folder:

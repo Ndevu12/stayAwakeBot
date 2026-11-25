@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.bots.security.hygiene.staging_kit import HELD_ASIDE_MARK, held_aside
-from stayawake.utils import atomicwrite, hostdenial, pathsafe
+from stayawake.utils import atomicwrite, folders, hostdenial
 
 __all__ = ["HELD_ASIDE_MARK", "Moved", "Seen", "held_aside", "move_aside", "put_back", "put_back_this", "seen_at"]
 
@@ -43,7 +43,11 @@ class Moved:
 
 
 def _seen(found: os.stat_result) -> Seen:
-    return Seen(found.st_dev, found.st_ino, stat.S_IFMT(found.st_mode), found.st_ctime_ns)
+    """Record what an entry is. Takes its attributes. Returns its device, inode, kind, a link for any
+    entry that points elsewhere, and when it last changed."""
+    points_elsewhere = getattr(found, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    kind = stat.S_IFLNK if points_elsewhere else stat.S_IFMT(found.st_mode)
+    return Seen(found.st_dev, found.st_ino, kind, found.st_ctime_ns)
 
 
 def seen_at(path: Path) -> Seen | None:
@@ -76,14 +80,10 @@ def hold(path: Path) -> Held | None:
     seen = seen_at(path)
     if seen is None:
         return None
-    if seen.kind == stat.S_IFDIR:
-        flags = os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag()
-    elif seen.kind == stat.S_IFREG:
-        flags = os.O_RDONLY | pathsafe.no_follow_flag() | getattr(os, "O_NONBLOCK", 0)
-    else:
+    if seen.kind not in (stat.S_IFDIR, stat.S_IFREG):
         return Held(seen)
     try:
-        fd = os.open(path, flags)
+        fd = folders.hold_entry(path, folder=seen.kind == stat.S_IFDIR)
     except OSError:
         return None
     opened = _seen(os.fstat(fd))

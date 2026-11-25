@@ -23,6 +23,10 @@ def junction(link: Path, target: Path) -> None:
                    capture_output=True)
 
 
+def as_administrator(elevated: bool):
+    return mock.patch.object(winlock, "administrator", return_value=elevated)
+
+
 class _Sandbox(unittest.TestCase):
 
     def setUp(self):
@@ -116,8 +120,9 @@ class TestAFileIsReadBack(_Sandbox):
         for at_a_link in (atomicwrite.REFUSE_A_LINK, atomicwrite.REPLACE_A_LINK):
             self.assertIsNone(atomicwrite.read_back(self.base / "record.json", 100,
                                                     at_a_link=at_a_link), at_a_link)
-        self.assertEqual(b"planted", atomicwrite.read_back(self.base / "record.json", 100,
-                                                          at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
+        with as_administrator(False):
+            self.assertEqual(b"planted", atomicwrite.read_back(self.base / "record.json", 100,
+                                                              at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
 
 
 @WINDOWS_ONLY
@@ -129,14 +134,49 @@ class TestALinkAtTheFilesName(_Sandbox):
         self.assertTrue((self.base / "record.json").is_symlink())
         self.assertEqual([], self.landed_elsewhere())
 
-    def test_a_symlink_this_account_placed_is_written_through(self):
+    def a_dotfiles_link_in(self, folder: Path) -> Path:
         (self.elsewhere / "dotfiles-record.json").write_bytes(b"old")
-        (self.base / "record.json").symlink_to(self.elsewhere / "dotfiles-record.json")
-        self.assertTrue(atomicwrite.replace(self.base / "record.json", "{}",
-                                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
-        self.assertTrue((self.base / "record.json").is_symlink())
-        self.assertEqual(b"{}", (self.elsewhere / "dotfiles-record.json").read_bytes())
-        atomicwrite.set_mode(self.base / "record.json", 0o600)
+        (folder / "record.json").symlink_to(self.elsewhere / "dotfiles-record.json")
+        return folder / "record.json"
+
+    def written_through(self, link: Path) -> bool:
+        written = atomicwrite.replace(link, "{}", at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        self.assertEqual(b"{}" if written else b"old", (self.elsewhere / "dotfiles-record.json").read_bytes())
+        return written
+
+    def test_a_symlink_this_account_placed_is_written_through(self):
+        link = self.a_dotfiles_link_in(self.base)
+        with as_administrator(False):
+            self.assertTrue(self.written_through(link))
+            atomicwrite.set_mode(link, 0o600)
+        self.assertTrue(link.is_symlink())
+
+    def test_as_an_administrator_a_link_the_acting_account_owns_is_refused(self):
+        link = self.a_dotfiles_link_in(self.base)
+        with as_administrator(True), \
+                mock.patch.object(winlock, "held_owner_sid", return_value=winlock.current_sid()):
+            self.assertFalse(self.written_through(link))
+
+    def test_as_an_administrator_a_link_administrators_placed_where_only_they_write_is_followed(self):
+        link = self.a_dotfiles_link_in(self.base)
+        with as_administrator(True), \
+                mock.patch.object(winlock, "held_owner_sid", return_value=winlock.ADMINISTRATORS), \
+                mock.patch.object(winlock, "others_may_write", return_value=False):
+            self.assertTrue(self.written_through(link))
+
+    def test_a_link_in_a_folder_others_can_write_in_is_refused(self):
+        shared = self.base / "shared"
+        shared.mkdir()
+        subprocess.run(["icacls", str(shared), "/grant", "*S-1-5-32-545:(OI)(CI)M"], check=True,
+                       capture_output=True)
+        link = self.a_dotfiles_link_in(shared)
+        with as_administrator(False):
+            self.assertFalse(self.written_through(link))
+
+    def test_a_link_in_a_folder_said_to_be_writable_by_others_is_refused(self):
+        link = self.a_dotfiles_link_in(self.base)
+        with as_administrator(False), mock.patch.object(winlock, "others_may_write", return_value=True):
+            self.assertFalse(self.written_through(link))
 
     def test_a_symlink_another_account_owns_is_refused(self):
         (self.elsewhere / "dotfiles-record.json").write_bytes(b"old")
