@@ -10,20 +10,19 @@ the payload is stamped with the schema by the CLI.
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 from stayawake.bots.security import clean_ledger, govern_held, govern_status
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.models import CLEAN, INFECTED, RESIDUE_VERDICT, ScanReport, ScanResult
-from stayawake.bots.security.scanner import scan_target
+from stayawake.bots.security.scanner import scan_target, unreadable
 from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
-from stayawake.lib.git import incoming, objects
+from stayawake.lib.git import blob_copies, incoming
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.write.working_tree import uncommitted_paths
-from stayawake.utils import atomicwrite, exitcodes, pathsafe, scratch
+from stayawake.utils import exitcodes, pathsafe, scratch
 from stayawake.utils.pace import DeadlineReached, Pace
 from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
@@ -57,8 +56,8 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     current().step("scan", "scanning what arrived")
     govern_status.write(repo, "checking", step="scanning what arrived")
     try:
-        payload, code, already_there = _scan_arrived(arrived.root, arrived.paths, config, arrived.base,
-                                                     deadline)
+        payload, code, already_there = _scan_arrived(arrived.root, arrived.commit, arrived.paths, config,
+                                                     arrived.base, deadline)
     except DeadlineReached:
         return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:
@@ -215,23 +214,26 @@ def _scan_files(files: Path, paths: tuple[str, ...], policy) -> ScanResult:
         return scan_target(target, policy.signatures, policy.allowlist)
 
 
-def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None, base: str | None = None,
-                  deadline: float | None = None) -> tuple[dict, int, list[dict]]:
-    """Scan the files an update brought, within `deadline` seconds when given. Takes the work tree,
-    the arrived paths, the operator config, the commit the folder had before and the deadline.
-    Returns the scan document, its exit, and the findings the folder already had before the
-    update, which do not count toward the verdict. Raises DeadlineReached at the deadline."""
+def _scan_arrived(root: Path, commit: str, paths: tuple[str, ...], config: str | None,
+                  base: str | None = None, deadline: float | None = None) -> tuple[dict, int, list[dict]]:
+    """Scan the files an update brought, each by its blob, within `deadline` seconds when given.
+    Takes the holding work tree, the commit the update brought, the arrived paths, the operator
+    config, the commit the folder had before and the deadline. Returns the scan document, its exit,
+    and the findings the folder already had before the update, which do not count toward the
+    verdict. Raises DeadlineReached at the deadline."""
     policy = operator_policy(config)
-    files = _plain_copy(Path(root), paths)
+    arrived = blob_copies.copy_out(Path(root), commit, paths, "the files an update brought in")
+    size = sum(pathsafe.regular_size(folder, names) for folder, names in arrived.folders)
     already = []
     with Pace(current(), deadline) as pace:
-        pace.plan(str(root), files=len(paths), size=pathsafe.regular_size(files, paths), commits=0, workers=1)
+        pace.plan(str(root), files=len(paths), size=size, commits=0, workers=1)
         pace.begin(str(root), "files", len(paths), counted=False)
         try:
-            result = _scan_files(files, paths, policy)
+            result = _scan_copies(arrived, policy)
             if base and result.findings:
-                before = _scan_files(_copy_as_before(Path(root), base, paths), paths, policy)
-                already = govern_held.set_aside_already_there(result, before)
+                before = blob_copies.copy_out(Path(root), base, paths,
+                                              "the files an update changed, as they were before")
+                already = govern_held.set_aside_already_there(result, _scan_copies(before, policy))
         except KeyboardInterrupt:
             if pace.expired:
                 raise DeadlineReached from None
@@ -253,36 +255,31 @@ def _scan_arrived(root: Path, paths: tuple[str, ...], config: str | None, base: 
     return _in_plain_words(report.to_payload()), code, already_there
 
 
-def _copy_as_before(root: Path, base: str, paths: tuple[str, ...]) -> Path:
-    """Copy the arrived files as they were at `base` into a directory of their own; a file the
-    update added is left out. Takes the work tree, the earlier commit and the paths."""
-    where = scratch.new_dir("the files an update changed, as they were before")
-    for rel in paths:
-        data = objects.blob(root, f"{base}:{rel}")
-        if data is None:
-            continue
-        destination = where / rel
-        try:
-            atomicwrite.make_folder(destination.parent)
-        except OSError:
-            continue
-        atomicwrite.replace(destination, data)
-    return where
+def _scan_copies(copies: "blob_copies.BlobCopies", policy) -> ScanResult:
+    """Scan each folder of copied files and join the results. Takes the copies and the operator's
+    policy. Returns one result, errored when a file could not be copied."""
+    result = None
+    for folder, names in copies.folders:
+        found = _scan_files(folder, names, policy)
+        result = found if result is None else _joined(result, found)
+    if result is None:
+        result = _scan_files(scratch.new_dir("the files an update brought in"), (), policy)
+    if copies.not_copied:
+        result.error = result.error or unreadable(copies.not_copied)
+    return result
 
 
-def _plain_copy(root: Path, paths: tuple[str, ...]) -> Path:
-    """Copy the arrived files into a directory of their own, so they are scanned as content and not
-    as the borrowed repository they were produced in. Takes the work tree and the arrived paths;
-    returns the directory."""
-    where = scratch.new_dir("the files an update brought in")
-    for rel in paths:
-        destination = where / rel
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            shutil.copyfile(root / rel, destination)
-        except OSError:
-            pass
-    return where
+def _joined(first: ScanResult, second: ScanResult) -> ScanResult:
+    """Join a second scan of the same update into the first. Takes both results. Returns the first,
+    now holding each finding, advisory, note and error of both once."""
+    for kept, added in ((first.findings, second.findings), (first.advisories, second.advisories),
+                        (first.informational, second.informational)):
+        seen = [item.to_dict() for item in kept]
+        kept.extend(item for item in added if item.to_dict() not in seen)
+    first.notes.extend(note for note in second.notes if note not in first.notes)
+    first.error = first.error or second.error
+    first.stored_payload = first.stored_payload or second.stored_payload
+    return first
 
 
 def _verdict(payload: dict) -> str:

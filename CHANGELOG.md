@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- `saw govern` checks every file an update brings, including names that differ only in case and
+  paths too long to read the usual way.
+
 ## [0.17.6] - 2026-11-25
 
 ### Added

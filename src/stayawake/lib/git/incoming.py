@@ -33,6 +33,7 @@ _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "pru
                   "branch": frozenset({"remote", "merge", "rebase"})}
 _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
 _IDENTITY_KEYS = ("user.name", "user.email")
+_FILE_MODES = (b"100644", b"100755", b"120000")
 
 WRITE_LEFT_PART_WAY = ("the update could not be written into the open folder, and the folder may have "
                        "changed; check it with git status")
@@ -406,15 +407,19 @@ def _run_gh(work: Path, args: list[str]) -> str:
 
 
 def _changed_files(work: Path, base: str, head: str) -> "tuple[str, ...] | None":
+    """List each file `head` records that differs from `base`. Takes the holding work tree and both
+    commits. Returns the paths, or None when git could not list them."""
     if base == head:
         return ()
-    listed = stdout_bytes(work, ["diff", "--name-only", "-z", base, head], context=SAW_OWNED)
+    listed = stdout_bytes(work, ["diff", "--raw", "-z", "--no-renames", base, head], context=SAW_OWNED)
     if listed is None:
         return None
     names = []
-    for raw in listed.split(b"\0"):
-        if raw and (work / os.fsdecode(raw)).is_file():
-            names.append(os.fsdecode(raw))
+    fields = listed.split(b"\0")
+    for described, path in zip(fields[0::2], fields[1::2]):
+        modes = described.split(b" ")
+        if len(modes) >= 2 and modes[1] in _FILE_MODES:
+            names.append(os.fsdecode(path))
     return tuple(names)
 
 

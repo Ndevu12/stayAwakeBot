@@ -94,6 +94,14 @@ def run_matchers(target, matcher_names: list[str],
     return out
 
 
+def unreadable(names) -> str:
+    """Name the paths a scan could not read. Takes the paths. Returns the sentence a result carries
+    as its error."""
+    unique = sorted(set(names))
+    shown = ", ".join(unique[:5]) + (" …" if len(unique) > 5 else "")
+    return f"{len(unique)} path(s) unreadable: {shown}"
+
+
 def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
              matcher_order: list[str], read_errors: list[str], coverage_notes: list[str],
              opts, root, allowlist: list[dict[str, Any]] | None,
@@ -128,9 +136,7 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     # run fails CLOSED (service.scan turns any errored target into a non-zero exit). Findings from the
     # readable files are kept; the target is still marked errored.
     if read_errors and not result.error:
-        unique = sorted(set(read_errors))
-        shown = ", ".join(unique[:5]) + (" …" if len(unique) > 5 else "")
-        result.error = f"{len(unique)} path(s) unreadable: {shown}"
+        result.error = unreadable(read_errors)
     result.notes.extend(coverage_notes or [])
     note = _payload_merge_note(result.findings)
     if note:
