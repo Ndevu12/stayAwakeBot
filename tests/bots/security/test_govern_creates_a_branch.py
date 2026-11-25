@@ -6,6 +6,9 @@ from stayawake.bots.security import govern
 from stayawake.lib.git import incoming
 from stayawake.utils import exitcodes
 from tests.bots.security.test_govern_replays_a_tracking_checkout import _TrackingCheckout
+from tests.support import samples
+
+_PAYLOAD = "var _0x=[String.%s(127)];eval(_0x.join(\"\"));\n" % samples.FROM_CHAR_CODE
 
 
 class CreatingABranch(_TrackingCheckout):
@@ -53,6 +56,24 @@ class WhatACommandBrings(_TrackingCheckout):
                 answer, _code = govern.prepare(str(self.open), str(self.into), "git", args)
                 self.assertNotIn("passthrough", answer)
                 self.assertIn("decision", answer)
+
+    def test_every_spelling_that_names_a_commit_is_checked(self):
+        self.write(self.upstream, "loader.js", _PAYLOAD)
+        self.commit(self.upstream, "payload")
+        self.git(self.open, "fetch", "-q")
+        before = self.git(self.open, "rev-parse", "HEAD").strip()
+        for args in (["checkout", "-m", "origin/main"], ["checkout", "origin/main", "-m"],
+                     ["checkout", "--merge", "origin/main"], ["checkout", "--recurse-submodules", "origin/main"],
+                     ["checkout", "--recurse-submodules=yes", "origin/main"], ["switch", "-m", "--detach", "origin/main"],
+                     ["switch", "--detach", "origin/main", "-m"], ["checkout", "--made-up-option"]):
+            with self.subTest(args=args):
+                self.assertFalse(incoming.brings_nothing("git", args))
+                answer, _code = govern.prepare(str(self.open), str(self.into), "git", args)
+                self.assertNotIn("passthrough", answer)
+                self.assertEqual(self.git(self.open, "rev-parse", "HEAD").strip(), before)
+                self.assertFalse((self.open / "loader.js").exists())
+                if "--made-up-option" not in args:
+                    self.assertEqual(answer["scan"]["results"][0]["verdict"], "infected", answer)
 
     def test_no_stat_and_no_tags_are_still_checked(self):
         for args in (["pull", "-n"], ["fetch", "-n"], ["merge", "-n", "origin/main"], ["rebase", "-n"]):

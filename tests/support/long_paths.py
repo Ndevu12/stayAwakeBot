@@ -23,10 +23,10 @@ def too_long_by_its_full_name(folder: Path) -> str:
     return "/".join(parts)[:-3] + ".js"
 
 
-def stage_blob(repo: Path, name: str, text: str) -> None:
-    """Stage a file by its blob, writing nothing in the work tree. Takes the repository, the name
-    and the text."""
+def stage_blob(repo: Path, name: str, text: str, mode: str = "100644") -> None:
+    """Stage a file by its blob, writing nothing in the work tree. Takes the repository, the name,
+    the text and the mode."""
     blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input=text,
                           capture_output=True, text=True, check=True).stdout.strip()
     subprocess.run(["git", "-C", str(repo), "update-index", "-z", "--add", "--index-info"],
-                   input=b"100644 %s\t%s\0" % (blob.encode(), os.fsencode(name)), check=True, capture_output=True)
+                   input=b"%s %s\t%s\0" % (mode.encode(), blob.encode(), os.fsencode(name)), check=True, capture_output=True)

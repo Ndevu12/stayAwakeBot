@@ -94,6 +94,43 @@ class AnUpdateIsCheckedAsItIsWritten(_TrackingCheckout):
         self.assertEqual(self.git(self.open, "status", "--porcelain"), "")
 
 
+class AttributesTheUpdateChanges(_TrackingCheckout):
+    """The folder expands `$Id$` in its `.js` files, and the update stops that and brings such a file."""
+
+    def _start_with(self, attributes_at: str, *others: tuple[str, str]) -> None:
+        stage_blob(self.upstream, attributes_at, "*.js ident\n")
+        for name, text in others:
+            stage_blob(self.upstream, name, text)
+        self.git(self.upstream, "commit", "-qm", "expands ids")
+        self.git(self.open, "pull", "-q", "--ff-only")
+
+    def _bring(self, attributes_at: str, file_at: str, *others: tuple[str, str, str]) -> dict:
+        stage_blob(self.upstream, attributes_at, "# none\n")
+        stage_blob(self.upstream, file_at, "x = '$Id$';\n")
+        for name, text, mode in others:
+            stage_blob(self.upstream, name, text, mode)
+        self.git(self.upstream, "commit", "-qm", "stops expanding")
+        self.git(self.open, "fetch", "-q")
+        govern.prepare(str(self.open), str(self.into), "git", ["merge", "origin/main"])
+        return govern.apply(str(self.open), str(self.into))[0]
+
+    def test_a_file_named_before_the_attributes_lands_as_checked(self):
+        self._start_with(".gitattributes")
+        applied = self._bring(".gitattributes", "+x.js")
+        self.assertTrue(applied["applied"], applied)
+        self.assertEqual((self.open / "+x.js").read_bytes(), b"x = '$Id$';\n")
+
+    def test_an_update_that_cannot_be_written_leaves_no_file_behind(self):
+        self._start_with("sub/.gitattributes", ("sub/keep.txt", "k\n"))
+        applied = self._bring("sub/.gitattributes", "sub/+x.js", ("A/x.txt", "hello\n", "100644"),
+                              ("a", "elsewhere", "120000"))
+        landed = self.open / "sub" / "+x.js"
+        if applied["applied"]:
+            self.assertEqual(landed.read_bytes(), b"x = '$Id$';\n")
+        else:
+            self.assertFalse(os.path.lexists(landed), "a file the check did not see was left in the folder")
+
+
 class NothingRunsWhileAnUpdateIsChecked(_TrackingCheckout):
 
     def test_a_command_that_runs_other_commands_is_left_to_you(self):

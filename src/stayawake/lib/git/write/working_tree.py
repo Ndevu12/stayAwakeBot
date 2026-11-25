@@ -382,32 +382,50 @@ def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
 
 def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[bytes]) -> bool:
     """Write what `commit` records at `paths` into `worktree`, converted by git's built-in
-    end-of-line and ident rules, and delete every path in `paths` it does not record; a directory
-    holding anything is left in place, as git leaves it. Returns whether every one was written."""
-    deleted = [p for p in paths if p not in entries]
+    end-of-line and ident rules and the attributes `commit` records, and delete every path in
+    `paths` it does not record. A directory holding anything is left in place, the way git leaves
+    it, and a path reached through a link is left alone. Returns whether every one was written."""
+    whole = all([_removed(worktree, rel) for rel in paths if rel not in entries])
     written = [p for p in paths if p in entries and entries[p][0] != _GITLINK]
-    for rel in deleted:
-        if passes_through_a_link(worktree, worktree / os.fsdecode(rel)):
-            return False
-        target = worktree / os.fsdecode(rel)
-        try:
-            if target.is_dir() and not target.is_symlink():
-                if not any(target.iterdir()):
-                    target.rmdir()
-                continue
-            if os.path.lexists(target):
-                target.unlink()
-        except OSError:
-            return False
+    if not written:
+        return whole
+    attributes = [rel for rel in written if _is_attributes_file(rel)]
+    rest = [rel for rel in written if not _is_attributes_file(rel)]
+    with borrow(repo) as borrowed, borrowed.own_attributes_then(_NO_FILTER):
+        conversion = _conversion_config(worktree)
+        for batch in (attributes, rest):
+            if batch and _checked_out(borrowed, conversion, commit, batch, worktree,
+                                      to_temporary_files=False) is None:
+                return False
+    return whole
+
+
+def _is_attributes_file(rel: bytes) -> bool:
+    """Tell whether a path names a `.gitattributes` file. Takes the path. Returns the answer."""
+    return rel == b".gitattributes" or rel.endswith(b"/.gitattributes")
+
+
+def _removed(worktree: Path, rel: bytes) -> bool:
+    """Delete a path a commit does not record, and every folder it leaves empty. A path reached
+    through a link and a directory holding anything are left in place. Takes the working tree and
+    the path. Returns whether nothing is left there but such a directory."""
+    target = worktree / os.fsdecode(rel)
+    if passes_through_a_link(worktree, target):
+        return False
+    try:
+        if target.is_dir() and not target.is_symlink():
+            if not any(target.iterdir()):
+                target.rmdir()
+            return True
+        if os.path.lexists(target):
+            target.unlink()
         parent = target.parent
         while parent != worktree and parent.is_dir() and not any(parent.iterdir()):
             parent.rmdir()
             parent = parent.parent
-    if not written:
-        return True
-    with borrow(repo) as borrowed, borrowed.own_attributes_then(_NO_FILTER):
-        return _checked_out(borrowed, _conversion_config(worktree), commit, written, worktree,
-                            to_temporary_files=False) is not None
+    except OSError:
+        return False
+    return True
 
 
 def _checked_out(borrowed, conversion: list[str], commit: str, paths: list[bytes], destination: Path, *,

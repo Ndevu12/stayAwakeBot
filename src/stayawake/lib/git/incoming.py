@@ -26,8 +26,23 @@ _GLOBAL = frozenset({
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
     "--config-env", "--exec-path",
 })
-_OPTION_VALUE = frozenset({"-b", "-B", "-c", "-C", "-m", "--orphan", "--recurse-submodules", "--conflict",
-                           "--create", "--force-create"})
+_OPTIONS_TAKING_THE_NEXT_WORD = {
+    "checkout": frozenset({"-b", "-B", "--orphan", "--conflict", "--pathspec-from-file"}),
+    "switch": frozenset({"-c", "-C", "--create", "--force-create", "--orphan", "--conflict"}),
+    "pull": frozenset({"-s", "--strategy", "-X", "--strategy-option", "--depth", "--deepen", "--shallow-since",
+                       "--shallow-exclude", "-o", "--server-option", "--upload-pack", "-j", "--jobs",
+                       "--negotiation-tip"}),
+}
+_OPTIONS_TAKING_NO_WORD = {
+    "checkout": frozenset({"-q", "--quiet", "--progress", "--no-progress", "-f", "--force", "--ours", "--theirs",
+                           "-t", "--track", "--no-track", "--guess", "--no-guess", "-l", "-d", "--detach", "-m",
+                           "--merge", "--overlay", "--no-overlay", "--ignore-skip-worktree-bits",
+                           "--ignore-other-worktrees", "--recurse-submodules", "--no-recurse-submodules",
+                           "--pathspec-file-nul"}),
+    "switch": frozenset({"-q", "--quiet", "--progress", "--no-progress", "-f", "--force", "--discard-changes",
+                         "-t", "--track", "--no-track", "--guess", "--no-guess", "-d", "--detach", "-m", "--merge",
+                         "--ignore-other-worktrees", "--recurse-submodules", "--no-recurse-submodules"}),
+}
 _RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
 _GH_INBOUND = frozenset({("pr", "checkout"), ("repo", "sync"), ("release", "download"), ("run", "download")})
 _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "prune"}),
@@ -80,13 +95,16 @@ def classify(tool: str, args: list[str]) -> str | None:
 
 
 def brings_nothing(tool: str, args: list[str]) -> bool:
-    """Tell whether a command moves nothing into the open folder. Takes the tool and the arguments
+    """Tell whether a command certainly moves nothing into the open folder: a checkout or switch
+    whose every option git reads as saw does, naming no commit. Takes the tool and the arguments
     without the program name. Returns the answer."""
     parsed = _parse_git(args) if tool == "git" else None
     if parsed is None:
         return False
     sub, rest = parsed
-    return (sub == "checkout" and not _checkout_brings(rest)) or (sub == "switch" and not _switch_brings(rest))
+    if sub not in _OPTIONS_TAKING_NO_WORD or not _options_read_as_git_reads_them(sub, rest):
+        return False
+    return not (_checkout_brings(rest) if sub == "checkout" else _switch_brings(rest))
 
 
 def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | str":
@@ -264,7 +282,7 @@ def _git_kind(args: list[str]) -> str | None:
         return None
     if sub in {"pull", "merge", "rebase", "fetch"}:
         return sub
-    if sub == "submodule" and _positionals(rest)[:1] == ["update"]:
+    if sub == "submodule" and _positionals(sub, rest)[:1] == ["update"]:
         return sub
     if sub == "checkout" and _checkout_brings(rest):
         return sub
@@ -337,7 +355,10 @@ def runs_other_commands(sub: str, args: list[str]) -> bool:
     return False
 
 
-def _positionals(args: list[str]) -> list[str]:
+def _positionals(sub: str, args: list[str]) -> list[str]:
+    """List the words of a git command that are not options or their values, up to `--`. Takes the
+    subcommand and its arguments. Returns the words."""
+    taking_a_word = _OPTIONS_TAKING_THE_NEXT_WORD.get(sub, frozenset())
     words: list[str] = []
     index = 0
     while index < len(args):
@@ -345,27 +366,43 @@ def _positionals(args: list[str]) -> list[str]:
         if arg == "--":
             break
         if arg.startswith("-") and arg != "-":
-            index += 2 if arg in _OPTION_VALUE and "=" not in arg else 1
+            index += 2 if arg in taking_a_word else 1
             continue
         words.append(arg)
         index += 1
     return words
 
 
+def _options_read_as_git_reads_them(sub: str, args: list[str]) -> bool:
+    """Tell whether every option of a command, up to `--`, is one whose value saw reads the way git
+    reads it. Takes the subcommand and its arguments. Returns the answer."""
+    taking_a_word = _OPTIONS_TAKING_THE_NEXT_WORD.get(sub, frozenset())
+    known = taking_a_word | _OPTIONS_TAKING_NO_WORD.get(sub, frozenset())
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg == "--":
+            return True
+        if not arg.startswith("-") or arg == "-":
+            continue
+        if arg in taking_a_word:
+            index += 1
+        elif arg.split("=", 1)[0] not in known and not (arg[:2] in taking_a_word and not arg.startswith("--")):
+            return False
+    return True
+
+
 def _checkout_brings(args: list[str]) -> bool:
-    """Tell whether a checkout moves the folder to another commit. Takes its arguments. Returns the
+    """Tell whether a checkout names a commit to move the folder to. Takes its arguments. Returns the
     answer."""
-    if "--orphan" in args:
-        return False
-    return len(_positionals(args[:args.index("--")] if "--" in args else args)) > 0
+    return len(_positionals("checkout", args)) > 0
 
 
 def _switch_brings(args: list[str]) -> bool:
-    """Tell whether a switch moves the folder to another commit. Takes its arguments. Returns the
+    """Tell whether a switch names a commit to move the folder to. Takes its arguments. Returns the
     answer."""
-    if "--orphan" in args:
-        return False
-    return len(_positionals(args)) > 0
+    return len(_positionals("switch", args)) > 0
 
 
 def _run_command(work: Path, tool: str, args: list[str], kind: str, signing: tuple[str, ...] = ()) -> str:
@@ -385,7 +422,7 @@ def _run_command(work: Path, tool: str, args: list[str], kind: str, signing: tup
 
 
 def _pull(work: Path, args: list[str], signing: tuple[str, ...] = ()) -> str:
-    positionals = _positionals(args)
+    positionals = _positionals("pull", args)
     if not run_ok(work, ["fetch", *positionals[:1]], context=OPERATOR_PUSH):
         return "the fetch did not finish"
     onto = [f"{positionals[0]}/{positionals[1]}"] if len(positionals) >= 2 else ["@{upstream}"]
