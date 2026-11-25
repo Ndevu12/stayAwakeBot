@@ -15,12 +15,21 @@ reader, not the mechanism or the weakness it closed.
 
 ## [0.17.6] - 2026-11-25
 
+### Added
+- Each release on GitHub carries a platform manifest naming the wheel for each system and
+  architecture, a requirements lock that pins saw and every dependency by hash, and the SBOM under
+  the release's name. The release's signed build provenance covers all three. See "Verify a release"
+  in the docs to check a file and install with every dependency pinned.
+
 ### Changed
 - Reports saw keeps for you now stay in one place and survive a restart: a full report too large for
   the terminal, a SARIF log that could not be written where asked, and reports whose folder cannot be
   written. saw gives the full path each time.
 
 ### Fixed
+- When an update `saw govern` checked cannot be written into the folder, saw puts back what it had
+  already changed before saying the folder was not changed, and tells you to check the folder when it
+  cannot put it back. Putting a folder back with `saw govern restore` does the same.
 - saw runs the real git even in a terminal where an editor's git stand-in comes first, so its own
   git work is not slowed down or given the stand-in's settings.
 - `saw govern` no longer lets an update in over uncommitted work on a file the update changes. It
