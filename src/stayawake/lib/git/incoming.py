@@ -151,13 +151,15 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     if arrived.mode == "refs":
         if not arrived.refs:
             return ""
-        if adopt_objects(repo, bare, [new for _, new, _ in arrived.refs], [arrived.base]):
-            return "the update could not be copied into the open folder"
+        why = adopt_objects(repo, bare, [new for _, new, _ in arrived.refs], [arrived.base])
+        if why:
+            return f"the update could not be copied into the open folder: {why}"
         if not update_refs(repo, list(arrived.refs)):
             return "the open folder's refs changed while the update was checked"
         return ""
-    if adopt_objects(repo, bare, [arrived.commit], [arrived.base]):
-        return "the update could not be copied into the open folder"
+    why = adopt_objects(repo, bare, [arrived.commit], [arrived.base])
+    if why:
+        return f"the update could not be copied into the open folder: {why}"
     way = changes_in_the_way(repo, arrived.commit)
     if way is None:
         return "saw could not tell whether uncommitted work could be kept"

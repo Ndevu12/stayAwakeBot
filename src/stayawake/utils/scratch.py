@@ -56,14 +56,26 @@ def _write_record(where: Path) -> None:
         pass
 
 
-def new_dir(purpose: str, *, teardown: Teardown | None = None) -> Path:
-    """Make a directory under this run's root. Takes what it is for and how to tear it down.
-    Returns the path."""
-    base = root() / _slug(purpose)
-    base.mkdir(parents=True, exist_ok=True)
-    made = Path(tempfile.mkdtemp(dir=str(base)))
+def new_dir(purpose: str, *, teardown: Teardown | None = None,
+            on_filesystem_of: Path | None = None) -> Path:
+    """Make a directory under this run's root, or on the filesystem of a given folder. Takes what it
+    is for, how to tear it down, and the folder whose filesystem it must share. Returns the path."""
+    if on_filesystem_of is not None and not _same_filesystem(root(), Path(on_filesystem_of)):
+        made = Path(tempfile.mkdtemp(dir=str(on_filesystem_of), prefix=f"{ROOT_PREFIX}{_slug(purpose)}-"))
+    else:
+        base = root() / _slug(purpose)
+        base.mkdir(parents=True, exist_ok=True)
+        made = Path(tempfile.mkdtemp(dir=str(base)))
     _areas.append(Area(made, purpose, teardown))
     return made
+
+
+def _same_filesystem(one: Path, other: Path) -> bool:
+    """Tell whether two paths are on one filesystem. Takes the paths. Returns the answer."""
+    try:
+        return os.stat(one).st_dev == os.stat(other).st_dev
+    except OSError:
+        return False
 
 
 def kept_dir(purpose: str) -> Path:

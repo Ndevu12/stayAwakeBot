@@ -52,6 +52,24 @@ def _place(src: Path, dest_dir: Path) -> None:
     os.replace(staging, dest)
 
 
+def _temporary_packs(pack_dir: Path) -> set[str]:
+    """Return the names of git's unfinished pack files in a pack folder. Takes the folder."""
+    try:
+        return {entry.name for entry in pack_dir.iterdir() if entry.name.startswith("tmp_")}
+    except OSError:
+        return set()
+
+
+def _remove_temporary_packs(pack_dir: Path, before: set[str]) -> None:
+    """Remove the unfinished pack files in a pack folder, keeping the ones named in `before`. Takes
+    the folder and those names."""
+    for name in _temporary_packs(pack_dir) - before:
+        try:
+            (pack_dir / name).unlink()
+        except OSError:
+            pass
+
+
 def adopt_objects(repo: str | Path, source: str | Path, tips: list[str],
                   known: list[str]) -> str:
     """Make every object `tips` reach in `source` and `known` do not present in `repo`.
@@ -71,12 +89,20 @@ def adopt_objects(repo: str | Path, source: str | Path, tips: list[str],
     store = object_directory(repo)
     if store is None:
         return f"{repo} has no object store"
-    staging = scratch.new_dir("objects handed to the operator repository")
+    source_store = object_directory(source)
+    if source_store is None:
+        return "the checked update's repository has no object store"
+    try:
+        staging = scratch.new_dir("objects handed to the operator repository", on_filesystem_of=source_store)
+    except OSError as exc:
+        return f"the new objects could not be packed: {exc.strerror or exc}"
+    unfinished = _temporary_packs(source_store / "pack")
     try:
         named = stdout_bytes_fed(source, ["pack-objects", "--revs", "--local", "-q",
                                           str(staging / "pack")],
                                  _rev_input(tips, known), context=SAW_OWNED)
         if not named:
+            _remove_temporary_packs(source_store / "pack", unfinished)
             return "the new objects could not be packed"
         name = f"pack-{named.decode().strip()}"
         pack, index = staging / f"{name}.pack", staging / f"{name}.idx"
