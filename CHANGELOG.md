@@ -13,12 +13,18 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- `saw govern classify --json` says how saw reads a git or gh command line: whether it could be
+  read, its subcommand after aliases, the folder it acts on and whether it brings files in.
+
 ### Changed
 - Reports saw keeps for you now stay in one place and survive a restart: a full report too large for
   the terminal, a SARIF log that could not be written where asked, and reports whose folder cannot be
   written. saw gives the full path each time.
 
 ### Fixed
+- `saw govern prepare` checks an update however the command is written: with any of git's global
+  options, or through an alias. A command line it cannot read is left to your decision.
 - saw runs the real git even in a terminal where an editor's git stand-in comes first, so its own
   git work is not slowed down or given the stand-in's settings.
 - `saw govern` no longer lets an update in over uncommitted work on a file the update changes. It

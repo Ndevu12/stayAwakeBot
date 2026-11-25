@@ -62,6 +62,19 @@ folder is left as it is and saw prints the command to let it in.
 covered yet. `saw govern uninstall` takes it back out, and your editor is unaffected. saw always
 falls back to your real git and gh.
 
+## Asking how saw reads a command
+
+```text
+saw govern classify --json --tool git|gh --repo <folder> -- <arguments>
+```
+
+`saw govern classify` reads a git or gh command line the way the program does, without running it.
+It answers whether the line could be read (`readable`), the subcommand after aliases, the folder it
+acts on, whether it brings files in (`brings_files`), and whether saw checks what it brings before
+it reaches the folder (`checked`). An unreadable line, such as one with an option git does not know
+or an alias that runs a shell command, answers `readable: false` with the `reason`; treat it as one
+that may bring files in. An editor uses it instead of reading git's options itself.
+
 ## Asking whether a tree is one saw let in
 
 ```text

@@ -20,7 +20,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
-from stayawake.lib.git import incoming, objects
+from stayawake.lib.git import command_line, incoming, objects
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.utils import atomicwrite, exitcodes, pathsafe, scratch
@@ -36,10 +36,19 @@ TOOLS = ("gh", "git")
 
 DECISION_CHOICES = ("run-as-typed", "leave-unchanged")
 
-def is_recognised(tool: str, args: list[str]) -> bool:
-    """Whether `(tool, args)` is an incoming command saw governs. Takes the tool and the operator's
-    arguments without the program name. Returns the answer."""
-    return incoming.classify(tool, list(args)) is not None
+def classify(repo: str, tool: str, args: list[str]) -> tuple[dict, int]:
+    """Read a git or gh command line. Takes the folder it runs in, the tool and
+    the arguments without the program name. Returns whether it could be read, the subcommand after
+    aliases, the folder it acts on, whether it brings files in and whether saw checks it first."""
+    reading = command_line.read(tool, list(args), Path(repo))
+    body: dict = {"readable": reading.readable,
+                  "subcommand": reading.subcommand,
+                  "folder": str(reading.folder) if reading.folder is not None else None,
+                  "brings_files": reading.readable and reading.brings_files,
+                  "checked": reading.readable and reading.brings_files}
+    if not reading.readable:
+        body["reason"] = reading.reason
+    return body, exitcodes.CLEAN if reading.readable else exitcodes.INCOMPLETE
 
 
 def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None = None, *,
@@ -47,7 +56,7 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     """Materialise the update outside the open folder and scan what arrived. Takes the open folder,
     the holding directory, the tool, the arguments, the config and the deadline. Returns the answer
     and its exit: a passthrough, a scan, or a reason with a decision."""
-    if incoming.brings_nothing(tool, args):
+    if incoming.brings_nothing(Path(repo), tool, args):
         return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
     govern_status.write(repo, "checking", step="checking the incoming update")
     current().step("materialise", "checking the incoming update")

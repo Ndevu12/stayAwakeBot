@@ -28,7 +28,8 @@ SCHEMA_VERSION_OF_EACH_DOCUMENT = {
 # `hook install` and `hook repair` print the hook-status document. Their names are not that document.
 ALSO_PRINTED_BY = {
     "hook-status": (("hook", "install"), ("hook", "repair")),
-    "govern": (("govern", "prepare"), ("govern", "apply"), ("govern", "verdict"), ("govern", "restore")),
+    "govern": (("govern", "prepare"), ("govern", "apply"), ("govern", "classify"), ("govern", "verdict"),
+               ("govern", "restore")),
 }
 
 
