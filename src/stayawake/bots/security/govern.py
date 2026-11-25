@@ -46,13 +46,16 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     """Materialise the update outside the open folder and scan what arrived. Takes the open folder,
     the holding directory, the tool, the arguments, the config and the deadline. Returns the answer
     and its exit: a passthrough, a scan, or a reason with a decision."""
-    if incoming.brings_nothing(tool, args):
+    if incoming.brings_nothing(tool, args, Path(repo)):
         return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
+    staged = incoming.what_it_stages(Path(repo), tool, list(args))
+    if staged is not None:
+        return _check_what_it_stages(repo, staged, config, deadline)
     govern_status.write(repo, "checking", step="checking the incoming update")
     current().step("materialise", "checking the incoming update")
     arrived = incoming.prepare(Path(repo), Path(into), tool, list(args))
     if isinstance(arrived, str):
-        return _unchecked(repo, arrived)
+        return _unchecked(repo, arrived, incoming.folder_it_creates(tool, list(args)))
     current().step("scan", "scanning what arrived")
     govern_status.write(repo, "checking", step="scanning what arrived")
     try:
@@ -98,12 +101,47 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     return answer, code
 
 
-def _unchecked(repo: str, reason: str) -> tuple[dict, int]:
-    """Answer an update saw could not check, leaving the decision to the user. Takes the open folder
-    and the reason. Returns the payload and INCOMPLETE."""
+def _unchecked(repo: str, reason: str, created: str | None = None) -> tuple[dict, int]:
+    """Answer an update saw could not check, leaving the decision to the user. Takes the open folder,
+    the reason and the folder the command creates, when it creates one. Returns the payload, whose
+    scan afterwards covers the created folder or else the open one, and INCOMPLETE."""
     govern_status.write(repo, "finished", reasons=[reason])
-    decision = {"choices": list(DECISION_CHOICES), "scan_after": ["saw", "scan", str(repo)]}
+    scanned = Path(repo) / created if created else Path(repo)
+    decision = {"choices": list(DECISION_CHOICES), "scan_after": ["saw", "scan", str(scanned)]}
     return {"reason": reason, "decision": decision}, exitcodes.INCOMPLETE
+
+
+def _check_what_it_stages(repo: str, staged: "incoming.Staged | str", config: str | None,
+                          deadline: float | None) -> tuple[dict, int]:
+    """Scan the files a command would stage, and let it run as typed when they are clean. Takes the
+    open folder, what the command stages, the operator config and the deadline. Returns a
+    passthrough carrying the scan, the scan of a held command, or a reason with a decision."""
+    if isinstance(staged, str):
+        return _unchecked(repo, staged)
+    purpose = "the files a command stages"
+    try:
+        landing = (blob_copies.copy_out(Path(repo), staged.commit, staged.paths, purpose) if staged.commit
+                   else blob_copies.copy_out_blobs(Path(repo), staged.blobs, purpose))
+        payload, code, already_there = _scan_arrived(Path(repo), landing, staged.paths, config, staged.base,
+                                                     deadline)
+    except DeadlineReached:
+        return _unchecked(repo, "the check did not finish before its deadline")
+    except ValueError as exc:
+        return _unchecked(repo, str(exc) or "the check could not use your config")
+    except OSError:
+        return _unchecked(repo, "the check could not finish")
+    verdict = _verdict(payload)
+    if code == exitcodes.CLEAN and verdict in {CLEAN, RESIDUE_VERDICT}:
+        return {"passthrough": True, "reason": "what the command stages was checked", "scan": payload}, code
+    if verdict not in govern_held.HELD_VERDICTS:
+        return _unchecked(repo, "the check could not finish")
+    govern_status.write(repo, "held", verdict=verdict, reasons=["the command did not run; the folder is unchanged"])
+    answer: dict = {"scan": payload}
+    findings = (payload.get("results") or [{}])[0].get("findings") or []
+    steps = govern_held.next_steps(verdict, findings, already_there, staged.commit, can_let_in=False)
+    if steps:
+        answer["next_steps"] = steps
+    return answer, code
 
 
 def apply(repo: str, into: str, accept: str | None = None, confirm: str | None = None) -> tuple[dict, int]:

@@ -46,6 +46,14 @@ def copy_out(repo: Path, commit: str, paths: tuple[str, ...], purpose: str) -> B
     return _in_folders([(rel, contents.get(recorded[os.fsencode(rel)])) for rel in wanted], purpose)
 
 
+def copy_out_blobs(repo: Path, named: tuple[tuple[str, str], ...], purpose: str) -> BlobCopies:
+    """Copy each named blob under its path, into folders laid out as `_in_folders` lays them. Takes
+    the repository, each path with its blob id, and what the copies are for. Returns the copies,
+    with each blob the repository does not hold listed as not copied."""
+    contents = _read(repo, [oid for _path, oid in named])
+    return _in_folders([(path, contents.get(oid)) for path, oid in named], purpose)
+
+
 def copy_out_as_written(repo: Path, holding: Path, commit: str, paths: tuple[str, ...],
                         purpose: str) -> BlobCopies:
     """Copy each path in the form a move to `commit` writes into `repo`'s working tree, and its

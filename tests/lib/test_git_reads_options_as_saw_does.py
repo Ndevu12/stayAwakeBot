@@ -9,10 +9,12 @@ import subprocess
 import unicodedata
 import unittest
 
-from stayawake.lib.git import incoming, query
+from stayawake.lib.git import query, subcommand_options
 from tests.support.gitrepo import GitSandbox
 
 
+_USAGE_LINE = re.compile(r"^(?:usage|\s*or):\s+git\s+\S+\s*(?P<rest>.*)$")
+_LEADING_OPTION = re.compile(r"\[-[\w-]+\]")
 _OPTION_LINE = re.compile(r"^\s+(?P<short>-\w)?(?:, )?(?P<long>--(?:\[no-\])?\w[\w-]*)?"
                           r"(?P<optional>\[=?[^\]\s]*\])?"
                           r"(?: (?P<required>[<({\[]\S*|\S*[()<>\[\]|]\S*|\.\.\.))?")
@@ -51,6 +53,29 @@ def options_in_usage(text: str) -> dict[str, str]:
     return found
 
 
+def words_in_usage(text: str) -> tuple[set[str], set[str]]:
+    """Read the word each usage line of a git command starts with, after the options it may take
+    first. Takes the usage text. Returns the words, "" for a line with none, and those leading
+    options."""
+    words: set[str] = set()
+    leading: set[str] = set()
+    for line in text.splitlines():
+        match = _USAGE_LINE.match(line)
+        if not match:
+            continue
+        tokens = match.group("rest").split()
+        while tokens and _LEADING_OPTION.fullmatch(tokens[0]):
+            leading.add(tokens.pop(0))
+        word = tokens[0].strip("[]") if tokens else ""
+        words.add(word if re.fullmatch(r"[a-z][a-z-]*", word) else "")
+    return words, leading
+
+
+def _help_all(repo, sub: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), *sub.split(), "--help-all"], capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL).stdout
+
+
 class TheOptionsGitTakesAValueFor(GitSandbox):
 
     def test_a_usage_text_is_read_option_by_option(self):
@@ -62,16 +87,51 @@ class TheOptionsGitTakesAValueFor(GitSandbox):
 
     def test_every_option_the_git_under_test_lists_is_read_as_it_reads_it(self):
         repo = self.new_repo()
-        for sub, taking_a_word in incoming._OPTIONS_TAKING_THE_NEXT_WORD.items():
-            usage = subprocess.run(["git", "-C", str(repo), sub, "--help-all"], capture_output=True, text=True,
-                                   stdin=subprocess.DEVNULL).stdout
-            listed = options_in_usage(usage)
+        for sub, table in subcommand_options.LISTED.items():
+            listed = options_in_usage(_help_all(repo, sub))
+            taking_a_word = table.takes_the_next_word
+            required = {name for name, kind in listed.items() if kind == "required"}
             with self.subTest(sub=sub):
                 self.assertTrue(listed, f"git {sub} listed no options")
-                self.assertEqual(sorted(name for name, kind in listed.items()
-                                        if kind == "required" and name not in taking_a_word), [])
+                self.assertEqual(sorted(required - taking_a_word), [])
                 self.assertEqual(sorted(name for name, kind in listed.items()
                                         if kind != "required" and name in taking_a_word), [])
+                self.assertEqual(sorted(name for name, kind in listed.items() if kind == "optional"
+                                        and not name.startswith("--")
+                                        and name not in table.takes_the_rest_of_its_word), [])
+                self.assertEqual(sorted(table.takes_the_rest_of_its_word & required), [])
+
+    def test_every_option_saw_lets_run_as_typed_is_one_git_lists_without_a_value(self):
+        repo = self.new_repo()
+        for sub, table in subcommand_options.LISTED.items():
+            if table.takes_no_word is None:
+                continue
+            listed = options_in_usage(_help_all(repo, sub))
+            with self.subTest(sub=sub):
+                self.assertEqual(sorted(name for name, kind in listed.items() if kind == "required"
+                                        and name in table.takes_no_word), [])
+                self.assertEqual(sorted(name for name, kind in listed.items() if kind != "required"
+                                        and name not in table.takes_no_word | table.takes_the_rest_of_its_word),
+                                 [])
+
+    def test_every_word_a_command_starts_with_is_one_saw_decides(self):
+        repo = self.new_repo()
+        decided = {
+            "stash": subcommand_options.STASH_WORDS_THAT_BRING_NOTHING
+            | subcommand_options.STASH_WORDS_SAW_LEAVES_TO_YOU,
+            "worktree": subcommand_options.WORKTREE_WORDS_THAT_BRING_NOTHING
+            | subcommand_options.WORKTREE_WORDS_SAW_LEAVES_TO_YOU,
+            "submodule": subcommand_options.SUBMODULE_WORDS_THAT_BRING_NOTHING
+            | subcommand_options.SUBMODULE_WORDS_SAW_LEAVES_TO_YOU | subcommand_options.SUBMODULE_WORDS_SAW_CHECKS,
+        }
+        for sub, words in decided.items():
+            usage = subprocess.run(["git", "-C", str(repo), sub, "-h"], capture_output=True, text=True,
+                                   stdin=subprocess.DEVNULL)
+            listed, leading = words_in_usage(usage.stdout + usage.stderr)
+            with self.subTest(sub=sub):
+                self.assertTrue(listed, f"git {sub} listed no words")
+                self.assertEqual(sorted(listed - words - {""}), [])
+                self.assertEqual(sorted(leading - {"[--quiet]", "[--cached]"}), [])
 
 
 class TheHooksFolderComparesByItsFilesystem(GitSandbox):

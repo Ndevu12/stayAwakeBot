@@ -9,9 +9,10 @@ saw govern prepare --repo <open-folder> --into <holding-directory> --tool git|gh
 saw govern apply   --repo <open-folder> --into <holding-directory>
 ```
 
-For the editor extension. When you pull, fetch, check out, switch, merge, rebase, update a
-submodule, check out a pull request, sync a repository, or download a release or an Actions
-artifact, these commands check what arrives before your open folder changes.
+For the editor extension. When you pull, fetch, check out, switch, merge, rebase, reset to another
+commit, cherry-pick, revert, update a submodule, check out a pull request, sync a repository, or
+download a release or an Actions artifact, these commands check what arrives before your open
+folder changes.
 
 `saw govern prepare` carries the update out into a holding directory saw owns, scans what arrived,
 and prints the verdict as the same document `saw scan --json` prints. Your open folder is not
@@ -35,6 +36,12 @@ commit saw checked. For an infected update, saw recommends leaving the folder un
 anyway, add `--confirm <folder name>`. `saw govern verdict` then answers that you let that tree in.
 A command that brings nothing into the folder, such as creating a branch where the folder already is, answers `passthrough` and runs as typed.
 
+A command that moves your branch or stages files without changing the folder's files, such as
+`git reset --soft` or staging part of a file, runs as typed when what it stages is already in the
+folder's history. When it is not, saw checks what it stages first: a clean result answers
+`passthrough` with the scan, and a finding holds the command, with the folder and its index as they
+were.
+
 When the update cannot be checked, you get the reason and the decision: run the command as
 typed, then scan the folder with `saw scan`, or leave the folder as it is. A command that has git
 run other programs, such as `git rebase --exec` or an interactive rebase, is one of these. These commands
@@ -50,12 +57,18 @@ saw govern uninstall
 
 The editor extension checks updates for the folders you open in the editor. To check them in your
 terminals too, and in the shells coding agents run, run `saw govern install`. From then on, when a
-terminal pulls, fetches, checks out, switches, merges, or updates a submodule, saw checks what
-arrives before it reaches the folder you are working in, the same as in the editor. Open a new
-terminal, or source the file the command names, for it to take effect.
+terminal pulls, fetches, checks out, switches, merges, rebases, resets to another commit,
+cherry-picks, reverts, or updates a submodule, saw checks what arrives before it reaches the folder
+you are working in, the same as in the editor. Any other git command that can bring files into the
+folder, such as an alias, a mistyped command, `git clone`, `git stash pop` or `git worktree add`,
+asks you first, the same as an update that cannot be checked. So does a command that would also
+update submodules, or one whose repository is named by `GIT_DIR` or a related setting. A `gh`
+command that names its repository with `-R` is checked like any other. Open a new terminal, or
+source the file the command names, for it to take effect.
 
 In a terminal, an update that cannot be checked brings a question: run the command as typed? Answer
-yes and the folder is scanned afterwards. Where there is no one to ask, the folder is left as it is;
+yes and the folder is scanned afterwards; after a clone or a new worktree, the folder it created is
+the one scanned. Where there is no one to ask, the folder is left as it is;
 set `SAW_GOVERN_DECISION=run-as-typed` or `SAW_GOVERN_DECISION=leave-unchanged` to decide ahead.
 A held update prints what to do and asks whether to let it in: a yes for a suspicious update, the
 folder name for an infected one. That is never decided ahead; where there is no one to ask, the

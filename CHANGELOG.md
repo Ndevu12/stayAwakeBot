@@ -24,6 +24,13 @@ reader, not the mechanism or the weakness it closed.
   `git checkout -m <branch>` or `git merge -m --abort <branch>`.
 - `saw govern` holds an update that changes the folder git runs your hooks from until you let it in,
   even when nothing is found in it.
+- In a terminal `saw govern` covers, every git command that can bring files into the folder is
+  checked or asks you first, however it is spelled, including `git reset --hard` to a fetched commit.
+- Moving your branch or staging files from a commit your folder has not had, such as
+  `git reset --soft` to a fetched commit, is checked before it runs, and so is staging part of a
+  file in your editor, which runs when it is clean. A `gh` command that names its repository with `-R` is
+  checked too, and after a clone or a new worktree you chose to run unchecked, the folder it created
+  is scanned.
 
 ## [0.17.6] - 2026-11-25
 

@@ -1,6 +1,7 @@
-//! A stand-in that sits where the editor expects `git` or `gh` and holds a bringing-files command
-//! until `saw govern` has checked what it would bring in. Everything else — and anything saw cannot
-//! answer — runs the real program unchanged, so the stand-in can never break the operator's git.
+//! A stand-in that sits where the editor expects `git` or `gh` and asks `saw govern` about a
+//! command that may bring files into the folder before it runs. A git command it reads with
+//! certainty as one that brings none runs straight through, and the real program runs unchanged
+//! whenever saw cannot answer.
 //!
 //! It is inert unless activated. A placer (the editor extension) activates it per command with
 //! `SAW_GOVERN_HOLDING` and points it at the real program and at `saw`. A system install instead
@@ -38,7 +39,7 @@ fn main() {
         eprintln!("saw: could not find the real {tool}");
         exit(127);
     });
-    if governing() && brings_files_in(&tool, &args) {
+    if governing() && asks_saw_first(&tool, &args) {
         if let Some(code) = govern(&tool, &args, &real) {
             exit(code);                            // governed: saw applied it, or held it
         }
@@ -62,65 +63,134 @@ fn governing() -> bool {
     env::var_os("SAW_GOVERN_HOLDING").is_some() || env::var_os("SAW_GOVERN_SYSTEM").is_some()
 }
 
-/// Whether `(tool, args)` brings files into the open folder. Mirrors `lib/git/incoming.classify`;
-/// `saw govern` re-decides authoritatively, so a wider guess here only costs a passthrough.
-fn brings_files_in(tool: &str, args: &[String]) -> bool {
-    let positional: Vec<&str> = positionals(args);
+/// Git subcommands that never write files from elsewhere into the folder.
+const NEVER_BRINGS_FILES: &[&str] = &[
+    "add", "annotate", "blame", "branch", "cat-file", "check-attr", "check-ignore", "check-mailmap",
+    "check-ref-format", "cherry", "clean", "commit", "commit-tree", "config", "count-objects", "credential",
+    "credential-cache", "credential-store", "describe", "diff", "diff-files", "diff-index", "diff-tree",
+    "for-each-ref", "fsck", "gc", "grep", "hash-object", "help", "init", "log", "ls-files", "ls-remote",
+    "ls-tree", "maintenance", "merge-base", "mktag", "mktree", "mv", "name-rev", "notes", "pack-refs",
+    "prune", "push", "range-diff", "reflog", "remote", "repack", "rev-list", "rev-parse", "rm", "shortlog",
+    "show", "show-branch", "show-ref", "stage", "status", "symbolic-ref", "tag", "var", "verify-commit",
+    "verify-tag", "version", "whatchanged", "write-tree",
+];
+/// gh options that take the repository a command acts on as their next argument.
+const GH_REPOSITORY_OPTIONS: &[&str] = &["-R", "--repo"];
+
+/// Git's global options that take the next argument as their value.
+const GIT_OPTIONS_WITH_VALUE: &[&str] = &["-C", "-c", "--shallow-file", "--git-dir", "--work-tree", "--namespace", "--attr-source"];
+/// Git's global options that take their value after `=`.
+const GIT_OPTIONS_WITH_JOINED_VALUE: &[&str] = &["--git-dir=", "--work-tree=", "--namespace=", "--attr-source="];
+/// Git's global options that take no value.
+const GIT_FLAGS: &[&str] = &[
+    "-p", "--paginate", "-P", "--no-pager", "--no-replace-objects", "--no-lazy-fetch", "--no-optional-locks",
+    "--no-advice", "--bare", "--literal-pathspecs", "--no-literal-pathspecs", "--glob-pathspecs",
+    "--noglob-pathspecs", "--icase-pathspecs",
+];
+/// Git's global options after which git prints something and runs no subcommand.
+const GIT_QUERIES: &[&str] = &["-h", "--help", "-v", "--version", "--exec-path", "--html-path", "--man-path", "--info-path"];
+/// Configuration sections that change which commands git runs under a name.
+const SECTIONS_THAT_NAME_COMMANDS: &[&str] = &["alias", "include", "includeif"];
+
+/// A git command line read through git's global options.
+struct GitLine<'a> {
+    /// Where the subcommand is, when git reaches one.
+    subcommand: Option<usize>,
+    /// Each `-C <path>` before the subcommand, in order.
+    folders: Vec<&'a str>,
+    /// Whether every option before the subcommand is one the stand-in reads with certainty.
+    read: bool,
+}
+
+/// Read git's global options up to the subcommand. Takes the arguments without the program name.
+/// Returns the reading, which stops at the first option the stand-in cannot read.
+fn read_git_line(args: &[String]) -> GitLine<'_> {
+    let mut line = GitLine { subcommand: None, folders: Vec::new(), read: true };
+    let mut i = 0;
+    while let Some(arg) = args.get(i).map(String::as_str) {
+        if !arg.starts_with('-') {
+            line.subcommand = Some(i);
+            return line;
+        }
+        if GIT_QUERIES.contains(&arg) || arg.starts_with("--list-cmds=") {
+            return line;
+        }
+        if GIT_FLAGS.contains(&arg) || GIT_OPTIONS_WITH_JOINED_VALUE.iter().any(|p| arg.starts_with(p)) {
+            i += 1;
+            continue;
+        }
+        let Some(value) = args.get(i + 1).filter(|_| GIT_OPTIONS_WITH_VALUE.contains(&arg)) else {
+            line.read = false;
+            return line;
+        };
+        if arg == "-c" && names_commands(value) {
+            line.read = false;
+            return line;
+        }
+        if arg == "-C" {
+            line.folders.push(value);
+        }
+        i += 2;
+    }
+    line
+}
+
+/// Whether a `-c <name>=<value>` sets a key in a section that changes which commands git runs.
+fn names_commands(setting: &str) -> bool {
+    let section = setting.split(['=', '.']).next().unwrap_or("").to_ascii_lowercase();
+    SECTIONS_THAT_NAME_COMMANDS.contains(&section.as_str())
+}
+
+/// Whether the stand-in asks `saw govern` before running `(tool, args)`: every git command it
+/// cannot read with certainty as bringing no files into the folder, and gh's bringing-files
+/// commands.
+fn asks_saw_first(tool: &str, args: &[String]) -> bool {
     match tool {
-        "git" => match git_subcommand(args).as_deref() {
-            Some("pull") | Some("fetch") | Some("merge") | Some("rebase") | Some("checkout")
-            | Some("switch") => true,
-            Some("submodule") => positional.get(1).copied() == Some("update"),
-            _ => false,
-        },
-        "gh" => matches!(
-            (positional.first().copied(), positional.get(1).copied()),
-            (Some("pr"), Some("checkout"))
-                | (Some("repo"), Some("sync"))
-                | (Some("release"), Some("download"))
-                | (Some("run"), Some("download"))
-        ),
+        "git" => !git_brings_no_files(args),
+        "gh" => gh_brings_files_in(args),
         _ => false,
     }
 }
 
-fn positionals<'a>(args: &'a [String]) -> Vec<&'a str> {
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        let a = args[i].as_str();
-        if a == "--" {
-            break;
-        }
-        if a.starts_with('-') {
-            if matches!(a, "-C" | "-c" | "--git-dir" | "--work-tree") && !a.contains('=') {
-                i += 1; // consumes a value
-            }
-            i += 1;
-            continue;
-        }
-        out.push(a);
-        i += 1;
+/// Whether git, given `args`, reaches only a subcommand that brings no files into the folder, or
+/// none at all.
+fn git_brings_no_files(args: &[String]) -> bool {
+    let line = read_git_line(args);
+    if !line.read {
+        return false;
     }
-    out
+    let Some(at) = line.subcommand else { return true };
+    NEVER_BRINGS_FILES.contains(&args[at].as_str())
 }
 
-fn git_subcommand(args: &[String]) -> Option<String> {
-    positionals(args).first().map(|s| s.to_string())
+/// Whether a gh command brings files into the open folder.
+fn gh_brings_files_in(args: &[String]) -> bool {
+    let mut words = Vec::new();
+    let mut given = args.iter().map(String::as_str).take_while(|a| *a != "--");
+    while let Some(arg) = given.next() {
+        if GH_REPOSITORY_OPTIONS.contains(&arg) {
+            given.next();
+        } else if !arg.starts_with('-') {
+            words.push(arg);
+        }
+    }
+    matches!(
+        (words.first().copied(), words.get(1).copied()),
+        (Some("pr"), Some("checkout"))
+            | (Some("repo"), Some("sync"))
+            | (Some("release"), Some("download"))
+            | (Some("run"), Some("download"))
+    )
 }
 
-/// The repository the command acts on: an explicit `git -C <path>`, else the current directory.
+/// The folder the command acts on: the current directory, moved by each `git -C <path>` before
+/// the subcommand.
 fn target_repo(args: &[String]) -> String {
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == "-C" {
-            if let Some(p) = args.get(i + 1) {
-                return p.clone();
-            }
-        }
-        i += 1;
+    let mut folder = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    for path in read_git_line(args).folders.into_iter().filter(|p| !p.is_empty()) {
+        folder = folder.join(path);
     }
-    env::current_dir().ok().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| ".".into())
+    folder.to_string_lossy().into_owned()
 }
 
 /// Run the check. Returns an exit code when the command was governed (applied or held), or `None`
@@ -184,7 +254,7 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
     if !prepared.success() {
         if let Some(reason) = unchecked_reason(&String::from_utf8_lossy(&output.stdout)) {
             return Some(match decide(tool, args, &reason) {
-                Decision::RunAsTyped => run_then_scan(real, saw, args, &repo),
+                Decision::RunAsTyped => run_then_scan(real, saw, args, &scanned_after(&answer, &repo)),
                 Decision::LeaveUnchanged => {
                     eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
                                answer yes in a terminal, or set SAW_GOVERN_DECISION=run-as-typed.");
@@ -192,8 +262,7 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
                 }
             });
         }
-        // Held: suspicious / infected / could not finish. The open folder is unchanged.
-        eprintln!("saw: held this update — it was not applied. Run `saw govern` output for why.");
+        say_why_held(&answer);
         return prepared.code().or(Some(2));
     }
     // Clean or residue: apply the tree saw already checked, without fetching again.
@@ -209,6 +278,29 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
     applied.code().or(Some(0))
 }
 
+/// Say that saw held the update, with its verdict and what to do.
+fn say_why_held(answer: &serde_json::Value) {
+    let verdict = answer.pointer("/scan/results/0/verdict").and_then(serde_json::Value::as_str).unwrap_or("held");
+    eprintln!("saw: held this update ({verdict}); the folder is unchanged.");
+    for step in answer.get("next_steps").and_then(serde_json::Value::as_array).into_iter().flatten() {
+        if let Some(text) = step.as_str() {
+            eprintln!("  - {text}");
+        }
+    }
+}
+
+/// The folder to scan after a command saw could not check runs as typed: the one saw names, or else
+/// the open folder.
+fn scanned_after(answer: &serde_json::Value, repo: &str) -> String {
+    answer
+        .pointer("/decision/scan_after")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|command| command.last())
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(repo)
+        .to_string()
+}
+
 /// Whether saw held the update and offers to let it in after review.
 fn offers_let_in(answer: &serde_json::Value) -> bool {
     answer
@@ -221,13 +313,7 @@ fn offers_let_in(answer: &serde_json::Value) -> bool {
 /// from the environment: letting in a finding is decided by a person, each time. Returns the exit
 /// code: the let-in command's, or `held` when the folder is left unchanged.
 fn let_in_or_leave(saw: &Path, answer: &serde_json::Value, held: i32) -> i32 {
-    let verdict = answer.pointer("/scan/results/0/verdict").and_then(serde_json::Value::as_str).unwrap_or("held");
-    eprintln!("saw: held this update ({verdict}); the folder is unchanged.");
-    for step in answer.get("next_steps").and_then(serde_json::Value::as_array).into_iter().flatten() {
-        if let Some(text) = step.as_str() {
-            eprintln!("  - {text}");
-        }
-    }
+    say_why_held(answer);
     let command: Vec<String> = answer
         .pointer("/decision/let_in")
         .and_then(serde_json::Value::as_array)
@@ -304,11 +390,11 @@ fn decide(tool: &str, args: &[String], reason: &str) -> Decision {
     }
 }
 
-/// Run the command as typed with the real program, then scan the folder it changed. Returns the
-/// real program's exit code.
-fn run_then_scan(real: &Path, saw: &Path, args: &[String], repo: &str) -> i32 {
+/// Run the command as typed with the real program, then scan the folder it changed or created.
+/// Returns the real program's exit code.
+fn run_then_scan(real: &Path, saw: &Path, args: &[String], folder: &str) -> i32 {
     let code = Command::new(real).args(args).status().ok().and_then(|s| s.code()).unwrap_or(127);
-    let _ = Command::new(saw).args(["scan", repo, "--no-stream"]).status();
+    let _ = Command::new(saw).args(["scan", folder, "--no-stream"]).status();
     code
 }
 

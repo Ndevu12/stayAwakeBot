@@ -12,47 +12,23 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git import owned
+from stayawake.lib.git import owned, subcommand_options, what_a_command_brings
 from stayawake.lib.git.borrowed import BorrowError, place
-from stayawake.lib.git.query import files_brought
-from stayawake.lib.git.run import OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run_ok, stdout, stdout_bytes
+from stayawake.lib.git.query import ancestry, files_brought
+from stayawake.lib.git.run import (OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run, run_ok, stdout,
+                                  stdout_bytes)
 from stayawake.lib.git.write.branch import refs_under, update_refs
 from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.lib.git.write.transfer import adopt_objects
 from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way, uncommitted_paths
 from stayawake.lib.signing.commits.git_command import fix_commit_signing
 
-_GLOBAL = frozenset({
-    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
-    "--config-env", "--exec-path",
-})
-_OPTIONS_TAKING_THE_NEXT_WORD = {
-    "checkout": frozenset({"-b", "-B", "--orphan", "--conflict", "--pathspec-from-file", "-U", "--unified",
-                           "--inter-hunk-context"}),
-    "switch": frozenset({"-c", "-C", "--create", "--force-create", "--orphan", "--conflict"}),
-    "pull": frozenset({"-s", "--strategy", "-X", "--strategy-option", "--depth", "--deepen", "--shallow-since",
-                       "--shallow-exclude", "-o", "--server-option", "--upload-pack", "--negotiation-tip",
-                       "--negotiation-include", "--negotiation-restrict", "--cleanup", "--refmap"}),
-    "merge": frozenset({"-m", "--message", "-F", "--file", "-s", "--strategy", "-X", "--strategy-option",
-                        "--into-name", "--cleanup"}),
-    "rebase": frozenset({"--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec", "-C",
-                         "--whitespace", "--empty", "--trailer"}),
-    "fetch": frozenset({"-o", "--server-option", "--depth", "--deepen", "--shallow-since", "--shallow-exclude",
-                        "-j", "--jobs", "--upload-pack", "--negotiation-tip", "--negotiation-include",
-                        "--negotiation-restrict", "--refmap", "--filter", "--recurse-submodules-default",
-                        "--submodule-prefix"}),
-}
+_GLOBAL_WITH_VALUE = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env",
+                                "--shallow-file", "--attr-source"})
+_NAMES_ITS_REPOSITORY = ("--git-dir", "--work-tree")
+_NAMES_ITS_REPOSITORY_FROM_THE_ENVIRONMENT = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY")
 _ENDS_OR_ONLY_TRIES = frozenset({"--abort", "--quit", "--dry-run"})
-_OPTIONS_TAKING_NO_WORD = {
-    "checkout": frozenset({"-q", "--quiet", "--progress", "--no-progress", "-f", "--force", "--ours", "--theirs",
-                           "-t", "--track", "--no-track", "--guess", "--no-guess", "-l", "-d", "--detach", "-m",
-                           "--merge", "--overlay", "--no-overlay", "--ignore-skip-worktree-bits",
-                           "--ignore-other-worktrees", "--recurse-submodules", "--no-recurse-submodules",
-                           "--pathspec-file-nul"}),
-    "switch": frozenset({"-q", "--quiet", "--progress", "--no-progress", "-f", "--force", "--discard-changes",
-                         "-t", "--track", "--no-track", "--guess", "--no-guess", "-d", "--detach", "-m", "--merge",
-                         "--ignore-other-worktrees", "--recurse-submodules", "--no-recurse-submodules"}),
-}
+_GH_REPOSITORY_OPTIONS = frozenset({"-R", "--repo"})
 _RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
 _GH_INBOUND = frozenset({("pr", "checkout"), ("repo", "sync"), ("release", "download"), ("run", "download")})
 _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "prune"}),
@@ -66,7 +42,6 @@ _LONG_OPTIONS_THAT_RUN_A_PROGRAM = {
     "fetch": ("--upload-pack",),
 }
 _SHORT_OPTIONS_THAT_RUN_A_PROGRAM = {"rebase": "xi", "merge": "e", "pull": "e"}
-_SHORT_OPTIONS_TAKING_THE_REST = "S"
 _TAKES_A_STRATEGY = frozenset({"merge", "pull", "rebase"})
 _BUILT_IN_STRATEGIES = frozenset({"ort", "recursive", "resolve", "octopus", "ours", "subtree"})
 RUNS_OTHER_COMMANDS = "a command that runs other commands cannot be checked"
@@ -96,24 +71,61 @@ def classify(tool: str, args: list[str]) -> str | None:
     `gh` and the arguments without the program name. Returns the command kind, or None."""
     if tool == "git":
         return _git_kind(args)
-    if tool == "gh":
-        words = [a for a in args if a != "--" and not a.startswith("-")]
-        if tuple(words[:2]) in _GH_INBOUND:
-            return "gh"
+    if tool == "gh" and tuple(_gh_words(args)[:2]) in _GH_INBOUND:
+        return "gh"
     return None
 
 
-def brings_nothing(tool: str, args: list[str]) -> bool:
-    """Tell whether a command certainly moves nothing into the open folder: a checkout or switch
-    whose every option git reads as saw does, naming no commit. Takes the tool and the arguments
-    without the program name. Returns the answer."""
-    parsed = _parse_git(args) if tool == "git" else None
-    if parsed is None:
+def brings_nothing(tool: str, args: list[str], repo: "Path | None" = None) -> bool:
+    """Tell whether a command certainly moves nothing from elsewhere into the open folder. Takes the
+    tool, the arguments without the program name and the open folder, when saw may read it.
+    Returns the answer."""
+    line = _parse_git(args) if tool == "git" else None
+    if line is None:
         return False
-    sub, rest = parsed
-    if sub not in _OPTIONS_TAKING_NO_WORD or not _options_read_as_git_reads_them(sub, rest):
-        return False
-    return not (_checkout_brings(rest) if sub == "checkout" else _switch_brings(rest))
+    return what_a_command_brings.decide(line.sub, line.rest, _folder(repo, line)) == \
+        what_a_command_brings.BRINGS_NOTHING
+
+
+@dataclass(frozen=True)
+class Staged:
+    """What a command that only stages files would stage: the folder's current commit, each file it
+    stages, and where each file's bytes are, a commit or one blob per file."""
+
+    base: str
+    paths: tuple[str, ...]
+    commit: str
+    blobs: tuple[tuple[str, str], ...]
+
+
+def what_it_stages(repo: Path, tool: str, args: list[str]) -> "Staged | str | None":
+    """Find what a command saw checks before it stages files would stage. Takes the open folder, the
+    tool and the arguments. Returns what it stages, a sentence for one that cannot be read, or None
+    for any other command."""
+    line = _parse_git(args) if tool == "git" else None
+    if line is None:
+        return None
+    if what_a_command_brings.decide(line.sub, line.rest, _folder(repo, line)) != \
+            what_a_command_brings.CHECKED_BEFORE_IT_STAGES:
+        return None
+    base = stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
+    if not base:
+        return "the open folder has no commit to check from"
+    if line.sub == "update-index":
+        blobs = tuple(what_a_command_brings.cacheinfo_entries(line.rest) or ())
+        return Staged(base, tuple(path for path, _oid in blobs), "", blobs)
+    commit = _commit_named(repo, subcommand_options.read("reset", line.rest).words[0])
+    names = files_brought(repo, base, commit) if commit else None
+    if names is None:
+        return "the files the command stages could not be read"
+    return Staged(base, names, commit, ())
+
+
+def folder_it_creates(tool: str, args: list[str]) -> "str | None":
+    """Find the folder a clone or a `worktree add` creates. Takes the tool and the arguments. Returns
+    it relative to where git runs, or None for any other command or when it cannot be told."""
+    line = _parse_git(args) if tool == "git" else None
+    return what_a_command_brings.folder_it_creates(line.sub, line.rest) if line else None
 
 
 def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | str":
@@ -123,8 +135,8 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
     kind = classify(tool, args)
     if kind is None:
         return "saw does not check that command"
-    parsed = _parse_git(args) if tool == "git" else None
-    if parsed is not None and runs_other_commands(*parsed):
+    line = _parse_git(args) if tool == "git" else None
+    if line is not None and runs_other_commands(line.sub, line.rest):
         return RUNS_OTHER_COMMANDS
     repo, into = Path(repo).resolve(), Path(into).resolve()
     if not (repo / ".git").exists() and _git_dir(repo) is None:
@@ -283,38 +295,120 @@ def restore(repo: Path, commit: str) -> str:
 
 
 def _git_kind(args: list[str]) -> str | None:
-    parsed = _parse_git(args)
-    if parsed is None:
+    line = _parse_git(args)
+    if line is None or line.names_its_repository:
         return None
-    sub, rest = parsed
-    if any(option in _ENDS_OR_ONLY_TRIES for option in _options(sub, rest)):
+    if any(option in _ENDS_OR_ONLY_TRIES for option in subcommand_options.read(line.sub, line.rest).names()):
         return None
-    if sub in {"pull", "merge", "rebase", "fetch"}:
-        return sub
-    if sub == "submodule" and _positionals(sub, rest)[:1] == ["update"]:
-        return sub
-    if sub == "checkout" and _checkout_brings(rest):
-        return sub
-    if sub == "switch" and _switch_brings(rest):
-        return sub
-    return None
+    decision = what_a_command_brings.decide(line.sub, line.rest)
+    return line.sub if decision == what_a_command_brings.CHECKED_IN_A_HOLDING_COPY else None
 
 
-def _parse_git(args: list[str]) -> "tuple[str, list[str]] | None":
+@dataclass(frozen=True)
+class _Line:
+    """A git command line read through git's global options: the subcommand, its arguments, whether
+    the line or the environment names the repository, and each `-c` setting by its lowercased key."""
+
+    sub: str
+    rest: list[str]
+    names_its_repository: bool
+    settings: dict
+
+
+def _parse_git(args: list[str]) -> "_Line | None":
+    """Read git's global options and find the subcommand. Takes the arguments without the program
+    name. Returns the line read, or None for a line without a subcommand."""
+    names_its_repository = any(os.environ.get(name) for name in _NAMES_ITS_REPOSITORY_FROM_THE_ENVIRONMENT)
+    settings: dict[str, str] = {}
     index = 0
     while index < len(args):
         arg = args[index]
-        if arg.startswith("-C") and len(arg) > 2:
-            index += 1
-            continue
-        if arg in _GLOBAL or arg.startswith("--git-dir=") or arg.startswith("--work-tree="):
+        name = arg.partition("=")[0]
+        if name in _GLOBAL_WITH_VALUE:
+            names_its_repository = names_its_repository or name in _NAMES_ITS_REPOSITORY
+            if arg == "-c" and index + 1 < len(args):
+                key, _, value = args[index + 1].partition("=")
+                settings[key.lower()] = value
             index += 1 if "=" in arg else 2
             continue
         if arg.startswith("-"):
             index += 1
             continue
-        return arg, args[index + 1:]
+        return _Line(arg, args[index + 1:], names_its_repository, settings)
     return None
+
+
+def _folder(repo: "Path | None", line: _Line) -> "what_a_command_brings.Folder":
+    """Read what a decision needs about the open folder. Takes the open folder, or None when saw may
+    not read it, and the command line. Returns the folder's answers, from the command line and a
+    revision's spelling alone for a command that names another repository."""
+    recursion = line.settings.get("submodule.recurse")
+    if repo is None:
+        return what_a_command_brings.Folder(
+            what_a_command_brings.spelled_as_an_ancestor,
+            lambda asked: asked if asked is not None else _says_yes(recursion))
+    if line.names_its_repository:
+        return what_a_command_brings.Folder(what_a_command_brings.spelled_as_an_ancestor,
+                                            lambda asked: asked is not False)
+    return what_a_command_brings.Folder(
+        lambda revision: _in_its_history(Path(repo), revision),
+        lambda asked: _updates_submodules(Path(repo), asked, recursion))
+
+
+def _says_yes(value: "str | None") -> bool:
+    """Tell whether a git boolean setting is on. Takes its value, or None when unset."""
+    return value is not None and value.strip().lower() in ("", "true", "yes", "on", "1")
+
+
+def _in_its_history(repo: Path, revision: str) -> bool:
+    """Tell whether a revision names the folder's current commit, one of its ancestors, or no object
+    at all. Takes the open folder and the revision. Returns the answer, false for an object saw
+    cannot place."""
+    if what_a_command_brings.spelled_as_an_ancestor(revision):
+        return True
+    commit = _commit_named(repo, revision)
+    if commit:
+        return ancestry(repo, commit, "HEAD") is True
+    named = run(repo, ["rev-parse", "--verify", "--quiet", "--end-of-options", revision], context=UNTRUSTED)
+    return named is not None and named.returncode == 1
+
+
+def _commit_named(repo: Path, revision: str) -> str:
+    """Resolve a revision to the commit it names. Takes the open folder and the revision. Returns the
+    commit id, or "" when it names none."""
+    return stdout(repo, ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{revision}^{{commit}}"],
+                  context=UNTRUSTED).strip()
+
+
+def _updates_submodules(repo: Path, asked: "bool | None", setting: "str | None") -> bool:
+    """Tell whether a command updates submodules in the folder. Takes the open folder, what the
+    command line asks for, and the `-c submodule.recurse` it gives. Returns the answer."""
+    if asked is None:
+        if setting is None:
+            setting = (stdout(repo, ["config", "--local", "--type=bool", "--get", "submodule.recurse"],
+                              context=UNTRUSTED)
+                       or stdout(None, ["config", "--type=bool", "--get", "submodule.recurse"],
+                                 context=OPERATOR_CONFIG)).strip() or None
+        asked = _says_yes(setting)
+    if not asked:
+        return False
+    listed = stdout(repo, ["ls-files", "--stage", "-z"], context=UNTRUSTED)
+    return (repo / ".gitmodules").exists() or any(entry.startswith("160000 ") for entry in listed.split("\0"))
+
+
+def _gh_words(args: list[str]) -> list[str]:
+    """List a gh command's words, leaving out its options and the repository it names. Takes the
+    arguments. Returns the words."""
+    words: list[str] = []
+    index = 0
+    while index < len(args) and args[index] != "--":
+        arg = args[index]
+        index += 1
+        if arg in _GH_REPOSITORY_OPTIONS:
+            index += 1
+        elif not arg.startswith("-"):
+            words.append(arg)
+    return words
 
 
 def runs_other_commands(sub: str, args: list[str]) -> bool:
@@ -323,132 +417,37 @@ def runs_other_commands(sub: str, args: list[str]) -> bool:
     with. Takes the subcommand and its arguments. Returns the answer."""
     long_options = _LONG_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, ())
     short_options = _SHORT_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, "")
-    taking_the_next_word = "".join(option[1] for option in _OPTIONS_TAKING_THE_NEXT_WORD.get(sub, ())
-                                   if len(option) == 2)
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        index += 1
-        if arg == "--":
-            return False
-        if arg.startswith("--"):
-            name, has_value, value = arg.partition("=")
+    for name, value in subcommand_options.read(sub, args).options:
+        interactive = (value or "").lower().startswith("i")
+        if name.startswith("--"):
             if len(name) <= 2:
                 continue
             if any(option.startswith(name) for option in long_options):
                 return True
-            if sub == "pull" and "--rebase".startswith(name) and value.lower().startswith("i"):
+            if sub == "pull" and "--rebase".startswith(name) and interactive:
                 return True
-            if sub in _TAKES_A_STRATEGY and "--strategy".startswith(name):
-                strategy = value if has_value else (args[index] if index < len(args) else "")
-                index += 0 if has_value else 1
-                if strategy not in _BUILT_IN_STRATEGIES:
-                    return True
-            continue
-        if not arg.startswith("-") or arg == "-":
-            continue
-        for position, flag in enumerate(arg[1:], start=2):
-            attached = arg[position:]
-            if flag in short_options:
+            if sub in _TAKES_A_STRATEGY and "--strategy".startswith(name) and value not in _BUILT_IN_STRATEGIES:
                 return True
-            if flag == "s" and sub in _TAKES_A_STRATEGY:
-                strategy = attached or (args[index] if index < len(args) else "")
-                index += 0 if attached else 1
-                if strategy not in _BUILT_IN_STRATEGIES:
-                    return True
-                break
-            if flag in taking_the_next_word:
-                index += 0 if attached else 1
-                break
-            if flag in _SHORT_OPTIONS_TAKING_THE_REST:
-                break
+        elif name[1] in short_options or (sub == "pull" and name == "-r" and interactive):
+            return True
+        elif name == "-s" and sub in _TAKES_A_STRATEGY and value not in _BUILT_IN_STRATEGIES:
+            return True
     return False
 
 
 def _positionals(sub: str, args: list[str]) -> list[str]:
     """List the words of a git command that are not options or their values, up to `--`. Takes the
     subcommand and its arguments. Returns the words."""
-    taking_a_word = _OPTIONS_TAKING_THE_NEXT_WORD.get(sub, frozenset())
-    words: list[str] = []
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        if arg == "--":
-            break
-        if arg.startswith("-") and arg != "-":
-            index += 2 if _takes_the_next_word(arg, taking_a_word) else 1
-            continue
-        words.append(arg)
-        index += 1
-    return words
-
-
-def _options(sub: str, args: list[str]) -> list[str]:
-    """List the options of a git command, up to `--`, leaving out the value an option takes. Takes the
-    subcommand and its arguments. Returns the options as written."""
-    taking_a_word = _OPTIONS_TAKING_THE_NEXT_WORD.get(sub, frozenset())
-    options: list[str] = []
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        index += 1
-        if arg == "--":
-            break
-        if arg.startswith("-") and arg != "-":
-            options.append(arg)
-            index += 1 if _takes_the_next_word(arg, taking_a_word) else 0
-    return options
-
-
-def _takes_the_next_word(arg: str, taking_a_word: frozenset[str]) -> bool:
-    """Tell whether git reads the word after `arg` as its value: `arg` names an option that takes one,
-    in full or by a leading part of its long name. Takes the argument and the options that take a
-    word. Returns the answer."""
-    if arg in taking_a_word:
-        return True
-    return arg.startswith("--") and "=" not in arg and len(arg) > 2 and any(
-        option.startswith(arg) for option in taking_a_word if option.startswith("--"))
-
-
-def _options_read_as_git_reads_them(sub: str, args: list[str]) -> bool:
-    """Tell whether every option of a command, up to `--`, is one whose value saw reads the way git
-    reads it. Takes the subcommand and its arguments. Returns the answer."""
-    taking_a_word = _OPTIONS_TAKING_THE_NEXT_WORD.get(sub, frozenset())
-    known = taking_a_word | _OPTIONS_TAKING_NO_WORD.get(sub, frozenset())
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        index += 1
-        if arg == "--":
-            return True
-        if not arg.startswith("-") or arg == "-":
-            continue
-        if arg in taking_a_word:
-            index += 1
-        elif arg.split("=", 1)[0] not in known and not (arg[:2] in taking_a_word and not arg.startswith("--")):
-            return False
-    return True
-
-
-def _checkout_brings(args: list[str]) -> bool:
-    """Tell whether a checkout names a commit to move the folder to. Takes its arguments. Returns the
-    answer."""
-    return len(_positionals("checkout", args)) > 0
-
-
-def _switch_brings(args: list[str]) -> bool:
-    """Tell whether a switch names a commit to move the folder to. Takes its arguments. Returns the
-    answer."""
-    return len(_positionals("switch", args)) > 0
+    return list(subcommand_options.read(sub, args).words)
 
 
 def _run_command(work: Path, tool: str, args: list[str], kind: str, signing: tuple[str, ...] = ()) -> str:
     if tool == "gh":
         return _run_gh(work, args)
-    parsed = _parse_git(args)
-    if parsed is None:
+    line = _parse_git(args)
+    if line is None:
         return "saw does not check that command"
-    sub, rest = parsed
+    sub, rest = line.sub, line.rest
     if kind in ("pull", "fetch") and not stdout(work, ["remote"], context=SAW_OWNED).strip():
         return "the repository has no remote to fetch from"
     if kind == "pull":
