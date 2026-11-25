@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.17.6] - 2026-11-25
+
 ### Added
 - Each release on GitHub carries a platform manifest naming the wheel for each system and
   architecture, a requirements lock that pins saw and every dependency by hash, and the SBOM under
@@ -2088,7 +2090,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.5...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.6...HEAD
+[0.17.6]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.5...v0.17.6
 [0.17.5]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.4...v0.17.5
 [0.17.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.3...v0.17.4
 [0.17.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.2...v0.17.3
