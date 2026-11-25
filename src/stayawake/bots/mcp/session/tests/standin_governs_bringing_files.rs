@@ -39,7 +39,8 @@ impl Fixture {
                  if [ \"$2\" = prepare ]; then\n\
                  \tif [ -n \"$SAW_FAKE_PASSTHROUGH\" ]; then echo '{{\"passthrough\":true,\"reason\":\"the command brings no files in\"}}'; exit 0; fi\n\
                  \tif [ -n \"$SAW_FAKE_LET_IN\" ]; then echo '{{\"scan\":{{\"results\":[{{\"verdict\":\"suspicious\"}}]}},\"next_steps\":[\"Check .claude/settings.json\"],\"decision\":{{\"choices\":[\"let-in\",\"leave-unchanged\"],\"let_in\":[\"saw\",\"govern\",\"apply\",\"--accept\",\"c0ffee\"],\"confirm\":\"yes\"}}}}'; exit 0; fi\n\
-                 \tif [ -n \"$SAW_FAKE_UNCHECKED\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{}}}}'; exit 2; fi\n\
+                 \tif [ -n \"$SAW_FAKE_UNCHECKED\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{\"choices\":[\"run-as-typed\",\"leave-unchanged\"]}}}}'; exit 2; fi\n\
+                 \tif [ -n \"$SAW_FAKE_NO_CHOICES\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{}}}}'; exit 2; fi\n\
                  \tif [ -n \"$SAW_FAKE_CHECKED_LEFT_OUT\" ]; then echo '{{\"scan\":{{\"any_error\":false,\"results\":[{{\"verdict\":\"clean\"}}]}},\"reason\":\"the update stops for conflicts that cannot be brought into the folder\",\"decision\":{{}}}}'; exit 2; fi\n\
                  \tif [ -n \"$SAW_FAKE_UNFINISHED\" ]; then echo '{{\"scan\":{{\"any_error\":true,\"results\":[{{\"verdict\":\"clean\"}}]}},\"decision\":{{\"choices\":[\"run-as-typed\",\"leave-unchanged\"]}}}}'; exit 2; fi\n\
                  \tif [ -n \"$SAW_FAKE_LEAVE_ONLY\" ]; then echo '{{\"scan\":{{\"any_error\":false,\"results\":[{{\"verdict\":\"clean\"}}]}},\"reason\":\"the update stops for conflicts that cannot be brought into the folder\",\"decision\":{{\"choices\":[\"leave-unchanged\"]}},\"next_steps\":[\"To bring in exactly the commit saw checked, run `git merge c0ffee`.\"]}}'; exit 2; fi\n\
@@ -282,6 +283,14 @@ fn an_update_whose_check_did_not_finish_is_not_called_checked() {
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(said.contains("cannot be checked"), "{said}");
     assert!(!said.contains("checked this update"), "{said}");
+}
+
+#[test]
+fn a_decision_that_names_no_choices_is_never_run_as_typed() {
+    let f = Fixture::new("no-choices");
+    let out = run_with_answer(&f, "SAW_FAKE_NO_CHOICES", Some("run-as-typed"));
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!f.real_ran(), "a decision that offered nothing ran the command as typed");
 }
 
 #[test]

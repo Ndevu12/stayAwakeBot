@@ -298,13 +298,12 @@ fn scan_finished(answer: &serde_json::Value) -> bool {
         && answer.pointer("/scan/any_error").and_then(serde_json::Value::as_bool) == Some(false)
 }
 
-/// Whether saw's answer leaves running the command as typed among its choices. An answer that names
-/// no choices leaves it.
+/// Whether saw's answer names running the command as typed among its choices.
 fn may_run_as_typed(answer: &serde_json::Value) -> bool {
-    match answer.pointer("/decision/choices").and_then(serde_json::Value::as_array) {
-        Some(choices) => choices.iter().any(|choice| choice == "run-as-typed"),
-        None => true,
-    }
+    answer
+        .pointer("/decision/choices")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|choices| choices.iter().any(|choice| choice == "run-as-typed"))
 }
 
 /// The line that tells the user why the update was not brought in.
