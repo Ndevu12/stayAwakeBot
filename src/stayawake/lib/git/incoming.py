@@ -163,13 +163,12 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     way = changes_in_the_way(repo, arrived.commit)
     if way is None:
         return "saw could not tell whether uncommitted work could be kept"
-    if way.blocking:
+    if way.blocking or way.carryable:
         return "uncommitted work would be overwritten, so the folder was not changed"
     gitdir = _git_dir(repo)
     if gitdir is None:
         return "the open folder is not a git checkout"
-    keep = frozenset(path.encode() for path in way.carryable)
-    move = PreparedMove(repo, Checkout(repo, gitdir), arrived.base, arrived.commit, keep=keep)
+    move = PreparedMove(repo, Checkout(repo, gitdir), arrived.base, arrived.commit)
     if not move.prepare():
         move.release()
         return "the update could not be written into the open folder"
