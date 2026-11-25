@@ -556,6 +556,19 @@ class PreparedMove:
         except (TreeStateUnknown, OSError, ValueError):
             return False
 
+    def undo(self, before: list[bytes]) -> bool:
+        """Write back to `old` each changed path that matched `old` before the move. Takes what
+        `uncommitted_paths` listed before the move. Returns whether the working tree now differs
+        from HEAD exactly where it did then."""
+        dirty = set(before)
+        try:
+            entries = _tree_entries(self.holder.worktree, self.old)
+            _write_paths(self.repo, self.holder.worktree, self.old, entries,
+                         [p for p in self.paths if p not in self.keep and p not in dirty])
+        except (TreeStateUnknown, OSError, ValueError):
+            pass
+        return uncommitted_paths(self.holder.worktree) == sorted(before)
+
     def release(self) -> None:
         """Drop the lock if still held, and the private index."""
         if self.held:

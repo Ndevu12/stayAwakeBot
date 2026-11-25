@@ -18,7 +18,7 @@ from stayawake.lib.git.run import OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNT
 from stayawake.lib.git.write.branch import refs_under, update_refs
 from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.lib.git.write.transfer import adopt_objects
-from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way
+from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way, uncommitted_paths
 from stayawake.lib.signing.commits.git_command import fix_commit_signing
 
 _GLOBAL = frozenset({
@@ -33,6 +33,10 @@ _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "pru
                   "branch": frozenset({"remote", "merge", "rebase"})}
 _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
 _IDENTITY_KEYS = ("user.name", "user.email")
+
+WRITE_LEFT_PART_WAY = ("the update could not be written into the open folder, and the folder may have "
+                       "changed; check it with git status")
+PUT_BACK_LEFT_PART_WAY = "the folder could not be put back, and it may have changed; check it with git status"
 
 
 @dataclass(frozen=True)
@@ -143,8 +147,8 @@ def claim(into: Path) -> None:
 
 def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     """Make `repo` match `arrived`. Takes the open folder, the holding directory and what prepare
-    stored. Returns "" when the folder matches it, else a sentence; leaves the folder as it was
-    when it returns a sentence."""
+    stored. Returns "" when the folder matches it, else a sentence that also names a folder that
+    may have changed."""
     repo = Path(repo).resolve()
     claim(into)
     bare = Path(into) / "repo.git"
@@ -168,6 +172,9 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     gitdir = _git_dir(repo)
     if gitdir is None:
         return "the open folder is not a git checkout"
+    before = uncommitted_paths(repo)
+    if before is None:
+        return "the folder was not changed: its uncommitted work could not be read"
     move = PreparedMove(repo, Checkout(repo, gitdir), arrived.base, arrived.commit)
     if not move.prepare():
         move.release()
@@ -175,26 +182,22 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     if arrived.refs and not update_refs(repo, list(arrived.refs)):
         move.release()
         return "the open folder changed while the update was checked"
-    if not move.apply():
+    if move.apply() and _write_head(gitdir, arrived.head):
         move.release()
-        if arrived.refs:
-            update_refs(repo, [(ref, old, new) for ref, new, old in arrived.refs])
-        return "the update could not be written into the open folder"
-    if not _write_head(gitdir, arrived.head):
-        move.restore_files()
-        move.release()
-        if arrived.refs:
-            update_refs(repo, [(ref, old, new) for ref, new, old in arrived.refs])
-        return "the update could not be written into the open folder"
+        return ""
     move.release()
-    return ""
+    if arrived.refs:
+        update_refs(repo, [(ref, old, new) for ref, new, old in arrived.refs])
+    if move.undo(before):
+        return "the update could not be written into the open folder"
+    return WRITE_LEFT_PART_WAY
 
 
 def restore(repo: Path, commit: str) -> str:
     """Put the open folder back on `commit`, a tree saw let in, keeping uncommitted work. Takes the
     open folder and the commit, which must already be in the repository. Returns "" when the folder
-    is on it, else a sentence; leaves the folder as it was when it returns a sentence. The current
-    branch is moved to the commit, so HEAD stays attached and is not detached."""
+    is on it, else a sentence that also names a folder that may have changed. The current branch is
+    moved to the commit and HEAD stays attached."""
     repo = Path(repo).resolve()
     gitdir = _git_dir(repo)
     if gitdir is None:
@@ -212,6 +215,9 @@ def restore(repo: Path, commit: str) -> str:
     head = _head_text(repo)
     branch = head[len("ref: "):].strip() if head.startswith("ref: ") else None
     keep = frozenset(path.encode() for path in way.carryable)
+    before = uncommitted_paths(repo)
+    if before is None:
+        return "the folder was not changed: its uncommitted work could not be read"
     move = PreparedMove(repo, Checkout(repo, gitdir), base, commit, keep=keep)
     if not move.prepare():
         move.release()
@@ -219,17 +225,13 @@ def restore(repo: Path, commit: str) -> str:
     if branch and not update_refs(repo, [(branch, commit, base)]):
         move.release()
         return "the open folder changed while saw was putting it back"
-    if not move.apply():
+    if not (move.apply() and _write_head(gitdir, head if branch else commit)):
+        move.release()
         if branch:
             update_refs(repo, [(branch, base, commit)])
-        move.release()
-        return "the folder could not be put back"
-    if not _write_head(gitdir, head if branch else commit):
-        move.restore_files()
-        if branch:
-            update_refs(repo, [(branch, base, commit)])
-        move.release()
-        return "the folder could not be put back"
+        if move.undo(before):
+            return "the folder could not be put back"
+        return PUT_BACK_LEFT_PART_WAY
     move.release()
     return ""
 
