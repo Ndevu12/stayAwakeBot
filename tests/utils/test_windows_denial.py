@@ -2,6 +2,7 @@
 """A Windows denial is graded from the account that holds it, and asked of the system's own program."""
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,6 +42,14 @@ class TestWhoHoldsIt(unittest.TestCase):
                  mock.patch.object(hostdenial.winlock, "current_sid", return_value="S-1-5-21-1"):
                 self.assertEqual(hostdenial.held_by(Path(folder)), hostdenial.ROOT_HELD)
 
+
+
+@unittest.skipUnless(os.name == "nt", "the account is read from Windows itself")
+class TestTheAccountThisProcessRunsAsIsRead(unittest.TestCase):
+    def test_the_acting_account_is_named(self):
+        sid = winlock.current_sid()
+        self.assertIsNotNone(sid)
+        self.assertTrue(sid.upper().startswith("S-1-5-"), sid)
 
 class TestTheDenialIsAskedOfTheSystemProgram(unittest.TestCase):
     def test_the_account_is_denied_adding_anything(self):

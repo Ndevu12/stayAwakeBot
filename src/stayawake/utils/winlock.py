@@ -85,10 +85,18 @@ def current_sid() -> str | None:
     adv = _advapi()
     if adv is None:
         return None
+    try:
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    except (AttributeError, OSError):
+        return None
+    kernel.GetCurrentProcess.restype = ctypes.c_void_p
+    kernel.CloseHandle.argtypes = (ctypes.c_void_p,)
+    adv.OpenProcessToken.argtypes = (ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_void_p))
+    adv.GetTokenInformation.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong,
+                                        ctypes.POINTER(ctypes.c_ulong))
     token = ctypes.c_void_p()
     try:
-        if not adv.OpenProcessToken(ctypes.windll.kernel32.GetCurrentProcess(), 0x0008,
-                                    ctypes.byref(token)):
+        if not adv.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
             return None
         needed = ctypes.c_ulong()
         adv.GetTokenInformation(token, 1, None, 0, ctypes.byref(needed))
@@ -103,7 +111,7 @@ def current_sid() -> str | None:
         return None
     finally:
         if token.value:
-            ctypes.windll.kernel32.CloseHandle(token)
+            kernel.CloseHandle(token)
 
 
 def owner_sid(path: Path) -> str | None:
