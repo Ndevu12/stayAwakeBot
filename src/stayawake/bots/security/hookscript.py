@@ -524,6 +524,22 @@ def recorded_saw_runs() -> bool:
     return recorded is None or runs(recorded[0])
 
 
+def copies_that_cannot_run(hooks: Path) -> list[Path]:
+    """List the hooks saw installs in the folder `hooks` whose `saw` is not a program that runs. Takes
+    the folder. Returns those files."""
+    found: list[Path] = []
+    for event in HOOKS:
+        path = hooks / event
+        try:
+            raw = None if path.is_symlink() else pathsafe.read_regular_bytes(path)
+        except OSError:
+            continue
+        command = saw_command(raw.decode("utf-8", "replace")) if raw is not None else None
+        if command and not runs(command[0]):
+            found.append(path)
+    return found
+
+
 def altered_hooks(unread: list | None = None) -> list[Path]:
     """Return every file git runs on this account that saw should have installed and did not, or
     that sits in the directory saw manages for itself alone: altered saw hooks in every hooks

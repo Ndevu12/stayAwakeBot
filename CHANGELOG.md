@@ -21,6 +21,8 @@ reader, not the mechanism or the weakness it closed.
   release on PyPI.
 - A Ctrl-C that lands while saw is loading stops it with its one line, instead of sometimes printing a
   traceback and carrying on.
+- `saw hook status` reports a repository whose saw hooks call a program that cannot run, and
+  `saw hook repair` rewrites them.
 
 ## [0.17.6] - 2026-11-25
 
