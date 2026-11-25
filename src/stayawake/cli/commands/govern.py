@@ -62,7 +62,8 @@ def register(sub) -> None:
         description=(
             "Make the open folder match the tree prepare scanned in the holding directory, without "
             "fetching again. Call this only after a clean or residue verdict; the operator's "
-            "uncommitted work is kept, or the open folder is not changed."),
+            "uncommitted work is kept, or the open folder is not changed. An update that stops for "
+            "conflicts is brought in with them left to resolve."),
         examples=[("saw govern apply --repo . --into D", "apply the checked tree")],
         stream=False)
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -140,6 +141,8 @@ def run_apply(a: argparse.Namespace) -> int:
 
 def _do_apply(a: argparse.Namespace) -> int:
     payload, code = core.apply(a.repo, a.into, a.accept, a.confirm)
+    for step in payload.get("next_steps") or []:
+        print(f"saw: {step}", file=sys.stderr)
     print(json.dumps(versioned("govern", payload)))
     return code
 

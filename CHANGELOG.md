@@ -24,6 +24,9 @@ reader, not the mechanism or the weakness it closed.
   `git checkout -m <branch>` or `git merge -m --abort <branch>`.
 - `saw govern` holds an update that changes the folder git runs your hooks from until you let it in,
   even when nothing is found in it.
+- In a terminal `saw govern` covers, a pull, merge or rebase that stops for conflicts is checked like
+  any other update. When it is clean, saw brings in exactly what it checked and leaves the conflicts
+  for you to resolve.
 
 ## [0.17.6] - 2026-11-25
 

@@ -19,7 +19,7 @@ from stayawake.bots.security.scanner import joined, scan_target, unreadable
 from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
-from stayawake.lib.git import blob_copies, incoming, query
+from stayawake.lib.git import blob_copies, conflicted, incoming, query
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.utils import exitcodes, pathsafe, scratch
@@ -56,10 +56,10 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     current().step("scan", "scanning what arrived")
     govern_status.write(repo, "checking", step="scanning what arrived")
     try:
-        landing = blob_copies.copy_out_as_written(Path(repo).resolve(), arrived.root, arrived.commit,
+        landing = blob_copies.copy_out_as_written(Path(repo).resolve(), arrived.root, _files_at(arrived),
                                                   arrived.paths, "the files an update brought in")
         payload, code, already_there = _scan_arrived(arrived.root, landing, arrived.paths, config,
-                                                     arrived.base, deadline)
+                                                     arrived.base, deadline, arrived.versions)
     except DeadlineReached:
         return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:
@@ -70,7 +70,8 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     current().step("verdict", "verdict: %s" % verdict)
     scanned_clean = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
     strictly_clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN and not already_there
-    applied_mark = clean_ledger.clean_key(arrived.commit, config) if scanned_clean else None
+    lands_whole = arrived.stopped is None
+    applied_mark = clean_ledger.clean_key(arrived.commit, config) if scanned_clean and lands_whole else None
     clean_mark = applied_mark if strictly_clean else None
     hooks = query.hook_files(Path(repo), arrived.paths)
     asks = scanned_clean and (hooks is None or bool(hooks))
@@ -86,6 +87,10 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
         answer["pre_existing"] = already_there
     findings = (payload.get("results") or [{}])[0].get("findings") or []
     steps = govern_held.next_steps(verdict, findings, already_there, arrived.commit)
+    if arrived.stopped:
+        answer["conflicts"] = list(arrived.stopped.conflicts)
+        steps.append(f"The update stops for conflicts in {_listed(arrived.stopped.conflicts)}. Once it is "
+                     f"in the folder, resolve them, then run `{_finish(arrived.stopped)}`.")
     if asks:
         steps.append(f"The update changes {', '.join(hooks or ('the folder git runs hooks from',))}, which "
                      f"git runs as a hook in this folder. Check it, then let {arrived.commit[:12]} in.")
@@ -120,16 +125,20 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
             return _applied(False, refused)
         accepted_verdict = state.get("verdict") if state.get("verdict") in govern_held.HELD_VERDICTS else None
     try:
+        stopped = state.get("stopped")
         arrived = incoming.Arrived(
             root=Path(state["root"]), paths=tuple(state["paths"]), mode=state["mode"],
             commit=state["commit"], base=state["base"], head=state["head"],
             refs=tuple(tuple(item) for item in state["refs"]),
-            written=tuple((state.get("written") or {}).items()))
+            written=tuple((state.get("written") or {}).items()),
+            stopped=conflicted.Stopped.from_record(stopped) if stopped else None)
     except (KeyError, TypeError):
         return _applied(False, "the checked update could not be read")
     current().step("apply", "applying the checked update")
     govern_status.write(repo, "checking", step="applying the checked update")
     reason = incoming.apply(Path(repo), Path(into), arrived)
+    if not reason and arrived.stopped:
+        return _left_to_resolve(repo, state, arrived.stopped, accepted_verdict)
     if not reason and accepted_verdict:
         clean_ledger.remember_accepted(Path(repo), state["commit"], accepted_verdict)
         govern_status.write(repo, "applied", verdict=accepted_verdict,
@@ -143,6 +152,38 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
     else:
         govern_status.write(repo, "finished", reasons=[reason])
     return _applied(not reason, reason)
+
+
+def _files_at(arrived: "incoming.Arrived") -> str:
+    """Name the commit or tree that holds the files an update leaves in the folder. Takes what
+    arrived. Returns the landed tree of a stop for conflicts, else the commit the update brought."""
+    return arrived.stopped.landed if arrived.stopped else arrived.commit
+
+
+def _left_to_resolve(repo: str, state: dict, stopped: "conflicted.Stopped",
+                     accepted_verdict: str | None) -> tuple[dict, int]:
+    """Answer an update now in the folder that stops for conflicts. Takes the open folder, the
+    recorded check, the stop and the verdict the user let in, if any. Returns the answer and
+    INCOMPLETE."""
+    step = (f"The update is in the folder and stops for conflicts in {_listed(stopped.conflicts)}. "
+            f"Resolve them, then run `{_finish(stopped)}`.")
+    reasons = [step]
+    if accepted_verdict:
+        clean_ledger.remember_accepted(Path(repo), state["commit"], accepted_verdict)
+        reasons.append(f"you let in an update saw found {accepted_verdict}")
+    govern_status.write(repo, "applied", verdict=state.get("verdict"), reasons=reasons)
+    return {"applied": True, "conflicts": list(stopped.conflicts), "next_steps": [step]}, exitcodes.INCOMPLETE
+
+
+def _listed(paths: tuple[str, ...]) -> str:
+    """Name up to three paths and count the rest. Takes the paths. Returns the words."""
+    shown = ", ".join(paths[:3])
+    return shown if len(paths) <= 3 else f"{shown} and {len(paths) - 3} more"
+
+
+def _finish(stopped: "conflicted.Stopped") -> str:
+    """Return the git command that finishes the stopped operation. Takes the stop."""
+    return conflicted.FINISH_COMMAND[stopped.operation]
 
 
 def _refuse_let_in(repo: str, state: dict, accept: str | None, confirm: str | None) -> str:
@@ -224,24 +265,33 @@ def _scan_files(files: Path, paths: tuple[str, ...], policy) -> ScanResult:
 
 
 def _scan_arrived(root: Path, landing: "blob_copies.BlobCopies", paths: tuple[str, ...], config: str | None,
-                  base: str | None = None, deadline: float | None = None) -> tuple[dict, int, list[dict]]:
-    """Scan the files an update brought, as they will be written, within `deadline` seconds when
-    given. Takes the holding work tree, the copies of what lands, the arrived paths, the operator
-    config, the commit the folder had before and the deadline. Returns the scan document, its exit,
-    and the findings the folder already had before the update, which do not count toward the
-    verdict. Raises DeadlineReached at the deadline."""
+                  base: str | None = None, deadline: float | None = None,
+                  versions: tuple[tuple[str, tuple[str, ...]], ...] = ()) -> tuple[dict, int, list[dict]]:
+    """Scan the files an update brought, as they will be written, and each other version of files
+    it brings, by its blob, within `deadline` seconds when given. Takes the holding work tree, the
+    copies of what lands, the arrived paths, the operator config, the commit the folder had before,
+    the deadline and the other versions as (commit, paths). Returns the scan document, its exit, and
+    the findings the folder already had before the update, which do not count toward the verdict.
+    Raises DeadlineReached at the deadline."""
     policy = operator_policy(config)
-    size = sum(pathsafe.regular_size(folder, names) for folder, names in landing.folders)
-    already = []
+    sides = [(landing, paths)]
+    sides += [(blob_copies.copy_out(Path(root), side, names, "the files an update brings, as one side has them"),
+               names) for side, names in versions]
+    counted = sum(len(names) for _, names in sides)
+    size = sum(pathsafe.regular_size(folder, names) for copied, _ in sides for folder, names in copied.folders)
+    already: list = []
+    result = None
     with Pace(current(), deadline) as pace:
-        pace.plan(str(root), files=len(paths), size=size, commits=0, workers=1)
-        pace.begin(str(root), "files", len(paths), counted=False)
+        pace.plan(str(root), files=counted, size=size, commits=0, workers=1)
+        pace.begin(str(root), "files", counted, counted=False)
         try:
-            result = _scan_copies(landing, policy)
-            if base and result.findings:
-                before = blob_copies.copy_out(Path(root), base, paths,
-                                              "the files an update changed, as they were before")
-                already = govern_held.set_aside_already_there(result, _scan_copies(before, policy))
+            for copied, names in sides:
+                found = _scan_copies(copied, policy)
+                if base and found.findings:
+                    before = blob_copies.copy_out(Path(root), base, names,
+                                                  "the files an update changed, as they were before")
+                    already += govern_held.set_aside_already_there(found, _scan_copies(before, policy))
+                result = found if result is None else joined(result, found)
         except KeyboardInterrupt:
             if pace.expired:
                 raise DeadlineReached from None
@@ -259,7 +309,8 @@ def _scan_arrived(root: Path, landing: "blob_copies.BlobCopies", paths: tuple[st
         body["description"] = described(body.get("signature_id", ""), body.get("category", ""),
                                         body.get("description"))
         body["pre_existing"] = True
-        already_there.append(body)
+        if body not in already_there:
+            already_there.append(body)
     return _in_plain_words(report.to_payload()), code, already_there
 
 
@@ -297,6 +348,7 @@ def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
     body = {"schema": SCHEMA, "releasable": releasable, "root": str(arrived.root),
             "paths": list(arrived.paths), "mode": arrived.mode, "commit": arrived.commit,
             "base": arrived.base, "head": arrived.head, "refs": [list(i) for i in arrived.refs],
+            "stopped": arrived.stopped.record() if arrived.stopped else None,
             "clean_mark": clean_mark, "applied_mark": applied_mark, "verdict": verdict,
             "written": written or {}, "asks": asks}
     path = Path(into) / _STATE

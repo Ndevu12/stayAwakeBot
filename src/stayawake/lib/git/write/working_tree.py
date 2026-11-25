@@ -550,14 +550,17 @@ class PreparedMove:
 
     `keep` names paths left as they are on disk; each keeps what was staged there, or follows the
     branch when nothing was. `restage` gives, for kept paths, the index entries to put back
-    exactly (None for no entry). `kept_entries` records what was staged at each kept path before
-    the move."""
+    exactly (None for no entry). `conflict_stages` gives, for paths left in conflict, the (mode,
+    object, stage) entries to put there in place of `new`'s. `kept_entries` records what was staged
+    at each kept path before the move."""
 
     def __init__(self, repo: Path, holder: Checkout, old: str, new: str,
-                 keep: frozenset[bytes] = frozenset(), restage: dict | None = None):
+                 keep: frozenset[bytes] = frozenset(), restage: dict | None = None,
+                 conflict_stages: dict | None = None):
         self.repo, self.holder, self.old, self.new = repo, holder, old, new
         self.keep = keep
         self.restage = restage
+        self.conflict_stages = conflict_stages or {}
         self.kept_entries: dict = {}
         self.lock = holder.gitdir / "index.lock"
         self.staged = scratch.new_file("the index a checkout moves to")
@@ -574,8 +577,8 @@ class PreparedMove:
             self.target = landing_entries(self.holder.worktree, self.new)
         except (TreeStateUnknown, ValueError):
             return False
-        self.paths = sorted(p for p in set(before) | set(self.target)
-                            if before.get(p) != self.target.get(p))
+        self.paths = sorted(p for p in set(before) | set(self.target) | set(self.conflict_stages)
+                            if before.get(p) != self.target.get(p) or p in self.conflict_stages)
         files = [p for p in self.paths
                  if any(side.get(p, (_GITLINK,))[0] != _GITLINK for side in (before, self.target))]
         if files:
@@ -591,7 +594,11 @@ class PreparedMove:
         self.kept_entries = {p: staged.get(p) for p in self.paths if p in self.keep}
         lines = []
         for p in self.paths:
-            if p in self.keep and self.restage is not None and p in self.restage:
+            if p in self.conflict_stages:
+                lines.append(b"0 %s\t%s\0" % (zero, p))
+                lines += [b"%s %s %s\t%s\0" % (mode, oid, stage, p)
+                          for mode, oid, stage in self.conflict_stages[p]]
+            elif p in self.keep and self.restage is not None and p in self.restage:
                 entry = self.restage[p]
                 lines.append(b"%s %s\t%s\0" % (entry[0], entry[1], p) if entry is not None
                              else b"0 %s\t%s\0" % (zero, p))

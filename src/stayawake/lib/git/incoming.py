@@ -12,13 +12,13 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git import owned
+from stayawake.lib.git import conflicted, owned
 from stayawake.lib.git.borrowed import BorrowError, place
 from stayawake.lib.git.query import files_brought
 from stayawake.lib.git.run import OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run_ok, stdout, stdout_bytes
 from stayawake.lib.git.write.branch import refs_under, update_refs
 from stayawake.lib.git.write.checkouts import Checkout
-from stayawake.lib.git.write.transfer import adopt_objects
+from stayawake.lib.git.write.transfer import adopt_objects, missing_objects
 from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way, uncommitted_paths
 from stayawake.lib.signing.commits.git_command import fix_commit_signing
 
@@ -79,7 +79,9 @@ PUT_BACK_LEFT_PART_WAY = "the folder could not be put back, and it may have chan
 @dataclass(frozen=True)
 class Arrived:
     """What a command produced outside the open folder. `written` holds the sha256 each file it
-    writes into the folder must hold, by path."""
+    writes into the folder must hold, by path. `versions` names other versions of files the update
+    brings, as (commit, paths), and `stopped` the merge or rebase that stopped for conflicts, when
+    it did."""
 
     root: Path
     paths: tuple[str, ...]
@@ -89,6 +91,8 @@ class Arrived:
     head: str
     refs: tuple[tuple[str, str, str], ...]
     written: tuple[tuple[str, str], ...] = ()
+    versions: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    stopped: "conflicted.Stopped | None" = None
 
 
 def classify(tool: str, args: list[str]) -> str | None:
@@ -170,6 +174,8 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
     if head.startswith("ref: "):
         run_ok(borrowed.path, ["symbolic-ref", "HEAD", head.removeprefix("ref: ").strip()], context=SAW_OWNED)
     ran = _run_command(work, tool, args, kind, fix_commit_signing(repo))
+    if ran and conflicted.stopped_for_conflicts(work, borrowed.path):
+        return _arrived_with_conflicts(work, borrowed.path, base)
     if ran:
         return ran
     after = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
@@ -183,11 +189,11 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
 
 
 def claim(into: Path) -> None:
-    """Mark the holding repository as one this process may write. Takes the holding directory.
-    Returns nothing."""
-    bare = Path(into) / "repo.git"
-    if bare.is_dir():
-        owned.own(bare)
+    """Mark the holding repository and its work tree as ones this process may write. Takes the
+    holding directory. Returns nothing."""
+    for made in (Path(into) / "repo.git", Path(into) / "work"):
+        if made.is_dir():
+            owned.own(made)
 
 
 def apply(repo: Path, into: Path, arrived: Arrived) -> str:
@@ -197,6 +203,8 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     repo = Path(repo).resolve()
     claim(into)
     bare = Path(into) / "repo.git"
+    if arrived.mode == "conflicts":
+        return _apply_conflicts(repo, bare, arrived)
     if arrived.mode == "refs":
         if not arrived.refs:
             return ""
@@ -235,6 +243,70 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     if arrived.refs:
         update_refs(repo, [(ref, old, new) for ref, new, old in arrived.refs])
     if move.undo(before):
+        return "the update could not be written into the open folder"
+    return WRITE_LEFT_PART_WAY
+
+
+def _arrived_with_conflicts(work: Path, holding: Path, base: str) -> "Arrived | str":
+    """Describe a merge or rebase that stopped for conflicts in the holding copy as what arrived.
+    Takes the holding work tree, its git directory and the open folder's commit. Returns what
+    arrived, or a sentence when it cannot be carried into the folder."""
+    stopped = conflicted.read(work, holding, base)
+    if isinstance(stopped, str):
+        return stopped
+    names = files_brought(work, base, stopped.landed, context=SAW_OWNED)
+    versions = conflicted.versions_brought(work, base, stopped)
+    if names is None or versions is None:
+        return "the files the update brings could not be listed"
+    return Arrived(work, names, "conflicts", stopped.incoming, base, _head_text(holding), (),
+                   versions=versions, stopped=stopped)
+
+
+def _apply_conflicts(repo: Path, bare: Path, arrived: Arrived) -> str:
+    """Carry a merge or rebase that stopped for conflicts into `repo`: the checked files, the
+    conflicted index entries and the operation's state. Takes the open folder, the holding
+    repository and what prepare stored. Returns "" when the folder holds it,
+    else a sentence that also names a folder that may have changed."""
+    stopped = conflicted.read(arrived.root, bare, arrived.base)
+    if isinstance(stopped, str) or stopped != arrived.stopped:
+        return "the checked update is no longer in the holding directory; check it again"
+    if stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip() != arrived.base:
+        return "the open folder changed while the update was checked"
+    gitdir = _git_dir(repo)
+    if gitdir is None:
+        return "the open folder is not a git checkout"
+    head = _head_text(repo)
+    if stopped.operation == conflicted.REBASE and conflicted.branch_named(stopped.files) != (
+            head.removeprefix("ref: ").strip() if head.startswith("ref: ") else "detached HEAD"):
+        return "the open folder changed while the update was checked"
+    why = adopt_objects(repo, bare, [stopped.incoming, stopped.landed, stopped.head], [arrived.base])
+    if why:
+        return f"the update could not be copied into the open folder: {why}"
+    if not conflicted.all_commits(repo, conflicted.commits_named(stopped.files) | {stopped.head}):
+        return "the update could not be copied into the open folder"
+    stages = stopped.entries_by_path()
+    if missing_objects(repo, [oid.decode() for entries in stages.values() for _, oid, _ in entries]) != []:
+        return "the update could not be copied into the open folder"
+    way = changes_in_the_way(repo, stopped.landed)
+    before = uncommitted_paths(repo)
+    if way is None or before is None:
+        return "the folder was not changed: its uncommitted work could not be read"
+    if way.blocking or way.carryable or set(before) & set(stages):
+        return "uncommitted work would be overwritten, so the folder was not changed"
+    move = PreparedMove(repo, Checkout(repo, gitdir), arrived.base, stopped.landed,
+                        conflict_stages=stages)
+    if not move.prepare():
+        move.release()
+        return "the update could not be written into the open folder"
+    placed = conflicted.place(gitdir, stopped.files)
+    if placed is None:
+        move.release()
+        return "the update could not be written into the open folder"
+    if move.apply() and (stopped.operation == conflicted.MERGE or _write_head(gitdir, stopped.head)):
+        move.release()
+        return ""
+    move.release()
+    if placed.take_back() and move.undo(before):
         return "the update could not be written into the open folder"
     return WRITE_LEFT_PART_WAY
 

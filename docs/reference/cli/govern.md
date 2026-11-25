@@ -40,6 +40,26 @@ typed, then scan the folder with `saw scan`, or leave the folder as it is. A com
 run other programs, such as `git rebase --exec` or an interactive rebase, is one of these. These commands
 never push and never open a pull request.
 
+## An update that stops for conflicts
+
+A pull, merge or rebase that stops for conflicts is checked like any other update: every file as it
+will reach your folder, conflict markers included, and every file the incoming commit changes, as
+that commit has it. The answer from `prepare` lists the files left to resolve under `conflicts`.
+
+`saw govern apply` then brings in exactly what was checked, without fetching again, and leaves the
+merge or rebase in progress in your folder, as git would. Its answer says so:
+
+```json
+{"applied": true, "conflicts": ["src/app.js"], "next_steps": ["The update is in the folder and stops for conflicts in src/app.js. Resolve them, then run `git commit`."]}
+```
+
+Resolve the conflicts, then run `git commit` for a merge or a pull that merges, or
+`git rebase --continue` for a rebase. In a terminal, saw prints that next step, and the command
+does not report success, so a command chained after it with `&&` does not run. A held update that
+stops for conflicts is let in the same way, with `--accept` and, for an infected one, `--confirm`.
+When the conflicts cannot be brought into the folder, you get that reason and the same decision as
+for an update that cannot be checked.
+
 ## Covering your terminals
 
 ```text
