@@ -19,6 +19,9 @@ reader, not the mechanism or the weakness it closed.
   written. saw gives the full path each time.
 
 ### Fixed
+- When an update `saw govern` checked cannot be written into the folder, saw puts back what it had
+  already changed before saying the folder was not changed, and tells you to check the folder when it
+  cannot put it back. Putting a folder back with `saw govern restore` does the same.
 - saw runs the real git even in a terminal where an editor's git stand-in comes first, so its own
   git work is not slowed down or given the stand-in's settings.
 - `saw govern` no longer lets an update in over uncommitted work on a file the update changes. It
