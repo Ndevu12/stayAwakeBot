@@ -107,8 +107,12 @@ jobs:
       - name: Set up toolchain
         uses: ./.github/actions/setup
 
-      - name: Save saw's own files on Windows
-        run: python -m unittest -v tests.utils.test_saws_files_are_written_on_windows
+      - name: Save saw's own files and remove a kit on Windows
+        run: >-
+          python -m unittest -v
+          tests.utils.test_saws_files_are_written_on_windows
+          tests.bots.security.test_harden_removes_a_kit_on_windows
+          tests.utils.test_windows_denial
 
   session:
     runs-on: ubuntu-latest

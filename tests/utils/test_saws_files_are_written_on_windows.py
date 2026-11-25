@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""On Windows, saw writes its own files where they were named, refusing a link or junction on the
-way or at the file's name, and in one step or not at all."""
+"""On Windows, saw writes its own files where they were named, in one step or not at all: it holds
+every folder on the way against anyone else moving it, refuses a link or junction on the way, and
+follows a link at the file's name that is a symbolic link a trusted account owns."""
 from __future__ import annotations
 
 import errno
@@ -12,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.utils import atomicwrite, pathsafe
+from stayawake.utils import atomicwrite, pathsafe, winlock
 
 WINDOWS_ONLY = unittest.skipUnless(os.name == "nt", "saw's Windows writer runs only on Windows")
 
@@ -38,13 +39,33 @@ class _Sandbox(unittest.TestCase):
 
 
 @WINDOWS_ONLY
-class TestTheWindowsWriterIsTheOneInUse(unittest.TestCase):
+class TestTheWindowsFoldersAreTheOnesInUse(unittest.TestCase):
 
-    def test_every_operation_on_windows_is_the_windows_one(self):
-        from stayawake.utils import atomicwrite_windows
-        for name in ("staged", "read_back", "make_folder", "set_mode", "new_folder", "rename_in",
-                     "move_into", "rename_beside"):
-            self.assertIs(getattr(atomicwrite_windows, name), getattr(atomicwrite, name), name)
+    def test_folders_on_windows_are_held_handles(self):
+        from stayawake.utils import folders, folders_windows
+        self.assertIs(folders_windows.Folder, folders.Folder)
+        self.assertIs(folders_windows.open_folder, folders.open_folder)
+        self.assertIs(folders, atomicwrite.folders)
+
+
+@WINDOWS_ONLY
+class TestAHeldFolderStaysWhereItIs(_Sandbox):
+
+    def test_no_one_else_can_rename_or_delete_a_folder_on_the_way_while_it_is_held(self):
+        from stayawake.utils import folders
+        inner = self.base / "state" / "inner"
+        inner.mkdir(parents=True)
+        with folders.open_folder(inner):
+            for attempt in (lambda: os.rename(self.base / "state", self.base / "moved"),
+                            lambda: os.rename(inner, self.base / "state" / "moved"),
+                            lambda: os.rmdir(inner)):
+                with self.assertRaises(PermissionError):
+                    attempt()
+            self.assertTrue(atomicwrite.replace(inner / "record.json", "{}"))
+            atomicwrite.rename_in(inner, "record.json", "kept.json")
+            atomicwrite.new_folder(inner, "run")
+        self.assertEqual(b"{}", (inner / "kept.json").read_bytes())
+        os.rename(self.base / "state", self.base / "moved")
 
 
 @WINDOWS_ONLY
@@ -89,25 +110,57 @@ class TestAFileIsReadBack(_Sandbox):
         self.assertIsNone(atomicwrite.read_back(self.base / "folder", 100))
         self.assertIsNone(atomicwrite.read_back(self.base / "missing.json", 100))
 
-    def test_a_link_at_the_name_reads_back_as_nothing(self):
+    def test_a_link_at_the_name_reads_back_only_when_it_is_followed(self):
         (self.elsewhere / "planted.json").write_bytes(b"planted")
         (self.base / "record.json").symlink_to(self.elsewhere / "planted.json")
-        for at_a_link in (atomicwrite.REFUSE_A_LINK, atomicwrite.FOLLOW_A_TRUSTED_LINK,
-                          atomicwrite.REPLACE_A_LINK):
+        for at_a_link in (atomicwrite.REFUSE_A_LINK, atomicwrite.REPLACE_A_LINK):
             self.assertIsNone(atomicwrite.read_back(self.base / "record.json", 100,
                                                     at_a_link=at_a_link), at_a_link)
+        self.assertEqual(b"planted", atomicwrite.read_back(self.base / "record.json", 100,
+                                                          at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
 
 
 @WINDOWS_ONLY
-class TestALinkAtTheFilesNameIsRefused(_Sandbox):
+class TestALinkAtTheFilesName(_Sandbox):
 
-    def test_a_symlink_at_the_name_is_never_written_through(self):
+    def test_a_symlink_at_the_name_is_refused_when_the_writer_refuses_links(self):
         (self.base / "record.json").symlink_to(self.elsewhere / "made-through-the-link")
-        for at_a_link in (atomicwrite.REFUSE_A_LINK, atomicwrite.FOLLOW_A_TRUSTED_LINK):
-            self.assertFalse(atomicwrite.replace(self.base / "record.json", "{}", at_a_link=at_a_link),
-                             at_a_link)
+        self.assertFalse(atomicwrite.replace(self.base / "record.json", "{}"))
         self.assertTrue((self.base / "record.json").is_symlink())
         self.assertEqual([], self.landed_elsewhere())
+
+    def test_a_symlink_this_account_placed_is_written_through(self):
+        (self.elsewhere / "dotfiles-record.json").write_bytes(b"old")
+        (self.base / "record.json").symlink_to(self.elsewhere / "dotfiles-record.json")
+        self.assertTrue(atomicwrite.replace(self.base / "record.json", "{}",
+                                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
+        self.assertTrue((self.base / "record.json").is_symlink())
+        self.assertEqual(b"{}", (self.elsewhere / "dotfiles-record.json").read_bytes())
+        atomicwrite.set_mode(self.base / "record.json", 0o600)
+
+    def test_a_symlink_another_account_owns_is_refused(self):
+        (self.elsewhere / "dotfiles-record.json").write_bytes(b"old")
+        (self.base / "record.json").symlink_to(self.elsewhere / "dotfiles-record.json")
+        with mock.patch.object(winlock, "held_owner_sid", return_value="S-1-5-21-1-2-3-1001"):
+            self.assertFalse(atomicwrite.replace(self.base / "record.json", "{}",
+                                                 at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
+            with self.assertRaises(pathsafe.RedirectedPath):
+                atomicwrite.set_mode(self.base / "record.json", 0o600)
+        self.assertEqual(b"old", (self.elsewhere / "dotfiles-record.json").read_bytes())
+
+    def test_a_junction_at_the_name_is_refused(self):
+        junction(self.base / "record.json", self.elsewhere)
+        self.assertFalse(atomicwrite.replace(self.base / "record.json", "{}",
+                                             at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
+        self.assertEqual([], self.landed_elsewhere())
+
+    def test_a_trusted_symlink_whose_target_is_reached_through_a_junction_is_refused(self):
+        (self.elsewhere / "dotfiles-record.json").write_bytes(b"old")
+        junction(self.base / "passage", self.elsewhere)
+        (self.base / "record.json").symlink_to(self.base / "passage" / "dotfiles-record.json")
+        self.assertFalse(atomicwrite.replace(self.base / "record.json", "{}",
+                                             at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK))
+        self.assertEqual(b"old", (self.elsewhere / "dotfiles-record.json").read_bytes())
 
     def test_a_symlink_at_the_name_is_replaced_when_the_writer_asks(self):
         (self.base / "record.json").symlink_to(self.elsewhere / "made-through-the-link")
@@ -120,10 +173,10 @@ class TestALinkAtTheFilesNameIsRefused(_Sandbox):
     def test_a_mode_is_given_only_to_a_regular_file_of_its_own(self):
         (self.base / "record.json").write_text("{}", encoding="utf-8")
         atomicwrite.set_mode(self.base / "record.json", 0o600)
-        (self.base / "link.json").symlink_to(self.base / "record.json")
         (self.base / "folder").mkdir()
+        junction(self.base / "junction.json", self.base / "folder")
         with self.assertRaises(pathsafe.RedirectedPath):
-            atomicwrite.set_mode(self.base / "link.json", 0o600)
+            atomicwrite.set_mode(self.base / "junction.json", 0o600)
         with self.assertRaises(pathsafe.RedirectedPath):
             atomicwrite.set_mode(self.base / "folder", 0o600)
 
@@ -222,9 +275,9 @@ class TestFoldersAreMadeAndEntriesRenamed(_Sandbox):
 class TestAMoveBetweenDisksCopiesWhole(_Sandbox):
 
     def across_disks(self):
-        from stayawake.utils import atomicwrite_windows
+        from stayawake.utils import folders_windows
         refused = OSError(errno.EXDEV, "not the same device", None, 17)
-        return mock.patch.object(atomicwrite_windows.os, "replace", side_effect=refused)
+        return mock.patch.object(folders_windows.os, "replace", side_effect=refused)
 
     def test_a_folder_is_copied_with_its_times_and_the_source_removed(self):
         source = self.base / "hooks"

@@ -7,14 +7,13 @@ import hashlib
 import json
 import os
 import re
-import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.bots.security.hygiene import staging_kit
 from stayawake.bots.security.hygiene.staging_kit import REMOVING_MARK
-from stayawake.utils import atomicwrite, hostdenial, operator, pathsafe
+from stayawake.utils import atomicwrite, folders, hostdenial, pathsafe
 
 __all__ = ["REMOVING_MARK", "Removal", "facts", "remove"]
 _MOST_AT_ONE_TIME = 100
@@ -33,9 +32,10 @@ class Removal:
     mismatch: bool = False
 
 
-def _owned_as_it_should_be(seen_uid: int) -> bool:
-    """Tell whether the kit is owned by the account saw acts for, or by root on a run as root."""
-    return seen_uid == operator.acting_uid() or (hostdenial.privileged() and seen_uid == 0)
+def _owned_as_it_should_be(owner: str) -> bool:
+    """Tell whether the kit belongs to the account saw acts for, or to root on a run as root. Takes its
+    owner's grade: `self`, `root` or `other`. Returns the answer."""
+    return owner == "self" or (owner == "root" and hostdenial.privileged())
 
 
 def _free_name(path: Path, now: datetime.datetime) -> str | None:
@@ -61,12 +61,13 @@ def _packages(lock: bytes | None) -> list[dict[str, str]]:
     return sorted(found, key=lambda p: (p["name"], p["version"]))
 
 
-def facts(folder: Path, when: datetime.datetime) -> dict:
+def facts(folder: Path, when: datetime.datetime, *, read=pathsafe.read_regular_no_follow) -> dict:
     """Return the facts about a staging kit worth keeping once it is gone: when it was made and
-    changed, the digests of its manifests, and the packages it holds. Takes the folder and the time."""
+    changed, the digests of its manifests, and the packages it holds. Takes the folder, the time and
+    what reads a manifest without following a link. Returns the facts."""
     found = folder.lstat()
-    manifest = pathsafe.read_regular_no_follow(folder / "package.json", _MOST_MANIFEST_BYTES)
-    lock = pathsafe.read_regular_no_follow(folder / "package-lock.json", _MOST_MANIFEST_BYTES)
+    manifest = read(folder / "package.json", _MOST_MANIFEST_BYTES)
+    lock = read(folder / "package-lock.json", _MOST_MANIFEST_BYTES)
     stamp = lambda seconds: datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).isoformat()  # noqa: E731
     return {
         "found_at": when.isoformat(),
@@ -97,73 +98,16 @@ def _unescaped(field: str) -> str:
     return raw.encode("latin-1").decode("utf-8", "surrogateescape")
 
 
-def _remove_on_one_device(folder: int, name: str, device: int, mounts: frozenset[str], where: str) -> bool:
-    """Delete an entry of an open folder and everything under it on `device`, never following a link
-    and never entering a mount point or another device. Takes the folder, the entry, the device, the
-    mount points and the entry's folder path. Returns True when the entry is gone."""
+def _manifest_at(folder: folders.Folder, name: str) -> dict | None:
+    """Read a manifest in a held folder, refusing a link or a pipe at its name. Takes the folder and
+    the manifest's name. Returns what it holds, or None for anything but a bounded regular file of
+    JSON. Raises OSError when it is there and cannot be read."""
     try:
-        found = os.stat(name, dir_fd=folder, follow_symlinks=False)
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-    here = os.path.join(where, name)
-    if not stat.S_ISDIR(found.st_mode):
-        try:
-            os.unlink(name, dir_fd=folder)
-        except OSError:
-            return False
-        return True
-    if found.st_dev != device or here in mounts:
-        return False
-    try:
-        inner = os.open(name, os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag(),
-                        dir_fd=folder)
-    except OSError:
-        return False
-    try:
-        opened = os.fstat(inner)
-        if (opened.st_dev, opened.st_ino) != (found.st_dev, found.st_ino):
-            return False
-        try:
-            os.fchmod(inner, stat.S_IRWXU)
-        except OSError:
-            pass
-        with os.scandir(inner) as entries:
-            names = [entry.name for entry in entries]
-        complete = True
-        for child in names:
-            if not _remove_on_one_device(inner, child, device, mounts, here):
-                complete = False
-    except (OSError, RecursionError):
-        return False
-    finally:
-        os.close(inner)
-    if not complete:
-        return False
-    try:
-        os.rmdir(name, dir_fd=folder)
-    except OSError:
-        return False
-    return True
-
-
-def _manifest_at(folder: int, name: str) -> dict | None:
-    """Read a manifest in a held folder, never through a link or a pipe. Takes the folder's descriptor
-    and the manifest's name. Returns what it holds, or None when it is not a bounded regular file of
-    JSON; raises OSError when it is there and cannot be read."""
-    try:
-        opened = os.open(name, os.O_RDONLY | pathsafe.no_follow_flag() | getattr(os, "O_NONBLOCK", 0),
-                         dir_fd=folder)
+        raw = folder.read_regular(name, _MOST_MANIFEST_BYTES)
     except FileNotFoundError:
         return None
-    try:
-        found = os.fstat(opened)
-        if not stat.S_ISREG(found.st_mode) or found.st_size > _MOST_MANIFEST_BYTES:
-            return None
-        raw = os.read(opened, _MOST_MANIFEST_BYTES + 1)
-    finally:
-        os.close(opened)
+    if raw is None or len(raw) > _MOST_MANIFEST_BYTES:
+        return None
     try:
         held = json.loads(raw)
     except (ValueError, RecursionError):
@@ -171,23 +115,14 @@ def _manifest_at(folder: int, name: str) -> dict | None:
     return held if isinstance(held, dict) else None
 
 
-def _holds_a_kit_at(folder: int) -> bool:
-    """Tell whether a held folder holds a known worm's staging kit, read through the descriptor. Takes it.
+def _holds_a_kit_at(folder: folders.Folder) -> bool:
+    """Tell whether a held folder holds a known worm's staging kit, read through the folder. Takes it.
     Returns the answer; raises OSError when a manifest is there and cannot be read."""
     for name in sorted({kit.manifest for kit in staging_kit.kits()}):
         held = _manifest_at(folder, name)
         if held is not None and staging_kit.is_a_kit(name, held):
             return True
     return False
-
-
-def _is_held(path: Path, held: int) -> bool:
-    """Tell whether `path` names the folder held open, whose inode cannot be given to anything else."""
-    try:
-        here, opened = path.lstat(), os.fstat(held)
-    except OSError:
-        return False
-    return (here.st_dev, here.st_ino) == (opened.st_dev, opened.st_ino)
 
 
 def remove(path: Path, capture_dir: Path, *, named_for: Path | None = None,
@@ -200,20 +135,17 @@ def remove(path: Path, capture_dir: Path, *, named_for: Path | None = None,
     was done; whatever could not be deleted is left under the name it was renamed to."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     try:
-        held = os.open(path, os.O_RDONLY | pathsafe.directory_flag() | pathsafe.no_follow_flag())
+        held = folders.hold(path)
     except OSError:
         return Removal()
-    try:
+    with held:
         return _remove_held(path, held, capture_dir, named_for, now)
-    finally:
-        os.close(held)
 
 
-def _remove_held(path: Path, held: int, capture_dir: Path, named_for: Path | None,
+def _remove_held(path: Path, held: folders.Folder, capture_dir: Path, named_for: Path | None,
                  now: datetime.datetime) -> Removal:
-    """Delete the kit `remove` holds open. Takes what `remove` took and the descriptor."""
-    opened = os.fstat(held)
-    if not _owned_as_it_should_be(opened.st_uid):
+    """Delete the kit `remove` holds open. Takes what `remove` took and the held folder."""
+    if not _owned_as_it_should_be(held.owned_by()):
         return Removal()
     try:
         if not _holds_a_kit_at(held):
@@ -221,30 +153,30 @@ def _remove_held(path: Path, held: int, capture_dir: Path, named_for: Path | Non
     except (OSError, ValueError):
         return Removal()
     name = _free_name(named_for or path, now)
-    if name is None or not _is_held(path, held):
+    if name is None or not held.is_at(path):
         return Removal()
     try:
         atomicwrite.rename_beside(path.parent, path.name, name)
     except OSError:
         return Removal()
     renamed = path.parent / name
-    if not _is_held(renamed, held):
+    if not held.settle_at(renamed):
         try:
             atomicwrite.rename_beside(path.parent, name, path.name)
         except OSError:
             pass
         return Removal(mismatch=True)
     try:
-        kept = facts(renamed, now)
+        kept = facts(renamed, now, read=_reading_through(held))
     except OSError:
         kept = {"found_at": now.isoformat()}
     atomicwrite.replace(capture_dir / f"staging-kit-{now.strftime('%Y%m%dT%H%M%SZ')}.json",
                         json.dumps(kept, indent=2), mode=atomicwrite.AS_A_PLAIN_WRITE,
                         at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     where = os.path.join(os.path.realpath(path.parent), name)
-    if _empty_held(held, opened.st_dev, _mount_points(), where) and _is_held(renamed, held):
+    if _empty_held(held, held.device(), _mount_points(), where) and held.is_at(renamed):
         try:
-            os.rmdir(renamed)
+            held.remove_at(renamed)
         except OSError:
             pass
     if not os.path.lexists(renamed):
@@ -252,24 +184,34 @@ def _remove_held(path: Path, held: int, capture_dir: Path, named_for: Path | Non
     return Removal(left=renamed)
 
 
-def _empty_held(held: int, device: int, mounts: frozenset[str], where: str) -> bool:
+def _reading_through(held: folders.Folder):
+    """Make a reader of the manifests in the held kit, refusing a link at their names. Takes the held
+    folder. Returns a function that takes a manifest's path and the most bytes to accept, and gives
+    back its bytes, or None for a link, anything but a regular file, a larger file or one it cannot
+    read."""
+    def read(path: Path, most: int) -> bytes | None:
+        try:
+            raw = held.read_regular(path.name, most)
+        except OSError:
+            return None
+        return raw if raw is not None and len(raw) <= most else None
+    return read
+
+
+def _empty_held(held: folders.Folder, device: int, mounts: frozenset[str], where: str) -> bool:
     """Delete everything in the held folder on `device`, its manifests last and only once the rest is
-    gone, never following a link or entering a mount point or another device. Takes the descriptor, the
+    gone, never following a link or entering a mount point or another device. Takes the folder, the
     device, the mount points and the folder's path. Returns True when it is empty."""
-    try:
-        os.fchmod(held, stat.S_IRWXU)
-    except OSError:
-        pass
+    held.make_writable()
     manifests = {kit.manifest for kit in staging_kit.kits()}
     try:
-        with os.scandir(held) as entries:
-            names = [entry.name for entry in entries]
+        names = held.names()
     except OSError:
         return False
     complete = True
     for child in sorted(names, key=lambda n: n in manifests):
         if child in manifests and not complete:
             continue
-        if not _remove_on_one_device(held, child, device, mounts, where):
+        if not held.remove_on_one_device(child, device, mounts, where):
             complete = False
     return complete

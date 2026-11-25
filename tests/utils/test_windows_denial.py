@@ -19,6 +19,13 @@ class TestWhoHoldsIt(unittest.TestCase):
         self.assertEqual(winlock.grade("S-1-5-21-2", acting), "other")
         self.assertEqual(winlock.grade(None, acting), "other")
 
+    def test_a_link_is_trusted_only_from_the_system_an_administrator_or_the_acting_account(self):
+        acting = "S-1-5-21-1"
+        for owner in (winlock.SYSTEM, winlock.ADMINISTRATORS, acting):
+            self.assertTrue(winlock.trusted_owner(owner, acting), owner)
+        for owner in ("S-1-5-21-2", "S-1-5-32-545", "", None):
+            self.assertFalse(winlock.trusted_owner(owner, acting), owner)
+
     def test_a_denial_is_graded_from_that_account(self):
         with tempfile.TemporaryDirectory() as folder:
             with mock.patch.object(hostdenial.sys, "platform", "win32"), \

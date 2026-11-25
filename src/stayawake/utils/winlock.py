@@ -117,6 +117,32 @@ def owner_sid(path: Path) -> str | None:
             ctypes.windll.kernel32.LocalFree(descriptor)
 
 
+def held_owner_sid(handle: int) -> str | None:
+    """Read who owns an open file, folder or link. Takes its handle, opened with READ_CONTROL. Returns
+    their sid, or None when it cannot be read."""
+    adv = _advapi()
+    if adv is None:
+        return None
+    owner = ctypes.c_void_p()
+    descriptor = ctypes.c_void_p()
+    try:
+        if adv.GetSecurityInfo(ctypes.c_void_p(handle), _SE_FILE_OBJECT, _OWNER_SECURITY_INFORMATION,
+                               ctypes.byref(owner), None, None, None, ctypes.byref(descriptor)) != 0:
+            return None
+        return _sid_text(adv, owner)
+    except (OSError, AttributeError):
+        return None
+    finally:
+        if descriptor.value:
+            ctypes.windll.kernel32.LocalFree(descriptor)
+
+
+def trusted_owner(owner: str | None, acting: str | None) -> bool:
+    """Tell whether an owner is one a write may trust: the system, the Administrators group or the
+    account saw is acting for. Takes the owner's sid and the acting account's. Returns the answer."""
+    return grade(owner, acting) in ("root", "self")
+
+
 def write_denied(path: Path, sid_text: str) -> bool:
     """Tell whether `sid_text` is denied from adding or removing anything in `path`. Takes the path
     and the account. Returns the answer, False when the denial cannot be read."""
