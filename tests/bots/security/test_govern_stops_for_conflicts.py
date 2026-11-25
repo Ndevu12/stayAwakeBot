@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake import cli
-from stayawake.bots.security import govern
+from stayawake.bots.security import govern, govern_carried
 from stayawake.utils import exitcodes
 from tests.bots.security.test_govern_replays_a_tracking_checkout import _TrackingCheckout
 from tests.support import samples
@@ -360,6 +360,25 @@ class ARebaseThatStopsWithCommitsLeft(_TrackingCheckout):
         self.assertEqual(answer["decision"]["choices"], ["leave-unchanged"])
         self.assertEqual(answer["scan"]["results"][0]["verdict"], "infected", answer)
         self.assertNotIn("did not finish cleanly", json.dumps(answer))
+
+    def test_a_carried_rebase_whose_rest_was_changed_to_run_commands_is_held(self):
+        self._commits(("kept.txt", "mine\n", "L0"), ("other.txt", "other\n", "L1"))
+        self._carried()
+        todo = self.open / ".git" / "rebase-merge" / "git-rebase-todo"
+        todo.write_bytes(b"exec true\n" + todo.read_bytes())
+        answer, _code = self._continue()
+        self.assertEqual(answer["decision"]["choices"], ["leave-unchanged"])
+
+    def test_a_rebase_saw_did_not_carry_gets_the_answer_starting_it_would(self):
+        self._commits(("kept.txt", "mine\n", "L0"), ("other.txt", "other\n", "L1"))
+        self._carried()
+        govern_carried._record_path(self.open).unlink()
+        todo = self.open / ".git" / "rebase-merge" / "git-rebase-todo"
+        todo.write_bytes(b"exec true\n" + todo.read_bytes())
+        answer, code = self._continue()
+        self.assertEqual(code, exitcodes.INCOMPLETE)
+        self.assertEqual(answer["reason"], "a command that runs other commands cannot be checked")
+        self.assertEqual(answer["decision"]["choices"], ["run-as-typed", "leave-unchanged"])
 
     def test_finishing_a_merge_runs_as_typed(self):
         answer, code = govern.prepare(str(self.open), str(self.into), "git", ["merge", "--continue"])

@@ -60,7 +60,8 @@ stops for conflicts is let in the same way, with `--accept` and, for an infected
 For a rebase, every commit it has yet to replay is checked too. Continuing a rebase saw brought in,
 with `git rebase --continue` or `--skip`, runs as typed when what is left is what saw checked.
 Anything else left is checked first; when the check finds something or cannot finish, the folder is
-left as it is and the answer says how to leave the rebase.
+left as it is and the answer says how to leave the rebase. Continuing a rebase saw did not bring in
+gets the answer starting it would get.
 
 When the conflicts cannot be brought into the folder, the update is still checked. A clean one
 brings that reason and the same decision as an update that cannot be checked, except for a pull,

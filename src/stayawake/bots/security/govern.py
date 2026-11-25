@@ -219,34 +219,42 @@ def _left_to_resolve(repo: str, state: dict, stopped: "conflicted.Stopped",
 
 
 def _continuing_a_rebase(repo: str, config: str | None, deadline: float | None) -> tuple[dict, int]:
-    """Answer continuing a rebase in progress in the open folder: it runs as typed when what is left
-    is what saw carried in and checked, or when a check of each commit left finds nothing. Any other
-    rest is held, and leaving the folder is the one choice. Takes the open folder, the operator
-    config and the deadline. Returns the answer and its exit."""
+    """Answer continuing a rebase in progress in the open folder. A rebase saw carried in runs as
+    typed when what is left is what saw checked, or when a check of each commit left finds nothing,
+    and any other rest is held with leaving the folder the one choice. A rebase saw did not carry
+    in gets the answer starting it would get. Takes the open folder, the operator config and the
+    deadline. Returns the answer and its exit."""
     left = incoming.rebase_left(Path(repo))
     if left is None:
         return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
     if isinstance(left, str):
-        return _rebase_held(repo, left, {}, exitcodes.INCOMPLETE, [])
+        return _unchecked(repo, left)
     onto, picks, only_picks = left
+    carried_here = govern_carried.carried_onto(repo) == onto
     if not only_picks:
+        if not carried_here:
+            return _unchecked(repo, incoming.RUNS_OTHER_COMMANDS)
         return _rebase_held(repo, "the rest of this rebase cannot be checked", {}, exitcodes.INCOMPLETE, [])
-    if govern_carried.carried(repo, onto, picks):
+    if carried_here and govern_carried.carried(repo, onto, picks):
         return {"passthrough": True, "reason": "the rest of the rebase is what saw checked"}, exitcodes.CLEAN
+    cannot = "the rest of this rebase could not be checked"
     sides = []
     for pick in picks:
         changed = conflicted.changed_by(Path(repo), pick)
         if changed is None:
-            return _rebase_held(repo, "the rest of this rebase cannot be checked", {}, exitcodes.INCOMPLETE, [])
+            return _rebase_held(repo, cannot, {}, exitcodes.INCOMPLETE, []) if carried_here else _unchecked(repo, cannot)
         sides.append((blob_copies.copy_out_as_written(Path(repo).resolve(), Path(repo), pick, changed,
                                                       "the commits a rebase has left"), changed))
     try:
         payload, code, _already = _scan_arrived(Path(repo), blob_copies.BlobCopies((), ()), (), config, None,
                                                 deadline, tuple(sides))
     except (DeadlineReached, ValueError, OSError):
-        return _rebase_held(repo, "the rest of this rebase could not be checked", {}, exitcodes.INCOMPLETE, [])
+        return _rebase_held(repo, cannot, {}, exitcodes.INCOMPLETE, []) if carried_here else _unchecked(repo, cannot)
     if code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}:
         return {"passthrough": True, "reason": "the rest of the rebase was checked"}, exitcodes.CLEAN
+    if code == exitcodes.INCOMPLETE and not carried_here:
+        answer, unchecked_code = _unchecked(repo, cannot)
+        return {"scan": payload, **answer}, unchecked_code
     findings = (payload.get("results") or [{}])[0].get("findings") or []
     steps = govern_held.next_steps(_verdict(payload) or "incomplete", findings, [], onto, can_let_in=False)
     return _rebase_held(repo, "the rest of this rebase brings what the check held", payload, code, steps)

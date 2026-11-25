@@ -26,6 +26,16 @@ def remember(repo: str | Path, onto: str, picks: tuple[str, ...]) -> bool:
     return atomicwrite.replace(where, json.dumps({"onto": onto, "picks": list(picks)}))
 
 
+def carried_onto(repo: str | Path) -> str | None:
+    """Read the commit the rebase saw last carried into `repo` replays onto. Takes the open folder.
+    Returns it, or None for a folder saw carried no rebase into."""
+    try:
+        onto = json.loads(_record_path(repo).read_text(encoding="utf-8"))["onto"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return onto if isinstance(onto, str) else None
+
+
 def carried(repo: str | Path, onto: str, picks: tuple[str, ...]) -> bool:
     """Tell whether a rebase in progress in `repo` is one saw carried, with nothing left to replay
     beyond what saw checked. Takes the open folder, the commit the rebase replays onto and the
