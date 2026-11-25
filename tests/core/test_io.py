@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reports go to the folder that was asked for, or nowhere with an error naming it."""
+"""Which reports folder was asked for, and in which order the sources are read."""
 from __future__ import annotations
 
 import contextlib
@@ -9,43 +9,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.utils.io import (resolve_writable_dir, resolve_reports_dir,
-                                reports_dir_choice, write_json)
-
-
-class TestResolveWritableDir(unittest.TestCase):
-    def test_writable_preferred_is_used_silently(self):
-        with tempfile.TemporaryDirectory() as d:
-            target = Path(d) / "reports" / "security"
-            err = _io.StringIO()
-            with contextlib.redirect_stderr(err):
-                got = resolve_writable_dir(target, label="security reports")
-            self.assertEqual(got, target)
-            self.assertTrue(got.is_dir())
-            self.assertEqual(err.getvalue(), "")            # no warning on the happy path
-
-    def test_an_unwritable_folder_gets_no_reports_and_an_error_naming_it(self):
-        with tempfile.TemporaryDirectory() as d:
-            blocker = Path(d) / "blocker"
-            blocker.write_text("not a dir\n")
-            target = blocker / "security"
-            err = _io.StringIO()
-            with contextlib.redirect_stderr(err):
-                got = resolve_writable_dir(target, label="security reports")
-            self.assertIsNone(got)
-            self.assertIn(f"error: security reports directory {target} cannot be written", err.getvalue())
-            self.assertEqual(sorted(p.name for p in Path(d).iterdir()), ["blocker"])
-
-    def test_a_writable_folder_keeps_no_trace_of_the_check(self):
-        with tempfile.TemporaryDirectory() as d:
-            target = Path(d) / "reports"
-            self.assertEqual(resolve_writable_dir(target), target)
-            self.assertEqual(list(target.iterdir()), [])
+from stayawake.utils.io import resolve_reports_dir, reports_dir_choice, write_json
 
 
 class TestResolveReportsDir(unittest.TestCase):
     """Shared precedence: explicit → STAYAWAKE_REPORTS_DIR env → settings → default
-    (then made writable via resolve_writable_dir). One place so the report writers
+    (then readied by scratch.destination_dir). One place so the report writers
     don't each re-implement it."""
 
     def _resolve(self, *, explicit=None, env=None, settings_value=None, default="def"):

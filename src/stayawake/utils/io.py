@@ -4,29 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
-from stayawake.utils import atomicwrite, env, pathsafe
-
-
-def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Path | None:
-    """Make sure a folder can take reports. Takes the folder and what the reports are. Returns the
-    folder, or none after saying on standard error why it cannot take them."""
-    preferred = Path(preferred)
-    try:
-        atomicwrite.make_folder(preferred)
-        check = preferred / ".saw-write-check"
-        atomicwrite.replace(check, "")
-        check.unlink()
-        return preferred
-    except pathsafe.RedirectedPath:
-        why = "is reached through a link saw does not follow"
-    except OSError as exc:
-        why = f"cannot be written ({exc.strerror or exc})"
-    print(f"error: {label} directory {preferred} {why}, so saw did not write the {label}.", file=sys.stderr)
-    return None
+from stayawake.utils import atomicwrite, env, scratch
 
 
 def reports_dir_choice(explicit: str | Path | None = None, *,
@@ -46,12 +27,11 @@ def reports_dir_choice(explicit: str | Path | None = None, *,
 
 def resolve_reports_dir(explicit: str | Path | None = None, *,
                         settings_value: str | Path | None = None,
-                        default: str | Path, label: str = "reports") -> Path | None:
+                        default: str | Path, label: str = "reports") -> Path:
     """Return the folder reports go to, ready for them. Takes the folder named on the command line,
-    the one in the settings, the default and what the reports are. Returns the folder, or none when
-    it cannot take them."""
+    the one in the settings, the default and what the reports are."""
     chosen = reports_dir_choice(explicit, settings_value=settings_value) or default
-    return resolve_writable_dir(chosen, label=label)
+    return scratch.destination_dir(chosen, label)
 
 
 def read_json(path: str | Path, default: Any = None) -> Any:

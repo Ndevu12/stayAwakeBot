@@ -417,9 +417,8 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     if reports_dir_choice(reports_dir, settings_value=settings_reports_dir):
         rdir = resolve_reports_dir(reports_dir, settings_value=settings_reports_dir,
                                    default=REPORTS_DIR, label="security reports")
-        if rdir is not None:
-            sinks.append(FileSink(rdir))
-            report_path = Path(rdir) / "latest.md"
+        sinks.append(FileSink(rdir))
+        report_path = Path(rdir) / "latest.md"
     if alert:
         sinks += [IssueSink(), SlackSink()]
     for sink in sinks:
