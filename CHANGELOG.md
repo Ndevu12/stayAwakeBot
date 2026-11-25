@@ -17,6 +17,8 @@ reader, not the mechanism or the weakness it closed.
 - saw removes each temporary file it makes as soon as it is done with it, not only when the run ends.
 - On Windows, saw saves its own files, such as hook records, settings and what `saw govern` and
   `saw watch` keep, refusing any link on the way as it does on macOS and Linux.
+- Each release publishes its container image to GHCR again, built from the same Linux wheel as the
+  release on PyPI.
 
 ## [0.17.6] - 2026-11-25
 
