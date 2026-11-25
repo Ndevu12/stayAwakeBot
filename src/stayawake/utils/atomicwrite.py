@@ -13,11 +13,9 @@ import sys
 from pathlib import Path
 
 from stayawake.utils import pathsafe
+from stayawake.utils.link_modes import FOLLOW_A_TRUSTED_LINK, REFUSE_A_LINK, REPLACE_A_LINK
 
 AS_A_PLAIN_WRITE = None
-REFUSE_A_LINK = "refuse"
-FOLLOW_A_TRUSTED_LINK = "follow"
-REPLACE_A_LINK = "replace"
 _CREATE = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | pathsafe.no_follow_flag()
            | getattr(os, "O_CLOEXEC", 0))
 _READ = (os.O_RDONLY | pathsafe.no_follow_flag() | getattr(os, "O_NONBLOCK", 0)
@@ -133,7 +131,7 @@ def set_mode(where: Path, mode: int) -> None:
 def new_folder(parent: Path, stem: str, *, mode: int = 0o777, tries: int = 1000) -> Path:
     """Make a folder no one else made, named `stem` or `stem-<n>`. Takes the parent, the name, the mode
     and how many names to try. Returns its path. Raises `OSError` when none could be made."""
-    _one_entry(stem)
+    pathsafe.one_entry(stem)
     folder = pathsafe.open_folder(Path(parent), create=True)
     try:
         for n in range(tries):
@@ -151,8 +149,8 @@ def new_folder(parent: Path, stem: str, *, mode: int = 0o777, tries: int = 1000)
 def rename_in(folder: Path, old: str, new: str) -> None:
     """Rename an entry of a folder, reached without following a link the writer does not trust. Takes
     the folder, the entry's name and its new name. Raises `OSError` when it could not be renamed."""
-    _one_entry(old)
-    _one_entry(new)
+    pathsafe.one_entry(old)
+    pathsafe.one_entry(new)
     opened = pathsafe.open_folder(Path(folder))
     try:
         os.rename(old, new, src_dir_fd=opened, dst_dir_fd=opened)
@@ -166,7 +164,7 @@ def move_into(source: Path, folder: Path, name: str) -> None:
     `OSError` when either is reached through such a link or the move could not be made; a copy that
     could not be made in full leaves the source in place."""
     source = Path(source)
-    _one_entry(name)
+    pathsafe.one_entry(name)
     origin = pathsafe.open_folder(source.parent)
     try:
         destination = pathsafe.open_folder(Path(folder))
@@ -196,8 +194,8 @@ def rename_beside(folder: Path, name: str, new_name: str) -> None:
     replacing what is already there and never following a link the writer does not trust. Takes the
     folder, the entry and its new name. Raises `FileExistsError` when the new name is taken, and
     `OSError` when the folder is reached through such a link or the rename could not be made."""
-    _one_entry(name)
-    _one_entry(new_name)
+    pathsafe.one_entry(name)
+    pathsafe.one_entry(new_name)
     opened = pathsafe.open_folder(Path(folder))
     try:
         if _kernel_rename_no_replace(opened, name, new_name):
@@ -297,13 +295,6 @@ def _is_link(name: str, folder: int) -> bool:
         return False
 
 
-def _one_entry(name: str) -> None:
-    """Refuse a name that is not exactly one entry of a folder. Takes the name. Raises
-    `RedirectedPath` for an empty name, `.`, `..`, or one with a separator in it."""
-    if name in ("", ".", "..") or os.sep in name or (os.altsep and os.altsep in name):
-        raise pathsafe.RedirectedPath(f"{name!r} is not one entry of a folder")
-
-
 def _mode_of(name: str, folder: int) -> int | None:
     """Name the mode of a regular file in an open folder. Takes its name and the folder. Returns the
     mode, or None when there is no regular file of that name."""
@@ -312,3 +303,8 @@ def _mode_of(name: str, folder: int) -> int | None:
     except FileNotFoundError:
         return None
     return stat.S_IMODE(found.st_mode) if stat.S_ISREG(found.st_mode) else None
+
+
+if os.name == "nt":
+    from stayawake.utils.atomicwrite_windows import (make_folder, move_into, new_folder, read_back,
+                                                     rename_beside, rename_in, set_mode, staged)

@@ -285,6 +285,13 @@ class RedirectedPath(OSError):
     """A path that reaches somewhere else through a link its writer does not trust."""
 
 
+def one_entry(name: str) -> None:
+    """Refuse a name that is not exactly one entry of a folder. Takes the name. Raises
+    `RedirectedPath` for an empty name, `.`, `..`, or one with a separator in it."""
+    if name in ("", ".", "..") or os.sep in name or (os.altsep and os.altsep in name):
+        raise RedirectedPath(f"{name!r} is not one entry of a folder")
+
+
 def trusted_link_owners() -> set[int]:
     """Name who may own a link a write follows: root, and the user writing. Returns their ids."""
     geteuid = getattr(os, "geteuid", None)
