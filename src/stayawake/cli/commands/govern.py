@@ -72,6 +72,8 @@ def register(sub) -> None:
                     help="let in an update saw held, after you reviewed it: the commit it checked")
     ap.add_argument("--confirm", default=None, metavar="FOLDER",
                     help="for an infected update, the open folder's name, typed by you")
+    ap.add_argument("--expect", default=None, metavar="STATE_ID",
+                    help="apply only the update whose check gave this state_id")
     add_progress_arg(ap)
     ap.set_defaults(func=run_apply)
 
@@ -155,7 +157,7 @@ def run_apply(a: argparse.Namespace) -> int:
 
 
 def _do_apply(a: argparse.Namespace) -> int:
-    payload, code = core.apply(a.repo, a.into, a.accept, a.confirm)
+    payload, code = core.apply(a.repo, a.into, a.accept, a.confirm, a.expect)
     print(json.dumps(versioned("govern", payload)))
     return code
 

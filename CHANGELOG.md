@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- `saw govern apply --expect <state_id>` brings in exactly the update its own `prepare` checked, one
+  saw run at a time per holding directory, and `--json` names what happened in `outcome`. `saw govern
+  verdict` says where a folder is after an apply that did not finish.
 - `saw govern classify --json` says how saw reads a git or gh command line: whether it could be
   read, its subcommand after aliases, the folder it acts on and whether it brings files in.
 

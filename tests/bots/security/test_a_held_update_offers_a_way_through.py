@@ -56,7 +56,7 @@ class WhatTheUpdateBrings(_Update):
         self.assertTrue(all(f["pre_existing"] for f in answer["pre_existing"]))
         self.assertNotIn("decision", answer)
         self.assertTrue(any("already there" in step for step in answer["next_steps"]))
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
 
     def test_a_finding_the_update_changes_still_holds_it(self):
         self.start({".claude/settings.json": _hook()})
@@ -86,7 +86,7 @@ class AWayThrough(_Update):
         self.assertFalse(govern.apply(str(self.open), str(self.into))[0]["applied"])
         self.assertFalse(govern.apply(str(self.open), str(self.into), accept="0" * 40)[0]["applied"])
         self.assertEqual(self.head(), before)
-        self.assertEqual(govern.apply(str(self.open), str(self.into), accept=commit)[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into), accept=commit)[0], {"applied": True, "outcome": "brought_in"})
         self.assertEqual(self.head(), commit)
         said, code = govern.verdict(str(self.open))
         self.assertEqual((said["governed"], said["code"]), ("not-let-in", "let-in-by-you"))
@@ -104,7 +104,7 @@ class AWayThrough(_Update):
             self.assertFalse(govern.apply(str(self.open), str(self.into), accept=commit, confirm=confirm)[0]["applied"])
         self.assertEqual(self.head(), before)
         self.assertEqual(govern.apply(str(self.open), str(self.into), accept=commit, confirm="open")[0],
-                         {"applied": True})
+                         {"applied": True, "outcome": "brought_in"})
         self.assertEqual(govern.verdict(str(self.open))[0]["code"], "let-in-by-you")
 
     def test_a_clean_update_carries_no_decision(self):

@@ -37,9 +37,11 @@ def status_path(repo: str | Path) -> Path:
 
 
 def write(repo: str | Path, phase: str, *, verdict: str | None = None,
-          reasons: list[str] | None = None, step: str | None = None) -> None:
+          reasons: list[str] | None = None, step: str | None = None,
+          applying: dict | None = None) -> None:
     """Record where a check for `repo` is. Takes the open folder and the phase, with the verdict,
-    reasons and step text when there are any. A write that fails is skipped."""
+    reasons, step text and the update being applied when there are any. A write that fails is
+    skipped."""
     try:
         status_dir().mkdir(parents=True, exist_ok=True)
         body: dict = {"repo": os.path.abspath(repo), "phase": phase,
@@ -48,6 +50,8 @@ def write(repo: str | Path, phase: str, *, verdict: str | None = None,
             body["verdict"] = verdict
         if step:
             body["step"] = step
+        if applying:
+            body["applying"] = applying
         atomicwrite.replace(status_path(repo), json.dumps(body))
     except OSError:
         pass
