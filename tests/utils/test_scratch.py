@@ -71,6 +71,17 @@ class TestReleaseTakesTheRunWithIt(OwnTempRoot):
         scratch.release()
         self.assertEqual([], scratch.held())
 
+    def test_a_released_file_is_removed_at_once(self):
+        made = scratch.new_file("askpass")
+        self.assertEqual("", scratch.release_path(made))
+        self.assertFalse(os.path.lexists(made))
+
+    def test_a_released_file_is_removed_while_a_report_is_kept(self):
+        scratch.kept_dir("report")
+        made = scratch.new_file("askpass")
+        self.assertEqual("", scratch.release_path(made))
+        self.assertFalse(os.path.lexists(made))
+
     def test_releasing_twice_is_not_an_error(self):
         scratch.new_dir("rollback")
         scratch.release()

@@ -27,6 +27,7 @@ reader, not the mechanism or the weakness it closed.
   written. saw gives the full path each time.
 
 ### Fixed
+- saw removes each temporary file it makes as soon as it is done with it, not only when the run ends.
 - When an update `saw govern` checked cannot be written into the folder, saw puts back what it had
   already changed before saying the folder was not changed, and tells you to check the folder when it
   cannot put it back. Putting a folder back with `saw govern restore` does the same.
