@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from stayawake.bots.security import govern
-from stayawake.lib.git import incoming
+from stayawake.lib.git import command_line, incoming
 from stayawake.utils import exitcodes
 from tests.bots.security.test_govern_replays_a_tracking_checkout import _TrackingCheckout
 
@@ -43,13 +43,13 @@ class WhatACommandBrings(_TrackingCheckout):
     def test_going_back_to_the_previous_branch_is_checked(self):
         for args in (["checkout", "-"], ["switch", "-"]):
             with self.subTest(args=args):
-                self.assertFalse(incoming.brings_nothing("git", args))
-                self.assertEqual(incoming.classify("git", args), args[0])
+                self.assertFalse(incoming.brings_nothing(self.open, "git", args))
+                self.assertEqual(command_line.read("git", args, self.open).kind, args[0])
 
     def test_a_command_saw_declines_to_check_is_still_asked_about(self):
         for args in (["rebase", "--abort"], ["fetch", "--dry-run"], ["submodule", "foreach", "git", "pull"]):
             with self.subTest(args=args):
-                self.assertFalse(incoming.brings_nothing("git", args))
+                self.assertFalse(incoming.brings_nothing(self.open, "git", args))
                 answer, _code = govern.prepare(str(self.open), str(self.into), "git", args)
                 self.assertNotIn("passthrough", answer)
                 self.assertIn("decision", answer)
@@ -57,7 +57,7 @@ class WhatACommandBrings(_TrackingCheckout):
     def test_no_stat_and_no_tags_are_still_checked(self):
         for args in (["pull", "-n"], ["fetch", "-n"], ["merge", "-n", "origin/main"], ["rebase", "-n"]):
             with self.subTest(args=args):
-                self.assertEqual(incoming.classify("git", args), args[0])
+                self.assertEqual(command_line.read("git", args, self.open).kind, args[0])
 
 
 if __name__ == "__main__":
