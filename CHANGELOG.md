@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- saw removes each temporary file it makes as soon as it is done with it, not only when the run ends.
+- On Windows, saw saves its own files, such as hook records, settings and what `saw govern` and
+  `saw watch` keep, refusing any link on the way as it does on macOS and Linux.
+
 ## [0.17.6] - 2026-11-25
 
 ### Added
@@ -27,7 +32,6 @@ reader, not the mechanism or the weakness it closed.
   written. saw gives the full path each time.
 
 ### Fixed
-- saw removes each temporary file it makes as soon as it is done with it, not only when the run ends.
 - When an update `saw govern` checked cannot be written into the folder, saw puts back what it had
   already changed before saying the folder was not changed, and tells you to check the folder when it
   cannot put it back. Putting a folder back with `saw govern restore` does the same.
@@ -39,8 +43,6 @@ reader, not the mechanism or the weakness it closed.
   never installs it.
 - A clean update `saw govern` checked lands in the folder even when the system's temporary folder is on
   another filesystem, as it is by default on Arch and Fedora. When an update cannot land, saw says why.
-- On Windows, saw saves its own files, such as hook records, settings and what `saw govern` and
-  `saw watch` keep, refusing any link on the way as it does on macOS and Linux.
 
 ## [0.17.5] - 2026-11-24
 
