@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git import objects
+from stayawake.lib.git.objects import FILE_AND_LINK_MODES
 from stayawake.lib.git.run import UNTRUSTED, stdout_bytes
 from stayawake.utils import atomicwrite, scratch
 
-_FILE_MODES = (b"100644", b"100755", b"120000")
 _BLOBS_PER_READ = 256
 _LARGEST_BATCHED_BLOB = 16 << 20
 _MOST_BYTES_PER_READ = 128 << 20
@@ -32,41 +32,50 @@ class BlobCopies:
 
 
 def copy_out(repo: Path, commit: str, paths: tuple[str, ...], purpose: str) -> BlobCopies:
-    """Copy each path's blob at `commit` under its own name, putting a name that would share a file
-    with one already copied in a further folder. Takes the repository, the commit, the paths and
-    what the copies are for. Returns the folders and the names that could not be copied, leaving
-    out each path the commit records no file for."""
+    """Copy each path's blob at `commit` under its own name. The first folder holds every name that
+    shares a file with no name before it. Each further folder holds names that would share a file
+    in the folders before it, with every file of the first folder whose name is still free there.
+    Takes the repository, the commit, the paths and what the copies are for. Returns the folders
+    and the names that could not be copied, leaving out each path the commit records no file for."""
     recorded = _file_entries(repo, commit)
     if recorded is None:
         return BlobCopies((), tuple(paths))
     wanted = [rel for rel in paths if os.fsencode(rel) in recorded]
     contents = _read(repo, [recorded[os.fsencode(rel)] for rel in wanted])
-    folders: list[tuple[Path, list[str]]] = []
-    not_copied: list[str] = []
-    for rel in wanted:
-        data = contents.get(recorded[os.fsencode(rel)])
-        if data is None or not _copied(folders, rel, data, purpose):
-            not_copied.append(rel)
-    return BlobCopies(tuple((folder, tuple(names)) for folder, names in folders), tuple(not_copied))
-
-
-def _copied(folders: list[tuple[Path, list[str]]], rel: str, data: bytes, purpose: str) -> bool:
-    """Write one file into the first folder where its name is free, or into a new one. Takes the
-    folders made, the name, its bytes and what the copies are for. Returns whether it was
-    written."""
-    for folder, names in folders:
-        outcome = _place(folder, rel, data)
-        if outcome == _NAME_IN_USE:
+    files = [(rel, contents.get(recorded[os.fsencode(rel)])) for rel in wanted]
+    not_copied = [rel for rel, data in files if data is None]
+    waiting = [(rel, data) for rel, data in files if data is not None]
+    folders: list[tuple[Path, tuple[str, ...]]] = []
+    shared: list[tuple[str, bytes]] = []
+    while waiting:
+        folder = scratch.new_dir(purpose)
+        placed, waiting = _fill(folder, waiting, not_copied)
+        if not placed:
+            scratch.release_path(folder)
             continue
+        if folders:
+            placed += _fill(folder, shared, [])[0]
+        else:
+            shared = placed
+        folders.append((folder, tuple(rel for rel, _ in placed)))
+    return BlobCopies(tuple(folders), tuple(not_copied))
+
+
+def _fill(folder: Path, files: list[tuple[str, bytes]],
+          not_copied: list[str]) -> tuple[list[tuple[str, bytes]], list[tuple[str, bytes]]]:
+    """Write each file whose name is free in `folder`. Takes the folder, the files as (name, bytes)
+    and the list a name that cannot hold a file is added to. Returns the files written and the
+    files whose name was in use."""
+    placed, in_use = [], []
+    for rel, data in files:
+        outcome = _place(folder, rel, data)
         if outcome == _PLACED:
-            names.append(rel)
-        return outcome == _PLACED
-    folder = scratch.new_dir(purpose)
-    if _place(folder, rel, data) != _PLACED:
-        scratch.release_path(folder)
-        return False
-    folders.append((folder, [rel]))
-    return True
+            placed.append((rel, data))
+        elif outcome == _NAME_IN_USE:
+            in_use.append((rel, data))
+        else:
+            not_copied.append(rel)
+    return placed, in_use
 
 
 def _place(folder: Path, rel: str, data: bytes) -> str:
@@ -127,7 +136,7 @@ def _file_entries(repo: Path, commit: str) -> dict[bytes, str] | None:
     for record in listed.split(b"\0"):
         described, _, path = record.partition(b"\t")
         parts = described.split(b" ")
-        if len(parts) == 3 and parts[0] in _FILE_MODES and parts[1] == b"blob":
+        if len(parts) == 3 and parts[0] in FILE_AND_LINK_MODES and parts[1] == b"blob":
             entries[path] = parts[2].decode()
     return entries
 

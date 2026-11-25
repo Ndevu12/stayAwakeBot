@@ -98,6 +98,9 @@ jobs:
           printf 'hello\n' > "$dir/readme.txt"
           saw scan "$(cygpath -w "$dir")" --json --no-stream --no-advisories
 
+      - name: Check every file an update brings on a case-insensitive disk
+        run: python -m unittest -v tests.bots.security.test_govern_checks_every_name
+
   session:
     runs-on: ubuntu-latest
     steps:

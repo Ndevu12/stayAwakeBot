@@ -14,6 +14,7 @@ from pathlib import Path
 
 from stayawake.lib.git import owned
 from stayawake.lib.git.borrowed import BorrowError, place
+from stayawake.lib.git.query import files_brought
 from stayawake.lib.git.run import OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run_ok, stdout, stdout_bytes
 from stayawake.lib.git.write.branch import refs_under, update_refs
 from stayawake.lib.git.write.checkouts import Checkout
@@ -33,7 +34,6 @@ _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "pru
                   "branch": frozenset({"remote", "merge", "rebase"})}
 _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
 _IDENTITY_KEYS = ("user.name", "user.email")
-_FILE_MODES = (b"100644", b"100755", b"120000")
 
 WRITE_LEFT_PART_WAY = ("the update could not be written into the open folder, and the folder may have "
                        "changed; check it with git status")
@@ -131,7 +131,7 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
     after = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
     if not after:
         return "the update did not produce a commit"
-    names = _changed_files(work, base, after)
+    names = files_brought(work, base, after, context=SAW_OWNED)
     if names is None:
         return "saw could not list what the update brought in"
     return Arrived(work, names, "refs" if kind == "fetch" else "tree", after, base,
@@ -404,23 +404,6 @@ def _run_gh(work: Path, args: list[str]) -> str:
     except (OSError, subprocess.TimeoutExpired):
         return "the GitHub command did not finish"
     return "" if result.returncode == 0 else "the GitHub command did not finish"
-
-
-def _changed_files(work: Path, base: str, head: str) -> "tuple[str, ...] | None":
-    """List each file `head` records that differs from `base`. Takes the holding work tree and both
-    commits. Returns the paths, or None when git could not list them."""
-    if base == head:
-        return ()
-    listed = stdout_bytes(work, ["diff", "--raw", "-z", "--no-renames", base, head], context=SAW_OWNED)
-    if listed is None:
-        return None
-    names = []
-    fields = listed.split(b"\0")
-    for described, path in zip(fields[0::2], fields[1::2]):
-        modes = described.split(b" ")
-        if len(modes) >= 2 and modes[1] in _FILE_MODES:
-            names.append(os.fsdecode(path))
-    return tuple(names)
 
 
 def _moved_refs(work: Path, before: dict, kind: str) -> tuple:

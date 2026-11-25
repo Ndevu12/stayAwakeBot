@@ -28,6 +28,7 @@ from stayawake.utils.streaming import Streamer, busy, status as spin_status, str
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.contexts import empty_hooks_dir
 from stayawake.bots.security import checkout_writes, clean_contents, clean_ledger, hook_status, hookscript, outbound, push_record
+from stayawake.lib.git.query import files_brought
 from stayawake.lib.git.run import stdout_bytes
 from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.bots.security.found import confirmed_first, left_out_line, what_it_is, where_it_is
@@ -1295,14 +1296,14 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
         if old == _NULL_REV or (_first_checkout_after_a_clone(root)
                                 and not _scanned_clean(root, _clean_key(old, config_path))):
             return None, "clone"
-        changed = _changed_files(root, old, new)
+        changed = files_brought(root, old, new)
         if changed is None:
             return None, "checkout"
         return (changed, "checkout") if changed else (False, None)
     if event == "post-merge":
         if not gitutil.run_ok(root, ["rev-parse", "--verify", "ORIG_HEAD"]):
             return None, "pull"
-        changed = _changed_files(root, "ORIG_HEAD", "HEAD")
+        changed = files_brought(root, "ORIG_HEAD", "HEAD")
         if changed is None:
             return None, "pull"
         return (changed, "pull") if changed else (False, None)
@@ -1314,7 +1315,7 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
             return None, "rewrite"
         changed: set[str] = set()
         for old, new in ranges:
-            files = _changed_files(root, old, new)
+            files = files_brought(root, old, new)
             if files is None:
                 return None, "rewrite"
             changed.update(files)
@@ -1398,16 +1399,6 @@ def _first_checkout_after_a_clone(root: Path) -> bool:
         return False
     return moves[0].startswith(_HEAD_MOVED_BY_A_CLONE) or (
         len(moves) == 2 and moves[1].startswith(_HEAD_MOVED_BY_A_CLONE))
-
-
-def _changed_files(root: Path, base: str, head: str) -> tuple[str, ...] | None:
-    """List the repo-relative paths that changed `base..head` and still exist as regular files.
-    Takes the root and the two commits. Returns them, or None when git could not list them."""
-    diff = stdout_bytes(root, ["diff", "--name-only", "-z", base, head])
-    if diff is None:
-        return None
-    names = (os.fsdecode(raw) for raw in diff.split(b"\0") if raw)
-    return tuple(name for name in names if (root / name).is_file())
 
 
 def _operator_scan(root: Path, include, config_path: str | None, display: str, merges=None):

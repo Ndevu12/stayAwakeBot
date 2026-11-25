@@ -11,6 +11,7 @@ from pathlib import Path
 from stayawake.lib.git.run import run, stdout_bytes_fed
 
 MAX_LINK_TARGET_BYTES = 4096
+FILE_AND_LINK_MODES = (b"100644", b"100755", b"120000")
 
 _INHERITED_LOCATION = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
                        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_INDEX_FILE", "GIT_NAMESPACE")

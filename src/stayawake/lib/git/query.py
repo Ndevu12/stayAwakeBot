@@ -14,9 +14,9 @@ from pathlib import Path
 
 from stayawake.lib.git import remote as gitremote
 from stayawake.lib.git.history_tips import history_tips
-from stayawake.lib.git.objects import (batch_objects, blob_text, link_targets, own_env, own_view,
-                                       own_view_fed)
-from stayawake.lib.git.run import answer, run, stdout, stdout_bytes, stdout_bytes_fed
+from stayawake.lib.git.objects import (FILE_AND_LINK_MODES, batch_objects, blob_text, link_targets, own_env,
+                                       own_view, own_view_fed)
+from stayawake.lib.git.run import UNTRUSTED, answer, run, stdout, stdout_bytes, stdout_bytes_fed
 
 
 def composed_path(path: str, *, fold: bool) -> str:
@@ -103,6 +103,23 @@ def ancestry(repo: str | Path, ancestor: str, descendant: str) -> bool | None:
     if res is None or res.returncode not in (0, 1):
         return None
     return res.returncode == 0
+
+
+def files_brought(repo: str | Path, base: str, head: str, *, context=UNTRUSTED) -> tuple[str, ...] | None:
+    """List each file or link `head` records that differs from `base`. Takes the repository, both
+    commits and the context git runs in. Returns the paths, or None when git could not list them."""
+    if base == head:
+        return ()
+    listed = stdout_bytes(repo, ["diff", "--raw", "-z", "--no-renames", base, head], context=context)
+    if listed is None:
+        return None
+    names = []
+    fields = listed.split(b"\0")
+    for described, path in zip(fields[0::2], fields[1::2]):
+        modes = described.split(b" ")
+        if len(modes) >= 2 and modes[1] in FILE_AND_LINK_MODES:
+            names.append(os.fsdecode(path))
+    return tuple(names)
 
 
 def tracked_under(repo: str | Path, pathspec: str | Path) -> list[str]:
