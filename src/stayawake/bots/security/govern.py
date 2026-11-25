@@ -9,10 +9,11 @@ the payload is stamped with the schema by the CLI.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
-from stayawake.bots.security import clean_ledger, govern_held, govern_status
+from stayawake.bots.security import clean_ledger, govern_carried, govern_held, govern_status
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.models import CLEAN, INFECTED, RESIDUE_VERDICT, ScanReport, ScanResult
 from stayawake.bots.security.scanner import joined, scan_target, unreadable
@@ -49,6 +50,8 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     and its exit: a passthrough, a scan, or a reason with a decision."""
     if incoming.brings_nothing(tool, args):
         return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
+    if incoming.continues_a_rebase(tool, args):
+        return _continuing_a_rebase(repo, config, deadline)
     govern_status.write(repo, "checking", step="checking the incoming update")
     current().step("materialise", "checking the incoming update")
     arrived = incoming.prepare(Path(repo), Path(into), tool, list(args))
@@ -59,8 +62,11 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     try:
         landing = blob_copies.copy_out_as_written(Path(repo).resolve(), arrived.root, _files_at(arrived),
                                                   arrived.paths, "the files an update brought in")
+        sides = tuple((blob_copies.copy_out_as_written(Path(repo).resolve(), arrived.root, commit, names,
+                                                       "the files an update brings, as one side has them"), names)
+                      for commit, names in arrived.versions)
         payload, code, already_there = _scan_arrived(arrived.root, landing, arrived.paths, config,
-                                                     arrived.base, deadline, arrived.versions)
+                                                     arrived.base, deadline, sides)
     except DeadlineReached:
         return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:
@@ -70,8 +76,9 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     verdict = _verdict(payload) or "incomplete"
     current().step("verdict", "verdict: %s" % verdict)
     scanned_clean = code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}
-    if arrived.mode == incoming.UNCARRIED_CONFLICTS:
-        return _checked_and_left_out(repo, into, arrived, payload, code, already_there, scanned_clean)
+    if arrived.mode == incoming.UNCARRIED_CONFLICTS or (arrived.stopped and code == exitcodes.INCOMPLETE):
+        left_out = dataclasses.replace(arrived, mode=incoming.UNCARRIED_CONFLICTS, stopped=None)
+        return _checked_and_left_out(repo, into, left_out, payload, code, already_there, scanned_clean)
     strictly_clean = code == exitcodes.CLEAN and _verdict(payload) == CLEAN and not already_there
     lands_whole = arrived.stopped is None
     applied_mark = clean_ledger.clean_key(arrived.commit, config) if scanned_clean and lands_whole else None
@@ -202,11 +209,59 @@ def _left_to_resolve(repo: str, state: dict, stopped: "conflicted.Stopped",
     step = (f"The update is in the folder and stops for conflicts in {_listed(stopped.conflicts)}. "
             f"Resolve them, then run `{_finish(stopped)}`.")
     reasons = [step]
+    if stopped.operation == conflicted.REBASE and not govern_carried.remember(repo, stopped.incoming, stopped.picks):
+        reasons.append("the rebase brought in could not be recorded")
     if accepted_verdict:
         clean_ledger.remember_accepted(Path(repo), state["commit"], accepted_verdict)
         reasons.append(f"you let in an update saw found {accepted_verdict}")
     govern_status.write(repo, "applied", verdict=state.get("verdict"), reasons=reasons)
     return {"applied": True, "conflicts": list(stopped.conflicts), "next_steps": [step]}, exitcodes.INCOMPLETE
+
+
+def _continuing_a_rebase(repo: str, config: str | None, deadline: float | None) -> tuple[dict, int]:
+    """Answer continuing a rebase in progress in the open folder: it runs as typed when what is left
+    is what saw carried in and checked, or when a check of each commit left finds nothing. Any other
+    rest is held, and leaving the folder is the one choice. Takes the open folder, the operator
+    config and the deadline. Returns the answer and its exit."""
+    left = incoming.rebase_left(Path(repo))
+    if left is None:
+        return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
+    if isinstance(left, str):
+        return _rebase_held(repo, left, {}, exitcodes.INCOMPLETE, [])
+    onto, picks, only_picks = left
+    if not only_picks:
+        return _rebase_held(repo, "the rest of this rebase cannot be checked", {}, exitcodes.INCOMPLETE, [])
+    if govern_carried.carried(repo, onto, picks):
+        return {"passthrough": True, "reason": "the rest of the rebase is what saw checked"}, exitcodes.CLEAN
+    sides = []
+    for pick in picks:
+        changed = conflicted.changed_by(Path(repo), pick)
+        if changed is None:
+            return _rebase_held(repo, "the rest of this rebase cannot be checked", {}, exitcodes.INCOMPLETE, [])
+        sides.append((blob_copies.copy_out_as_written(Path(repo).resolve(), Path(repo), pick, changed,
+                                                      "the commits a rebase has left"), changed))
+    try:
+        payload, code, _already = _scan_arrived(Path(repo), blob_copies.BlobCopies((), ()), (), config, None,
+                                                deadline, tuple(sides))
+    except (DeadlineReached, ValueError, OSError):
+        return _rebase_held(repo, "the rest of this rebase could not be checked", {}, exitcodes.INCOMPLETE, [])
+    if code == exitcodes.CLEAN and _verdict(payload) in {CLEAN, RESIDUE_VERDICT}:
+        return {"passthrough": True, "reason": "the rest of the rebase was checked"}, exitcodes.CLEAN
+    findings = (payload.get("results") or [{}])[0].get("findings") or []
+    steps = govern_held.next_steps(_verdict(payload) or "incomplete", findings, [], onto, can_let_in=False)
+    return _rebase_held(repo, "the rest of this rebase brings what the check held", payload, code, steps)
+
+
+def _rebase_held(repo: str, reason: str, payload: dict, code: int, steps: list[str]) -> tuple[dict, int]:
+    """Answer a rebase whose rest is held, offering only to leave the folder. Takes the open folder,
+    the reason, the scan when there is one, its exit and the steps to show. Returns the answer and
+    an exit that is never a success."""
+    govern_status.write(repo, "held", reasons=[reason])
+    answer: dict = {"reason": reason, "decision": {"choices": [LEAVE_UNCHANGED]},
+                    "next_steps": [*steps, "To leave the rebase, run `git rebase --abort`."]}
+    if payload:
+        answer["scan"] = payload
+    return answer, exitcodes.INCOMPLETE if code == exitcodes.CLEAN else code
 
 
 def _listed(paths: tuple[str, ...]) -> str:
@@ -300,17 +355,15 @@ def _scan_files(files: Path, paths: tuple[str, ...], policy) -> ScanResult:
 
 def _scan_arrived(root: Path, landing: "blob_copies.BlobCopies", paths: tuple[str, ...], config: str | None,
                   base: str | None = None, deadline: float | None = None,
-                  versions: tuple[tuple[str, tuple[str, ...]], ...] = ()) -> tuple[dict, int, list[dict]]:
+                  versions: tuple = ()) -> tuple[dict, int, list[dict]]:
     """Scan the files an update brought, as they will be written, and each other version of files
-    it brings, by its blob, within `deadline` seconds when given. Takes the holding work tree, the
-    copies of what lands, the arrived paths, the operator config, the commit the folder had before,
-    the deadline and the other versions as (commit, paths). Returns the scan document, its exit, and
-    the findings the folder already had before the update, which do not count toward the verdict.
-    Raises DeadlineReached at the deadline."""
+    it brings, within `deadline` seconds when given. Takes the holding work tree, the copies of what
+    lands, the arrived paths, the operator config, the commit the folder had before, the deadline
+    and the copies of the other versions as (copies, paths). Returns the scan document, its exit,
+    and the findings the folder already had before the update, which do not count toward the
+    verdict. Raises DeadlineReached at the deadline."""
     policy = operator_policy(config)
-    sides = [(landing, paths)]
-    sides += [(blob_copies.copy_out(Path(root), side, names, "the files an update brings, as one side has them"),
-               names) for side, names in versions]
+    sides = [(landing, paths), *versions]
     counted = sum(len(names) for _, names in sides)
     size = sum(pathsafe.regular_size(folder, names) for copied, _ in sides for folder, names in copied.folders)
     already: list = []

@@ -286,6 +286,86 @@ class ConflictsThatCannotBeBroughtIn(_StopsForConflicts):
         self._not_brought_in(code)
 
 
+class ARebaseThatStopsWithCommitsLeft(_TrackingCheckout):
+    """The open folder has local commits, the first of which conflicts with the upstream."""
+
+    def _commits(self, *commits: tuple[str, str, str]) -> None:
+        for name, text, message in commits:
+            self.write(self.open, name, text)
+            self.commit(self.open, message)
+        self.write(self.upstream, "kept.txt", "from upstream\n")
+        self.commit(self.upstream, "upstream edit")
+
+    def _carried(self) -> None:
+        self.git(self.open, "fetch", "-q")
+        answer, _code = govern.prepare(str(self.open), str(self.into), "git", ["rebase", "origin/main"])
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "clean", answer)
+        self.assertTrue(govern.apply(str(self.open), str(self.into))[0]["applied"])
+        self.write(self.open, "kept.txt", "resolved\n")
+        self.git(self.open, "add", "kept.txt")
+
+    def _continue(self) -> tuple[dict, int]:
+        return govern.prepare(str(self.open), str(self.root / "holding-again"), "git", ["rebase", "--continue"])
+
+    def test_a_commit_left_to_replay_that_carries_a_payload_is_held(self):
+        self._commits(("kept.txt", "mine\n", "L0"), ("loader.js", _PAYLOAD, "C1 adds a payload"),
+                      ("loader.js", "module.exports = 1;\n", "C2 makes it harmless"))
+        before = self.rev(self.open)
+        self.git(self.open, "fetch", "-q")
+        answer, _code = govern.prepare(str(self.open), str(self.into), "git", ["rebase", "origin/main"])
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "infected", answer)
+        self.assertFalse(govern.apply(str(self.open), str(self.into))[0]["applied"])
+        self.assertEqual(self.rev(self.open), before)
+        self.assertFalse((self.open / ".git" / "rebase-merge").exists())
+
+    def test_continuing_what_saw_carried_runs_as_typed(self):
+        self._commits(("kept.txt", "mine\n", "L0"), ("other.txt", "other\n", "L1"))
+        self._carried()
+        answer, code = self._continue()
+        self.assertEqual((answer.get("passthrough"), code), (True, exitcodes.CLEAN), answer)
+        self.assertEqual(answer["reason"], "the rest of the rebase is what saw checked")
+
+    def test_a_commit_left_to_replay_that_cannot_be_read_keeps_the_rebase_out(self):
+        self._commits(("kept.txt", "mine\n", "L0"), ("other.txt", "other\n", "L1"))
+        left = self.rev(self.open)
+        real = govern.blob_copies.copy_out_as_written
+
+        def unreadable_for_the_last_commit(repo, holding, commit, paths, purpose):
+            copies = real(repo, holding, commit, paths, purpose)
+            return govern.blob_copies.BlobCopies((), tuple(paths)) if commit == left else copies
+
+        self.git(self.open, "fetch", "-q")
+        with mock.patch.object(govern.blob_copies, "copy_out_as_written", side_effect=unreadable_for_the_last_commit):
+            answer, _code = govern.prepare(str(self.open), str(self.into), "git", ["rebase", "origin/main"])
+        self.assertNotIn("decision", answer)
+        self.assertEqual(self._state()["mode"], "uncarried-conflicts")
+        self.assertFalse(govern.apply(str(self.open), str(self.into), self.rev(self.open, "origin/main"))[0]["applied"])
+        self.assertFalse((self.open / ".git" / "rebase-merge").exists())
+
+    def _state(self) -> dict:
+        return json.loads((self.into / "state.json").read_text(encoding="utf-8"))
+
+    def test_continuing_a_rest_saw_did_not_check_is_held_with_no_way_to_run_it(self):
+        self._commits(("kept.txt", "mine\n", "L0"), ("other.txt", "other\n", "L1"))
+        self.git(self.open, "checkout", "-q", "-b", "elsewhere")
+        self.write(self.open, "loader.js", _PAYLOAD)
+        payload = self.commit(self.open, "a payload")
+        self.git(self.open, "checkout", "-q", "main")
+        self._carried()
+        todo = self.open / ".git" / "rebase-merge" / "git-rebase-todo"
+        todo.write_bytes(todo.read_bytes() + b"pick %s a payload\n" % payload.encode())
+        answer, code = self._continue()
+        self.assertNotIn("passthrough", answer)
+        self.assertNotEqual(code, exitcodes.CLEAN)
+        self.assertEqual(answer["decision"]["choices"], ["leave-unchanged"])
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "infected", answer)
+        self.assertNotIn("did not finish cleanly", json.dumps(answer))
+
+    def test_finishing_a_merge_runs_as_typed(self):
+        answer, code = govern.prepare(str(self.open), str(self.into), "git", ["merge", "--continue"])
+        self.assertEqual((answer.get("passthrough"), code), (True, exitcodes.CLEAN), answer)
+
+
 class AConflictTheUpdateDeletes(_TrackingCheckout):
     """The upstream deleted kept.txt, which the open folder changed."""
 

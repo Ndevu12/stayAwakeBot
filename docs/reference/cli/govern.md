@@ -57,6 +57,11 @@ Resolve the conflicts, then run `git commit` for a merge or a pull that merges, 
 `git rebase --continue` for a rebase. In a terminal, saw prints that next step, and the command
 does not report success, so a command chained after it with `&&` does not run. A held update that
 stops for conflicts is let in the same way, with `--accept` and, for an infected one, `--confirm`.
+For a rebase, every commit it has yet to replay is checked too. Continuing a rebase saw brought in,
+with `git rebase --continue` or `--skip`, runs as typed when what is left is what saw checked.
+Anything else left is checked first; when the check finds something or cannot finish, the folder is
+left as it is and the answer says how to leave the rebase.
+
 When the conflicts cannot be brought into the folder, the update is still checked. A clean one
 brings that reason and the same decision as an update that cannot be checked, except for a pull,
 where the only choice is to leave the folder as it is and `next_steps` names the command that brings

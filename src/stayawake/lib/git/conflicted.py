@@ -51,9 +51,9 @@ _REBASE_STATE_NEEDED = ("head-name", "onto", "orig-head", "git-rebase-todo", "do
 class Stopped:
     """A merge or rebase stopped for conflicts in the holding copy: the operation, the commit
     the update brings, the tree the open folder's files take, the commit the holding copy's HEAD is
-    on, each conflicted index entry as (path, mode, object, stage), and each file git keeps for the
-    operation as (place, sha256 of its bytes). `files` holds those files' bytes, by their place in a
-    git directory."""
+    on, each conflicted index entry as (path, mode, object, stage), each file git keeps for the
+    operation as (place, sha256 of its bytes), and the commits a rebase has yet to replay. `files`
+    holds those files' bytes, by their place in a git directory."""
 
     operation: str
     incoming: str
@@ -61,6 +61,7 @@ class Stopped:
     head: str
     stages: tuple[tuple[str, str, str, str], ...]
     file_digests: tuple[tuple[str, str], ...]
+    picks: tuple[str, ...] = ()
     files: dict = field(default_factory=dict, compare=False)
 
     @property
@@ -80,7 +81,7 @@ class Stopped:
         """Write what identifies this stop as JSON-ready values. Returns them."""
         return {"operation": self.operation, "incoming": self.incoming, "landed": self.landed,
                 "head": self.head, "stages": [list(entry) for entry in self.stages],
-                "file_digests": [list(entry) for entry in self.file_digests]}
+                "file_digests": [list(entry) for entry in self.file_digests], "picks": list(self.picks)}
 
     @classmethod
     def from_record(cls, record: dict) -> "Stopped":
@@ -88,7 +89,7 @@ class Stopped:
         KeyError or TypeError for anything else."""
         return cls(record["operation"], record["incoming"], record["landed"], record["head"],
                    tuple(tuple(entry) for entry in record["stages"]),
-                   tuple(tuple(entry) for entry in record["file_digests"]))
+                   tuple(tuple(entry) for entry in record["file_digests"]), tuple(record["picks"]))
 
 
 def stopped_for_conflicts(work: Path, holding: Path) -> bool:
@@ -127,7 +128,18 @@ def read(work: Path, holding: Path, base: str) -> "Stopped | str":
     entries = tuple(sorted((os.fsdecode(path), mode.decode(), oid.decode(), stage.decode())
                            for path, listed in stages.items() for mode, oid, stage in listed))
     digests = tuple(sorted((place, hashlib.sha256(data).hexdigest()) for place, data in files.items()))
-    return Stopped(operation, incoming, landed, head, entries, digests, files)
+    picks = picks_in(files.get(f"{_REBASE_STATE}/git-rebase-todo", b""))
+    return Stopped(operation, incoming, landed, head, entries, digests, picks, files)
+
+
+def only_picks(todo: bytes) -> bool:
+    """Tell whether a rebase todo holds nothing but picks. Takes its bytes. Returns the answer."""
+    return _in_form(_TODO, todo)
+
+
+def picks_in(todo: bytes) -> tuple[str, ...]:
+    """Read the commits a rebase todo picks, in order. Takes the todo's bytes. Returns their ids."""
+    return tuple(line.split(b" ")[1].decode() for line in todo.splitlines() if _is_pick(line))
 
 
 def incoming_commits(holding: Path) -> tuple[str, ...]:
@@ -166,13 +178,14 @@ def unmerged_entries(work: Path) -> dict[bytes, tuple[tuple[bytes, bytes, bytes]
     return {path: tuple(entries) for path, entries in found.items()}
 
 
-def versions_brought(work: Path, base: str, incoming: tuple[str, ...],
-                     head: str) -> tuple[tuple[str, tuple[str, ...]], ...] | None:
+def versions_brought(work: Path, base: str, incoming: tuple[str, ...], head: str,
+                     picks: tuple[str, ...] = ()) -> tuple[tuple[str, tuple[str, ...]], ...] | None:
     """List the other versions of files a stopped update brings: each incoming commit's version of
-    each path it changes from the commit it shares with the open folder, and the holding copy's
-    HEAD's version of each path a rebase changed by moving HEAD. Takes the holding work tree, the
-    open folder's commit, the incoming commits and the holding copy's HEAD. Returns (commit, paths)
-    pairs, or None when they cannot be listed."""
+    each path it changes from the commit it shares with the open folder, the holding copy's HEAD's
+    version of each path a rebase changed by moving HEAD, and each commit a rebase has yet to
+    replay with the paths it changes. Takes the holding work tree, the open folder's commit, the
+    incoming commits, the holding copy's HEAD and the commits left to replay. Returns (commit,
+    paths) pairs, or None when they cannot be listed."""
     versions = []
     for commit in incoming:
         parted = stdout(work, ["merge-base", base, commit], context=SAW_OWNED).strip()
@@ -188,7 +201,22 @@ def versions_brought(work: Path, base: str, incoming: tuple[str, ...],
         if moved is None:
             return None
         versions.append((head, moved))
+    for pick in picks:
+        changed = changed_by(work, pick)
+        if changed is None:
+            return None
+        versions.append((pick, changed))
     return tuple(versions)
+
+
+def changed_by(repo: Path, commit: str) -> tuple[str, ...] | None:
+    """List the paths a commit changes from its first parent, or every path of a commit with none.
+    Takes a repository holding the commit and the commit. Returns the paths, or None when git could
+    not list them."""
+    parent = stdout(repo, ["rev-parse", "--verify", "--quiet", f"{commit}^"], context=UNTRUSTED).strip()
+    args = ["diff", "--name-only", "-z", parent, commit] if parent else ["ls-tree", "-r", "-z", "--name-only", commit]
+    listed = stdout_bytes(repo, args, context=UNTRUSTED)
+    return None if listed is None else tuple(os.fsdecode(raw) for raw in listed.split(b"\0") if raw)
 
 
 def commits_named(files: dict[str, bytes]) -> set[str]:

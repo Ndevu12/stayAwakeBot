@@ -21,6 +21,7 @@ from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.lib.git.write.transfer import adopt_objects, missing_objects
 from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way, uncommitted_paths
 from stayawake.lib.signing.commits.git_command import fix_commit_signing
+from stayawake.utils import pathsafe
 
 _GLOBAL = frozenset({
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
@@ -110,14 +111,42 @@ def classify(tool: str, args: list[str]) -> str | None:
     return None
 
 
+def continues_a_rebase(tool: str, args: list[str]) -> bool:
+    """Tell whether a command continues or skips ahead in a rebase in progress. Takes the tool and
+    the arguments without the program name. Returns the answer."""
+    parsed = _parse_git(args) if tool == "git" else None
+    return parsed is not None and parsed[0] == "rebase" and bool(
+        {"--continue", "--skip"} & set(_options("rebase", parsed[1])))
+
+
+def rebase_left(repo: Path) -> "tuple[str, tuple[str, ...], bool] | str | None":
+    """Read what a rebase in progress in `repo` has left to do. Takes the open folder. Returns the
+    commit it replays onto, the commits it has left and whether its todo holds nothing but picks;
+    None when no rebase is in progress, or a sentence when its state cannot be read."""
+    gitdir = _git_dir(Path(repo))
+    if gitdir is None:
+        return "the open folder is not a git checkout"
+    if os.path.lexists(gitdir / "rebase-apply"):
+        return "the rest of this rebase cannot be checked"
+    if not os.path.lexists(gitdir / "rebase-merge"):
+        return None
+    onto = pathsafe.read_regular_no_follow(gitdir / "rebase-merge" / "onto", 4096)
+    todo = pathsafe.read_regular_no_follow(gitdir / "rebase-merge" / "git-rebase-todo", 64 << 20)
+    if onto is None or todo is None:
+        return "the rest of this rebase cannot be checked"
+    return onto.decode(errors="replace").strip(), conflicted.picks_in(todo), conflicted.only_picks(todo)
+
+
 def brings_nothing(tool: str, args: list[str]) -> bool:
     """Tell whether a command certainly moves nothing into the open folder: a checkout or switch
-    whose every option git reads as saw does, naming no commit. Takes the tool and the arguments
-    without the program name. Returns the answer."""
+    whose every option git reads as saw does, naming no commit, or the commit that finishes a merge
+    in progress. Takes the tool and the arguments without the program name. Returns the answer."""
     parsed = _parse_git(args) if tool == "git" else None
     if parsed is None:
         return False
     sub, rest = parsed
+    if sub == "merge" and rest == ["--continue"]:
+        return True
     if sub not in _OPTIONS_TAKING_NO_WORD or not _options_read_as_git_reads_them(sub, rest):
         return False
     return not (_checkout_brings(rest) if sub == "checkout" else _switch_brings(rest))
@@ -262,7 +291,7 @@ def _arrived_with_conflicts(work: Path, holding: Path, base: str, kind: str) -> 
         return _arrived_uncarried(work, holding, base, kind)
     changed = files_brought(work, base, stopped.landed, context=SAW_OWNED)
     names = None if changed is None else tuple(dict.fromkeys((*changed, *stopped.conflicts)))
-    versions = conflicted.versions_brought(work, base, (stopped.incoming,), stopped.head)
+    versions = conflicted.versions_brought(work, base, (stopped.incoming,), stopped.head, stopped.picks)
     if names is None or versions is None:
         return "the files the update brings could not be listed"
     return Arrived(work, names, "conflicts", stopped.incoming, base, _head_text(holding), (),
