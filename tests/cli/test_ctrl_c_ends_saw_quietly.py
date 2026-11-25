@@ -65,29 +65,27 @@ class CtrlCEndsSawQuietly(unittest.TestCase):
 class ACtrlCPythonSwallowsIsDeliveredAgain(unittest.TestCase):
 
     def test_a_ctrl_c_raised_inside_a_callback_still_stops_saw(self):
-        import io
-        import weakref
-        from contextlib import redirect_stderr
-
-        import stayawake.cli  # noqa: F401
-
-        class Held:
-            pass
-
-        def interrupted(_ref):
-            raise KeyboardInterrupt
-
-        held = Held()
-        watcher = weakref.ref(held, interrupted)
-        printed = io.StringIO()
-        with redirect_stderr(printed), self.assertRaises(KeyboardInterrupt):
-            del held
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline:
-                pass
-        self.assertIsNone(watcher())
-        self.assertNotIn("Exception ignored", printed.getvalue())
-
+        swallowed_then_waited = (
+            "import time, weakref\n"
+            "import stayawake.cli\n"
+            "class Held:\n"
+            "    pass\n"
+            "def interrupted(_ref):\n"
+            "    raise KeyboardInterrupt\n"
+            "held = Held()\n"
+            "watcher = weakref.ref(held, interrupted)\n"
+            "try:\n"
+            "    del held\n"
+            "    deadline = time.monotonic() + 10\n"
+            "    while time.monotonic() < deadline:\n"
+            "        pass\n"
+            "    print('not stopped')\n"
+            "except KeyboardInterrupt:\n"
+            "    print('stopped')\n")
+        run = subprocess.run([sys.executable, "-c", swallowed_then_waited], capture_output=True, text=True,
+                             timeout=60, env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")})
+        self.assertEqual(run.stdout.strip(), "stopped")
+        self.assertNotIn("Exception ignored", run.stderr)
 
 if __name__ == "__main__":
     unittest.main()
