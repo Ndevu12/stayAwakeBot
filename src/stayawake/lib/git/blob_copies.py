@@ -23,6 +23,12 @@ _PLACED = "placed"
 _NAME_IN_USE = "name in use"
 _CANNOT_HOLD_A_FILE = "cannot hold a file"
 
+ON_WINDOWS = os.name == "nt"
+_CHARACTERS_WINDOWS_REFUSES = frozenset('<>:"|?*\\') | frozenset(chr(code) for code in range(32))
+_NAMES_WINDOWS_RESERVES = frozenset({"con", "prn", "aux", "nul", "conin$", "conout$",
+                                     *(f"{port}{number}" for port in ("com", "lpt")
+                                       for number in (*"123456789", "\u00b9", "\u00b2", "\u00b3"))})
+
 
 @dataclass(frozen=True)
 class BlobCopies:
@@ -140,19 +146,21 @@ def _fill(folder: Path, files: list[tuple[str, bytes]],
 def _place(folder: Path, rel: str, data: bytes) -> str:
     """Write `data` at `rel` in `folder` where no file there answers to that name. Takes the
     folder, the name and the bytes. Returns placed, name in use, or cannot hold a file."""
+    if ON_WINDOWS and not _windows_can_hold(rel):
+        return _CANNOT_HOLD_A_FILE
     destination = folder / rel
     free = _free(destination)
     if free != _FREE:
         return free
     try:
-        atomicwrite.make_folder(destination.parent)
-    except NotADirectoryError:
+        _make_folder(destination.parent)
+    except (NotADirectoryError, FileExistsError):
         return _NAME_IN_USE
     except OSError:
         return _CANNOT_HOLD_A_FILE
     if _free(destination) != _FREE:
         return _NAME_IN_USE
-    if not atomicwrite.replace(destination, data):
+    if not _write(destination, data):
         _remove(destination)
         return _CANNOT_HOLD_A_FILE
     try:
@@ -161,6 +169,39 @@ def _place(folder: Path, rel: str, data: bytes) -> str:
         _remove(destination)
         return _CANNOT_HOLD_A_FILE
     return _PLACED if written.st_size == len(data) else _CANNOT_HOLD_A_FILE
+
+
+def _windows_can_hold(rel: str) -> bool:
+    """Tell whether Windows can hold a file under this name, each part of it a name it neither
+    refuses nor reserves for a device. Takes the name, its parts split by `/`. Returns the answer."""
+    for part in rel.split("/"):
+        if (not part or part in (".", "..") or part[-1] in ". " or set(part) & _CHARACTERS_WINDOWS_REFUSES
+                or part.split(".")[0].rstrip(" ").lower() in _NAMES_WINDOWS_RESERVES):
+            return False
+    return True
+
+
+def _make_folder(folder: Path) -> None:
+    """Make a folder and every missing folder above it, without following a link on POSIX. Takes
+    the folder. Raises `OSError` when it cannot be made."""
+    if ON_WINDOWS:
+        os.makedirs(folder, exist_ok=True)
+    else:
+        atomicwrite.make_folder(folder)
+
+
+def _write(destination: Path, data: bytes) -> bool:
+    """Write a new file's bytes and read them back, untranslated. Takes the path and the bytes.
+    Returns whether the file now holds exactly them."""
+    if not ON_WINDOWS:
+        return atomicwrite.replace(destination, data)
+    try:
+        with open(destination, "xb") as handle:
+            handle.write(data)
+        with open(destination, "rb") as handle:
+            return handle.read(len(data) + 1) == data
+    except OSError:
+        return False
 
 
 def _free(destination: Path) -> str:

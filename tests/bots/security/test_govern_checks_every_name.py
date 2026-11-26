@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import unittest
 from unittest import mock
 
@@ -26,7 +27,9 @@ class AnUpdateWithNamesThatAreHardToCopy(_TrackingCheckout):
 
     def _prepare(self) -> tuple[dict, int]:
         self.git(self.open, "fetch", "-q")
-        return govern.prepare(str(self.open), str(self.into), "git", ["merge", "origin/main"])
+        answer, code = govern.prepare(str(self.open), str(self.into), "git", ["merge", "origin/main"])
+        self.assertIn("scan", answer, answer)
+        return answer, code
 
     def _held(self, answer: dict, code: int) -> None:
         self.assertNotEqual(code, exitcodes.CLEAN, answer)
@@ -68,12 +71,12 @@ class AnUpdateWithNamesThatAreHardToCopy(_TrackingCheckout):
         self._held(answer, code)
 
     def test_a_copy_that_could_not_be_written_keeps_the_update_from_reading_clean(self):
-        real = blob_copies.atomicwrite.replace
+        real = blob_copies._write
 
-        def refuse_one(where, data, **kwargs):
-            return False if where.name == "new.txt" else real(where, data, **kwargs)
+        def refuse_one(where, data):
+            return False if where.name == "new.txt" else real(where, data)
 
-        with mock.patch.object(blob_copies.atomicwrite, "replace", side_effect=refuse_one):
+        with mock.patch.object(blob_copies, "_write", side_effect=refuse_one):
             answer, code = self._prepare()
         self.assertIn("new.txt", answer["scan"]["results"][0]["error"])
         self._held(answer, code)
@@ -106,6 +109,32 @@ class CopyingOutByBlob(GitSandbox):
             self.assertEqual((folder / "other.js").read_text(encoding="utf-8"), _BENIGN)
         self.assertEqual(sorted(name for _folder, names in copies.folders for name in names
                                 if name != "other.js"), ["Loader.js", "loader.js"])
+
+    def test_on_windows_each_name_reads_back_its_bytes_untranslated(self):
+        repo = self.new_repo()
+        for name, data in (("Loader.js", b"eval(1);\r\n"), ("loader.js", b"a\r\nb\x1ac\n"), ("other.js", b"x\n")):
+            blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input=data,
+                                  capture_output=True, check=True).stdout.decode().strip()
+            self.git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{name}")
+        self.git(repo, "commit", "-qm", "twins")
+        with mock.patch.object(blob_copies, "ON_WINDOWS", True):
+            copies = blob_copies.copy_out(repo, self.rev(repo), ("Loader.js", "loader.js", "other.js"), "twins")
+        self.assertEqual(copies.not_copied, ())
+        placed = {name: (folder / name).read_bytes() for folder, names in copies.folders for name in names}
+        self.assertEqual(placed, {"Loader.js": b"eval(1);\r\n", "loader.js": b"a\r\nb\x1ac\n", "other.js": b"x\n"})
+
+    def test_on_windows_a_name_windows_cannot_hold_is_not_copied_and_the_rest_is(self):
+        repo = self.new_repo()
+        refused = ("aux.js", "Com1.txt", "lpt\u00b9.js", "a:b.js", "trailing.", "folder /x.js", "back\\slash.js",
+                   "ask?.js", "nul")
+        for name in (*refused, "kept.js", "con-not-reserved.js"):
+            stage_blob(repo, name, _BENIGN)
+        self.git(repo, "commit", "-qm", "names")
+        with mock.patch.object(blob_copies, "ON_WINDOWS", True):
+            copies = blob_copies.copy_out(repo, self.rev(repo), (*refused, "kept.js", "con-not-reserved.js"), "names")
+        self.assertEqual(sorted(copies.not_copied), sorted(refused))
+        self.assertEqual(sorted(name for _folder, names in copies.folders for name in names),
+                         ["con-not-reserved.js", "kept.js"])
 
     def test_a_name_the_commit_does_not_record_is_left_out(self):
         repo = self.new_repo()

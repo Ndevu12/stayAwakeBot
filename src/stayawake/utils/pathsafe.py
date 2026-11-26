@@ -70,7 +70,7 @@ def _read_regular(path: Path, limit: int, extra_flags: int,
     """Open, check and read a regular file without blocking. Takes the path, the most bytes to
     accept, extra open flags and, when given, the file it must be. Returns the bytes, or None."""
     try:
-        fd = os.open(str(path), os.O_RDONLY | extra_flags | getattr(os, "O_NONBLOCK", 0))
+        fd = os.open(str(path), os.O_RDONLY | extra_flags | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
     except OSError:
         return None
     try:
