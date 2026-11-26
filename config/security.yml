@@ -35,8 +35,8 @@ targets:
     include_forks: false
     include_archived: false
 
-# Findings to ignore. Each rule MUST name a `signature`, optionally scoped by `path_glob`;
-# a bare `path_glob` is ignored.
+# Findings to ignore. Each rule MUST name a `signature`, optionally scoped by `path_glob` or by
+# `commit`, a commit's full id; a bare `path_glob` is ignored.
 #
 # The rules below cover this repository's own test material and are scoped to it.
 allowlist:

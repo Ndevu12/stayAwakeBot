@@ -60,6 +60,23 @@ allowlist:
 Such an entry accepts the setting, not what a script it names contains later; a script that turns
 malicious is still reported as an infection.
 
+An entry may name a `commit` in place of `path_glob`, so it accepts that signature's finding in that
+one commit and nowhere else. Give the commit's full id, as `saw scan --json` prints it in the
+finding's `commit_sha`; a shortened id is refused. Use it to accept a merge commit of your own that
+you have reviewed:
+
+```yaml
+allowlist:
+  - signature: evil-merge
+    commit: "0123456789abcdef0123456789abcdef01234567"
+```
+
+An entry gives either `path_glob` or `commit`, never both. saw refuses a config whose allowlist
+breaks either rule.
+
+An entry with any other key, such as a misspelled `commit`, accepts nothing, and the report names
+the key to correct.
+
 The allowlist is yours, not the scanned repository's — see [trust
 model](../explanation/trust-model.md).
 

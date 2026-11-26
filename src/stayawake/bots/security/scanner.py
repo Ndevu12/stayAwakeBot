@@ -22,6 +22,7 @@ from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.dependencies.installed import stated_at
 from stayawake.bots.security.signatures import every_signature
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.object_id import full_object_id
 from stayawake.lib.git.run import one_pass, stalls_recorded
 
 
@@ -41,27 +42,54 @@ def _accepts_all_signatures(matcher) -> bool:
         return False
 
 
-def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
-    """True if a finding is suppressed by the allowlist.
+_RULE_KEYS = frozenset({"signature", "path_glob", "commit", "evidence"})
 
-    A rule must name a `signature` to suppress. A bare `path_glob` (no signature)
-    is intentionally NOT honored — it would blanket-suppress *every* signature on
-    that path, so a fresh payload dropped under e.g. a test-fixtures glob would slip
-    through silently. Fixture allowlisting therefore requires `signature` (+ optional
-    `path_glob` to scope it, and an optional exact `evidence` to name one finding)."""
+
+def _unknown_keys(rule: dict[str, Any]) -> list[str]:
+    """Name the unknown keys of an allowlist rule. Takes the rule. Returns the keys, sorted."""
+    return sorted(str(key) for key in rule if key not in _RULE_KEYS)
+
+
+def unread_rule_notes(allowlist: list[dict[str, Any]] | None) -> list[str]:
+    """Write one note for each allowlist rule with an unknown key. Takes the allowlist. Returns the
+    notes."""
+    notes = []
+    for rule in allowlist or []:
+        if isinstance(rule, dict) and _unknown_keys(rule):
+            notes.append(f"An allowlist rule for {rule.get('signature', 'no signature')} has an unknown key "
+                         f"({', '.join(_unknown_keys(rule))}) and accepts nothing. Correct the rule in your "
+                         "saw config.")
+    return notes
+
+
+def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
+    """Match a finding against each allowlist rule by its signature and by each `path_glob`, `commit`
+    and `evidence` the rule gives. Takes the finding and the allowlist. Returns whether a rule
+    matches."""
     for rule in allowlist or []:
         if not isinstance(rule, dict):
             continue                       # defensive: skip a non-mapping rule (config is validated upstream)
+        if _unknown_keys(rule):
+            continue
         sig = rule.get("signature")
         glob = rule.get("path_glob")
         if not sig or sig != finding.signature_id:
             continue                       # path-only rules are too broad — ignored
         if glob and not fnmatch(finding.path, glob):
             continue
+        if "commit" in rule and not _same_commit(rule["commit"], finding.commit_sha):
+            continue
         if "evidence" in rule and rule["evidence"] != finding.evidence:
             continue
         return True
     return False
+
+
+def _same_commit(named, found) -> bool:
+    """Compare the commit a rule names with the commit a finding came from, by full id. Takes the
+    rule's commit and the finding's. Returns whether they are the same commit."""
+    named_id = full_object_id(named)
+    return named_id is not None and named_id == full_object_id(found)
 
 
 def run_matchers(target, matcher_names: list[str],
@@ -151,6 +179,7 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     if read_errors and not result.error:
         result.error = unreadable(read_errors)
     result.notes.extend(coverage_notes or [])
+    result.notes.extend(note for note in unread_rule_notes(allowlist) if note not in result.notes)
     note = _payload_merge_note(result.findings)
     if note:
         result.notes.append(note)
