@@ -8,11 +8,13 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Obstacle:
-    """One reason saw's hooks may not run. `repair` is empty when the sentence names no command."""
+    """One reason saw's hooks may not run. `repair` is empty when the sentence names no command. `folder`
+    is the hooks folder the sentence names, or None."""
 
     code: str
     message: str
     repair: str
+    folder: str | None = None
 
 
 @dataclass(frozen=True)

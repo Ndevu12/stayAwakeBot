@@ -167,9 +167,15 @@ def _remove(area: Area) -> str:
         why = area.teardown(area.path)
         if why:
             return why
-    if not area.path.exists():
+    if not os.path.lexists(area.path):
         return ""
-    return _rmtree(area.path)
+    if area.path.is_dir() and not area.path.is_symlink():
+        return _rmtree(area.path)
+    try:
+        area.path.unlink()
+    except OSError as exc:
+        return str(exc)
+    return ""
 
 
 def _drop_root(where: Path) -> list[str]:

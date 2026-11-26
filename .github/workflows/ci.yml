@@ -98,6 +98,24 @@ jobs:
           printf 'hello\n' > "$dir/readme.txt"
           saw scan "$(cygpath -w "$dir")" --json --no-stream --no-advisories
 
+  windows-own-files:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Save saw's own files and harden on Windows
+        run: >-
+          python -m unittest -v
+          tests.utils.test_saws_files_are_written_on_windows
+          tests.bots.security.test_harden_removes_a_kit_on_windows
+          tests.bots.security.test_harden_holds_on_windows
+          tests.utils.test_reading_without_following_on_windows
+          tests.utils.test_windows_denial
+
   session:
     runs-on: ubuntu-latest
     steps:

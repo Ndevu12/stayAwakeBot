@@ -40,7 +40,7 @@ class TestStateFilesAreReadSafely(unittest.TestCase):
                              schedule.UNREADABLE)
 
     def test_a_pipe_raced_in_after_a_write_is_not_waited_on(self):
-        from stayawake.utils import atomicwrite
+        from stayawake.utils import folders_posix
         real_rename = os.rename
 
         def rename_then_race(staged, where, *, src_dir_fd=None, dst_dir_fd=None):
@@ -48,7 +48,7 @@ class TestStateFilesAreReadSafely(unittest.TestCase):
             os.unlink(where, dir_fd=dst_dir_fd)
             os.mkfifo(where, dir_fd=dst_dir_fd)
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(atomicwrite.os, "rename", rename_then_race):
+                mock.patch.object(folders_posix.os, "rename", rename_then_race):
             where = Path(d) / "w.json"
             self.assertFalse(self._within(lambda: watchrecord.save({"a": 1}, where)))
 
