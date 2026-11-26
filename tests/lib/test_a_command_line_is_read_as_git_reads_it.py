@@ -144,15 +144,20 @@ class PrepareChecksWhatTheReaderReads(GitSandbox):
         self.git(self.repo, "checkout", "-q", "main")
         self.git(self.repo, "config", "alias.co", "checkout")
 
-    def test_every_spelling_of_a_checkout_is_checked_first(self):
-        for line in (("--attr-source", "HEAD", "checkout", "next"), ("co", "next"),
-                     ("-c", "alias.go=checkout", "go", "next"), ("--no-advice", "-P", "checkout", "next")):
+    def test_every_spelling_of_a_checkout_is_checked_first_or_asked_about(self):
+        for line, checked in ((("--attr-source", "HEAD", "checkout", "next"), False), (("co", "next"), False),
+                              (("-c", "alias.go=checkout", "go", "next"), False),
+                              (("--no-advice", "-P", "checkout", "next"), True)):
             with self.subTest(line=line):
                 out = io.StringIO()
                 with redirect_stdout(out):
                     code = cli.main(["govern", "prepare", "--json", "--repo", str(self.repo),
                                      "--into", str(self.root / "holding"), "--tool", "git", "--", *line])
                 body = json.loads(out.getvalue())
-                self.assertEqual(code, exitcodes.CLEAN, body)
-                self.assertIn("scan", body)
+                self.assertNotIn("passthrough", body)
+                if checked:
+                    self.assertEqual(code, exitcodes.CLEAN, body)
+                    self.assertIn("scan", body)
+                else:
+                    self.assertIn("run-as-typed", body["decision"]["choices"], body)
                 self.assertEqual(self.rev(self.repo), self.base)
