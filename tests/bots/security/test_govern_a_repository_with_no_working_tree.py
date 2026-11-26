@@ -165,7 +165,7 @@ class AFetchIntoACheckoutIsWrittenAsGitWritesIt(_Mirrored):
         self.assertEqual(code, exitcodes.CLEAN, answer)
         self.assertNotIn("passthrough", answer)
         self.assertFalse(self._has(checkout, self.arrived))
-        self.assertEqual(govern.apply(str(checkout), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(checkout), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         fetch_head = (checkout / ".git" / "FETCH_HEAD").read_text(encoding="utf-8")
         self.assertTrue(fetch_head.startswith(self.arrived), fetch_head)
         self.assertTrue(self._has(checkout, self.arrived))

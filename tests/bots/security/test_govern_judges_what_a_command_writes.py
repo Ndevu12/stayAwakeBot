@@ -74,7 +74,7 @@ class _Fetched(_TrackingCheckout):
         self.assertEqual(code, exitcodes.CLEAN, answer)
         self.assertNotIn("passthrough", answer)
         self.assertIn("output", answer)
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         self.assertFalse((self.open / "loader.js").exists())
         return answer
 
@@ -108,7 +108,7 @@ class EverySpellingIsJudgedByWhatItWrites(_Fetched):
     def test_a_clean_reset_hard_moves_the_branch_and_the_files(self):
         answer, code = self._prepare("reset", "--hard", "origin/main")
         self.assertEqual(code, exitcodes.CLEAN, answer)
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         self.assertEqual(self.rev(self.open), self.rev(self.open, "origin/main"))
         self.assertEqual(self.git(self.open, "branch", "--show-current").strip(), "main")
         self.assertEqual((self.open / "new.txt").read_text(encoding="utf-8"), "new\n")
@@ -117,7 +117,7 @@ class EverySpellingIsJudgedByWhatItWrites(_Fetched):
     def test_a_clean_cherry_pick_lands_as_a_new_commit_on_the_branch(self):
         answer, code = self._prepare("cherry-pick", "origin/main")
         self.assertEqual(code, exitcodes.CLEAN, answer)
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         self.assertEqual(self.rev(self.open, "HEAD~1"), self.start)
         self.assertTrue((self.open / "new.txt").is_file())
 
@@ -142,7 +142,7 @@ class EverySpellingIsJudgedByWhatItWrites(_Fetched):
         answer, code = self._prepare("checkout", "-b", "raced", "origin/feature")
         self.assertEqual(code, exitcodes.CLEAN, answer)
         self.git(self.open, "update-ref", "refs/remotes/origin/feature", "refs/remotes/origin/evil~1")
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         self.assertEqual(self.rev(self.open), self.start)
         self.assertFalse((self.open / "loader.js").exists())
 
@@ -166,7 +166,7 @@ class EverySpellingIsJudgedByWhatItWrites(_Fetched):
         self._held("reset", "origin/evil~1")
         answer, code = self._prepare("reset", "origin/main")
         self.assertEqual(code, exitcodes.CLEAN, answer)
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         self.assertEqual(self.rev(self.open), self.rev(self.open, "origin/main"))
         self.assertIn("new.txt", self.git(self.open, "ls-files"))
         self.assertFalse((self.open / "new.txt").exists())
@@ -175,7 +175,7 @@ class EverySpellingIsJudgedByWhatItWrites(_Fetched):
         clean = self._blob("mine\n")
         answer, code = self._prepare("update-index", "--add", "--cacheinfo", "100644", clean, "kept.txt")
         self.assertEqual(code, exitcodes.CLEAN, answer)
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         self.assertIn(clean, self.git(self.open, "ls-files", "-s", "kept.txt"))
         self.git(self.open, "reset", "-q", "--", "kept.txt")
         infected = self._blob(_LOADER)
@@ -400,7 +400,7 @@ class AnUpdateLandsAsGitWouldLandIt(_Fetched):
                 self._raw(*args, cwd=twin)
                 answer, code = self._prepare(*args)
                 self.assertEqual(code, exitcodes.CLEAN, answer)
-                self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+                self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
                 self.assertEqual(self._state(self.open), self._state(twin))
                 self.git(self.open, "checkout", "-q", "main")
                 self.git(self.open, "reset", "-q", "--hard", self.start)
@@ -410,7 +410,7 @@ class AnUpdateLandsAsGitWouldLandIt(_Fetched):
         for args in (["stash"], ["stash", "pop"]):
             answer, code = self._prepare(*args)
             self.assertEqual(code, exitcodes.CLEAN, answer)
-            self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+            self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
             if args == ["stash"]:
                 self.assertEqual((self.open / "kept.txt").read_text(encoding="utf-8"), "kept\n")
                 self.assertIn("stash@{0}", self.git(self.open, "stash", "list"))
@@ -419,7 +419,7 @@ class AnUpdateLandsAsGitWouldLandIt(_Fetched):
 
     def test_content_let_in_before_is_judged_from_the_record(self):
         answer, _code = self._prepare("checkout", "origin/main")
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         self.git(self.open, "checkout", "-q", "main")
         scanned = []
         real = govern._scan_arrived
@@ -435,7 +435,7 @@ class AnUpdateLandsAsGitWouldLandIt(_Fetched):
 
     def test_content_let_in_before_is_judged_again_under_another_mode(self):
         self._prepare("checkout", "origin/main")
-        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
         self.git(self.open, "checkout", "-q", "main")
         blob = self.git(self.upstream, "rev-parse", "main:new.txt").strip()
         changed = {}
