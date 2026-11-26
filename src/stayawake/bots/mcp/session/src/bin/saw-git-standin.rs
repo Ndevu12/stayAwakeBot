@@ -7,6 +7,10 @@
 //! `SAW_GOVERN_HOLDING` and points it at the real program and at `saw`. A system install instead
 //! sets `SAW_GOVERN_SYSTEM`, and the stand-in makes its own holding directory for each check and
 //! removes it afterwards. Without either, every command passes straight through.
+//!
+//! Invoked by its own name with `git` or `gh` and that tool's arguments, it sends a command saw
+//! checks to saw whatever the environment, and never falls back to the real program when saw
+//! cannot answer.
 
 use std::collections::HashMap;
 use std::env;
@@ -24,28 +28,28 @@ fn main() {
     let base = Path::new(argv0).file_name().and_then(|s| s.to_str()).unwrap_or("");
     let base = base.strip_suffix(".exe").unwrap_or(base);
     // Invoked by its own name (not git/gh) and not asked to impersonate a tool: an admin
-    // subcommand managing the placement, never a git command.
-    if base != "git" && base != "gh" && env::var_os("SAW_STANDIN_TOOL").is_none() {
-        if let Some(sub) = argv.get(1).map(String::as_str) {
-            if matches!(sub, "install" | "status" | "uninstall") {
-                exit(admin(sub, &argv[2..]));
-            }
+    // subcommand managing the placement, or a git or gh command saw must check.
+    let by_its_own_name = base != "git" && base != "gh" && env::var_os("SAW_STANDIN_TOOL").is_none();
+    let rest = argv.get(1..).unwrap_or(&[]);
+    let (tool, args, must_check) = match rest.first().map(String::as_str) {
+        Some(sub) if by_its_own_name && matches!(sub, "install" | "status" | "uninstall") => {
+            exit(admin(sub, &rest[1..]))
         }
-    }
-    let tool = match tool_name(argv.first().map(String::as_str).unwrap_or("")) {
-        Some(t) => t,
-        None => passthrough_raw(&argv),           // unknown name: find a real one and run it
+        Some(sub) if by_its_own_name && matches!(sub, "git" | "gh") => (sub.to_string(), rest[1..].to_vec(), true),
+        _ => match tool_name(argv0) {
+            Some(t) => (t, rest.to_vec(), false),
+            None => passthrough_raw(&argv),       // unknown name: find a real one and run it
+        },
     };
-    let args: Vec<String> = argv.into_iter().skip(1).collect();
     let real = real_tool(&tool).unwrap_or_else(|| {
         eprintln!("saw: could not find the real {tool}");
         exit(127);
     });
-    if governing() {
+    if governing() || must_check {
         let sent = sent_to_saw(&tool, &args, &real);
         if sent != Sent::No {
-            if let Some(code) = govern(&tool, &args, &real, sent == Sent::ForWhatItNames) {
-                exit(code);                        // governed: saw applied it, or held it
+            if let Some(code) = govern(&tool, &args, &real, sent == Sent::ForWhatItNames, must_check) {
+                exit(code);                        // governed: saw applied it, held it or refused it
             }
         }
     }
@@ -342,27 +346,55 @@ fn target_repo(args: &[String]) -> String {
     folder.to_string_lossy().into_owned()
 }
 
-/// Run the check. Returns an exit code when the command was governed (applied or held), or `None`
-/// to fall back to the real program (saw absent or it could not answer — fail open, never break git).
-fn govern(tool: &str, args: &[String], real: &Path, for_what_it_names: bool) -> Option<i32> {
-    let saw = real_saw()?;
-    let (holding, temporary) = holding_dir()?;
-    let code = govern_with(&saw, tool, args, &holding, real, for_what_it_names);
-    if temporary {
-        let _ = std::fs::remove_dir_all(&holding); // never leave a held update on disk
-    }
-    code
+/// What became of a command sent to saw.
+enum Checked {
+    /// saw applied it, held it, or the user decided: the command ends with this code.
+    Ended(i32),
+    /// saw answered that it runs as typed.
+    RunsAsTyped,
+    /// saw could not be reached, or could not answer.
+    Unanswered,
 }
 
-/// The holding directory for this check, and whether the stand-in owns it. A placer's
-/// `SAW_GOVERN_HOLDING` is used as given and left in place. In system mode (`SAW_GOVERN_SYSTEM`)
-/// a new directory is made under the system temp directory and removed when the check is done;
-/// a name that already exists is never taken.
-fn holding_dir() -> Option<(PathBuf, bool)> {
+/// Run the check. Takes the tool, its arguments, the real program, whether the command is sent for
+/// what it names and whether saw must check it. Returns an exit code when the command was governed
+/// (applied, held or refused), or `None` to run the real program: saw answered that it runs as
+/// typed, or saw could not answer a command it was not required to check (fail open, never break
+/// git).
+fn govern(tool: &str, args: &[String], real: &Path, for_what_it_names: bool, must_check: bool) -> Option<i32> {
+    let checked = match real_saw().and_then(|saw| holding_dir(must_check).map(|holding| (saw, holding))) {
+        Some((saw, (holding, temporary))) => {
+            let checked = govern_with(&saw, tool, args, &holding, temporary, real, for_what_it_names);
+            if temporary {
+                let _ = std::fs::remove_dir_all(&holding); // never leave a held update on disk
+            }
+            checked
+        }
+        None => Checked::Unanswered,
+    };
+    match checked {
+        Checked::Ended(code) => Some(code),
+        Checked::RunsAsTyped => None,
+        Checked::Unanswered if must_check => {
+            eprintln!("saw: this command could not be checked; the folder is unchanged; {tool} did not run.");
+            Some(2)
+        }
+        Checked::Unanswered => None,
+    }
+}
+
+/// Pick the holding directory for this check: a placer's `SAW_GOVERN_HOLDING` as given, else in
+/// system mode (`SAW_GOVERN_SYSTEM`) or when saw must check the command, a new directory under the
+/// system temp directory, never a name that already exists. Takes whether saw must check the
+/// command. Returns the directory and whether it is the stand-in's own, or None when neither
+/// applies or no directory can be made.
+fn holding_dir(must_check: bool) -> Option<(PathBuf, bool)> {
     if let Some(given) = env::var_os("SAW_GOVERN_HOLDING") {
         return Some((PathBuf::from(given), false));
     }
-    env::var_os("SAW_GOVERN_SYSTEM")?;
+    if !must_check {
+        env::var_os("SAW_GOVERN_SYSTEM")?;
+    }
     let unique = format!(
         "saw-govern-{}-{}",
         std::process::id(),
@@ -378,10 +410,11 @@ fn holding_dir() -> Option<(PathBuf, bool)> {
     Some((dir, true))
 }
 
-/// Run `saw govern prepare`, then `apply` when it comes back clean. Returns the exit code, or
-/// `None` to fall back to the real program (fail open, never break git).
-fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &Path,
-               for_what_it_names: bool) -> Option<i32> {
+/// Run `saw govern prepare`, then `apply` when it comes back clean. Takes saw, the tool, its
+/// arguments, the holding directory, whether it is removed when the check ends, the real program
+/// and whether the command is sent for what it names. Returns what became of the command.
+fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, holding_is_temporary: bool,
+               real: &Path, for_what_it_names: bool) -> Checked {
     let repo = target_repo(args);
     let mut prepare = Command::new(saw);
     prepare
@@ -390,20 +423,21 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
         .arg("--into")
         .arg(holding)
         .args(if for_what_it_names { &["--brings-no-files"][..] } else { &[][..] })
+        .args(if holding_is_temporary && !attended() { &["--no-one-to-ask"][..] } else { &[][..] })
         .args(["--tool", tool, "--"])
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit()); // progress/status reaches the operator
-    let output = prepare.output().ok()?;
+    let Ok(output) = prepare.output() else { return Checked::Unanswered };
     let prepared = output.status;
     let answer: serde_json::Value =
         serde_json::from_str(String::from_utf8_lossy(&output.stdout).trim()).unwrap_or_default();
     if answer.get("passthrough").and_then(serde_json::Value::as_bool) == Some(true) {
-        return None;
+        return Checked::RunsAsTyped;
     }
     if offers_let_in(&answer) {
         let held = prepared.code().filter(|code| *code != 0).unwrap_or(1);
-        return Some(let_in_or_leave(saw, &answer, held));
+        return Checked::Ended(let_in_or_leave(saw, &answer, held, holding_is_temporary));
     }
     if let Some(reason) = unchecked_reason(&answer) {
         let checked = scan_finished(&answer);
@@ -415,9 +449,9 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
                 }
             }
             eprintln!("saw: left the folder unchanged; {tool} did not run.");
-            return Some(2);
+            return Checked::Ended(2);
         }
-        return Some(match decide(tool, args, &reason, checked) {
+        return Checked::Ended(match decide(tool, args, &reason, checked) {
             Decision::RunAsTyped => run_then_scan(real, saw, args, &scanned_after(&answer, &repo)),
             Decision::LeaveUnchanged => {
                 eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
@@ -432,9 +466,9 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
         } else {
             eprintln!("saw: this update cannot be checked; the folder is unchanged; {tool} did not run.");
         }
-        return Some(failed(prepared.code()));
+        return Checked::Ended(failed(prepared.code()));
     }
-    apply_checked(saw, tool, &repo, holding, &answer)
+    apply_checked(saw, tool, &repo, holding, &answer).map_or(Checked::Unanswered, Checked::Ended)
 }
 
 /// Write the update saw checked into the folder, without fetching again, and say what git said.
@@ -514,22 +548,27 @@ fn offers_let_in(answer: &serde_json::Value) -> bool {
 }
 
 /// Say why saw held the update and what to do, then ask the user whether to let it in. Never read
-/// from the environment: letting in a finding is decided by a person, each time. Returns the exit
-/// code: the let-in command's, or `held` when the folder is left unchanged.
-fn let_in_or_leave(saw: &Path, answer: &serde_json::Value, held: i32) -> i32 {
+/// from the environment: letting in a finding is decided by a person, each time. Takes saw,
+/// prepare's answer, the exit code of a held update and whether the holding directory is removed
+/// with the check. Returns the exit code: the let-in command's, or `held` when the folder is left
+/// unchanged.
+fn let_in_or_leave(saw: &Path, answer: &serde_json::Value, held: i32, holding_is_temporary: bool) -> i32 {
     say_why_held(answer);
-    let command: Vec<String> = answer
-        .pointer("/decision/let_in")
-        .and_then(serde_json::Value::as_array)
-        .map(|parts| parts.iter().filter_map(|p| p.as_str().map(str::to_string)).collect())
-        .unwrap_or_default();
+    let command = command_at(answer, "/decision/let_in");
     if command.len() < 2 {
         return held;
     }
     let typed = answer.pointer("/decision/confirm").and_then(serde_json::Value::as_str) == Some("typed");
-    if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
-        eprintln!("saw: after you review it, let it in with: {}{}", command.join(" "),
-                  if typed { " --confirm <folder name>" } else { "" });
+    if !attended() {
+        let later = command_at(answer, "/decision/let_in_later");
+        if !later.is_empty() {
+            let later: Vec<String> = later.iter().map(|word| shell_word(word)).collect();
+            eprintln!("saw held this update for review and nothing changed. To review it and let it in: {}",
+                      later.join(" "));
+        } else if !holding_is_temporary {
+            eprintln!("saw: after you review it, let it in with: {}{}", command.join(" "),
+                      if typed { " --confirm <folder name>" } else { "" });
+        }
         return held;
     }
     let mut extra = Vec::new();
@@ -547,6 +586,37 @@ fn let_in_or_leave(saw: &Path, answer: &serde_json::Value, held: i32) -> i32 {
         }
     }
     Command::new(saw).args(&command[1..]).args(&extra).status().ok().and_then(|s| s.code()).unwrap_or(held)
+}
+
+/// Read a command saw's answer names. Takes the answer and where the command is in it. Returns its
+/// words, none when the answer names no command there.
+fn command_at(answer: &serde_json::Value, pointer: &str) -> Vec<String> {
+    answer
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_array)
+        .map(|parts| parts.iter().filter_map(|p| p.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// Whether a person can be asked: this run reads from a terminal and writes to one.
+fn attended() -> bool {
+    io::stdin().is_terminal() && io::stderr().is_terminal()
+}
+
+/// Quote a word for a POSIX shell, leaving a word of plain characters unquoted. Takes the word.
+/// Returns the word to type.
+fn shell_word(word: &str) -> String {
+    let literal = !word.is_empty() && word.chars().all(|c| c.is_ascii_alphanumeric() || "_+:,./-@".contains(c));
+    if literal {
+        word.to_string()
+    } else {
+        single_quoted(word)
+    }
+}
+
+/// Quote a word in single quotes for a POSIX shell. Takes the word. Returns the quoted word.
+fn single_quoted(word: &str) -> String {
+    format!("'{}'", word.replace('\'', "'\\''"))
 }
 
 /// Read one line the user typed, trimmed.
@@ -604,7 +674,7 @@ fn decide(tool: &str, args: &[String], reason: &str, checked: bool) -> Decision 
         _ => {}
     }
     let said = said(reason, checked);
-    if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
+    if !attended() {
         eprintln!("{said}");
         return Decision::LeaveUnchanged;
     }
@@ -725,7 +795,7 @@ fn activate_path() -> Option<PathBuf> {
 
 /// Quote a path for a POSIX shell.
 fn sh_quote(path: &Path) -> String {
-    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+    single_quoted(&path.to_string_lossy())
 }
 
 fn activate_text(shim: &Path, saw: &str) -> String {

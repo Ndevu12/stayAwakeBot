@@ -5,14 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 
 from stayawake.bots.security import govern as core, records
+from stayawake.bots.security import govern_held_commands
 from stayawake.bots.mcp.launch import standin_binary
 from stayawake.cli.argtypes import add_deadline_arg, add_progress_arg, progress_requested
 from stayawake.cli.helptext import add_command
-from stayawake.utils import exitcodes
+from stayawake.utils import env, exitcodes
 from stayawake.utils.progress_events import covering
 from stayawake.utils.json_documents import versioned
 from stayawake.utils.streaming import say
@@ -53,6 +55,9 @@ def register(sub) -> None:
     pp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
     pp.add_argument("--brings-no-files", action="store_true",
                     help="the stand-in reads the command as one that brings no files")
+    pp.add_argument("--no-one-to-ask", action="store_true",
+                    help="the command ran where no one can be asked: a held update's command is kept "
+                         "for saw govern let-in")
     add_progress_arg(pp)
     add_deadline_arg(pp, help="stop the check after SECONDS; an unfinished check is left to the user "
                               "to decide")
@@ -125,6 +130,19 @@ def register(sub) -> None:
     rp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
     rp.set_defaults(func=run_restore)
 
+    lp = add_command(
+        actions, "let-in",
+        help="review an update saw held where no one could be asked, and let it in",
+        description=(
+            "Run again, in this terminal, the command whose update saw held where no one could be "
+            "asked. saw checks it again and asks you whether to let it in: yes for a suspicious "
+            "update, the folder's name for an infected one. It needs a person at a terminal."),
+        examples=[("saw govern let-in", "review the update held here"),
+                  ("saw govern let-in --repo ~/code/app", "review one held for another folder")],
+        stream=False)
+    lp.add_argument("--repo", default=".", help="any folder in the repository the update was held for")
+    lp.set_defaults(func=run_let_in)
+
     for name, helptext, description, example in _PLACEMENT:
         c = add_command(actions, name, help=helptext, description=description,
                         examples=[example], stream=False)
@@ -153,6 +171,8 @@ def _do_prepare(a: argparse.Namespace) -> int:
     payload, code = core.prepare(a.repo, a.into, a.tool, _operator_args(a.args), a.config,
                                  deadline=a.deadline, environment=environment,
                                  brings_no_files=a.brings_no_files)
+    if a.no_one_to_ask:
+        govern_held_commands.keep_for_let_in(a.repo, [a.tool, *_operator_args(a.args)], payload)
     print(json.dumps(versioned("govern", payload)))
     return code
 
@@ -186,6 +206,53 @@ def run_restore(a: argparse.Namespace) -> int:
     payload, code = core.restore(a.repo, a.config)
     print(json.dumps(versioned("govern", payload)))
     return code
+
+
+def run_let_in(a: argparse.Namespace) -> int:
+    """Run again, through saw's stand-in and attached to this terminal, the command whose update saw
+    held for a folder where no one could be asked. Takes the parsed arguments. Returns the
+    stand-in's exit code, or DID_NOT_RUN when nothing is held, no one is at a terminal or the
+    stand-in is missing."""
+    folder = os.path.realpath(a.repo)
+    record = govern_held_commands.read(folder)
+    if record is None:
+        print(f"saw: no update is held for review in {govern_held_commands.repository_of(folder)}.",
+              file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    refused = govern_held_commands.refusal_to_run(record)
+    if refused:
+        govern_held_commands.drop(record)
+        print(f"saw: the held command cannot be let in: {refused}; saw dropped it and nothing ran.",
+              file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+        print("saw: saw govern let-in needs a person at a terminal; nothing ran.", file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    binary = standin_binary()
+    if not binary:
+        print("saw govern: the stand-in is not available on this machine yet.", file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    print(f"saw: checking again: {shlex.join(record['command'])}", file=sys.stderr)
+    try:
+        ran = subprocess.run([binary, *record["command"]], cwd=record["ran_in"], env=_standin_environment())
+    except OSError as error:
+        print(f"saw: it could not run in {record['ran_in']}: {error.strerror or error}; nothing ran.",
+              file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    govern_held_commands.clear(folder, record)
+    return ran.returncode
+
+
+def _standin_environment() -> dict:
+    """Build the stand-in's environment from this process's: no placer's holding directory, no tool
+    override, no decision made ahead, and `SAW_BIN` naming this saw when it is a program that runs.
+    Returns the environment."""
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in (env.SAW_GOVERN_HOLDING, env.SAW_GOVERN_DECISION, "SAW_STANDIN_TOOL")}
+    own = os.path.abspath(sys.argv[0])
+    if os.path.isfile(own) and os.access(own, os.X_OK):
+        environment["SAW_BIN"] = own
+    return environment
 
 
 _PLACEMENT = (
