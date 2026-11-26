@@ -7,6 +7,7 @@ import os
 import shutil
 from pathlib import Path
 
+from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.utils import folderlock
 
 REPOSITORY = "repo.git"
@@ -23,14 +24,26 @@ NOT_A_FOLDER = "the holding directory is not a folder"
 NOT_CLEARED = "the holding directory could not be cleared"
 
 
-def overlaps(repo: Path, into: Path) -> str:
-    """Refuse a holding directory that is the open folder, lies inside it or holds it. Takes the open
-    folder and the holding directory. Returns the refusal, or "" when the two are apart."""
-    folder, holding = Path(repo).resolve(), Path(into).resolve()
-    if any(_same_place(holding, place) for place in (folder, *folder.parents)):
-        return OVERLAPS_THE_FOLDER
-    if any(_same_place(folder, place) for place in holding.parents):
-        return OVERLAPS_THE_FOLDER
+def repository_places(repo: Path) -> list[Path]:
+    """List the places a holding directory stays apart from: the folder, and the top, git directory
+    and common directory of the repository it belongs to. Takes the folder. Returns the places."""
+    places = [Path(repo)]
+    for asked in (["--absolute-git-dir", "--git-common-dir"], ["--show-toplevel"]):
+        found = stdout(repo, ["rev-parse", "--path-format=absolute", *asked], context=UNTRUSTED)
+        places += [Path(line) for line in found.splitlines() if line.strip()]
+    return places
+
+
+def overlaps(into: Path, places) -> str:
+    """Refuse a holding directory that is one of the places, lies inside one or holds one. Takes the
+    holding directory and the places. Returns the refusal, or "" when it is apart from them all."""
+    holding = Path(into).resolve()
+    for place in places:
+        resolved = Path(place).resolve()
+        if any(_same_place(holding, step) for step in (resolved, *resolved.parents)):
+            return OVERLAPS_THE_FOLDER
+        if any(_same_place(resolved, step) for step in holding.parents):
+            return OVERLAPS_THE_FOLDER
     return ""
 
 

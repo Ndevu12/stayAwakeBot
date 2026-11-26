@@ -17,11 +17,11 @@ from tests.bots.security.test_govern_replays_a_tracking_checkout import _Trackin
 
 class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
 
-    def _prepare(self, into: Path) -> tuple[dict, int]:
-        return govern.prepare(str(self.open), str(into), "git", ["pull"])
+    def _prepare(self, into: Path, repo: "Path | None" = None) -> tuple[dict, int]:
+        return govern.prepare(str(repo or self.open), str(into), "git", ["pull"])
 
-    def _refused(self, into: Path, reason: str) -> None:
-        answer, code = self._prepare(into)
+    def _refused(self, into: Path, reason: str, repo: "Path | None" = None) -> None:
+        answer, code = self._prepare(into, repo)
         self.assertEqual((answer.get("reason"), code), (reason, exitcodes.INCOMPLETE), answer)
         self.assertEqual(answer["decision"]["choices"], list(govern.DECISION_CHOICES), answer)
         self.assertTrue((self.open / ".git").is_dir())
@@ -54,6 +54,54 @@ class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
         self.write(self.open, "held/notes.txt", "notes\n")
         self._refused(inside, holding_directory.OVERLAPS_THE_FOLDER)
         self.assertEqual((inside / "notes.txt").read_text(encoding="utf-8"), "notes\n")
+
+    def test_a_folder_of_the_repository_beside_the_open_folder_is_refused_and_kept(self):
+        self.write(self.open, "sub/work/user.txt", "user\n")
+        self.write(self.open, "data/work/keep.txt", "keep\n")
+        self.write(self.open, "data/state.json", "{\"mine\": true}\n")
+        self.commit(self.open, "tracked data")
+        data = self.open / "data"
+        self._refused(data, holding_directory.OVERLAPS_THE_FOLDER, repo=self.open / "sub")
+        self.assertEqual(sorted(os.listdir(data)), ["state.json", "work"])
+        self.assertEqual((data / "state.json").read_text(encoding="utf-8"), "{\"mine\": true}\n")
+        self.assertEqual(os.listdir(data / "work"), ["keep.txt"])
+        self.assertEqual(self.git(self.open, "status", "--porcelain").strip(), "")
+        applied = govern.apply(str(self.open / "sub"), str(data))[0]
+        self.assertEqual(applied, {"applied": False, "outcome": govern.HOLDING_UNUSABLE,
+                                   "reason": holding_directory.OVERLAPS_THE_FOLDER})
+
+    def _linked(self) -> Path:
+        linked = self.owned(self.root / "linked")
+        self.git(self.open, "worktree", "add", "-q", "-b", "side", str(linked))
+        return linked
+
+    def test_the_git_directory_of_a_linked_work_tree_is_refused_and_kept(self):
+        common = self.open / ".git"
+        self._refused(common, holding_directory.OVERLAPS_THE_FOLDER, repo=self._linked())
+        self.assertTrue((common / "HEAD").is_file())
+        self.assertTrue((common / "config").is_file())
+        for name in (holding_directory.REPOSITORY, holding_directory.WORK_TREE, holding_directory.NO_HOOKS):
+            self.assertFalse((common / name).exists(), name)
+
+    def test_a_folder_inside_the_git_directory_is_refused_and_not_made(self):
+        inside = self.open / ".git" / "held"
+        self._refused(inside, holding_directory.OVERLAPS_THE_FOLDER, repo=self._linked())
+        self.assertFalse(inside.exists())
+
+    def test_a_command_run_as_typed_is_answered_and_an_overlapping_holding_directory_untouched(self):
+        bare = self.owned(self.root / "bare.git")
+        self.git(self.root, "clone", "-q", "--bare", str(self.upstream), str(bare))
+        notes = self.root / "notes.txt"
+        notes.write_text("notes\n", encoding="utf-8")
+        for repo, into, args in ((self.root, self.root / "holding", ["--git-dir", str(bare), "fetch", "origin"]),
+                                 (bare, bare / "held", ["fetch", "origin"]), (bare, self.root, ["fetch", "origin"])):
+            with self.subTest(repo=repo, into=into):
+                answer, code = govern.prepare(str(repo), str(into), "git", args)
+                self.assertEqual((answer.get("passthrough"), code), (True, exitcodes.CLEAN), answer)
+                self.assertFalse((self.root / "holding").exists())
+                self.assertFalse((bare / "held").exists())
+                self.assertEqual(notes.read_text(encoding="utf-8"), "notes\n")
+                self.assertTrue((bare / "HEAD").is_file())
 
     def test_a_link_to_the_open_folder_is_refused(self):
         link = self.root / "link"

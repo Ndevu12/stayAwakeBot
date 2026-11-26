@@ -84,27 +84,28 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     deadline, the command's environment and whether the stand-in reads the command as one that
     brings no files. Returns the answer and its exit: a passthrough, a scan, a reason with a
     decision, or busy when another run holds the holding directory past the wait."""
-    refused = holding_directory.overlaps(Path(repo), Path(into)) or holding_directory.holds_other_files(Path(into))
-    if refused:
-        return _unchecked(repo, refused)
+    holding_refusal = (holding_directory.overlaps(Path(into), holding_directory.repository_places(Path(repo)))
+                       or holding_directory.holds_other_files(Path(into)))
     with contextlib.ExitStack() as hold:
-        try:
-            Path(into).mkdir(parents=True, exist_ok=True)
-            hold.enter_context(folderlock.held(Path(into), wait=_HOLD_WAIT_SECONDS))
-        except folderlock.Busy:
-            return {"reason": _BUSY, "outcome": BUSY, "decision": _decision(repo)}, exitcodes.INCOMPLETE
-        except OSError as error:
-            return _unchecked(repo, f"the holding directory could not be used: {error.strerror or error}")
-        return _prepare_held(repo, into, tool, args, config, deadline, environment, brings_no_files)
+        if not holding_refusal:
+            try:
+                Path(into).mkdir(parents=True, exist_ok=True)
+                hold.enter_context(folderlock.held(Path(into), wait=_HOLD_WAIT_SECONDS))
+            except folderlock.Busy:
+                return {"reason": _BUSY, "outcome": BUSY, "decision": _decision(repo)}, exitcodes.INCOMPLETE
+            except OSError as error:
+                return _unchecked(repo, f"the holding directory could not be used: {error.strerror or error}")
+        return _prepare_held(repo, into, holding_refusal, tool, args, config, deadline, environment,
+                             brings_no_files)
 
 
-def _prepare_held(repo: str, into: str, tool: str, args: list[str], config: str | None,
+def _prepare_held(repo: str, into: str, holding_refusal: str, tool: str, args: list[str], config: str | None,
                   deadline: float | None, environment: dict | None, brings_no_files: bool) -> tuple[dict, int]:
-    """Prepare while holding the holding directory. Takes what `prepare` takes. Returns what it
+    """Prepare while holding the holding directory, or without it when it cannot be used. Takes what
+    `prepare` takes and the refusal of the holding directory, "" for none. Returns what `prepare`
     returns."""
-    refused = holding_directory.clear(Path(into))
-    if refused:
-        return _unchecked(repo, refused)
+    if not holding_refusal:
+        holding_directory.clear(Path(into))
     command = typed_command.TypedCommand("", ())
     if tool == "gh":
         if not runs_directly.gh_brings_files(list(args)):
@@ -122,6 +123,10 @@ def _prepare_held(repo: str, into: str, tool: str, args: list[str], config: str 
     location = replay.locate(Path(repo), command)
     if isinstance(location, str):
         return _unchecked(repo, location)
+    refused = holding_refusal or holding_directory.overlaps(Path(into), [place for place in (
+        location.folder, location.work_tree, location.git_dir, location.common_dir) if place is not None])
+    if refused:
+        return _unchecked(repo, refused)
     holding = replay.reproduce(location, Path(into), command, with_files=command.sub != "fetch")
     if isinstance(holding, str):
         return _unchecked(repo, holding)
@@ -474,7 +479,8 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
     the holding directory, the accepted commit, the typed confirmation and the id of the state the
     caller's prepare recorded. Returns whether it was applied, the outcome, the reason when not, and
     the exit."""
-    refused = holding_directory.overlaps(Path(repo), Path(into))
+    refused = (holding_directory.overlaps(Path(into), holding_directory.repository_places(Path(repo)))
+               or holding_directory.holds_other_files(Path(into)))
     if refused:
         return _applied(False, refused, HOLDING_UNUSABLE)
     state = _read_state(Path(into)) if Path(into).is_dir() else None
@@ -531,6 +537,10 @@ def _apply_held(repo: str, into: str, accept: str | None, confirm: str | None,
     state = _read_state(Path(into))
     if state is None:
         return _applied(False, "there is no checked update to apply", NOTHING_TO_APPLY)
+    refused = holding_directory.overlaps(Path(into), [Path(state[key]) for key in ("top", "git_dir")
+                                                      if isinstance(state.get(key), str)])
+    if refused:
+        return _applied(False, refused, HOLDING_UNUSABLE)
     if expect is not None and state.get("state_id") != expect:
         return _replaced()
     if state.get("mode") == incoming.UNCARRIED_CONFLICTS:
