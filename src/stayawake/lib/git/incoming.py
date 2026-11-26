@@ -21,8 +21,6 @@ from stayawake.lib.git.write.transfer import adopt_objects, missing_objects
 from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way, uncommitted_paths
 from stayawake.utils import pathsafe
 
-_GH_REPOSITORY_OPTIONS = frozenset({"-R", "--repo"})
-_GH_INBOUND = frozenset({("pr", "checkout"), ("repo", "sync"), ("release", "download"), ("run", "download")})
 
 WRITE_LEFT_PART_WAY = ("the update could not be written into the open folder, and the folder may have "
                        "changed; check it with git status")
@@ -49,12 +47,6 @@ class Arrived:
     versions: tuple[tuple[str, tuple[str, ...]], ...] = ()
     stopped: "conflicted.Stopped | None" = None
     bring_in: tuple[str, ...] = ()
-
-
-def gh_brings_files(args: list[str]) -> bool:
-    """Tell whether a gh command brings files into the folder it runs in. Takes its arguments.
-    Returns the answer."""
-    return tuple(_gh_words(args)[:2]) in _GH_INBOUND
 
 
 def continues_a_rebase(command: TypedCommand) -> bool:
@@ -224,21 +216,6 @@ def restore(repo: Path, commit: str) -> str:
         return PUT_BACK_LEFT_PART_WAY
     move.release()
     return ""
-
-
-def _gh_words(args: list[str]) -> list[str]:
-    """List a gh command's words, leaving out its options and the repository it names. Takes the
-    arguments. Returns the words."""
-    words: list[str] = []
-    index = 0
-    while index < len(args) and args[index] != "--":
-        arg = args[index]
-        index += 1
-        if arg in _GH_REPOSITORY_OPTIONS:
-            index += 1
-        elif not arg.startswith("-"):
-            words.append(arg)
-    return words
 
 
 def _head_text(repo: Path) -> str:

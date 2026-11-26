@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 from stayawake.bots.security import govern
-from stayawake.lib.git import command_line
+from stayawake.lib.git import runs_directly
 from stayawake.cli.commands.capabilities import capabilities
 from stayawake.cli.dispatch import build_parser
 
@@ -42,13 +42,13 @@ class TestGovernRecognisedCommands(unittest.TestCase):
                            ("gh", ["pr", "checkout", "12"]), ("gh", ["repo", "sync"]),
                            ("gh", ["release", "download"]), ("gh", ["run", "download", "4"])]:
             with self.subTest(tool=tool, args=args):
-                self.assertTrue(command_line.read(tool, args, Path('.'), lambda _folder, _name: None).brings_files)
+                self.assertEqual(runs_directly.decide(tool, args, Path('.'), {}), runs_directly.CHECKED)
 
     def test_a_command_that_brings_nothing_in_is_not_governed(self):
         for tool, args in [("git", ["status"]), ("git", ["commit"]), ("git", ["push"]),
                            ("gh", ["pr", "view"]), ("git", [])]:
             with self.subTest(tool=tool, args=args):
-                self.assertFalse(command_line.read(tool, args, Path('.'), lambda _folder, _name: None).brings_files)
+                self.assertEqual(runs_directly.decide(tool, args, Path('.'), {}), runs_directly.RUNS_AS_TYPED)
 
 
 class TestGovernFailsClosed(unittest.TestCase):

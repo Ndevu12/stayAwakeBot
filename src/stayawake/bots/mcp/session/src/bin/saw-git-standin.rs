@@ -8,6 +8,7 @@
 //! sets `SAW_GOVERN_SYSTEM`, and the stand-in makes its own holding directory for each check and
 //! removes it afterwards. Without either, every command passes straight through.
 
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, IsTerminal};
@@ -15,6 +16,7 @@ use std::os::unix::fs::symlink;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
+use std::sync::OnceLock;
 
 fn main() {
     let argv: Vec<String> = env::args().collect();
@@ -66,60 +68,26 @@ fn governing() -> bool {
     env::var_os("SAW_GOVERN_HOLDING").is_some() || env::var_os("SAW_GOVERN_SYSTEM").is_some()
 }
 
-/// Git subcommands that never write files from elsewhere into the folder.
-const NEVER_BRINGS_FILES: &[&str] = &[
-    "add", "annotate", "blame", "branch", "cat-file", "check-attr", "check-ignore", "check-mailmap",
-    "check-ref-format", "cherry", "clean", "commit", "commit-tree", "config", "count-objects", "credential",
-    "credential-cache", "credential-store", "describe", "diff", "diff-files", "diff-index", "diff-tree",
-    "for-each-ref", "fsck", "gc", "grep", "hash-object", "help", "init", "log", "ls-files", "ls-remote",
-    "ls-tree", "maintenance", "merge-base", "mktag", "mktree", "mv", "name-rev", "notes", "pack-refs",
-    "prune", "push", "range-diff", "reflog", "remote", "repack", "rev-list", "rev-parse", "rm", "shortlog",
-    "show", "show-branch", "show-ref", "stage", "status", "symbolic-ref", "tag", "var", "verify-commit",
-    "verify-tag", "version", "whatchanged", "write-tree",
-];
-/// gh options that take the repository a command acts on as their next argument.
-const GH_REPOSITORY_OPTIONS: &[&str] = &["-R", "--repo"];
 
-/// Git's global options that take the next argument as their value.
-const GIT_OPTIONS_WITH_VALUE: &[&str] = &["-C", "-c", "--shallow-file", "--git-dir", "--work-tree", "--namespace", "--attr-source"];
-/// Git's global options that take their value after `=`.
-const GIT_OPTIONS_WITH_JOINED_VALUE: &[&str] = &["--git-dir=", "--work-tree=", "--namespace=", "--attr-source="];
-/// Git's global options that take no value.
-const GIT_FLAGS: &[&str] = &[
-    "-p", "--paginate", "-P", "--no-pager", "--no-replace-objects", "--no-lazy-fetch", "--no-optional-locks",
-    "--no-advice", "--bare", "--literal-pathspecs", "--no-literal-pathspecs", "--glob-pathspecs",
-    "--noglob-pathspecs", "--icase-pathspecs",
-];
-/// Git's global options after which git prints something and runs no subcommand.
-const GIT_QUERIES: &[&str] = &["-h", "--help", "-v", "--version", "--exec-path", "--html-path", "--man-path", "--info-path"];
-/// Configuration sections that change which commands git runs under a name.
-const SECTIONS_THAT_NAME_COMMANDS: &[&str] = &["alias", "include", "includeif"];
-/// Settings that make git run nothing. Any other setting a command line gives is sent to saw.
-const SETTINGS_THAT_RUN_NOTHING: &[&str] = &["user.name", "user.email", "core.quotepath", "init.defaultbranch",
-    "commit.gpgsign", "tag.gpgsign", "color.ui"];
-/// Sections whose every setting makes git run nothing.
-const SECTIONS_THAT_RUN_NOTHING: &[&str] = &["advice", "color"];
-/// Subcommands that write a file `--output` names.
-const WRITE_AN_OUTPUT: &[&str] = &["diff", "diff-files", "diff-index", "diff-tree", "log", "show", "whatchanged",
-    "range-diff"];
-/// `git config` options that only read.
-const CONFIG_READS: &[&str] = &["--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color",
-    "--get-colorbool", "--list"];
-/// `git config` options that write.
-const CONFIG_WRITES: &[&str] = &["--add", "--replace-all", "--unset", "--unset-all", "--rename-section",
-    "--remove-section", "--edit"];
-/// Every other long option `git config` lists, which an abbreviation may also name.
-const CONFIG_OTHER_OPTIONS: &[&str] = &["--global", "--system", "--local", "--worktree", "--file", "--blob",
-    "--null", "--name-only", "--show-origin", "--show-scope", "--show-names", "--type", "--bool", "--int",
-    "--bool-or-int", "--bool-or-str", "--path", "--expiry-date", "--default", "--comment", "--fixed-value",
-    "--includes", "--all", "--regexp", "--value", "--url", "--append"];
-/// Push options that name a program to run.
-const PUSH_PROGRAM_OPTIONS: &[&str] = &["--receive-pack", "--exec"];
-/// Push options that take the next word as their value.
-const PUSH_OPTIONS_WITH_A_VALUE: &[&str] = &["--repo", "-o", "--push-option", "--receive-pack", "--exec"];
-/// Environment variables that give git settings.
-const SETTINGS_VARIABLES: &[&str] = &["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_SYSTEM", "GIT_CONFIG", "GIT_CONFIG_NOSYSTEM"];
+
+/// The stand-in's tables, which saw reads too: the subcommands and global options it reads as
+/// bringing no files, what a command that brings none may still name, and gh's commands that bring
+/// files.
+const TABLES: &str = include_str!("../../../../../lib/data/git_runs_directly.json");
+
+/// Return one of the stand-in's tables. Takes its name. Panics when the tables built into the
+/// stand-in cannot be read.
+fn table(name: &str) -> &'static [&'static str] {
+    static READ: OnceLock<HashMap<String, Vec<&'static str>>> = OnceLock::new();
+    let tables = READ.get_or_init(|| {
+        let parsed: HashMap<String, Vec<String>> = serde_json::from_str(TABLES).expect("saw's git tables");
+        parsed
+            .into_iter()
+            .map(|(name, words)| (name, words.into_iter().map(|w| &*Box::leak(w.into_boxed_str())).collect()))
+            .collect()
+    });
+    tables.get(name).map(Vec::as_slice).unwrap_or_else(|| panic!("saw's git tables have no {name}"))
+}
 
 /// A git command line read through git's global options.
 struct GitLine<'a> {
@@ -146,17 +114,17 @@ fn read_git_line(args: &[String]) -> GitLine<'_> {
             line.subcommand = Some(i);
             return line;
         }
-        if GIT_QUERIES.contains(&arg) || arg.starts_with("--list-cmds=") {
+        if table("global_queries").contains(&arg) || arg.starts_with("--list-cmds=") {
             return line;
         }
         if arg == "--work-tree" || arg.starts_with("--work-tree=") {
             line.names_a_work_tree = true;
         }
-        if GIT_FLAGS.contains(&arg) || GIT_OPTIONS_WITH_JOINED_VALUE.iter().any(|p| arg.starts_with(p)) {
+        if table("global_flags").contains(&arg) || table("global_options_with_a_joined_value").iter().any(|p| arg.starts_with(p)) {
             i += 1;
             continue;
         }
-        let Some(value) = args.get(i + 1).filter(|_| GIT_OPTIONS_WITH_VALUE.contains(&arg)) else {
+        let Some(value) = args.get(i + 1).filter(|_| table("global_options_with_a_value").contains(&arg)) else {
             line.read = false;
             return line;
         };
@@ -178,7 +146,7 @@ fn read_git_line(args: &[String]) -> GitLine<'_> {
 /// Whether a `-c <name>=<value>` sets a key in a section that changes which commands git runs.
 fn names_commands(setting: &str) -> bool {
     let section = setting.split(['=', '.']).next().unwrap_or("").to_ascii_lowercase();
-    SECTIONS_THAT_NAME_COMMANDS.contains(&section.as_str())
+    table("sections_that_name_commands").contains(&section.as_str())
 }
 
 /// Whether the stand-in sends a command to `saw govern` before it runs, and why.
@@ -212,7 +180,7 @@ fn git_sent(args: &[String], real: &Path) -> Sent {
     }
     let Some(at) = line.subcommand else { return Sent::No };
     let sub = args[at].as_str();
-    if !NEVER_BRINGS_FILES.contains(&sub) || line.names_a_work_tree || env::var_os("GIT_WORK_TREE").is_some() {
+    if !table("subcommands_that_bring_no_files").contains(&sub) || line.names_a_work_tree || env::var_os("GIT_WORK_TREE").is_some() {
         return Sent::ToSaw;
     }
     let reader = GitReader { real, folder: PathBuf::from(target_repo(args)) };
@@ -229,15 +197,15 @@ fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: 
     let runs_something = |key: &&str| {
         let key = key.to_ascii_lowercase();
         let section = key.split('.').next().unwrap_or("");
-        !(SETTINGS_THAT_RUN_NOTHING.contains(&key.as_str()) || SECTIONS_THAT_RUN_NOTHING.contains(&section))
+        !(table("settings_that_run_nothing").contains(&key.as_str()) || table("sections_that_run_nothing").contains(&section))
     };
-    if settings.iter().any(runs_something) || SETTINGS_VARIABLES.iter().any(|name| env::var_os(name).is_some()) {
+    if settings.iter().any(runs_something) || table("settings_variables").iter().any(|name| env::var_os(name).is_some()) {
         return true;
     }
     let options: Vec<&str> = rest.iter().map(String::as_str).take_while(|arg| *arg != "--").collect();
     let words: Vec<&str> = options.iter().copied().filter(|arg| !arg.starts_with('-')).collect();
     match sub {
-        _ if WRITE_AN_OUTPUT.contains(&sub) => options.iter().any(|arg| *arg == "--output" || arg.starts_with("--output=")),
+        _ if table("subcommands_that_write_an_output").contains(&sub) => options.iter().any(|arg| *arg == "--output" || arg.starts_with("--output=")),
         "init" | "maintenance" => true,
         "push" => push_may_write_here(&options, reader),
         "config" => !config_only_reads(&options, &words),
@@ -261,10 +229,10 @@ fn push_may_write_here(options: &[&str], reader: &GitReader) -> bool {
     while let Some(arg) = options.get(index).copied() {
         index += 1;
         let name = arg.split('=').next().unwrap_or("");
-        if name.starts_with("--") && name.len() > 3 && PUSH_PROGRAM_OPTIONS.iter().any(|o| o.starts_with(name)) {
+        if name.starts_with("--") && name.len() > 3 && table("push_program_options").iter().any(|o| o.starts_with(name)) {
             return true;
         }
-        if PUSH_OPTIONS_WITH_A_VALUE.contains(&name) {
+        if table("push_options_with_a_value").contains(&name) {
             let value = if arg.contains('=') { arg.splitn(2, '=').nth(1) } else { index += 1; options.get(index - 1).copied() };
             if name == "--repo" {
                 target = value;
@@ -307,12 +275,12 @@ fn a_remote_is_local(reader: &GitReader) -> bool {
 fn config_only_reads(options: &[&str], words: &[&str]) -> bool {
     let named: Vec<Option<&str>> =
         options.iter().filter(|arg| arg.starts_with("--")).map(|arg| config_option(arg)).collect();
-    if named.iter().any(|option| option.map_or(true, |name| CONFIG_WRITES.contains(&name)))
+    if named.iter().any(|option| option.map_or(true, |name| table("config_writes").contains(&name)))
         || options.iter().any(|arg| *arg == "-e")
     {
         return false;
     }
-    named.iter().flatten().any(|name| CONFIG_READS.contains(name))
+    named.iter().flatten().any(|name| table("config_reads").contains(name))
         || options.iter().any(|arg| *arg == "-l")
         || matches!(words.first(), Some(&"get") | Some(&"list"))
         || (words.len() == 1 && !matches!(words[0], "set" | "unset" | "edit" | "rename-section" | "remove-section"))
@@ -324,7 +292,7 @@ fn config_only_reads(options: &[&str], words: &[&str]) -> bool {
 fn config_option(arg: &str) -> Option<&'static str> {
     let written = arg.split('=').next().unwrap_or("");
     let name = written.strip_prefix("--no-").unwrap_or(&written[2..]);
-    let listed = || CONFIG_READS.iter().chain(CONFIG_WRITES).chain(CONFIG_OTHER_OPTIONS).copied();
+    let listed = || table("config_reads").iter().chain(table("config_writes")).chain(table("config_other_options")).copied();
     if let Some(exact) = listed().find(|option| &option[2..] == name) {
         return Some(exact);
     }
@@ -340,19 +308,13 @@ fn gh_brings_files_in(args: &[String]) -> bool {
     let mut words = Vec::new();
     let mut given = args.iter().map(String::as_str).take_while(|a| *a != "--");
     while let Some(arg) = given.next() {
-        if GH_REPOSITORY_OPTIONS.contains(&arg) {
+        if table("gh_repository_options").contains(&arg) {
             given.next();
         } else if !arg.starts_with('-') {
             words.push(arg);
         }
     }
-    matches!(
-        (words.first().copied(), words.get(1).copied()),
-        (Some("pr"), Some("checkout"))
-            | (Some("repo"), Some("sync"))
-            | (Some("release"), Some("download"))
-            | (Some("run"), Some("download"))
-    )
+    words.len() >= 2 && table("gh_commands_that_bring_files").contains(&words[..2].join(" ").as_str())
 }
 
 /// The folder the command acts on: the current directory, moved by each `git -C <path>` before

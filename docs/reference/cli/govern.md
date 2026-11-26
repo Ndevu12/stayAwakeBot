@@ -155,10 +155,12 @@ saw govern classify --json --tool git|gh --repo <folder> -- <arguments>
 
 `saw govern classify` reads a git or gh command line the way the program does, without running it.
 It answers whether the line could be read (`readable`), the subcommand after aliases, the folder it
-acts on, whether it brings files in (`brings_files`), and whether saw checks what it brings before
-it reaches the folder (`checked`). An unreadable line, such as one with an option git does not know
-or an alias that runs a shell command, answers `readable: false` with the `reason`; treat it as one
-that may bring files in. An editor uses it instead of reading git's options itself.
+acts on, whether it may bring files in (`brings_files`), and whether saw checks it before it runs
+(`checked`), exactly as saw's git stand-in decides in a terminal `saw govern` covers. A command the
+stand-in runs as typed answers `checked: false`; every other one, such as `git reset --hard` to a
+fetched commit or an alias, answers `checked: true`. An unreadable line, such as one with an
+unfamiliar option or an alias that runs a shell command, answers `readable: false` with the
+`reason`, and is checked. An editor uses it instead of reading git's options itself.
 
 ## Asking whether a tree is one saw let in
 

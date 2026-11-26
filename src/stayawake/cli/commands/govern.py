@@ -85,9 +85,9 @@ def register(sub) -> None:
         help="say how saw reads a git or gh command line",
         description=(
             "Read a git or gh command line the way the program does and say whether it could be "
-            "read, its subcommand after aliases, the folder it acts on, and whether it brings files "
-            "in, which saw checks before they land. An unreadable command line answers "
-            "readable: false with the reason."),
+            "read, its subcommand after aliases, the folder it acts on, and whether saw checks it "
+            "before it runs, as saw's git stand-in decides. An unreadable command line answers "
+            "readable: false with the reason, and is checked."),
         examples=[("saw govern classify --json --tool git --repo . -- pull", "ask about a pull")],
         stream=False)
     cp.add_argument("--json", action="store_true", help="machine-readable output")
