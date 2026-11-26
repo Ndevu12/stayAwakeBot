@@ -59,9 +59,9 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     deadline, the command's environment and whether the stand-in reads the command as one that
     brings no files. Returns the answer and its exit: a passthrough, a scan, or a reason with a
     decision."""
-    refused = holding_directory.overlaps(Path(repo), Path(into)) or holding_directory.clear(Path(into))
-    if refused:
-        return _unchecked(repo, refused)
+    overlapping = holding_directory.overlaps(Path(into), holding_directory.repository_places(Path(repo)))
+    if not overlapping:
+        holding_directory.clear(Path(into))
     command = typed_command.TypedCommand("", ())
     if tool == "gh":
         if not incoming.gh_brings_files(list(args)):
@@ -79,6 +79,10 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     location = replay.locate(Path(repo), command)
     if isinstance(location, str):
         return _unchecked(repo, location)
+    refused = overlapping or holding_directory.overlaps(Path(into), [place for place in (
+        location.folder, location.work_tree, location.git_dir, location.common_dir) if place is not None])
+    if refused:
+        return _unchecked(repo, refused)
     holding = replay.reproduce(location, Path(into), command, with_files=command.sub != "fetch")
     if isinstance(holding, str):
         return _unchecked(repo, holding)
@@ -421,12 +425,17 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
     """Make the open folder match the checked tree, without fetching again. Takes the open folder,
     the holding directory, the accepted commit and the typed confirmation. Returns whether it was
     applied, the reason when not, and the exit."""
-    refused = holding_directory.overlaps(Path(repo), Path(into))
+    refused = (holding_directory.overlaps(Path(into), holding_directory.repository_places(Path(repo)))
+               or holding_directory.holds_other_files(Path(into)))
     if refused:
         return _applied(False, refused)
     state = _read_state(Path(into))
     if state is None:
         return _applied(False, "there is no checked update to apply")
+    refused = holding_directory.overlaps(Path(into), [Path(state[key]) for key in ("top", "git_dir")
+                                                      if isinstance(state.get(key), str)])
+    if refused:
+        return _applied(False, refused)
     if state.get("mode") == incoming.UNCARRIED_CONFLICTS:
         return _applied(False, conflicted.CANNOT_CARRY)
     accepted_verdict = None
