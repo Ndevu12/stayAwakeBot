@@ -282,6 +282,19 @@ class ClearingRemovesOnlySawsEntries(TestCase):
         self._git("init", "-q", "--bare", str(self.into / holding_directory.REPOSITORY))
         self._kept(holding_directory.REPOSITORY)
 
+    def test_a_linked_work_trees_git_directory_under_saws_name_is_kept(self):
+        common = self.root / "main"
+        self._git("init", "-q", str(common))
+        for name, points_at in (("whole", str(common / ".git")), ("broken", str(self.root / "gone"))):
+            with self.subTest(name=name):
+                work = self.into / holding_directory.WORK_TREE
+                work.mkdir(parents=True)
+                (work / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+                (work / "commondir").write_text(points_at + "\n", encoding="utf-8")
+                self._kept(holding_directory.WORK_TREE)
+                self.assertTrue((work / "commondir").is_file())
+                shutil.rmtree(self.into)
+
     def test_a_working_tree_pointing_git_elsewhere_keeps_every_entry(self):
         self._git("init", "-q", "--bare", str(self.into / holding_directory.REPOSITORY))
         self._git("init", "-q", "--bare", str(self.root / "other.git"))

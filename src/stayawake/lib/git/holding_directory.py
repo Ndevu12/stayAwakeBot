@@ -7,7 +7,7 @@ import os
 import shutil
 from pathlib import Path
 
-from stayawake.lib.git.inside_a_repository import lies_inside_a_repository, marks_a_repository
+from stayawake.lib.git.inside_a_repository import lies_inside_a_repository
 from stayawake.utils import folderlock, pathsafe
 
 REPOSITORY = "repo.git"
@@ -87,7 +87,7 @@ def _holds_what_saw_did_not_put(holding: Path, names: set[str]) -> bool:
     linked = _links_its_working_tree(holding)
     for name in names & set(_SAW_ENTRIES):
         entry = holding / name
-        if os.path.islink(entry) or not marks_a_repository(entry):
+        if os.path.islink(entry) or not lies_inside_a_repository(entry):
             continue
         if not (linked and name in (REPOSITORY, WORK_TREE)):
             return True
