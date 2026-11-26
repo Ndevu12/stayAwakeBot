@@ -24,6 +24,10 @@ reader, not the mechanism or the weakness it closed.
 - `saw govern classify --json` says how saw reads a git or gh command line: whether it could be
   read, its subcommand after aliases, the folder it acts on and whether saw checks it before it
   runs, exactly as saw's git stand-in decides.
+- `saw govern classify --json` also says how to run a git command it does not check so that no
+  program the folder's own git settings name starts, in `run_with`, while your own identity,
+  signing, hooks, credential helpers and transports keep working. `saw capabilities` names it as
+  `govern.classify.run_with`.
 - An allowlist entry can name a `commit` by its full id in place of `path_glob`, and then accepts
   that signature's finding in that one commit only. A shortened id is refused.
 

@@ -172,6 +172,27 @@ fetched commit or an alias, answers `checked: true`. An unreadable line, such as
 unfamiliar option or an alias that runs a shell command, answers `readable: false` with the
 `reason`, and is checked. An editor uses it instead of reading git's options itself.
 
+For a git command saw does not check, the answer also carries `run_with`: how to run it so that no
+program the git settings of the repository it acts on name starts. Those are hooks, filters, diff and
+merge drivers, aliases, editors, pagers, credential helpers, signing, ssh and proxy commands, archive
+filters and the tools git hands work to. saw reads those settings, the worktrees' and submodules' and
+what they include, without running anything there. `run_with` holds:
+
+- `arguments`: git's own options to put right after `git` and before the command's arguments;
+- `environment`: variables to set for that command;
+- `settings`: each setting those options give, in order.
+
+Run git with `run_with` in the same environment you ran `saw govern classify` in.
+
+Your own settings stay in force. A setting the folder replaces goes back to your value, or to one
+that runs nothing when you have none, so a folder that sets its own editor or signing program makes
+that command fail rather than run it. Hooks run from your own hooks folder, or from an empty one saw
+keeps. A command that reaches another repository on this machine by its path fails rather than run
+that repository's programs. A command that only reads or writes settings, such as `git config --get`, gets no settings,
+so it reports what the folder says. A command that cannot be run safely this way, for example one
+naming a repository that cannot be read, is answered `checked: true` with the `reason` and no
+`run_with`.
+
 ## Asking whether a tree is one saw let in
 
 ```text
