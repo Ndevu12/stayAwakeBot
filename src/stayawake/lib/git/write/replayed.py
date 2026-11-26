@@ -26,6 +26,7 @@ _REMOVABLE_STATE = frozenset({"MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "AUTO_MER
                               "REVERT_HEAD", "REBASE_HEAD"})
 _STASH_LOG = Path("logs") / "refs" / "stash"
 _PSEUDO_REFS = frozenset({"ORIG_HEAD", "AUTO_MERGE"})
+_LARGEST_STATE_FILE = 16 << 20
 
 
 @dataclass(frozen=True)
@@ -80,7 +81,7 @@ def write(result: Written) -> str:
         return CHANGED_SINCE
     tips = [result.files_after, *[new for _ref, new, _old in result.refs if new],
             *[commit for _name, commit in result.pseudo_refs if _is_object_id(commit)],
-            *_named_in_fetch_head(result.fetch_head)]
+            *_named_in_fetch_head(result.fetch_head, _read_bytes(git_dir / "FETCH_HEAD"))]
     head = result.head_after.strip()
     if head and not head.startswith("ref: "):
         tips.append(head)
@@ -132,10 +133,12 @@ def _is_object_id(text: str) -> bool:
     return len(text) in (40, 64) and all(char in "0123456789abcdef" for char in text)
 
 
-def _named_in_fetch_head(fetch_head: "bytes | None") -> list[str]:
-    """List the objects `FETCH_HEAD` names. Takes its bytes, None when the command wrote none.
-    Returns the object ids."""
-    named = [line.split(b"\t", 1)[0].decode(errors="replace") for line in (fetch_head or b"").splitlines()]
+def _named_in_fetch_head(fetch_head: "bytes | None", held: bytes) -> list[str]:
+    """List the objects the lines of a new `FETCH_HEAD` name that the folder's own lacks. Takes its
+    bytes, None when the command wrote none, and the folder's. Returns the object ids."""
+    kept = set(held.splitlines())
+    named = [line.split(b"\t", 1)[0].decode(errors="replace") for line in (fetch_head or b"").splitlines()
+             if line not in kept]
     return [oid for oid in named if _is_object_id(oid)]
 
 
@@ -312,6 +315,12 @@ def _read_text(path: Path) -> str:
     """Read a small text file without following a link. Takes the path. Returns its text, or ""."""
     data = pathsafe.read_regular_no_follow(path, 4096)
     return data.decode(errors="replace") if data is not None else ""
+
+
+def _read_bytes(path: Path) -> bytes:
+    """Read a state file without following a link. Takes the path. Returns its bytes, or b""."""
+    data = pathsafe.read_regular_no_follow(path, _LARGEST_STATE_FILE)
+    return data if data is not None else b""
 
 
 def _write_text(path: Path, text: str) -> bool:

@@ -30,6 +30,7 @@ WRITES_ELSEWHERE = "a command that writes outside the folder's repository cannot
 RUNS_OTHER_COMMANDS = "a command that runs other commands cannot be checked"
 NOT_REPLAYED = "that command cannot be checked"
 NO_REMOTE = "the repository has no remote to fetch from"
+FETCH_HEAD_NOT_COPIED = "the repository's FETCH_HEAD could not be copied for the check"
 RECURSION_KEYS = frozenset({"submodule.recurse", "fetch.recursesubmodules"})
 _RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
 _STATE_FILES = ("MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD")
@@ -48,6 +49,7 @@ _W_IDENTITY = {"GIT_AUTHOR_NAME": "saw", "GIT_AUTHOR_EMAIL": "saw@localhost", "G
 _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "prune"}),
                   "branch": frozenset({"remote", "merge", "rebase"})}
 _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
+_FETCH_HEAD = "FETCH_HEAD"
 _IDENTITY_KEYS = ("user.name", "user.email")
 _LONG_OPTIONS_THAT_RUN_A_PROGRAM = {
     "rebase": ("--exec", "--interactive", "--edit-todo"),
@@ -687,9 +689,15 @@ def replay(holding: Holding, command: TypedCommand, signing: tuple[str, ...], gh
     elif command.sub == "fetch":
         if not stdout(holding.work, ["remote"], context=SAW_OWNED).strip():
             return _read_result(holding, False, ("", NO_REMOTE))
+        before = pathsafe.read_regular_no_follow(holding.location.git_dir / _FETCH_HEAD, _LARGEST_STATE_FILE)
+        try:
+            if before is not None:
+                (holding.bare / _FETCH_HEAD).write_bytes(before)
+        except OSError:
+            return _read_result(holding, False, ("", FETCH_HEAD_NOT_COPIED))
         finished, output = _ran(run(holding.work, ["fetch", *command.rest], context=OPERATOR_PUSH))
-        return _read_result(holding, finished, output,
-                            pathsafe.read_regular_no_follow(holding.bare / "FETCH_HEAD", _LARGEST_STATE_FILE))
+        after = pathsafe.read_regular_no_follow(holding.bare / _FETCH_HEAD, _LARGEST_STATE_FILE)
+        return _read_result(holding, finished, output, after if after != before else None)
     else:
         settings = [arg for key, value in command.settings if key.lower() not in RECURSION_KEYS
                     for arg in ("-c", key if value is None else f"{key}={value}")]

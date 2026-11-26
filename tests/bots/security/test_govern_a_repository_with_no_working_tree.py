@@ -171,6 +171,35 @@ class AFetchIntoACheckoutIsWrittenAsGitWritesIt(_Mirrored):
         self.assertTrue(self._has(checkout, self.arrived))
         self.assertEqual(self.git(checkout, "status", "--porcelain"), "")
 
+    def _checkout_with_fetch_head(self, name: str, named: str = "HEAD") -> tuple:
+        checkout = self.owned(self.root / name)
+        self._raw("clone", "-q", "--no-local", str(self.mirror), str(checkout))
+        named = self.git(checkout, "rev-parse", named).strip() if named == "HEAD" else named
+        earlier = f"{named}\t\tbranch 'main' of elsewhere\n"
+        (checkout / ".git" / "FETCH_HEAD").write_text(earlier, encoding="utf-8")
+        return checkout, earlier
+
+    def _brought_in(self, checkout, *args: str) -> str:
+        answer, code = self._prepare(checkout, *args)
+        self.assertEqual(code, exitcodes.CLEAN, answer)
+        self.assertEqual(govern.apply(str(checkout), str(self.into))[0], {"applied": True, "outcome": "brought_in"})
+        self.assertTrue(self._has(checkout, self.arrived))
+        return (checkout / ".git" / "FETCH_HEAD").read_text(encoding="utf-8")
+
+    def test_an_appending_fetch_adds_to_fetch_head(self):
+        for name, named in (("appending", "HEAD"), ("naming-a-commit-gone", "f" * 40)):
+            with self.subTest(name=name):
+                checkout, earlier = self._checkout_with_fetch_head(name, named)
+                fetch_head = self._brought_in(checkout, "fetch", "--append", str(self.upstream), self.arrived)
+                self.assertTrue(fetch_head.startswith(earlier), fetch_head)
+                self.assertIn(self.arrived, fetch_head[len(earlier):])
+
+    def test_a_fetch_told_not_to_write_fetch_head_leaves_it_as_it_was(self):
+        checkout, earlier = self._checkout_with_fetch_head("not-written")
+        self.assertEqual(self._brought_in(checkout, "fetch", "--no-write-fetch-head", str(self.upstream),
+                                          "main:refs/remotes/up/main"), earlier)
+        self.assertEqual(self.git(checkout, "rev-parse", "refs/remotes/up/main").strip(), self.arrived)
+
 
 if __name__ == "__main__":
     import unittest

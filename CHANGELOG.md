@@ -32,6 +32,7 @@ reader, not the mechanism or the weakness it closed.
   When your cache folder lies inside one, saw checks each update afresh.
 - `saw govern verdict` answers `let-in` only for a tree whose submodule links saw let in before, so
   an update that brings a new submodule link is not counted as one saw let in.
+- A governed `git fetch --append` adds to `FETCH_HEAD` as git does, instead of replacing what it held.
 
 ## [0.17.7] - 2026-11-26
 
