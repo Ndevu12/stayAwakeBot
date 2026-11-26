@@ -8,8 +8,9 @@
 //! sets `SAW_GOVERN_SYSTEM`, and the stand-in makes its own holding directory for each check and
 //! removes it afterwards. Without either, every command passes straight through.
 //!
-//! Invoked by its own name with `git` or `gh` and that tool's arguments, it has saw check the
-//! command whatever the environment, and never runs it unchecked.
+//! Invoked by its own name with `git` or `gh` and that tool's arguments, it sends a command saw
+//! checks to saw whatever the environment, and never falls back to the real program when saw
+//! cannot answer.
 
 use std::collections::HashMap;
 use std::env;

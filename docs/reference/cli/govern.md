@@ -148,8 +148,8 @@ folder name for an infected one. That is never decided ahead; where there is no 
 a shell an agent runs, the folder is left as it is and saw says to run `saw govern let-in`.
 
 `saw govern let-in` runs the held command again in your terminal, in the folder it ran in: saw checks
-it again and asks you whether to let the update in. Nothing is let in without your answer, and it
-needs a person at a terminal. saw keeps only the command, the folder it ran in and when, never the
+it again and asks you whether to let the update in. Nothing is let in without your answer, it
+needs a person at a terminal, and `SAW_GOVERN_DECISION` does not apply to it. saw keeps only the command, the folder it ran in and when, never the
 files, and only the latest one for each repository. Run it from any folder in that repository, or
 add `--repo <folder>` from outside it.
 

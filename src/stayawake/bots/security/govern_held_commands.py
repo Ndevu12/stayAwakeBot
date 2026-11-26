@@ -9,7 +9,7 @@ from pathlib import Path
 
 from stayawake.bots.security import govern_command, govern_held, govern_status
 from stayawake.bots.security.govern import TOOLS
-from stayawake.lib.git import holding_directory
+from stayawake.lib.git import holding_directory, runs_directly
 from stayawake.utils import atomicwrite, env, pathsafe
 from stayawake.utils.timeutil import now_iso
 
@@ -53,6 +53,8 @@ def keep_for_let_in(repo: str, command: list[str], answer: dict) -> None:
     repository = repository_of(repo)
     body = {"version": VERSION, "repository": repository, "ran_in": os.path.realpath(os.getcwd()),
             "command": list(command), "at": now_iso()}
+    if refusal_to_run(body):
+        return
     try:
         store().mkdir(parents=True, exist_ok=True, mode=0o700)
         kept = atomicwrite.replace(_record_path(repository), json.dumps(body))
@@ -82,11 +84,28 @@ def read(folder: str) -> dict | None:
     return record
 
 
+def refusal_to_run(record: dict) -> str:
+    """Say why a kept command is not run again: it ran outside its repository, or it is one the
+    stand-in runs without asking saw. Takes the record. Returns the reason, or "" when it may run."""
+    repository, ran_in = record["repository"], os.path.realpath(record["ran_in"])
+    if not (ran_in == repository or ran_in.startswith(repository.rstrip(os.sep) + os.sep)):
+        return "the folder it ran in is outside its repository"
+    tool, *args = record["command"]
+    if runs_directly.decide(tool, args, Path(ran_in)) == runs_directly.RUNS_AS_TYPED:
+        return "it is not a command saw checks"
+    return ""
+
+
+def drop(record: dict) -> None:
+    """Remove a kept command. Takes its record. Returns nothing."""
+    try:
+        _record_path(record["repository"]).unlink()
+    except OSError:
+        pass
+
+
 def clear(folder: str, record: dict) -> None:
     """Remove the command kept for the repository a folder is in when it is still the one given.
     Takes any folder inside it and the record that ran. Returns nothing."""
     if read(folder) == record:
-        try:
-            _record_path(record["repository"]).unlink()
-        except OSError:
-            pass
+        drop(record)

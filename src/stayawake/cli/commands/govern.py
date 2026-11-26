@@ -218,6 +218,12 @@ def run_let_in(a: argparse.Namespace) -> int:
         print(f"saw: no update is held for review in {govern_held_commands.repository_of(folder)}.",
               file=sys.stderr)
         return exitcodes.DID_NOT_RUN
+    refused = govern_held_commands.refusal_to_run(record)
+    if refused:
+        govern_held_commands.drop(record)
+        print(f"saw: the held command cannot be let in: {refused}; saw dropped it and nothing ran.",
+              file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
     if not (sys.stdin.isatty() and sys.stderr.isatty()):
         print("saw: saw govern let-in needs a person at a terminal; nothing ran.", file=sys.stderr)
         return exitcodes.DID_NOT_RUN
@@ -238,9 +244,10 @@ def run_let_in(a: argparse.Namespace) -> int:
 
 def _standin_environment() -> dict:
     """Build the stand-in's environment from this process's: no placer's holding directory, no tool
-    override, and `SAW_BIN` naming this saw when it is a program that runs. Returns the environment."""
+    override, no decision made ahead, and `SAW_BIN` naming this saw when it is a program that runs.
+    Returns the environment."""
     environment = {key: value for key, value in os.environ.items()
-                   if key not in (env.SAW_GOVERN_HOLDING, "SAW_STANDIN_TOOL")}
+                   if key not in (env.SAW_GOVERN_HOLDING, env.SAW_GOVERN_DECISION, "SAW_STANDIN_TOOL")}
     own = os.path.abspath(sys.argv[0])
     if os.path.isfile(own) and os.access(own, os.X_OK):
         environment["SAW_BIN"] = own

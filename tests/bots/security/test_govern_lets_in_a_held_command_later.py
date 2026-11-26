@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake import cli
-from stayawake.bots.security import govern, govern_held_commands
+from stayawake.bots.security import govern, govern_held_commands, govern_status
 
 _HELD = {"scan": {"results": [{"verdict": "suspicious"}]},
          "decision": {"choices": ["let-in", "leave-unchanged"],
@@ -41,7 +41,10 @@ class LetInLater(unittest.TestCase):
         self.folder.mkdir()
         self.ran = base / "ran"
         self.standin = base / "standin"
-        self.standin.write_text(f'#!/bin/sh\npwd > "{self.ran}"\nprintf "%s\\n" "$@" >> "{self.ran}"\n')
+        self.ran_as_typed = base / "ran-as-typed"
+        self.standin.write_text(f'#!/bin/sh\npwd > "{self.ran}"\nprintf "%s\\n" "$@" >> "{self.ran}"\n'
+                                f'[ "$SAW_GOVERN_DECISION" = run-as-typed ] && : > "{self.ran_as_typed}"\n'
+                                'exit 0\n')
         self.standin.chmod(self.standin.stat().st_mode | stat.S_IXUSR)
         named = mock.patch.dict(os.environ, {"SAW_STANDIN_BIN": str(self.standin)})
         named.start()
@@ -82,12 +85,6 @@ class LetInLater(unittest.TestCase):
         self.assertIsNone(self._kept())
         self._prepare(_CLEAN, "--no-one-to-ask")
         self.assertIsNone(self._kept())
-
-    def test_the_let_in_command_names_the_folder_when_it_ran_elsewhere(self):
-        os.chdir(self.folder.parent)
-        printed = self._prepare(_HELD, "--no-one-to-ask")
-        self.assertEqual(printed["decision"]["let_in_later"],
-                         ["saw", "govern", "let-in", "--repo", os.path.realpath(self.folder)])
 
     def test_a_second_held_command_replaces_the_first(self):
         self._prepare(_HELD, "--no-one-to-ask", args=("pull",))
@@ -142,15 +139,63 @@ class LetInLater(unittest.TestCase):
                 self.assertEqual(argv, ["git", "pull"])
                 self.assertIsNone(govern_held_commands.read(str(top)))
 
-    def test_from_outside_the_repository_the_let_in_command_names_its_top_folder(self):
-        top = self.folder / "repository"
-        (top / "src").mkdir(parents=True)
-        subprocess.run(["git", "init", "-q", str(top)], check=True,
+    def _git_init(self, folder: Path) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "-q", str(folder)], check=True,
                        env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
-        printed = self._prepare(_HELD, "--no-one-to-ask", args=("-C", "repository/src", "pull"),
-                                repo=top / "src")
+
+    def _plant(self, repository: Path, ran_in: Path, command: list[str]) -> None:
+        govern_held_commands.store().mkdir(parents=True, exist_ok=True)
+        kept = govern_held_commands.store() / f"{govern_status.folder_key(os.path.realpath(repository))}.json"
+        kept.write_text(json.dumps({"version": govern_held_commands.VERSION,
+                                    "repository": os.path.realpath(repository),
+                                    "ran_in": os.path.realpath(ran_in), "command": command, "at": "now"}))
+
+    def test_from_a_nested_repository_the_let_in_command_names_the_top_folder(self):
+        top = self.folder / "repository"
+        self._git_init(top)
+        self._git_init(top / "nested")
+        os.chdir(top / "nested")
+        printed = self._prepare(_HELD, "--no-one-to-ask", args=("-C", "..", "pull"), repo=top)
         self.assertEqual(printed["decision"]["let_in_later"],
                          ["saw", "govern", "let-in", "--repo", os.path.realpath(top)])
+
+    def test_a_command_run_from_outside_its_repository_is_not_kept(self):
+        top = self.folder / "repository"
+        self._git_init(top / "src")
+        printed = self._prepare(_HELD, "--no-one-to-ask", args=("-C", "repository/src", "pull"),
+                                repo=top / "src")
+        self.assertNotIn("let_in_later", printed["decision"])
+        self.assertIsNone(govern_held_commands.read(str(top)))
+
+    def test_a_command_the_stand_in_runs_without_saw_is_not_kept(self):
+        printed = self._prepare(_HELD, "--no-one-to-ask", args=("status",))
+        self.assertNotIn("let_in_later", printed["decision"])
+        self.assertIsNone(self._kept())
+
+    def test_a_kept_command_saw_does_not_check_is_refused_dropped_and_never_run(self):
+        self._plant(self.folder, self.folder, ["git", "status"])
+        code, said = self._let_in(attended=True)
+        self.assertNotEqual(code, 0)
+        self.assertIn("not a command saw checks", said)
+        self.assertFalse(self.ran.exists(), "a command saw does not check was run")
+        self.assertIsNone(self._kept(), "the refused command was kept")
+
+    def test_a_kept_command_from_outside_its_repository_is_refused_dropped_and_never_run(self):
+        self._plant(self.folder, self.folder.parent, ["git", "pull"])
+        code, said = self._let_in(attended=True)
+        self.assertNotEqual(code, 0)
+        self.assertIn("outside its repository", said)
+        self.assertFalse(self.ran.exists(), "a command from outside its repository was run")
+        self.assertIsNone(self._kept(), "the refused command was kept")
+
+    def test_no_decision_made_ahead_reaches_the_stand_in(self):
+        self._prepare(_HELD, "--no-one-to-ask")
+        with mock.patch.dict(os.environ, {"SAW_GOVERN_DECISION": "run-as-typed"}):
+            code, _said = self._let_in(attended=True)
+        self.assertEqual(code, 0)
+        self.assertTrue(self.ran.exists())
+        self.assertFalse(self.ran_as_typed.exists(), "a decision made ahead ran the command without an answer")
 
     def test_with_nothing_held_it_says_so_and_runs_nothing(self):
         code, said = self._let_in(attended=True)
