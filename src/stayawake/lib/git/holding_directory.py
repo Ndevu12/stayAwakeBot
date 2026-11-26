@@ -7,7 +7,7 @@ import os
 import shutil
 from pathlib import Path
 
-from stayawake.lib.git.run import UNTRUSTED, run
+from stayawake.lib.git.inside_a_repository import lies_inside_a_repository, marks_a_repository
 from stayawake.utils import folderlock, pathsafe
 
 REPOSITORY = "repo.git"
@@ -18,8 +18,6 @@ STATE_BEING_WRITTEN = STATE + ".tmp"
 _SAW_ENTRIES = (STATE, STATE_BEING_WRITTEN, REPOSITORY, WORK_TREE, NO_HOOKS)
 _KEPT_ENTRIES = (folderlock.LOCK_NAME,)
 _POINTS_AT = b"gitdir: "
-_NOT_A_REPOSITORY = "not a git repository (or any of the parent directories)"
-_ACROSS_FILESYSTEMS = "GIT_DISCOVERY_ACROSS_FILESYSTEM"
 
 OVERLAPS_THE_FOLDER = "the holding directory must be outside the open folder"
 OUTSIDE_EVERY_REPOSITORY = "the holding directory must be outside every git repository"
@@ -29,53 +27,9 @@ NOT_CLEARED = "the holding directory could not be cleared"
 
 
 def in_a_repository(into: Path) -> str:
-    """Refuse a holding directory that git finds inside a work tree, a git directory or a bare
-    repository, asked from the holding directory or, when it does not exist yet, its nearest existing
-    folder. Takes the holding directory. Returns the refusal, or "" when git finds it outside every
-    repository."""
-    place = Path(os.path.realpath(into))
-    while not place.is_dir() and place != place.parent:
-        place = place.parent
-    if any(_marks_a_repository(folder) for folder in (place, *place.parents)):
-        return OUTSIDE_EVERY_REPOSITORY
-    asked = run(place, ["rev-parse", "--is-inside-work-tree", "--is-inside-git-dir", "--is-bare-repository"],
-                env=_asking_from_anywhere(), context=UNTRUSTED)
-    if asked is not None and asked.returncode != 0 and _NOT_A_REPOSITORY in (asked.stderr or ""):
-        return ""
-    return OUTSIDE_EVERY_REPOSITORY
-
-
-def _marks_a_repository(folder: Path) -> bool:
-    """Tell whether a folder holds a `.git` entry of any kind or is itself a git directory. Takes the
-    folder. Returns the answer, yes when an entry cannot be looked at."""
-    return _may_exist(folder / ".git") or all(_may_exist(folder / name) for name in ("HEAD", "objects", "refs"))
-
-
-def _may_exist(path: Path) -> bool:
-    """Tell whether an entry exists, without following a link. Takes its path. Returns the answer, yes
-    when it cannot be looked at."""
-    try:
-        os.lstat(path)
-    except (FileNotFoundError, NotADirectoryError):
-        return False
-    except OSError:
-        return True
-    return True
-
-
-def _asking_from_anywhere() -> dict:
-    """Return this process's environment with git's messages untranslated and its search for a
-    repository crossing filesystems."""
-    environment = {key: value for key, value in os.environ.items() if key != "LANGUAGE"}
-    environment["LC_ALL"] = "C"
-    environment[_ACROSS_FILESYSTEMS] = _true_unlike_the_inherited(_ACROSS_FILESYSTEMS)
-    return environment
-
-
-def _true_unlike_the_inherited(name: str) -> str:
-    """Spell a true value for a git variable other than the way this process inherited it. Takes the
-    variable's name. Returns the value."""
-    return "true" if os.environ.get(name) == "1" else "1"
+    """Refuse a holding directory inside any git repository. Takes the holding directory. Returns
+    the refusal, or "" when it lies outside every repository."""
+    return OUTSIDE_EVERY_REPOSITORY if lies_inside_a_repository(into) else ""
 
 
 def overlaps(into: Path, places) -> str:
@@ -133,7 +87,7 @@ def _holds_what_saw_did_not_put(holding: Path, names: set[str]) -> bool:
     linked = _links_its_working_tree(holding)
     for name in names & set(_SAW_ENTRIES):
         entry = holding / name
-        if os.path.islink(entry) or not _marks_a_repository(entry):
+        if os.path.islink(entry) or not marks_a_repository(entry):
             continue
         if not (linked and name in (REPOSITORY, WORK_TREE)):
             return True

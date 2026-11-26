@@ -28,6 +28,8 @@ reader, not the mechanism or the weakness it closed.
   `--open-files-in-pager`).
 - `saw govern classify` names the git command a line runs when an alias shares that command's name,
   as git ignores such an alias.
+- saw reads and keeps its record of what it checked and let in only outside every git repository.
+  When your cache folder lies inside one, saw checks each update afresh.
 
 ## [0.17.7] - 2026-11-26
 
