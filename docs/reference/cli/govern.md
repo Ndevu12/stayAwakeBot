@@ -106,10 +106,19 @@ files on this machine or one that names a program to run. A command that points 
 a working tree into a new repository, asks you first too. A `gh` command that names its repository with `-R` is checked like any other. Open a new terminal, or
 source the file the command names, for it to take effect.
 
+In a repository with no working tree, such as a bare repository or a mirror clone, git runs as
+typed: a fetch, `git fetch --prune`, `git remote update` or `git gc` there runs as it would without
+saw. A command that creates or writes a working tree from such a repository, such as
+`git worktree add`, a clone of it, or a command given a working tree with `--work-tree`, is checked
+as usual, and so is a command in such a repository when the repository lies among the files of a
+working tree.
+
 In a terminal, an update that cannot be checked brings a question: run the command as typed? Answer
 yes and the folder is scanned afterwards; after a clone or a new worktree, the folder it created is
 the one scanned. Where there is no one to ask, the folder is left as it is;
 set `SAW_GOVERN_DECISION=run-as-typed` or `SAW_GOVERN_DECISION=leave-unchanged` to decide ahead.
+Whenever git does not run and saw does not write what the command would, saw says so and the command
+does not report success, so a command chained after it with `&&` does not run.
 A held update prints what to do and asks whether to let it in: a yes for a suspicious update, the
 folder name for an infected one. That is never decided ahead; where there is no one to ask, the
 folder is left as it is and saw prints the command to let it in.

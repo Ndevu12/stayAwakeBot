@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Answer a git command before saw replays it: settings that make git run files from the folder, a
-command the stand-in reads as bringing no files and sends for what it names, and a command saw does
-not replay."""
+command the stand-in reads as bringing no files and sends for what it names, a command saw does not
+replay, and a command acting on a repository with no working tree."""
 from __future__ import annotations
 
 import os
@@ -22,6 +22,7 @@ UPDATES_SUBMODULES = "a command that also updates submodules cannot be checked"
 PUSHES_INTO_A_FOLDER = "a push into a repository with files on this machine cannot be checked"
 RUNS_A_PROGRAM = "a command that runs a program it names cannot be checked"
 LETS_A_PUSH_WRITE = "the command lets a push change this folder's files; check it first"
+NO_WORKING_TREE = "the repository the command acts on has no working tree"
 _PUSH_PROGRAM_OPTIONS = ("--receive-pack", "--exec")
 _PUSH_OPTIONS_WITH_A_VALUE = frozenset({"--repo", "-o", "--push-option", "--receive-pack", "--exec"})
 _LOCAL_PREFIXES = ("/", "./", "../", "~", "file:")
@@ -44,9 +45,32 @@ class Answer:
 
 
 def before_replay(folder: Path, command: TypedCommand, brings_no_files: bool) -> "Answer | None":
-    """Answer a git command before it is replayed. Takes where it runs, the command and whether the
+    """Answer a git command before it is replayed: one saw would replay, or that only fetches, runs
+    as typed in a repository with no working tree. Takes where it runs, the command and whether the
     stand-in reads it as one that brings no files. Returns the answer, or None for a command saw
     replays."""
+    answer = _answer_before_replay(folder, command, brings_no_files)
+    if (answer is None or answer.reason == FETCHES) and _without_a_working_tree(folder, command):
+        return Answer(PASSTHROUGH, NO_WORKING_TREE)
+    return answer
+
+
+def _without_a_working_tree(folder: Path, command: TypedCommand) -> bool:
+    """Tell whether git gives a command no working tree in the repository it acts on, that
+    repository lies outside every working tree, and the command writes no files without one. Takes
+    where it runs and the command. Returns the answer."""
+    rules = replay.REPLAYED.get(command.sub)
+    if rules is not None and rules.writes_files_without_a_working_tree:
+        return False
+    location = replay.locate(folder, command)
+    return (not isinstance(location, str) and not location.has_a_working_tree
+            and not runs_from_the_folder.lies_in_a_working_tree(str(location.git_dir.parent), folder))
+
+
+def _answer_before_replay(folder: Path, command: TypedCommand, brings_no_files: bool) -> "Answer | None":
+    """Answer a git command before it is replayed, whatever repository it acts on. Takes where it
+    runs, the command and whether the stand-in reads it as one that brings no files. Returns the
+    answer, or None for a command saw replays."""
     top = _top(folder)
     runs = runs_from_the_folder.settings_running_folder_files(top, command.settings)
     if runs:

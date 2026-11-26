@@ -45,6 +45,8 @@ reader, not the mechanism or the weakness it closed.
 - In a terminal `saw govern` covers, a pull, merge or rebase that stops for conflicts is checked like
   any other update. When it is clean, saw brings in exactly what it checked and leaves the conflicts
   for you to resolve.
+- In a terminal `saw govern` covers, git runs as typed in a repository with no working tree, such as
+  a mirror clone, and saw never reports success for a command git did not run.
 
 ## [0.17.6] - 2026-11-25
 

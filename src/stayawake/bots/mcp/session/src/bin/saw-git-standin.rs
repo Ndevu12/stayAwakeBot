@@ -391,45 +391,71 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
         let held = prepared.code().filter(|code| *code != 0).unwrap_or(1);
         return Some(let_in_or_leave(saw, &answer, held));
     }
-    if !prepared.success() {
-        if let Some(reason) = unchecked_reason(&String::from_utf8_lossy(&output.stdout)) {
-            let checked = scan_finished(&answer);
-            if !may_run_as_typed(&answer) {
-                eprintln!("{}", said(&reason, checked));
-                for step in answer.get("next_steps").and_then(serde_json::Value::as_array).into_iter().flatten() {
-                    if let Some(text) = step.as_str() {
-                        eprintln!("  - {text}");
-                    }
+    if let Some(reason) = unchecked_reason(&answer) {
+        let checked = scan_finished(&answer);
+        if !may_run_as_typed(&answer) {
+            eprintln!("{}", said(&reason, checked));
+            for step in answer.get("next_steps").and_then(serde_json::Value::as_array).into_iter().flatten() {
+                if let Some(text) = step.as_str() {
+                    eprintln!("  - {text}");
                 }
-                eprintln!("saw: left the folder unchanged; {tool} did not run.");
-                return Some(2);
             }
-            return Some(match decide(tool, args, &reason, checked) {
-                Decision::RunAsTyped => run_then_scan(real, saw, args, &scanned_after(&answer, &repo)),
-                Decision::LeaveUnchanged => {
-                    eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
-                               answer yes in a terminal, or set SAW_GOVERN_DECISION=run-as-typed.");
-                    2
-                }
-            });
+            eprintln!("saw: left the folder unchanged; {tool} did not run.");
+            return Some(2);
         }
-        say_why_held(&answer);
-        return prepared.code().or(Some(2));
+        return Some(match decide(tool, args, &reason, checked) {
+            Decision::RunAsTyped => run_then_scan(real, saw, args, &scanned_after(&answer, &repo)),
+            Decision::LeaveUnchanged => {
+                eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
+                           answer yes in a terminal, or set SAW_GOVERN_DECISION=run-as-typed.");
+                2
+            }
+        });
     }
-    // Clean or residue: apply the tree saw already checked, without fetching again.
+    if !prepared.success() {
+        if answer.is_object() {
+            say_why_held(&answer);
+        } else {
+            eprintln!("saw: this update cannot be checked; the folder is unchanged; {tool} did not run.");
+        }
+        return Some(failed(prepared.code()));
+    }
+    apply_checked(saw, tool, &repo, holding, &answer)
+}
+
+/// Write the update saw checked into the folder, without fetching again, and say what git said.
+/// Takes saw, the tool, the open folder, the holding directory and prepare's answer. Returns the
+/// exit code, never a success when saw did not write the update, or `None` when apply could not
+/// start.
+fn apply_checked(saw: &Path, tool: &str, repo: &str, holding: &Path, answer: &serde_json::Value) -> Option<i32> {
     let applied = Command::new(saw)
         .args(["govern", "apply", "--json", "--repo"])
-        .arg(&repo)
+        .arg(repo)
         .arg("--into")
         .arg(holding)
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
-        .status()
+        .output()
         .ok()?;
-    if applied.success() {
-        relay_output(&answer);
+    if applied.status.success() {
+        relay_output(answer);
+        return Some(0);
     }
-    applied.code().or(Some(0))
+    let written: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&applied.stdout).trim()).unwrap_or_default();
+    if written.get("applied").and_then(serde_json::Value::as_bool) != Some(true) {
+        let reason = written.get("reason").and_then(serde_json::Value::as_str).unwrap_or(
+            "the update could not be written into the open folder, and the folder may have changed; \
+             check it with git status");
+        eprintln!("saw: {reason}; {tool} did not run.");
+    }
+    Some(failed(applied.status.code()))
+}
+
+/// Pick the exit code a saw step that did not succeed ends the command with. Takes the step's own
+/// code, `None` when it has none. Returns a code that is never 0.
+fn failed(code: Option<i32>) -> i32 {
+    code.filter(|code| *code != 0).unwrap_or(2)
 }
 
 /// Write what git wrote when saw ran the command, to the same streams.
@@ -524,10 +550,9 @@ enum Decision {
 
 /// Return the reason `saw govern prepare` gave when it could not check the update and left the
 /// decision to the user, or `None` when its answer carries no decision.
-fn unchecked_reason(answer: &str) -> Option<String> {
-    let parsed: serde_json::Value = serde_json::from_str(answer.trim()).ok()?;
-    parsed.get("decision")?;
-    let reason = parsed.get("reason").and_then(serde_json::Value::as_str);
+fn unchecked_reason(answer: &serde_json::Value) -> Option<String> {
+    answer.get("decision")?;
+    let reason = answer.get("reason").and_then(serde_json::Value::as_str);
     Some(reason.unwrap_or("the update could not be checked").to_string())
 }
 

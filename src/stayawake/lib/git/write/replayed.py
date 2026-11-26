@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Write what a replayed command changes into the folder with saw's own writers: its files, its
-index entries, its refs, HEAD, the operation state it removed and the stash's log. Nothing runs in
-the folder. Every written file must hold the digest it was judged with."""
+index entries, its refs, HEAD, the operation state it removed, the stash's log and what a fetch
+wrote to `FETCH_HEAD`. Nothing runs in the folder. Every written file must hold the digest it was
+judged with."""
 from __future__ import annotations
 
 import os
@@ -33,7 +34,8 @@ class Written:
     the commit holding the files as written, each changed file as (path, mode, blob) with its state
     before and the digest it must hold, each changed index path with its entries before and after,
     the refs as (ref, new, old), HEAD before and after, the operation state removed, the stash's new
-    log and the commit the folder was on."""
+    log, the commit the folder was on, the commits `ORIG_HEAD` and the like name, and what a fetch
+    wrote to `FETCH_HEAD`."""
 
     top: Path
     git_dir: Path
@@ -50,6 +52,7 @@ class Written:
     stash_log: "bytes | None"
     base: str
     pseudo_refs: tuple[tuple[str, str], ...] = ()
+    fetch_head: "bytes | None" = None
 
 
 def state_of(path: Path) -> str:
@@ -76,7 +79,8 @@ def write(result: Written) -> str:
     if any(current.get(os.fsencode(rel), ()) != _entries(before) for rel, before, _after in result.index):
         return CHANGED_SINCE
     tips = [result.files_after, *[new for _ref, new, _old in result.refs if new],
-            *[commit for _name, commit in result.pseudo_refs if _is_object_id(commit)]]
+            *[commit for _name, commit in result.pseudo_refs if _is_object_id(commit)],
+            *_named_in_fetch_head(result.fetch_head)]
     head = result.head_after.strip()
     if head and not head.startswith("ref: "):
         tips.append(head)
@@ -118,12 +122,21 @@ def write(result: Written) -> str:
     for name, commit in result.pseudo_refs:
         if name in _PSEUDO_REFS and _is_object_id(commit) and not _write_text(git_dir / name, commit + "\n"):
             return LEFT_PART_WAY
+    if result.fetch_head is not None and not _write_bytes(git_dir / "FETCH_HEAD", result.fetch_head):
+        return LEFT_PART_WAY
     return ""
 
 
 def _is_object_id(text: str) -> bool:
     """Tell whether text is a full object id. Takes the text. Returns the answer."""
     return len(text) in (40, 64) and all(char in "0123456789abcdef" for char in text)
+
+
+def _named_in_fetch_head(fetch_head: "bytes | None") -> list[str]:
+    """List the objects `FETCH_HEAD` names. Takes its bytes, None when the command wrote none.
+    Returns the object ids."""
+    named = [line.split(b"\t", 1)[0].decode(errors="replace") for line in (fetch_head or b"").splitlines()]
+    return [oid for oid in named if _is_object_id(oid)]
 
 
 def _entries(listed) -> tuple:

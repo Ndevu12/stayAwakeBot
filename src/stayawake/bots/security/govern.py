@@ -286,7 +286,8 @@ def _write_replayed_state(into: Path, result: "replay.Replayed", releasable: boo
             "refs": [list(entry) for entry in result.refs], "head_before": holding.head,
             "head_after": result.head, "state_removed": list(result.state_removed),
             "stash_log": result.stash_log.hex() if result.stash_log is not None else None,
-            "base": holding.base, "pseudo_refs": [list(entry) for entry in result.pseudo_refs], **judged}
+            "base": holding.base, "pseudo_refs": [list(entry) for entry in result.pseudo_refs],
+            "fetch_head": result.fetch_head.hex() if result.fetch_head is not None else None, **judged}
     path = Path(into) / _STATE
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(body), encoding="utf-8")
@@ -457,7 +458,8 @@ def _apply_replayed(repo: str, into: str, state: dict, accepted_verdict: str | N
             refs=tuple(tuple(entry) for entry in state["refs"]), head_before=state["head_before"],
             head_after=state["head_after"], state_removed=tuple(state["state_removed"]),
             stash_log=bytes.fromhex(state["stash_log"]) if state.get("stash_log") else None, base=state["base"],
-            pseudo_refs=tuple(tuple(entry) for entry in state.get("pseudo_refs") or ()))
+            pseudo_refs=tuple(tuple(entry) for entry in state.get("pseudo_refs") or ()),
+            fetch_head=bytes.fromhex(state["fetch_head"]) if state.get("fetch_head") is not None else None)
     except (KeyError, TypeError, ValueError):
         return _applied(False, "the checked update could not be read")
     incoming.claim(into)

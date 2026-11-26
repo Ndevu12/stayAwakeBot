@@ -62,12 +62,14 @@ _BUILT_IN_STRATEGIES = frozenset({"ort", "recursive", "resolve", "octopus", "our
 
 @dataclass(frozen=True)
 class Replays:
-    """What saw refuses before replaying a subcommand: long options that write outside the
-    repository, matched by any prefix git would take, and whether it reads standard input when it
-    names no file."""
+    """How saw treats a subcommand it replays: long options that write outside the repository,
+    matched by any prefix git would take, which saw refuses, whether it reads standard input when it
+    names no file, and whether it writes files where it runs when its repository has no working
+    tree."""
 
     writes_elsewhere: tuple[str, ...] = ()
     reads_input_without_a_file: bool = False
+    writes_files_without_a_working_tree: bool = False
 
 
 REPLAYED = {
@@ -77,7 +79,7 @@ REPLAYED = {
     "read-tree": Replays(writes_elsewhere=("--index-output",)),
     "checkout-index": Replays(writes_elsewhere=("--prefix", "--temp")),
     "apply": Replays(writes_elsewhere=("--unsafe-paths", "--build-fake-ancestor", "--output"),
-                     reads_input_without_a_file=True),
+                     reads_input_without_a_file=True, writes_files_without_a_working_tree=True),
     "pull": Replays(), "fetch": Replays(),
 }
 
@@ -85,10 +87,11 @@ REPLAYED = {
 @dataclass(frozen=True)
 class Location:
     """Where a command's repository is: where the command runs, its git directory, common
-    directory, working tree (None when bare), index file, object directory and further object
-    directories, the command's place in the working tree, the object format, the working tree's
-    own repository top when it is one, and whether saw can write a result there: the command acts
-    on the repository git finds there by itself."""
+    directory, the working tree the command runs inside (None when it runs outside one), index
+    file, object directory and further object directories, the command's place in the working
+    tree, the object format, the working tree's own repository top when it is one, whether saw can
+    write a result there: the command acts on the repository git finds there by itself, and whether
+    git gives the command a working tree at all."""
 
     folder: Path
     git_dir: Path
@@ -101,6 +104,7 @@ class Location:
     object_format: str
     folder_repository: "Path | None"
     writable: bool
+    has_a_working_tree: bool
 
 
 @dataclass
@@ -131,7 +135,8 @@ class Replayed:
     entries before and after as (mode, blob, stage); `refs` holds (ref, new, old); `state_left`
     and `state_removed` name operation state files the command left or removed, `pseudo_refs` the
     commits it pointed `ORIG_HEAD` and the like at. `finished` is whether git finished the command,
-    `said` the end of what it said, and `output` what it wrote to its output and to its errors."""
+    `said` the end of what it said, `output` what it wrote to its output and to its errors, and
+    `fetch_head` what a fetch wrote to `FETCH_HEAD`."""
 
     holding: Holding
     finished: bool
@@ -146,6 +151,7 @@ class Replayed:
     stash_log: "bytes | None"
     pseudo_refs: tuple[tuple[str, str], ...] = ()
     output: tuple[str, str] = ("", "")
+    fetch_head: "bytes | None" = None
 
     @property
     def changes_nothing_but_refs(self) -> bool:
@@ -252,6 +258,7 @@ def locate(folder: Path, command: TypedCommand) -> "Location | str":
         if not placed:
             return "the folder is not in a git repository saw can read"
         top, prefix = placed[0], placed[1] if len(placed) > 1 else ""
+    has_a_working_tree = bool(top) or answer(["--show-toplevel"]) is not None
     paths = answer(["--path-format=absolute", "--git-path", "index", "--git-path", "objects"])
     if not paths or len(paths) != 2:
         return "the folder is not in a git repository saw can read"
@@ -265,7 +272,7 @@ def locate(folder: Path, command: TypedCommand) -> "Location | str":
         Path(paths[1]), Path(common_dir) / "objects") and _is_default(folder_repository, Path(git_dir),
                                                                        Path(paths[0]))
     return Location(folder, Path(git_dir), Path(common_dir), work_tree, Path(paths[0]), Path(paths[1]), alternates,
-                    prefix, object_format or "sha1", folder_repository, writable)
+                    prefix, object_format or "sha1", folder_repository, writable, has_a_working_tree)
 
 
 def _own_repository(work_tree: "Path | None") -> "Path | None":
@@ -678,6 +685,8 @@ def replay(holding: Holding, command: TypedCommand, signing: tuple[str, ...], gh
         if not stdout(holding.work, ["remote"], context=SAW_OWNED).strip():
             return _read_result(holding, False, ("", NO_REMOTE))
         finished, output = _ran(run(holding.work, ["fetch", *command.rest], context=OPERATOR_PUSH))
+        return _read_result(holding, finished, output,
+                            pathsafe.read_regular_no_follow(holding.bare / "FETCH_HEAD", _LARGEST_STATE_FILE))
     else:
         settings = [arg for key, value in command.settings if key.lower() not in RECURSION_KEYS
                     for arg in ("-c", key if value is None else f"{key}={value}")]
@@ -695,9 +704,11 @@ def _ran(done) -> tuple[bool, tuple[str, str]]:
     return done.returncode == 0, (done.stdout or "", done.stderr or "")
 
 
-def _read_result(holding: Holding, finished: bool, output: tuple[str, str]) -> Replayed:
-    """Read what a replay changed in its holding copy. Takes the copy, whether git finished and what
-    it wrote to its output and errors. Returns what changed."""
+def _read_result(holding: Holding, finished: bool, output: tuple[str, str],
+                 fetch_head: "bytes | None" = None) -> Replayed:
+    """Read what a replay changed in its holding copy. Takes the copy, whether git finished, what
+    it wrote to its output and errors, and what a fetch wrote to `FETCH_HEAD`. Returns what
+    changed."""
     bare, work = holding.bare, holding.work
     after_entries = _entries(stdout_bytes(work, ["ls-files", "-s", "-z"], context=SAW_OWNED)) or {}
     index = tuple((os.fsdecode(path), holding.index.get(path, ()), after_entries.get(path, ()))
@@ -734,7 +745,7 @@ def _read_result(holding: Holding, finished: bool, output: tuple[str, str]) -> R
     before_log = pathsafe.read_regular_no_follow(holding.location.common_dir / _STASH_LOG, _LARGEST_STATE_FILE)
     said = (output[1] or output[0]).strip()[-600:]
     return Replayed(holding, finished, said, tuple(files), commit, index, refs, head, left, removed,
-                    log if log != before_log else None, pseudo, output)
+                    log if log != before_log else None, pseudo, output, fetch_head)
 
 
 def _holding_refs(bare: Path) -> tuple[dict, dict]:
