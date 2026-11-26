@@ -182,6 +182,8 @@ what they include, without running anything there. `run_with` holds:
 - `environment`: variables to set for that command;
 - `settings`: each setting those options give, in order.
 
+Run git with `run_with` in the same environment you ran `saw govern classify` in.
+
 Your own settings stay in force. A setting the folder replaces goes back to your value, or to one
 that runs nothing when you have none, so a folder that sets its own editor or signing program makes
 that command fail rather than run it. Hooks run from your own hooks folder, or from an empty one saw
