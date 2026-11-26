@@ -22,7 +22,7 @@ from stayawake.lib.git.run import (LOCAL_TIMEOUT, OPERATOR_CONFIG, OPERATOR_PUSH
 from stayawake.lib.git.typed_command import TypedCommand
 from stayawake.lib.git.write.branch import update_refs
 from stayawake.lib.git.write.working_tree import uncommitted_paths
-from stayawake.utils import pathsafe
+from stayawake.utils import folderlock, pathsafe
 
 NETWORK = frozenset({"pull", "fetch"})
 READS_STANDARD_INPUT = "a command that reads what you type cannot be checked"
@@ -301,15 +301,25 @@ def _same(one: Path, other: Path) -> bool:
     return os.path.realpath(one) == os.path.realpath(other)
 
 
+def _empty_keeping_the_hold(into: Path) -> None:
+    """Remove everything in the holding directory except a run's hold on it. Takes the directory."""
+    into.mkdir(parents=True, exist_ok=True)
+    for child in into.iterdir():
+        if child.name == folderlock.LOCK_NAME:
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
 def reproduce(location: Location, into: Path, command: TypedCommand, *, with_files: bool) -> "Holding | str":
     """Make the copy a command replays in: borrowed objects, the refs, HEAD, operation state and
     index of its repository, and a working tree holding the folder's bytes. Takes the location, the
     holding directory, the command and whether the working tree is needed. Returns the copy, or a
     sentence when it could not be made."""
     into = Path(into)
-    if into.exists():
-        shutil.rmtree(into)
-    into.mkdir(parents=True)
+    _empty_keeping_the_hold(into)
     bare, work = into / "repo.git", into / "work"
     made = run(None, ["init", "--bare", "--quiet", f"--object-format={location.object_format}", "--template=",
                       str(bare)], context=SAW_OWNED)

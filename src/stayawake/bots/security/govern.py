@@ -9,6 +9,7 @@ the payload is stamped with the schema by the CLI.
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import json
@@ -75,8 +76,23 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     """Replay a command in a holding copy saw owns and judge what it would write into the open
     folder. Takes the open folder, the holding directory, the tool, the arguments, the config, the
     deadline, the command's environment and whether the stand-in reads the command as one that
-    brings no files. Returns the answer and its exit: a passthrough, a scan, or a reason with a
-    decision."""
+    brings no files. Returns the answer and its exit: a passthrough, a scan, a reason with a
+    decision, or busy when another run holds the holding directory past the wait."""
+    with contextlib.ExitStack() as hold:
+        try:
+            Path(into).mkdir(parents=True, exist_ok=True)
+            hold.enter_context(folderlock.held(Path(into), wait=_HOLD_WAIT_SECONDS))
+        except folderlock.Busy:
+            return {"reason": _BUSY, "outcome": BUSY, "decision": _decision(repo)}, exitcodes.INCOMPLETE
+        except OSError as error:
+            return _unchecked(repo, f"the holding directory could not be used: {error.strerror or error}")
+        return _prepare_held(repo, into, tool, args, config, deadline, environment, brings_no_files)
+
+
+def _prepare_held(repo: str, into: str, tool: str, args: list[str], config: str | None,
+                  deadline: float | None, environment: dict | None, brings_no_files: bool) -> tuple[dict, int]:
+    """Prepare while holding the holding directory. Takes what `prepare` takes. Returns what it
+    returns."""
     _forget_state(Path(into))
     command = typed_command.TypedCommand("", ())
     if tool == "gh":
