@@ -33,8 +33,6 @@ class _Records(GitSandbox):
     def setUp(self):
         super().setUp()
         records._told.clear()
-        records._inside_a_repository.cache_clear()
-        self.addCleanup(records._inside_a_repository.cache_clear)
         self.repo = self.new_repo("checkout")
         self.write(self.repo, "a.txt", "a\n")
         self.head = self.commit(self.repo, "start")
@@ -163,6 +161,39 @@ class NoRecordIsReadOrWrittenInsideARepository(_Records):
             cli.main(["govern", "status"])
         self.assertIn(self.said(), " ".join(out.getvalue().split()))
         self.assertNotIn(str(self.folder), out.getvalue())
+
+
+class ARecordFolderInsideARepositoryIsNeitherReadNorWritten(_Records):
+
+    def _forged_in_the_checkout(self, record: Path) -> bytes:
+        held = self.repo / "records"
+        held.mkdir()
+        forged = record.read_bytes()
+        (held / record.name).write_bytes(forged)
+        shutil.rmtree(record.parent)
+        try:
+            os.symlink(held, record.parent, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("this system makes no symbolic links here")
+        return forged
+
+    def test_a_record_folder_linked_into_a_repository_is_neither_read_nor_written(self):
+        forged = self._forged_in_the_checkout(self.pushed)
+        self.assertEqual(push_record.load(self.repo / ".git", self.policy).verified, set())
+        record = push_record.load(self.repo / ".git", self.policy)
+        record.mark_verified("b.txt", "1" * 40)
+        with redirect_stderr(io.StringIO()):
+            self.assertFalse(record.save())
+        self.assertEqual((self.repo / "records" / self.pushed.name).read_bytes(), forged)
+
+    def test_a_repository_made_inside_the_record_folder_is_neither_read_nor_written(self):
+        forged = self.store.read_bytes()
+        self.git(self.root, "init", "-q", str(self.store.parent))
+        self.assertEqual(clean_contents.held(self.repo, self.policy), {})
+        with redirect_stderr(io.StringIO()):
+            self.assertFalse(clean_contents.remember(self.repo, clean_contents.Checked({}), self.policy))
+        self.assertEqual(self.store.read_bytes(), forged)
+        self.assertNotEqual(hook._checks_made(), {})
 
 
 class EveryRecordPathComesFromTheRecordFolder(GitSandbox):
