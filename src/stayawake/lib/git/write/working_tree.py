@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from stayawake.lib.git.borrowed import BorrowError, borrow
 from stayawake.lib.git.objects import blob_id
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes, stdout_bytes_fed
 from stayawake.lib.git.write.checkouts import Checkout
+from stayawake.lib.git.index_copy import copy_index
 from stayawake.utils import scratch
 from stayawake.utils.pathsafe import passes_through_a_link, read_regular_no_follow
 
@@ -530,11 +530,11 @@ def rewrite_index(worktree: str | Path, feed: bytes) -> bool:
     held = True
     private = scratch.new_file("the index a run rewrites")
     try:
-        shutil.copyfile(index, private)
+        copy_index(index, private)
         if stdout_bytes_fed(worktree, ["update-index", "-z", "--index-info"], feed,
                             env={"GIT_INDEX_FILE": str(private)}, context=UNTRUSTED) is None:
             return False
-        shutil.copyfile(private, lock)
+        copy_index(private, lock)
         os.replace(lock, index)
         held = False
         return True
@@ -618,7 +618,7 @@ class PreparedMove:
                              if p in self.target else b"0 %s\t%s\0" % (zero, p))
         feed = b"".join(lines)
         try:
-            shutil.copyfile(self.holder.gitdir / "index", self.staged)
+            copy_index(self.holder.gitdir / "index", self.staged)
             fd = os.open(self.lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
             os.close(fd)
         except OSError:
@@ -643,7 +643,7 @@ class PreparedMove:
             if expected is not None and not self._holds(expected, written):
                 self.release()
                 return False
-            shutil.copyfile(self.staged, self.lock)
+            copy_index(self.staged, self.lock)
             os.replace(self.lock, self.holder.gitdir / "index")
             self.held = False
             return True

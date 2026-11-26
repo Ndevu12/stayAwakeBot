@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- `saw govern` checks every file an update rewrites, also one rewritten with the same size in the
+  same second it prepared the check.
+
 ### Added
 - `saw govern apply --expect <state_id>` brings in exactly the update its own `prepare` checked, one
   saw run at a time per holding directory, and `--json` names what happened in `outcome`. `saw govern
