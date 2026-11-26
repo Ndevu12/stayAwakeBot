@@ -22,8 +22,8 @@ reader, not the mechanism or the weakness it closed.
   runs, exactly as saw's git stand-in decides.
 
 ### Fixed
-- `saw govern` never deletes a folder named as its holding directory: it refuses one that is your
-  open folder, inside it or contains it, and clears only what it put there.
+- `saw govern` never deletes a folder named as its holding directory: it refuses one inside any git
+  repository or holding files it did not put there, and clears only what it put there.
 
 ## [0.17.7] - 2026-11-26
 

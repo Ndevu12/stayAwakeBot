@@ -84,8 +84,7 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     deadline, the command's environment and whether the stand-in reads the command as one that
     brings no files. Returns the answer and its exit: a passthrough, a scan, a reason with a
     decision, or busy when another run holds the holding directory past the wait."""
-    holding_refusal = (holding_directory.overlaps(Path(into), holding_directory.repository_places(Path(repo)))
-                       or holding_directory.holds_other_files(Path(into)))
+    holding_refusal = holding_directory.in_a_repository(Path(into)) or holding_directory.holds_other_files(Path(into))
     with contextlib.ExitStack() as hold:
         if not holding_refusal:
             try:
@@ -479,8 +478,7 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
     the holding directory, the accepted commit, the typed confirmation and the id of the state the
     caller's prepare recorded. Returns whether it was applied, the outcome, the reason when not, and
     the exit."""
-    refused = (holding_directory.overlaps(Path(into), holding_directory.repository_places(Path(repo)))
-               or holding_directory.holds_other_files(Path(into)))
+    refused = holding_directory.in_a_repository(Path(into)) or holding_directory.holds_other_files(Path(into))
     if refused:
         return _applied(False, refused, HOLDING_UNUSABLE)
     state = _read_state(Path(into)) if Path(into).is_dir() else None

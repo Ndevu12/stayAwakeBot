@@ -36,23 +36,23 @@ class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
 
     def test_the_open_folder_as_the_holding_directory_is_refused_and_kept(self):
         self.write(self.open, "state.json", "{\"mine\": true}\n")
-        self._refused(self.open, holding_directory.OVERLAPS_THE_FOLDER)
+        self._refused(self.open, holding_directory.OUTSIDE_EVERY_REPOSITORY)
         self.assertEqual((self.open / "state.json").read_text(), "{\"mine\": true}\n")
         applied = govern.apply(str(self.open), str(self.open))[0]
         self.assertEqual(applied, {"applied": False, "outcome": govern.HOLDING_UNUSABLE,
-                                   "reason": holding_directory.OVERLAPS_THE_FOLDER})
+                                   "reason": holding_directory.OUTSIDE_EVERY_REPOSITORY})
 
     def test_a_folder_holding_the_open_folder_is_refused_and_its_files_kept(self):
         sibling = self.root / "notes.txt"
         sibling.write_text("notes\n", encoding="utf-8")
-        self._refused(self.root, holding_directory.OVERLAPS_THE_FOLDER)
+        self._refused(self.root, holding_directory.HOLDS_OTHER_FILES)
         self.assertEqual(sibling.read_text(encoding="utf-8"), "notes\n")
         self.assertTrue((self.upstream / ".git").is_dir())
 
     def test_a_folder_inside_the_open_folder_is_refused_and_its_files_kept(self):
         inside = self.open / "held"
         self.write(self.open, "held/notes.txt", "notes\n")
-        self._refused(inside, holding_directory.OVERLAPS_THE_FOLDER)
+        self._refused(inside, holding_directory.OUTSIDE_EVERY_REPOSITORY)
         self.assertEqual((inside / "notes.txt").read_text(encoding="utf-8"), "notes\n")
 
     def test_a_folder_of_the_repository_beside_the_open_folder_is_refused_and_kept(self):
@@ -61,14 +61,14 @@ class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
         self.write(self.open, "data/state.json", "{\"mine\": true}\n")
         self.commit(self.open, "tracked data")
         data = self.open / "data"
-        self._refused(data, holding_directory.OVERLAPS_THE_FOLDER, repo=self.open / "sub")
+        self._refused(data, holding_directory.OUTSIDE_EVERY_REPOSITORY, repo=self.open / "sub")
         self.assertEqual(sorted(os.listdir(data)), ["state.json", "work"])
         self.assertEqual((data / "state.json").read_text(encoding="utf-8"), "{\"mine\": true}\n")
         self.assertEqual(os.listdir(data / "work"), ["keep.txt"])
         self.assertEqual(self.git(self.open, "status", "--porcelain").strip(), "")
         applied = govern.apply(str(self.open / "sub"), str(data))[0]
         self.assertEqual(applied, {"applied": False, "outcome": govern.HOLDING_UNUSABLE,
-                                   "reason": holding_directory.OVERLAPS_THE_FOLDER})
+                                   "reason": holding_directory.OUTSIDE_EVERY_REPOSITORY})
 
     def _linked(self) -> Path:
         linked = self.owned(self.root / "linked")
@@ -77,7 +77,7 @@ class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
 
     def test_the_git_directory_of_a_linked_work_tree_is_refused_and_kept(self):
         common = self.open / ".git"
-        self._refused(common, holding_directory.OVERLAPS_THE_FOLDER, repo=self._linked())
+        self._refused(common, holding_directory.OUTSIDE_EVERY_REPOSITORY, repo=self._linked())
         self.assertTrue((common / "HEAD").is_file())
         self.assertTrue((common / "config").is_file())
         for name in (holding_directory.REPOSITORY, holding_directory.WORK_TREE, holding_directory.NO_HOOKS):
@@ -85,7 +85,7 @@ class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
 
     def test_a_folder_inside_the_git_directory_is_refused_and_not_made(self):
         inside = self.open / ".git" / "held"
-        self._refused(inside, holding_directory.OVERLAPS_THE_FOLDER, repo=self._linked())
+        self._refused(inside, holding_directory.OUTSIDE_EVERY_REPOSITORY, repo=self._linked())
         self.assertFalse(inside.exists())
 
     def test_a_command_run_as_typed_is_answered_and_an_overlapping_holding_directory_untouched(self):
@@ -98,10 +98,59 @@ class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
             with self.subTest(repo=repo, into=into):
                 answer, code = govern.prepare(str(repo), str(into), "git", args)
                 self.assertEqual((answer.get("passthrough"), code), (True, exitcodes.CLEAN), answer)
-                self.assertFalse((self.root / "holding").exists())
                 self.assertFalse((bare / "held").exists())
                 self.assertEqual(notes.read_text(encoding="utf-8"), "notes\n")
                 self.assertTrue((bare / "HEAD").is_file())
+
+    def _another_checkout(self) -> Path:
+        other = self.owned(self.root / "other")
+        self.git(self.root, "clone", "-q", str(self.upstream), str(other))
+        for key, value in (("user.name", "Operator"), ("user.email", "operator@example.invalid"),
+                           ("commit.gpgsign", "false")):
+            self.git(other, "config", key, value)
+        return other
+
+    def _tracked_under_saws_names(self, checkout: Path) -> Path:
+        self.write(checkout, "data/state.json", "{\"mine\": true}\n")
+        self.write(checkout, "data/work/keep.txt", "keep\n")
+        self.commit(checkout, "tracked data")
+        return checkout / "data"
+
+    def _kept_by_a_refusal(self, repo: Path, held: Path, args: list[str], checkout: Path,
+                           environment: "dict | None" = None) -> None:
+        listed = sorted(os.listdir(held))
+        answer, code = govern.prepare(str(repo), str(held), "git", args, environment=environment)
+        self.assertEqual((answer.get("reason"), code),
+                         (holding_directory.OUTSIDE_EVERY_REPOSITORY, exitcodes.INCOMPLETE), answer)
+        self.assertEqual(sorted(os.listdir(held)), listed)
+        self.assertEqual(self.git(checkout, "status", "--porcelain", "--ignored").strip(), "")
+
+    def test_a_folder_of_another_repository_the_command_names_is_refused_and_kept(self):
+        other = self._another_checkout()
+        held = self._tracked_under_saws_names(other)
+        for args, environment in (([f"--git-dir={other / '.git'}", f"--work-tree={other}", "fetch"], None),
+                                  (["fetch"], {"GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other)}),
+                                  (["-C", str(other), "fetch"], None)):
+            with self.subTest(args=args, environment=environment):
+                self._kept_by_a_refusal(self.open, held, args, other, environment)
+                self.assertEqual((held / "work" / "keep.txt").read_text(encoding="utf-8"), "keep\n")
+
+    def test_a_folder_of_the_main_checkout_of_a_linked_work_tree_is_refused_and_kept(self):
+        held = self._tracked_under_saws_names(self.open)
+        self._kept_by_a_refusal(self._linked(), held, ["fetch"], self.open)
+
+    def test_a_folder_of_a_submodules_superproject_is_refused_and_kept(self):
+        self.git(self.open, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(self.upstream), "sub")
+        self.commit(self.open, "submodule")
+        held = self._tracked_under_saws_names(self.open)
+        self._kept_by_a_refusal(self.open / "sub", held, ["fetch"], self.open)
+
+    def test_a_folder_of_an_unrelated_repository_holding_only_work_is_refused_and_kept(self):
+        other = self._another_checkout()
+        self.write(other, "pkg/work/keep.txt", "keep\n")
+        self.commit(other, "package")
+        self._kept_by_a_refusal(self.open, other / "pkg", ["fetch"], other)
+        self.assertEqual((other / "pkg" / "work" / "keep.txt").read_text(encoding="utf-8"), "keep\n")
 
     def test_a_link_to_the_open_folder_is_refused(self):
         link = self.root / "link"
@@ -109,7 +158,7 @@ class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
             os.symlink(self.open, link, target_is_directory=True)
         except (OSError, NotImplementedError):
             self.skipTest("this system makes no symbolic links here")
-        self._refused(link, holding_directory.OVERLAPS_THE_FOLDER)
+        self._refused(link, holding_directory.OUTSIDE_EVERY_REPOSITORY)
 
     def test_a_folder_holding_files_saw_did_not_put_there_is_refused_and_kept(self):
         into = self.root / "elsewhere"

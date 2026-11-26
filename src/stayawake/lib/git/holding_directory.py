@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """The holding directory `saw govern` checks an update in: the entries saw puts there, the refusal of
-one that overlaps the open folder, and clearing it of saw's own entries."""
+one inside a git repository, and clearing it of saw's own entries."""
 from __future__ import annotations
 
 import os
 import shutil
 from pathlib import Path
 
-from stayawake.lib.git.run import UNTRUSTED, stdout
+from stayawake.lib.git.run import UNTRUSTED, run
 from stayawake.utils import folderlock
 
 REPOSITORY = "repo.git"
@@ -17,21 +17,44 @@ STATE = "state.json"
 STATE_BEING_WRITTEN = STATE + ".tmp"
 _SAW_ENTRIES = (STATE, STATE_BEING_WRITTEN, REPOSITORY, WORK_TREE, NO_HOOKS)
 _KEPT_ENTRIES = (folderlock.LOCK_NAME,)
+_NOT_A_REPOSITORY = "not a git repository"
+_ACROSS_FILESYSTEMS = "GIT_DISCOVERY_ACROSS_FILESYSTEM"
 
 OVERLAPS_THE_FOLDER = "the holding directory must be outside the open folder"
+OUTSIDE_EVERY_REPOSITORY = "the holding directory must be outside every git repository"
 HOLDS_OTHER_FILES = "the holding directory holds files saw did not put there"
 NOT_A_FOLDER = "the holding directory is not a folder"
 NOT_CLEARED = "the holding directory could not be cleared"
 
 
-def repository_places(repo: Path) -> list[Path]:
-    """List the places a holding directory stays apart from: the folder, and the top, git directory
-    and common directory of the repository it belongs to. Takes the folder. Returns the places."""
-    places = [Path(repo)]
-    for asked in (["--absolute-git-dir", "--git-common-dir"], ["--show-toplevel"]):
-        found = stdout(repo, ["rev-parse", "--path-format=absolute", *asked], context=UNTRUSTED)
-        places += [Path(line) for line in found.splitlines() if line.strip()]
-    return places
+def in_a_repository(into: Path) -> str:
+    """Refuse a holding directory that git finds inside a work tree, a git directory or a bare
+    repository, asked from the holding directory or, when it does not exist yet, its nearest existing
+    folder. Takes the holding directory. Returns the refusal, or "" when git finds it outside every
+    repository."""
+    place = Path(os.path.abspath(into))
+    while not place.is_dir() and place != place.parent:
+        place = place.parent
+    asked = run(place, ["rev-parse", "--is-inside-work-tree", "--is-inside-git-dir", "--is-bare-repository"],
+                env=_asking_from_anywhere(), context=UNTRUSTED)
+    if asked is not None and asked.returncode != 0 and _NOT_A_REPOSITORY in (asked.stderr or ""):
+        return ""
+    return OUTSIDE_EVERY_REPOSITORY
+
+
+def _asking_from_anywhere() -> dict:
+    """Return this process's environment with git's messages untranslated and its search for a
+    repository crossing filesystems."""
+    environment = {key: value for key, value in os.environ.items() if key != "LANGUAGE"}
+    environment["LC_ALL"] = "C"
+    environment[_ACROSS_FILESYSTEMS] = _true_unlike_the_inherited(_ACROSS_FILESYSTEMS)
+    return environment
+
+
+def _true_unlike_the_inherited(name: str) -> str:
+    """Spell a true value for a git variable other than the way this process inherited it. Takes the
+    variable's name. Returns the value."""
+    return "true" if os.environ.get(name) == "1" else "1"
 
 
 def overlaps(into: Path, places) -> str:
