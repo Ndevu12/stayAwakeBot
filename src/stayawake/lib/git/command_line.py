@@ -71,8 +71,11 @@ def _alias_set_inline(pair: str) -> tuple[str, str] | None:
 
 
 def _git_own_subcommands() -> frozenset[str]:
-    """Return the git subcommands listed in saw's tables."""
-    return frozenset(runs_directly.tables()["subcommands_that_bring_no_files"]) | frozenset(subcommand_options.LISTED)
+    """Return the git subcommands listed in saw's tables and the commands git has, which git runs
+    whatever alias shares their name."""
+    known = runs_directly.tables()
+    return (frozenset(known["subcommands_that_bring_no_files"]) | frozenset(known["git_commands"])
+            | frozenset(subcommand_options.LISTED))
 
 
 def _read_git(args: list[str], folder: Path, alias_of: AliasReader) -> Reading:
