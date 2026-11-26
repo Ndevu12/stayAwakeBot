@@ -7,7 +7,8 @@ from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED, INFECTED, SUSPICIOUS, Finding, ScanResult
 
-LET_IN_CHOICES = ("let-in", "leave-unchanged")
+LET_IN = "let-in"
+LET_IN_CHOICES = (LET_IN, "leave-unchanged")
 CONFIRM_YES = "yes"
 CONFIRM_TYPED = "typed"
 HELD_VERDICTS = (SUSPICIOUS, INFECTED)

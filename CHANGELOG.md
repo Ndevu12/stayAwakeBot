@@ -23,10 +23,15 @@ reader, not the mechanism or the weakness it closed.
 - `saw govern guard --json` says how to run a git command in a folder you did not create so that no
   program the folder's own git settings name starts, while your own identity, signing, hooks,
   credential helpers and transports keep working. `saw capabilities` names it as `govern.guard`.
+- An allowlist entry can name a `commit` by its full id in place of `path_glob`, and then accepts
+  that signature's finding in that one commit only. A shortened id is refused.
 
 ### Fixed
 - `saw govern` never deletes a folder named as its holding directory: it refuses one inside any git
   repository or holding files it did not put there, and clears only what it put there.
+- In a terminal `saw govern install` covers, an update saw holds where there is no one to ask, such
+  as in a shell an agent runs, can now be let in: run `saw govern let-in` in a terminal, and saw
+  checks the same command again and asks you. The command it printed before could not let it in.
 
 ## [0.17.7] - 2026-11-26
 
