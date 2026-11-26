@@ -391,6 +391,10 @@ class WhatMakesGitRunFolderFilesIsAskedAbout(_Fetched):
     def test_a_file_the_folders_configuration_includes_or_runs_is_held_for_review(self):
         for key, value, name in (("include.path", "../shared.gitconfig", "shared.gitconfig"),
                                  ("core.fsmonitor", "tools/fsm.sh", "tools/fsm.sh"),
+                                 ("core.fsmonitor", "sh tools/fsmon.sh", "tools/fsmon.sh"),
+                                 ("filter.x.clean", "sh tools/filter.sh", "tools/filter.sh"),
+                                 ("filter.x.smudge", "sh '$(git rev-parse --show-toplevel)/tools/smudge.sh'",
+                                  "tools/smudge.sh"),
                                  ("includeIf.onbranch:main.path", "../shared.gitconfig", "shared.gitconfig")):
             with self.subTest(key=key):
                 self._folder_configured(key, value, {name: "# first\n"})
@@ -411,21 +415,61 @@ class WhatMakesGitRunFolderFilesIsAskedAbout(_Fetched):
         with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(global_config)}):
             self._held_for_review("tools/watch.sh")
 
-    def test_a_file_a_hook_names_is_held_for_review_and_so_is_the_file_it_names(self):
-        self._folder_configured("core.hooksPath", ".husky/_", {
-            ".husky/pre-commit": "sh tools/check.sh\n", "tools/check.sh": "sh tools/deeper.sh\n",
-            "tools/deeper.sh": "exit 0\n", "tools/other.sh": "exit 0\n"})
-        for name, text in (("tools/check.sh", "sh tools/deeper.sh\necho changed\n"), ("tools/deeper.sh", "echo changed\n")):
-            with self.subTest(name=name):
-                self._upstream({name: text})
-                self._held_for_review(name)
-                self.git(self.open, "merge", "-q", "--ff-only", "origin/main")
-                self.start = self.rev(self.open)
-        self._upstream({"tools/other.sh": "echo changed\n"})
+    def _lands_without_asking(self, files: dict) -> None:
+        self._upstream(files)
         self.git(self.open, "fetch", "-q")
         answer, code = self._prepare("merge", "--ff-only", "origin/main")
         self.assertEqual(code, exitcodes.CLEAN, answer)
         self.assertNotIn("decision", answer)
+        self.assertTrue(govern.apply(str(self.open), str(self.into))[0]["applied"])
+        self.start = self.rev(self.open)
+
+    def test_a_file_a_hook_names_is_held_for_review_and_what_that_file_runs_is_left_to_the_scan(self):
+        self._folder_configured("core.hooksPath", ".husky/_", {
+            ".husky/pre-commit": "sh tools/check.sh\n", "tools/check.sh": "sh tools/deeper.sh\n",
+            "tools/deeper.sh": "exit 0\n"})
+        self._upstream({"tools/check.sh": "sh tools/deeper.sh\necho changed\n"})
+        self._held_for_review("tools/check.sh")
+        self.git(self.open, "merge", "-q", "--ff-only", "origin/main")
+        self.start = self.rev(self.open)
+        self._lands_without_asking({"tools/deeper.sh": "echo changed\n"})
+
+    def test_a_hook_naming_a_file_in_any_spelling_is_held_for_review(self):
+        self._upstream({"scripts/x.sh": "exit 0\n"})
+        self.git(self.open, "pull", "-q", "--ff-only")
+        hook = self.open / ".git" / "hooks" / "pre-commit"
+        for line in ('"$(git rev-parse --show-toplevel)/scripts/x.sh"', 'sh "$GIT_DIR/../scripts/x.sh"',
+                     f"'{self.open}/scripts/x.sh'", '`git rev-parse --show-toplevel`/scripts/x.sh'):
+            with self.subTest(line=line):
+                hook.write_text(f"#!/bin/sh\n{line}\n", encoding="utf-8")
+                self.start = self.rev(self.open)
+                self._upstream({"scripts/x.sh": f"echo {len(line)}\n"})
+                self._held_for_review("scripts/x.sh")
+                self.git(self.open, "merge", "-q", "--ff-only", "origin/main")
+
+    def test_a_script_a_hook_runs_through_npm_and_the_files_it_names_are_held_and_code_they_load_is_not(self):
+        package = json.dumps({"scripts": {"test": "node tools/t.js"}})
+        self._upstream({"package.json": package, "tools/t.js": "require('./util');\n", "tools/util.js": "1\n"})
+        self.git(self.open, "pull", "-q", "--ff-only")
+        (self.open / ".git" / "hooks" / "pre-push").write_text("#!/bin/sh\nnpm test\n", encoding="utf-8")
+        self.start = self.rev(self.open)
+        self._upstream({"tools/t.js": "require('./util');\n// changed\n"})
+        self._held_for_review("tools/t.js")
+        self.git(self.open, "merge", "-q", "--ff-only", "origin/main")
+        self.start = self.rev(self.open)
+        self._upstream({"package.json": json.dumps({"scripts": {"test": "node tools/u.js"}}), "tools/u.js": "1\n"})
+        self._held_for_review("package.json")
+        self.git(self.open, "merge", "-q", "--ff-only", "origin/main")
+        self.start = self.rev(self.open)
+        self._lands_without_asking({"tools/util.js": "2\n"})
+
+    def test_a_makefile_a_hook_runs_is_held_for_review(self):
+        self._upstream({"Makefile": "lint:\n\t@echo lint\n"})
+        self.git(self.open, "pull", "-q", "--ff-only")
+        (self.open / ".git" / "hooks" / "pre-commit").write_text("#!/bin/sh\nmake lint\n", encoding="utf-8")
+        self.start = self.rev(self.open)
+        self._upstream({"Makefile": "lint:\n\t@echo changed\n"})
+        self._held_for_review("Makefile")
 
     def test_a_file_a_hook_outside_the_working_tree_names_is_held_for_review(self):
         self._upstream({"scripts/pre.sh": "exit 0\n"})
@@ -466,6 +510,13 @@ class WhatMakesGitRunFolderFilesIsAskedAbout(_Fetched):
         self._upstream({**files, "tools/check.js": "1\n", "tools/check.sh": "exit 0\n"})
         return tuple(files)
 
+    def test_letting_a_push_change_the_folders_files_asks_first(self):
+        for args in (["config", "receive.denyCurrentBranch", "updateInstead"],
+                     ["config", "set", "receive.denycurrentbranch", "updateinstead"]):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], govern_command.LETS_A_PUSH_WRITE)
+        self._passes("config", "receive.denyCurrentBranch", "refuse", brings_no_files=True)
+
     def test_pointing_git_at_a_folder_of_hooks_asks_first(self):
         (self.open / ".githooks").mkdir()
         for args in (["config", "core.hooksPath", ".githooks"], ["config", "set", "core.hookspath", ".githooks"],
@@ -494,6 +545,43 @@ class WhatMakesGitRunFolderFilesIsAskedAbout(_Fetched):
 
 
 class ACommandThatWritesAFileItNamesIsAsked(_Fetched):
+
+    def test_a_push_that_can_change_a_folder_on_this_machine_is_asked(self):
+        other = self.root / "other"
+        self._raw("clone", "-q", str(self.upstream), str(other))
+        for args in (["push", ".", "HEAD:refs/heads/elsewhere"], ["push", str(other), "HEAD:refs/heads/x"],
+                     ["push", f"file://{other}", "HEAD:refs/heads/x"], ["push", "origin", "HEAD:refs/heads/x"],
+                     ["push"], ["push", "--receive-pack=git receive-pack", "https://example.invalid/r"],
+                     ["push", "--exec", "git receive-pack", "https://example.invalid/r"],
+                     ["-c", "receive.denyCurrentBranch=updateInstead", "push", ".", "HEAD:main"]):
+            with self.subTest(args=args):
+                self._asked(*args, brings_no_files=True)
+
+    def test_a_push_elsewhere_or_into_a_repository_without_files_runs_as_typed(self):
+        bare = self.root / "bare.git"
+        self._raw("clone", "-q", "--bare", str(self.upstream), str(bare))
+        self.git(self.open, "remote", "set-url", "origin", "https://example.invalid/team/r")
+        for args in (["push", str(bare), "HEAD:refs/heads/x"], ["push", "https://example.invalid/r", "main"],
+                     ["push", "git@example.invalid:team/r", "main"], ["push", "origin", "main"], ["push"]):
+            with self.subTest(args=args):
+                self._passes(*args, brings_no_files=True)
+
+    def test_maintenance_that_fetches_or_schedules_runs_is_asked(self):
+        for args in (["maintenance", "run", "--task=prefetch"], ["maintenance", "run", "--task", "prefetch"],
+                     ["maintenance", "run", "--schedule=hourly"], ["maintenance", "start"],
+                     ["maintenance", "register"]):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], govern_command.FETCHES)
+        for args in (["maintenance", "run", "--task=gc"], ["maintenance", "unregister"]):
+            with self.subTest(args=args):
+                self._passes(*args, brings_no_files=True)
+        self.git(self.open, "config", "maintenance.prefetch.enabled", "true")
+        self._asked("maintenance", "run", brings_no_files=True)
+
+    def test_a_template_folder_the_configuration_names_asks_before_init(self):
+        (self.open / "tpl" / "hooks").mkdir(parents=True)
+        self.git(self.open, "config", "init.templateDir", str(self.open / "tpl"))
+        self._asked("init", "-q", brings_no_files=True)
 
     def test_an_output_file_or_a_fetch_it_names_is_left_to_the_operator(self):
         for args in (["diff", "--output=loader.js", "HEAD", "origin/evil~1"], ["log", "--output", "x.sh", "-1"],

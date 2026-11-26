@@ -4,6 +4,7 @@ command the stand-in reads as bringing no files and sends for what it names, and
 not replay."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,13 @@ CONTINUES_A_REBASE = "continues-a-rebase"
 WRITES_A_FILE = "the command writes a file saw does not check"
 FETCHES = "the command fetches outside the check; fetch with git fetch instead"
 UPDATES_SUBMODULES = "a command that also updates submodules cannot be checked"
+PUSHES_INTO_A_FOLDER = "a push into a repository with files on this machine cannot be checked"
+RUNS_A_PROGRAM = "a command that runs a program it names cannot be checked"
+LETS_A_PUSH_WRITE = "the command lets a push change this folder's files; check it first"
+_PUSH_PROGRAM_OPTIONS = ("--receive-pack", "--exec")
+_PUSH_OPTIONS_WITH_A_VALUE = frozenset({"--repo", "-o", "--push-option", "--receive-pack", "--exec"})
+_LOCAL_PREFIXES = ("/", "./", "../", "~", "file:")
+_SCHEDULES_FETCHES = frozenset({"start", "register"})
 _SAYS_NO = frozenset({"no", "false", "off", "0"})
 _WRITES_AN_OUTPUT = frozenset({"diff", "diff-files", "diff-index", "diff-tree", "log", "show", "whatchanged",
                                "range-diff", "format-patch"})
@@ -43,6 +51,8 @@ def before_replay(folder: Path, command: TypedCommand, brings_no_files: bool) ->
     runs = runs_from_the_folder.settings_running_folder_files(top, command.settings)
     if runs:
         return Answer(ASKS, _runs(runs))
+    if _lets_a_push_write(command.settings) and command.sub == "push":
+        return Answer(UNCHECKED, PUSHES_INTO_A_FOLDER)
     if brings_no_files:
         return _sent_for_what_it_names(folder, top, command)
     if command.sub == "merge" and command.rest == ("--continue",):
@@ -100,8 +110,13 @@ def _sent_for_what_it_names(folder: Path, top: "Path | None", command: TypedComm
         if words[:1] == ["update"] or (words[:1] == ["add"] and any(
                 arg in ("-f", "--fetch") for arg in before_paths)):
             return Answer(UNCHECKED, FETCHES)
+    if command.sub == "push":
+        return _push(folder, rest)
+    if command.sub == "maintenance":
+        return _maintenance(folder, rest)
     if command.sub == "init":
-        template = runs_from_the_folder.template_named(rest, command.template, command.settings)
+        template = runs_from_the_folder.template_named(rest, command.template, command.settings) or stdout(
+            folder, ["config", "--get", "init.templateDir"], context=UNTRUSTED).strip()
         if template and runs_from_the_folder.lies_in_a_working_tree(template, folder):
             return Answer(ASKS, f"the command copies hooks from {template}, a folder in a git working tree; "
                                 "check it first")
@@ -112,6 +127,85 @@ def _sent_for_what_it_names(folder: Path, top: "Path | None", command: TypedComm
         runs = runs_from_the_folder.settings_running_folder_files(top, settings)
         if runs:
             return Answer(ASKS, _runs(runs))
+        if _lets_a_push_write(settings):
+            return Answer(ASKS, LETS_A_PUSH_WRITE)
+    return Answer(PASSTHROUGH, "the command brings no files in")
+
+
+def _lets_a_push_write(settings) -> bool:
+    """Tell whether settings let a push into this repository update its working tree. Takes the
+    (key, value) settings. Returns the answer."""
+    return any(key.lower() == "receive.denycurrentbranch" and (value or "").strip().lower() == "updateinstead"
+               for key, value in settings)
+
+
+def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
+    """Answer a push: one that runs a program it names, or that reaches a repository with a working
+    tree on this machine, asks first. Takes where it runs and its arguments. Returns the answer."""
+    words: list[str] = []
+    named = ""
+    index = 0
+    while index < len(rest) and rest[index] != "--":
+        arg = rest[index]
+        index += 1
+        name, joined, value = arg.partition("=")
+        if arg.startswith("--") and len(name) > 3 and any(option.startswith(name) for option in _PUSH_PROGRAM_OPTIONS):
+            return Answer(UNCHECKED, RUNS_A_PROGRAM)
+        if name in _PUSH_OPTIONS_WITH_A_VALUE:
+            given = value if joined else (rest[index] if index < len(rest) else "")
+            index += 0 if joined else 1
+            named = given if name == "--repo" else named
+        elif not arg.startswith("-"):
+            words.append(arg)
+    targets = [named or words[0]] if (named or words) else _remotes(folder)
+    for target in targets:
+        place = _local_place(folder, target)
+        if place is not None and stdout(place, ["rev-parse", "--is-bare-repository"],
+                                        context=UNTRUSTED).strip() != "true":
+            return Answer(UNCHECKED, PUSHES_INTO_A_FOLDER)
+    return Answer(PASSTHROUGH, "the command brings no files in")
+
+
+def _remotes(folder: Path) -> list[str]:
+    """List the remotes a push with no repository named may reach. Takes where it runs. Returns
+    their names."""
+    listed = stdout(folder, ["config", "--name-only", "--get-regexp", r"^remote\..*\.(push)?url$"], context=UNTRUSTED)
+    return list(dict.fromkeys(line.removeprefix("remote.").rpartition(".")[0] for line in listed.splitlines() if line))
+
+
+def _local_place(folder: Path, target: str) -> "Path | None":
+    """Find the folder on this machine a push target reaches, through the remote's push address when
+    it names a remote. Takes where the push runs and the target. Returns the folder, or None for a
+    target elsewhere."""
+    address = target
+    if not target.startswith(_LOCAL_PREFIXES) and target not in (".", "..") and not (folder / target).is_dir():
+        address = stdout(folder, ["remote", "get-url", "--push", target], context=UNTRUSTED).strip() or target
+    if address.startswith("file://"):
+        address = address[len("file://"):]
+    elif address.startswith("file:"):
+        address = address[len("file:"):]
+    elif "://" in address or (":" in address and not address.startswith(_LOCAL_PREFIXES)):
+        return None
+    path = Path(os.path.expanduser(address))
+    path = path if path.is_absolute() else folder / path
+    return path if path.exists() else None
+
+
+def _maintenance(folder: Path, rest: tuple[str, ...]) -> Answer:
+    """Answer a maintenance command: scheduling runs, or a run that fetches, asks first. Takes where
+    it runs and its arguments. Returns the answer."""
+    words = [arg for arg in rest if not arg.startswith("-")]
+    if words[:1] and words[0] in _SCHEDULES_FETCHES:
+        return Answer(UNCHECKED, FETCHES)
+    if words[:1] != ["run"]:
+        return Answer(PASSTHROUGH, "the command brings no files in")
+    tasks = [arg.partition("=")[2] for arg in rest if arg.startswith("--task=")]
+    tasks += [rest[index + 1] for index, arg in enumerate(rest[:-1]) if arg == "--task"]
+    scheduled = any(arg == "--schedule" or arg.startswith("--schedule=") or arg == "--auto" for arg in rest)
+    prefetch_on = stdout(folder, ["config", "--type=bool", "--get", "maintenance.prefetch.enabled"],
+                         context=UNTRUSTED).strip() == "true"
+    if "prefetch" in tasks or scheduled or (not tasks and prefetch_on):
+        return Answer(UNCHECKED, FETCHES)
     return Answer(PASSTHROUGH, "the command brings no files in")
 
 

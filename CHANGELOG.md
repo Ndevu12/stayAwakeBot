@@ -34,12 +34,14 @@ reader, not the mechanism or the weakness it closed.
   repository, index or objects the command or its environment names. What saw holds stays out of
   the folder, and a clean update is written exactly as it was checked.
 - An update that changes a file a hook manager runs or reads, such as a husky, lefthook or
-  pre-commit hook, a file any of those names, or a file your git configuration has git run or
-  include, is held until you let it in, even when nothing is found in it. A command that
+  pre-commit hook, a file any of those names, a package.json script or Makefile a hook runs, or a
+  file your git configuration has git run or include, is held until you let it in, even when nothing
+  is found in it. A command that
   points git at files in your folder to run, such as setting `core.hooksPath`, or that copies hooks
   from a folder in a working tree into a new repository, asks you first.
-- A git command that writes a file it names, such as `git diff --output`, or that fetches through a
-  remote it adds or updates, asks you first.
+- A git command that writes a file it names, such as `git diff --output`, that fetches through a
+  remote it adds or updates or through `git maintenance`, or that pushes into a repository with files
+  on this machine, asks you first.
 - In a terminal `saw govern` covers, a pull, merge or rebase that stops for conflicts is checked like
   any other update. When it is clean, saw brings in exactly what it checked and leaves the conflicts
   for you to resolve.

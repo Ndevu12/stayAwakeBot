@@ -40,7 +40,7 @@ fn main() {
         exit(127);
     });
     if governing() {
-        let sent = sent_to_saw(&tool, &args);
+        let sent = sent_to_saw(&tool, &args, &real);
         if sent != Sent::No {
             if let Some(code) = govern(&tool, &args, &real, sent == Sent::ForWhatItNames) {
                 exit(code);                        // governed: saw applied it, or held it
@@ -108,6 +108,10 @@ const CONFIG_READS: &[&str] = &["--get", "--get-all", "--get-regexp", "--get-url
 /// `git config` options that write.
 const CONFIG_WRITES: &[&str] = &["--add", "--replace-all", "--unset", "--unset-all", "--rename-section",
     "--remove-section", "-e", "--edit"];
+/// Push options that name a program to run.
+const PUSH_PROGRAM_OPTIONS: &[&str] = &["--receive-pack", "--exec"];
+/// Push options that take the next word as their value.
+const PUSH_OPTIONS_WITH_A_VALUE: &[&str] = &["--repo", "-o", "--push-option", "--receive-pack", "--exec"];
 /// Environment variables that give git settings.
 const SETTINGS_VARIABLES: &[&str] = &["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
 
@@ -180,16 +184,16 @@ enum Sent {
 /// read with certainty as bringing no files into the folder, one that brings none but names a
 /// setting, an output file, a hooks template, a configuration change or a fetch, and gh's
 /// bringing-files commands.
-fn sent_to_saw(tool: &str, args: &[String]) -> Sent {
+fn sent_to_saw(tool: &str, args: &[String], real: &Path) -> Sent {
     match tool {
-        "git" => git_sent(args),
+        "git" => git_sent(args, real),
         "gh" if gh_brings_files_in(args) => Sent::ToSaw,
         _ => Sent::No,
     }
 }
 
 /// Decide whether a git command goes to saw first.
-fn git_sent(args: &[String]) -> Sent {
+fn git_sent(args: &[String], real: &Path) -> Sent {
     let line = read_git_line(args);
     if !line.read {
         return Sent::ToSaw;
@@ -199,7 +203,8 @@ fn git_sent(args: &[String]) -> Sent {
     if !NEVER_BRINGS_FILES.contains(&sub) {
         return Sent::ToSaw;
     }
-    if names_what_saw_checks(sub, &args[at + 1..], &line.settings) {
+    let reader = GitReader { real, folder: PathBuf::from(target_repo(args)) };
+    if names_what_saw_checks(sub, &args[at + 1..], &line.settings, &reader) {
         Sent::ForWhatItNames
     } else {
         Sent::No
@@ -208,7 +213,7 @@ fn git_sent(args: &[String]) -> Sent {
 
 /// Whether a command that brings no files names a setting that may run something, an output file,
 /// a hooks template, a configuration change or a fetch.
-fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str]) -> bool {
+fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: &GitReader) -> bool {
     let runs_something = |key: &&str| {
         let key = key.to_ascii_lowercase();
         let section = key.split('.').next().unwrap_or("");
@@ -221,15 +226,69 @@ fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str]) -> bool 
     let words: Vec<&str> = options.iter().copied().filter(|arg| !arg.starts_with('-')).collect();
     match sub {
         _ if WRITE_AN_OUTPUT.contains(&sub) => options.iter().any(|arg| *arg == "--output" || arg.starts_with("--output=")),
-        "init" => env::var_os("GIT_TEMPLATE_DIR").is_some() || options.iter().any(|arg| {
-            let name = arg.split('=').next().unwrap_or("");
-            name.len() > 3 && "--template".starts_with(name)
-        }),
+        "init" | "maintenance" => true,
+        "push" => push_may_write_here(&options, reader),
         "config" => !config_only_reads(&options, &words),
         "remote" => words.first() == Some(&"update")
             || (words.first() == Some(&"add") && options.iter().any(|arg| *arg == "-f" || *arg == "--fetch")),
         _ => false,
     }
+}
+
+/// The real git and the folder a command runs in, for reading that folder's configuration.
+struct GitReader<'a> {
+    real: &'a Path,
+    folder: PathBuf,
+}
+
+/// Whether a push names a program to run, or may reach a repository on this machine: a target that
+/// is a path, or a remote whose configured or rewritten address is a path.
+fn push_may_write_here(options: &[&str], reader: &GitReader) -> bool {
+    let mut target = None;
+    let mut index = 0;
+    while let Some(arg) = options.get(index).copied() {
+        index += 1;
+        let name = arg.split('=').next().unwrap_or("");
+        if name.starts_with("--") && name.len() > 3 && PUSH_PROGRAM_OPTIONS.iter().any(|o| o.starts_with(name)) {
+            return true;
+        }
+        if PUSH_OPTIONS_WITH_A_VALUE.contains(&name) {
+            let value = if arg.contains('=') { arg.splitn(2, '=').nth(1) } else { index += 1; options.get(index - 1).copied() };
+            if name == "--repo" {
+                target = value;
+            }
+        } else if !arg.starts_with('-') && target.is_none() {
+            target = Some(arg);
+        }
+    }
+    match target {
+        Some(target) if is_local_address(target) || Path::new(target).is_dir() => true,
+        Some(target) if target.contains(':') || target.contains('@') => false,
+        _ => a_remote_is_local(reader),
+    }
+}
+
+/// Whether an address names a place on this machine.
+fn is_local_address(address: &str) -> bool {
+    address.starts_with("file:") || !address.contains(':')
+}
+
+/// Whether any remote's address, or an address rewrite, names a place on this machine.
+fn a_remote_is_local(reader: &GitReader) -> bool {
+    let Ok(listed) = Command::new(reader.real)
+        .current_dir(&reader.folder)
+        .args(["config", "--get-regexp", r"^(remote\..*\.(url|pushurl)|url\..*\.(insteadof|pushinsteadof))$"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return true;
+    };
+    String::from_utf8_lossy(&listed.stdout).lines().any(|line| {
+        let (key, value) = line.split_once(' ').unwrap_or((line, ""));
+        let rewritten = key.strip_prefix("url.").and_then(|rest| rest.rsplit_once('.')).map(|(base, _)| base);
+        is_local_address(rewritten.unwrap_or(value))
+    })
 }
 
 /// Whether a `git config` command only reads.

@@ -31,8 +31,9 @@ saw judges what the update brings. A finding a changed file already had before t
 listed under `pre_existing` and does not hold the update, unless it is confirmed. An update that
 changes a file in the folder git runs your hooks from is held until you let it in, even when
 nothing is found in it, and so is an update that changes a file a hook manager runs or reads, such as
-a husky, lefthook or pre-commit hook, a file any of those names, or a file your configuration has git
-run or include.
+a husky, lefthook or pre-commit hook, a file any of those names, a package.json script or Makefile a
+hook runs and the files that script names, or a file your configuration has git run or include. What
+those files go on to load or run is checked by the scan like the rest of the update.
 
 When the verdict is suspicious or infected, the update is held and your open folder stays as it
 was. The answer says what to do in `next_steps`, and its `decision` lets you let the update in after
@@ -98,10 +99,11 @@ cherry-picks, reverts or stages files, saw checks what the command would write b
 folder you are working in, the same as in the editor. Any other git command that can bring files into the
 folder, such as an alias, a mistyped command, `git clone` or `git worktree add`, asks you first, the
 same as an update that cannot be checked. So does a command that would also update submodules, one
-that writes a file it names, such as `git diff --output`, and one that fetches through a remote it
-adds or updates. A command that points git at files in your folder to run, such as setting
-`core.hooksPath`, or that copies hooks from a folder in a working tree into a new repository, asks
-you first too. A `gh` command that names its repository with `-R` is checked like any other. Open a new terminal, or
+that writes a file it names, such as `git diff --output`, one that fetches through a remote it adds
+or updates, a `git maintenance` that fetches or schedules runs, and a push into a repository with
+files on this machine or one that names a program to run. A command that points git at files in your folder to run, such as setting
+`core.hooksPath`, that lets a push change your folder's files, or that copies hooks from a folder in
+a working tree into a new repository, asks you first too. A `gh` command that names its repository with `-R` is checked like any other. Open a new terminal, or
 source the file the command names, for it to take effect.
 
 In a terminal, an update that cannot be checked brings a question: run the command as typed? Answer

@@ -84,6 +84,14 @@ fn a_command_that_names_what_saw_checks_goes_to_saw_and_does_not_run() {
         (&["config", "--edit"], &[]),
         (&["remote", "add", "-f", "other", "https://example.invalid/r"], &[]),
         (&["remote", "update"], &[]),
+        (&["push", ".", "HEAD:refs/heads/x"], &[]),
+        (&["push", "../other", "main"], &[]),
+        (&["push", "file:///srv/other", "main"], &[]),
+        (&["push", "--receive-pack=git receive-pack", "https://example.invalid/r"], &[]),
+        (&["push", "--rec", "x", "https://example.invalid/r"], &[]),
+        (&["maintenance", "run", "--task=prefetch"], &[]),
+        (&["maintenance", "start"], &[]),
+        (&["init", "new-project"], &[]),
     ];
     for (args, environment) in named {
         let out = terminal.run(args, environment);
@@ -104,7 +112,8 @@ fn a_command_that_names_nothing_saw_checks_runs_as_typed() {
         &["-c", "advice.detachedHead=false", "status"],
         &["diff", "HEAD"],
         &["log", "-1", "--", "--output=x"],
-        &["init", "new-project"],
+        &["push", "https://example.invalid/r", "main"],
+        &["push", "git@example.invalid:team/r", "main"],
         &["config", "--get", "core.hooksPath"],
         &["config", "user.name"],
         &["config", "get", "user.name"],
