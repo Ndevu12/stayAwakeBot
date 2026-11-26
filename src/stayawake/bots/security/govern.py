@@ -176,12 +176,11 @@ def _judge_replayed(repo: str, into: str, result: "replay.Replayed", config: str
         if as_written is None:
             return _unchecked(repo, "the files the command writes could not be read")
         landing = blob_copies.copy_out_as_written(writer, holding.work, result.files_after, judged,
-                                                  "the files an update brought in")
-        sides = ((blob_copies.copy_out_blobs(holding.work, tuple((rel, oid) for rel, _mode, oid in staged),
-                                             "the files a command stages"),
-                  tuple(rel for rel, _mode, _oid in staged)),) if staged else ()
-        payload, code, already_there = _scan_arrived(holding.work, landing, judged, config,
-                                                     let_in_commit, deadline, sides, own)
+                                                  "the files an update brought in",
+                                                  tuple((rel, oid) for rel, _mode, oid in staged))
+        landed = tuple(dict.fromkeys((*judged, *(rel for rel, _mode, _oid in staged))))
+        payload, code, already_there = _scan_arrived(holding.work, landing, landed, config, let_in_commit, deadline,
+                                                     (), own)
     except DeadlineReached:
         return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:

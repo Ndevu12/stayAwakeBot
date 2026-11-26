@@ -23,6 +23,35 @@ _BENIGN = "module.exports = 1;\n"
 _TASKS = json.dumps({"version": "2.0.0", "tasks": [{"label": "dev", "type": "shell", "command": "npm run watch",
                                                     "runOptions": {"runOn": "folderOpen"}}]})
 
+def _commit_of(repo, files: dict) -> str:
+    """Make a commit holding each file, written straight into git's trees, whatever names the local
+    disk or git's own checks refuse. Takes the repository and each name with its text. Returns the
+    commit."""
+    def tree(entries: dict) -> str:
+        lines = []
+        for name, value in sorted(entries.items()):
+            oid = tree(value) if isinstance(value, dict) else _git_fed(repo, ["hash-object", "-w", "--stdin"],
+                                                                         value.encode())
+            kind = "040000 tree" if isinstance(value, dict) else "100644 blob"
+            lines.append(f"{kind} {oid}\t{name}".encode() + b"\0")
+        return _git_fed(repo, ["mktree", "-z"], b"".join(lines))
+    nested: dict = {}
+    for name, text in files.items():
+        *folders, leaf = name.split("/")
+        place = nested
+        for folder in folders:
+            place = place.setdefault(folder, {})
+        place[leaf] = text
+    return _git_fed(repo, ["commit-tree", tree(nested), "-m", "names"], b"")
+
+
+def _git_fed(repo, args: list[str], data: bytes) -> str:
+    """Run git in a repository with bytes on its input. Takes the repository, the arguments and the
+    bytes. Returns what it printed, stripped."""
+    return subprocess.run(["git", "-C", str(repo), *args], input=data, capture_output=True,
+                          check=True).stdout.decode().strip()
+
+
 class AnUpdateWithNamesThatAreHardToCopy(_TrackingCheckout):
 
     def _prepare(self) -> tuple[dict, int]:
@@ -61,6 +90,16 @@ class AnUpdateWithNamesThatAreHardToCopy(_TrackingCheckout):
         found = {f["signature_id"] for f in answer["scan"]["results"][0]["findings"]}
         self.assertIn("vscode-task-runs-payload-script", found, answer)
         self._held(answer, code)
+
+    def test_what_a_command_stages_is_scanned_beside_what_it_writes(self):
+        self.write(self.upstream, ".vscode/tasks.json", _TASKS)
+        self.commit(self.upstream, "task")
+        script = json.dumps({"name": "app", "scripts": {"watch": f"node {samples.FONT_PAYLOAD}"}})
+        blob = _git_fed(self.open, ["hash-object", "-w", "--stdin"], script.encode())
+        with mock.patch.object(govern, "_new_staged", return_value=[("package.json", "100644", blob)]):
+            answer, code = self._prepare()
+        found = {f["signature_id"] for f in answer["scan"]["results"][0]["findings"]}
+        self.assertIn("vscode-task-runs-payload-script", found, answer)
 
     @unittest.skipIf(os.name == "nt", POSIX_ONLY)
     def test_a_path_too_long_to_open_by_its_full_name_is_not_passed_over(self):
@@ -124,19 +163,25 @@ class CopyingOutByBlob(GitSandbox):
 
     def test_on_windows_a_name_windows_cannot_hold_is_not_copied_and_the_rest_is(self):
         repo = self.new_repo()
-        refused = ("aux.js", "Com1.txt", "lpt\u00b9.js", "a:b.js", "trailing.", "folder /x.js", "back\\slash.js",
-                   "ask?.js", "nul")
-        received_from_elsewhere = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.protectNTFS",
-                                   "GIT_CONFIG_VALUE_0": "false"}
-        with mock.patch.dict(os.environ, received_from_elsewhere):
-            for name in (*refused, "kept.js", "con-not-reserved.js"):
-                stage_blob(repo, name, _BENIGN)
-            self.git(repo, "commit", "-qm", "names")
+        refused = ("aux.js", "Com1.txt", "lpt\u00b9.js", "a:b.js", "a.js::$DATA", "trailing.", "folder /x.js",
+                   "back\\slash.js", "ask?.js", "nul", "PROGRA~1/x.js", "git~1/config", ".GIT/x.js", "dot./x.js")
+        kept = ("kept.js", "con-not-reserved.js", "tilde~word.js", "notes~1.text.js")
+        commit = _commit_of(repo, {name: _BENIGN for name in (*refused, *kept)})
         with mock.patch.object(blob_copies, "ON_WINDOWS", True):
-            copies = blob_copies.copy_out(repo, self.rev(repo), (*refused, "kept.js", "con-not-reserved.js"), "names")
+            copies = blob_copies.copy_out(repo, commit, (*refused, *kept), "names")
         self.assertEqual(sorted(copies.not_copied), sorted(refused))
-        self.assertEqual(sorted(name for _folder, names in copies.folders for name in names),
-                         ["con-not-reserved.js", "kept.js"])
+        self.assertEqual(sorted(name for _folder, names in copies.folders for name in names), sorted(kept))
+
+    def test_what_a_command_stages_is_copied_beside_what_it_writes_into_a_complete_view(self):
+        repo = self.new_repo()
+        commit = _commit_of(repo, {".vscode/tasks.json": _TASKS, "Package.json": json.dumps({"name": "app"})})
+        staged = _commit_of(repo, {"package.json": "payload\n"})
+        blob = self.git(repo, "rev-parse", f"{staged}:package.json").strip()
+        copies = blob_copies.copy_out_as_written(repo, repo, commit, (".vscode/tasks.json", "Package.json"), "view",
+                                                 (("package.json", blob),))
+        self.assertEqual(copies.not_copied, ())
+        holding = [set(names) for _folder, names in copies.folders]
+        self.assertTrue(any({".vscode/tasks.json", "package.json"} <= names for names in holding), holding)
 
     def test_a_name_the_commit_does_not_record_is_left_out(self):
         repo = self.new_repo()

@@ -25,6 +25,8 @@ _CANNOT_HOLD_A_FILE = "cannot hold a file"
 
 ON_WINDOWS = os.name == "nt"
 _CHARACTERS_WINDOWS_REFUSES = frozenset('<>:"|?*\\') | frozenset(chr(code) for code in range(32))
+_LONGEST_SHORT_STEM = 8
+_LONGEST_SHORT_EXTENSION = 3
 _NAMES_WINDOWS_RESERVES = frozenset({"con", "prn", "aux", "nul", "conin$", "conout$",
                                      *(f"{port}{number}" for port in ("com", "lpt")
                                        for number in (*"123456789", "\u00b9", "\u00b2", "\u00b3"))})
@@ -52,14 +54,6 @@ def copy_out(repo: Path, commit: str, paths: tuple[str, ...], purpose: str) -> B
     return _in_folders([(rel, contents.get(recorded[os.fsencode(rel)])) for rel in wanted], purpose)
 
 
-def copy_out_blobs(repo: Path, named: tuple[tuple[str, str], ...], purpose: str) -> BlobCopies:
-    """Copy each named blob under its path, into folders laid out as `_in_folders` lays them. Takes
-    the repository, each path with its blob id, and what the copies are for. Returns the copies,
-    with each blob the repository does not hold listed as not copied."""
-    contents = _read(repo, [oid for _path, oid in named])
-    return _in_folders([(path, contents.get(oid)) for path, oid in named], purpose)
-
-
 def copy_out_files(top: Path, paths: tuple[str, ...], purpose: str) -> BlobCopies:
     """Copy each path's bytes the folder holds now, into folders laid out as `_in_folders` lays
     them. Takes the top of the working tree, the paths and what the copies are for. Returns the
@@ -77,19 +71,20 @@ def copy_out_files(top: Path, paths: tuple[str, ...], purpose: str) -> BlobCopie
 
 
 def copy_out_as_written(repo: Path, holding: Path, commit: str, paths: tuple[str, ...],
-                        purpose: str) -> BlobCopies:
-    """Copy each path in the form a move to `commit` writes into `repo`'s working tree, and its
-    stored blob too where the two differ, into folders laid out by `_in_folders`. Takes the
-    operator's repository, a repository holding the commit, the commit, the paths and what the
-    copies are for. Returns the copies with the digest of each written file, leaving out each path
+                        purpose: str, beside: tuple[tuple[str, str], ...] = ()) -> BlobCopies:
+    """Copy each path in the form a move to `commit` writes into `repo`'s working tree, its stored
+    blob too where the two differ, and each further named blob, into folders laid out by
+    `_in_folders`. Takes the operator's repository, a repository holding the commit, the commit,
+    the paths, what the copies are for and the further (path, blob id) pairs, such as what a
+    command stages. Returns the copies with the digest of each written file, leaving out each path
     the commit records no file for."""
     recorded = _file_entries(holding, commit)
     store = object_directory(holding)
     if recorded is None or store is None:
-        return BlobCopies((), tuple(paths))
+        return BlobCopies((), (*paths, *(rel for rel, _oid in beside)))
     wanted = [rel for rel in paths if os.fsencode(rel) in recorded]
     written = bytes_as_written(repo, commit, [os.fsencode(rel) for rel in wanted], store) or {}
-    stored = _read(holding, [recorded[os.fsencode(rel)] for rel in wanted])
+    stored = _read(holding, [*(recorded[os.fsencode(rel)] for rel in wanted), *(oid for _rel, oid in beside)])
     files: list[tuple[str, bytes | None]] = []
     for rel in wanted:
         landing = written.get(os.fsencode(rel))
@@ -97,6 +92,7 @@ def copy_out_as_written(repo: Path, holding: Path, commit: str, paths: tuple[str
         blob = stored.get(recorded[os.fsencode(rel)])
         if landing is not None and blob is not None and blob != landing:
             files.append((rel, blob))
+    files += [(rel, stored.get(oid)) for rel, oid in beside]
     digests = tuple((os.fsdecode(name), hashlib.sha256(written[name]).hexdigest())
                     for name in recorded if name in written)
     return _in_folders(files, purpose, digests)
@@ -172,13 +168,24 @@ def _place(folder: Path, rel: str, data: bytes) -> str:
 
 
 def _windows_can_hold(rel: str) -> bool:
-    """Tell whether Windows can hold a file under this name, each part of it a name it neither
-    refuses nor reserves for a device. Takes the name, its parts split by `/`. Returns the answer."""
+    """Tell whether Windows holds a file under exactly this name, each part of it a name it neither
+    refuses, reserves for a device or a stream, reads as another file's short name, nor takes for
+    `.git`. Takes the name, its parts split by `/`. Returns the answer."""
     for part in rel.split("/"):
         if (not part or part in (".", "..") or part[-1] in ". " or set(part) & _CHARACTERS_WINDOWS_REFUSES
-                or part.split(".")[0].rstrip(" ").lower() in _NAMES_WINDOWS_RESERVES):
+                or part.split(".")[0].rstrip(" ").lower() in _NAMES_WINDOWS_RESERVES
+                or part.lower() == ".git" or _is_a_short_name(part)):
             return False
     return True
+
+
+def _is_a_short_name(part: str) -> bool:
+    """Tell whether a name has the form of a Windows short name, such as `PROGRA~1` or `GIT~1`.
+    Takes the name. Returns the answer."""
+    stem, _, extension = part.partition(".")
+    base, tilde, number = stem.rpartition("~")
+    return (bool(tilde and base and number.isdigit()) and len(stem) <= _LONGEST_SHORT_STEM
+            and len(extension) <= _LONGEST_SHORT_EXTENSION and "." not in extension)
 
 
 def _free(destination: Path) -> str:
