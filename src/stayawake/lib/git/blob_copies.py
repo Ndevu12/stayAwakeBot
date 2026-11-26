@@ -153,14 +153,14 @@ def _place(folder: Path, rel: str, data: bytes) -> str:
     if free != _FREE:
         return free
     try:
-        _make_folder(destination.parent)
+        atomicwrite.make_folder(destination.parent)
     except (NotADirectoryError, FileExistsError):
         return _NAME_IN_USE
     except OSError:
         return _CANNOT_HOLD_A_FILE
     if _free(destination) != _FREE:
         return _NAME_IN_USE
-    if not _write(destination, data):
+    if not atomicwrite.replace(destination, data):
         _remove(destination)
         return _CANNOT_HOLD_A_FILE
     try:
@@ -179,29 +179,6 @@ def _windows_can_hold(rel: str) -> bool:
                 or part.split(".")[0].rstrip(" ").lower() in _NAMES_WINDOWS_RESERVES):
             return False
     return True
-
-
-def _make_folder(folder: Path) -> None:
-    """Make a folder and every missing folder above it, without following a link on POSIX. Takes
-    the folder. Raises `OSError` when it cannot be made."""
-    if ON_WINDOWS:
-        os.makedirs(folder, exist_ok=True)
-    else:
-        atomicwrite.make_folder(folder)
-
-
-def _write(destination: Path, data: bytes) -> bool:
-    """Write a new file's bytes and read them back, untranslated. Takes the path and the bytes.
-    Returns whether the file now holds exactly them."""
-    if not ON_WINDOWS:
-        return atomicwrite.replace(destination, data)
-    try:
-        with open(destination, "xb") as handle:
-            handle.write(data)
-        with open(destination, "rb") as handle:
-            return handle.read(len(data) + 1) == data
-    except OSError:
-        return False
 
 
 def _free(destination: Path) -> str:

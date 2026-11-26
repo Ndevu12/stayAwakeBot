@@ -38,7 +38,7 @@ from stayawake.bots.security.matchers.git_history import MOST_MERGES_CHECKED
 from stayawake.bots.security.hook_report import BRAND as _BRAND, command as _cmd, paint_at as _paint
 from stayawake.bots.security.hook_outcome import (
     BROKEN_LINK, CHAINED, CHANGED, HOOKS_FOLDER_REFUSED, HOOKS_FOLDER_UNKNOWN, IN_PLACE, LEFT, NOT_PUT_IN_PLACE,
-    NOT_SAWS, NOTED, OUT_OF_DATE, PRESERVED, PUT_BACK, RECORD_NOT_WRITTEN, REPAIRED, REPOSITORYS_OWN,
+    NOT_REWRITTEN, NOT_SAWS, NOTED, OUT_OF_DATE, PRESERVED, PUT_BACK, RECORD_NOT_WRITTEN, REPAIRED, REPOSITORYS_OWN,
     RESTORED, RUNS_FROM_ELSEWHERE, SAVED_COPY_IN_THE_WAY, SET_ASIDE, SETTINGS_NOT_SET, SETTINGS_SWITCHED_OFF,
     SETTLED as _SETTLED, STILL_IN_SETTINGS, UNREAD, UNVERIFIED, UPDATED, WRITTEN, YOUR_PUSH_HOOK_KEPT,
     YOURS_RUNS_AFTER, Action, lines as _outcome_lines)
@@ -295,7 +295,7 @@ def why_saws_hooks_may_not_run() -> hook_status.Obstacle | None:
             f"git is set to run every repository's hooks from {textsafe.plain(hp, limit=4096)}, "
             "so saw's hooks will not run." + (also or ("" if git_runs_settings_hooks() else
                                                        " Update git to 2.54 or later.")),
-            "")
+            "", hp)
     template = os.environ.get("GIT_TEMPLATE_DIR")
     if template is not None and not _same_path(os.path.expanduser(template), template_dir()):
         return hook_status.Obstacle(
@@ -671,7 +671,7 @@ def install(config_path: str | None = None, *, no_stream: bool = False,
     if done.problem is not None:
         print(f"error: {done.problem}", file=sys.stderr)
         if as_json:
-            _print_json(_posture(), [])
+            _print_json(_posture(here), [])
         return done.code
     config = os.path.abspath(config_path) if config_path else None
     settled = done.settled and not missing and not empty
@@ -686,7 +686,7 @@ def install(config_path: str | None = None, *, no_stream: bool = False,
                                    name_one="saw hook install")
     changed = [headline, *missing_lines, *([unnamed] if unnamed else []),
                *[text for text, _level in _outcome_lines(done.actions, again="saw hook install")]]
-    out = _begin_report(as_json, no_stream, changed)
+    out = _begin_report(as_json, no_stream, changed, here)
     if settled:
         print(_paint("✓ scan-on-clone installed", "ok", out)
               + " — future `git clone` / `git pull` will be scanned automatically.", file=out)
@@ -772,15 +772,18 @@ def _hooks_folder_problem(folder: str) -> str | None:
     return None
 
 
-def repair(*, no_stream: bool = False, as_json: bool = False) -> int:
+def repair(*, no_stream: bool = False, as_json: bool = False, standing_in: bool = False) -> int:
     """Put back every hook saw installs, wherever git runs it on this account, and move aside what
-    was found in its place or in saw's own directory."""
+    was found in its place or in saw's own directory. Takes whether streaming is off, whether JSON
+    was asked for, and whether saw's hooks in the repository the command runs in count too. Returns
+    the exit status."""
+    here = _repo_root() if standing_in else None
     recorded = hookscript.installed()
     if recorded is None:
         if not any(d.is_dir() for d, _ in _installed_hooks_dirs()) and not hookscript.seeded_repositories():
             sentence = "scan-on-clone has not seeded anything on this account; nothing to repair."
             if as_json:
-                _print_json(_posture(), [sentence])
+                _print_json(_posture(here), [sentence])
                 print(sentence, file=sys.stderr)
             else:
                 print(sentence, file=_tape(no_stream))
@@ -788,26 +791,26 @@ def repair(*, no_stream: bool = False, as_json: bool = False) -> int:
         print("error: saw has no record of what it installed here. Run `saw hook install` once "
               "(with -c if you used one) so it knows what to put back, then repair.", file=sys.stderr)
         if as_json:
-            _print_json(_posture(), [])
+            _print_json(_posture(here), [])
         return 2
     saw = recorded[0] if hookscript.runs(recorded[0]) else _saw_executable()
     if saw is None:
         print(f"error: {_NO_SAW_THAT_RUNS}", file=sys.stderr)
         if as_json:
-            _print_json(_posture(), [])
+            _print_json(_posture(here), [])
         return 2
     config = recorded[1]
     if config and not os.path.isfile(config):
         print("error: the config your hooks scan with is gone. Run `saw hook install -c <your config>`, "
               "then `saw hook repair`.", file=sys.stderr)
         if as_json:
-            _print_json(_posture(), [])
+            _print_json(_posture(here), [])
         return 2
     if config and not _config_usable(config):
         print("error: the config your hooks scan with cannot be read. Correct it, or run "
               "`saw hook install -c <your config>`, then `saw hook repair`.", file=sys.stderr)
         if as_json:
-            _print_json(_posture(), [])
+            _print_json(_posture(here), [])
         return 2
     template_dirs = _installed_hooks_dirs()
     actions: list[Action] = []
@@ -825,15 +828,16 @@ def repair(*, no_stream: bool = False, as_json: bool = False) -> int:
             actions += _settle_settings_hooks(saw, config)
             hooks_folder, folder_actions = _settle_hooks_folder(saw, config)
             actions += folder_actions
+            actions += _put_back_saws_copies(here, saw, config)
     except HookError as exc:
         print(f"error: {exc}", file=sys.stderr)
         if as_json:
-            _print_json(_posture(), [])
+            _print_json(_posture(here), [])
         return 2
     except OSError:
         print("error: not every hook could be put back. Run `saw hook repair` to try again.", file=sys.stderr)
         if as_json:
-            _print_json(_posture(), [])
+            _print_json(_posture(here), [])
         return 3
     if not hookscript.declare(saw, config, hookscript.installed_into(), _hooks_folders_to_record(hooks_folder)):
         actions.append(Action(UNVERIFIED, hookscript.declaration_path(), RECORD_NOT_WRITTEN))
@@ -841,7 +845,7 @@ def repair(*, no_stream: bool = False, as_json: bool = False) -> int:
     headline = ("✓ every hook saw installs is in place." if settled
                 else "Not every hook could be put back — see below. Nothing was deleted.")
     changed = [headline, *[text for text, _level in _outcome_lines(actions, again="saw hook repair")]]
-    out = _begin_report(as_json, no_stream, changed)
+    out = _begin_report(as_json, no_stream, changed, here)
     print(_paint(headline, "ok" if settled else "warn", out), file=out)
     _print_actions(actions, out, again="saw hook repair")
     return 0 if settled else 3
@@ -867,6 +871,80 @@ def _keep_seeded_current(saw: str, config: str | None, seeded_by: list[Path]) ->
             actions += [replace(a, repository=repo) for a in _repair_repository(d, saw, config)]
         except OSError:
             actions.append(Action(UNVERIFIED, repo, NOT_PUT_IN_PLACE, repo))
+    return actions
+
+
+def _hooks_folders_to_check(here: Path | None,
+                            tracked: list[tuple[Path, Path | None]]) -> list[tuple[Path, Path | None]]:
+    """List every hooks folder git runs saw's hooks from on this account and the one git runs for the
+    repository the command runs in. Takes that repository's root or None, and the folders
+    `hookscript.hook_folders()` found. Returns each folder once, with the repository its hooks run in,
+    or None."""
+    folders = list(tracked)
+    found = hookscript.repository_hooks_dir(here) if here is not None else None
+    if found is None:
+        return folders
+    for at, (folder, repository) in enumerate(folders):
+        if _same_path(found, folder):
+            folders[at] = (folder, repository or here)
+            return folders
+    return folders + [(found, here)]
+
+
+def _template_hooks_folders() -> list[Path]:
+    """List the template hooks folders `saw hook repair` puts saw's hooks back in: saw's own, the one
+    the record names and the one git is set to give new clones. Returns them."""
+    configured = _global_template_dir()
+    recorded = hookscript.installed_into()
+    return ([_hooks_dir()] + ([recorded] if recorded is not None else [])
+            + ([Path(configured) / "hooks"] if configured and os.path.isabs(configured) else []))
+
+
+def _why_saw_does_not_write(folder: Path, templates: list[Path]) -> str | None:
+    """Say why `saw hook repair` does not write saw's hooks in a hooks folder. Takes the folder and the
+    template hooks folders. Returns the reason, or None when repair rewrites them there."""
+    if folder.is_symlink() or folder.parent.is_symlink():
+        return "is a link"
+    if any(_same_path(folder, template) for template in templates):
+        return None
+    if _inside_what_saw_keeps(folder):
+        return "lies inside a folder saw keeps for itself"
+    if hookscript.inside_a_git_directory(folder if folder.is_dir() else folder.parent):
+        return None
+    return _hooks_folder_problem(str(folder))
+
+
+def _left_by_repair(paths: list[Path], reasons: dict[Path, str | None]) -> list[Path]:
+    """List the files whose hooks folder `saw hook repair` does not write. Takes the files and the
+    reason already found for each folder, which it extends. Returns those files."""
+    unjudged = {path.parent for path in paths} - reasons.keys()
+    templates = _template_hooks_folders() if unjudged else []
+    for folder in unjudged:
+        reasons[folder] = _why_saw_does_not_write(folder, templates)
+    return [path for path in paths if reasons[path.parent]]
+
+
+_REWRITTEN_BY_REPAIR = frozenset({hookscript.ALTERED, hookscript.STALE, hookscript.OUTDATED})
+
+
+def _put_back_saws_copies(here: Path | None, saw: str, config: str | None) -> list[Action]:
+    """Put back saw's hooks that are changed or out of date in every hooks folder `saw hook status`
+    reads and saw writes, leaving what is not saw's. Takes the root of the repository the command runs
+    in or None, the saw executable and the operator config. Returns what was done, with each file in a
+    folder saw does not write and the reason."""
+    actions: list[Action] = []
+    templates = _template_hooks_folders()
+    for folder, repository in _hooks_folders_to_check(here, hookscript.hook_folders()):
+        to_rewrite = [folder / event for event in _HOOKS
+                      if hookscript.verdict(folder / event, (saw, config)) in _REWRITTEN_BY_REPAIR]
+        if not to_rewrite:
+            continue
+        reason = _why_saw_does_not_write(folder, templates)
+        if reason is not None:
+            actions += [Action(UNVERIFIED, path, NOT_REWRITTEN, repository, reason) for path in to_rewrite]
+            continue
+        actions += [replace(a, repository=repository)
+                    for a in _repair_repository(folder, saw, config, restore=False)]
     return actions
 
 
@@ -1094,8 +1172,9 @@ def _remove_from_repositories(expected, handled: list[Path]) -> tuple[bool, list
 _PLAIN_PROBLEM = frozenset({"no-record", "disabled-by-env", "older-git"})
 
 
-def _posture() -> hook_status.Posture:
-    """Read whether scan-on-clone is in place and what would stop it. Returns that posture."""
+def _posture(here: Path | None = None) -> hook_status.Posture:
+    """Read whether scan-on-clone is in place and what would stop it. Takes the root of the repository
+    the command runs in, or None. Returns that posture."""
     existing = _global_template_dir()
     hooks_dir = Path(existing) / "hooks" if existing else _hooks_dir()
     present = [event for event in _HOOKS if _is_ours(hooks_dir / event)]
@@ -1116,25 +1195,49 @@ def _posture() -> hook_status.Posture:
             "saw has no record of what it installed here; run `saw hook install` once "
             "(with -c if you used one) so `saw hook repair` knows what to put back.",
             "saw hook install"))
-    if not hookscript.recorded_saw_runs():
+    recorded_runs = hookscript.recorded_saw_runs()
+    if not recorded_runs:
         problems.append(hook_status.problem(
             "stale-binary-path",
             "the saw your hooks run is gone or cannot run. Run `saw hook repair` so clones "
             "are scanned again.",
             "saw hook repair"))
+    tracked = hookscript.hook_folders()
+    fix, fix_in_words = _put_back_command(recorded)
+    reasons: dict[Path, str | None] = {}
+    dead = [(path, saw) for folder, repository in _hooks_folders_to_check(here, tracked)
+            for path, saw in hookscript.copies_that_cannot_run(folder, repository)]
+    dead_left = _left_by_repair([path for path, _ in dead], reasons)
+    cannot_run = [path for path, saw in dead
+                  if path not in dead_left and (recorded_runs or saw != recorded[0])]
+    if cannot_run:
+        problems.append(hook_status.problem(
+            "hook-copy-cannot-run",
+            f"{len(cannot_run)} of saw's hook file(s) call a saw that cannot run. Run {fix_in_words}.",
+            fix))
     if recorded and recorded[1] and not _config_usable(recorded[1]):
         problems.append(hook_status.problem(
             "config-gone",
             "the config your hooks scan with is gone, so clones are scanned without your "
             "allowlist. Run `saw hook install -c <your config>`.",
             "saw hook install -c <your config>"))
-    altered = hookscript.altered_hooks()
+    altered = hookscript.altered_hooks(dirs=[folder for folder, _ in tracked])
+    altered_left = _left_by_repair(altered, reasons)
+    altered = [path for path in altered if path not in altered_left]
     if altered:
         problems.append(hook_status.problem(
             "altered-hooks",
             f"{len(altered)} file(s) are not what saw installs, where saw's hooks run "
-            "— see `saw audit`; put them back with `saw hook repair`.",
-            "saw hook repair"))
+            f"— see `saw audit`. {fix_in_words} puts them back.",
+            fix))
+    obstacle = why_saws_hooks_may_not_run()
+    named = Path(os.path.expanduser(obstacle.folder)) if obstacle is not None and obstacle.folder else None
+    left = _folders_repair_does_not_write(dead_left, altered_left)
+    folded = next((entry for entry in left if named is not None and _same_path(entry[0], named)), None)
+    problems += [hook_status.problem(
+        "hooks-saw-does-not-rewrite",
+        _not_written(f"in {_shown(str(folder))}", count, changed, reasons[folder], fix_in_words), "")
+        for folder, count, changed in left if (folder, count, changed) != folded]
     if installed and not existing:
         problems.append(hook_status.problem(
             "clones-not-seeded",
@@ -1145,11 +1248,38 @@ def _posture() -> hook_status.Posture:
             "disabled-by-env",
             "SAW_HOOK_DISABLED is set — the hook is currently a no-op.",
             ""))
-    obstacle = why_saws_hooks_may_not_run()
     if obstacle is not None:
-        problems.append(hook_status.problem(obstacle.code, obstacle.message, obstacle.repair))
+        also = (" " + _not_written("there", folded[1], folded[2], reasons[folded[0]], fix_in_words)
+                if folded else "")
+        problems.append(hook_status.problem(obstacle.code, obstacle.message + also, obstacle.repair))
     return hook_status.Posture(installed, tuple(present), tuple(via), env.hook_disabled(),
                                tuple(problems))
+
+
+def _put_back_command(recorded: tuple[str, str | None] | None) -> tuple[str, str]:
+    """Name the command that puts saw's hooks back. Takes what was recorded at install, or None. Returns
+    the command line and the words a sentence names it with."""
+    if recorded:
+        return "saw hook repair", "`saw hook repair`"
+    return "saw hook install && saw hook repair", "`saw hook install`, then `saw hook repair`"
+
+
+def _folders_repair_does_not_write(dead: list[Path], altered: list[Path]) -> list[tuple[Path, int, bool]]:
+    """Group the files `saw hook repair` does not write by hooks folder. Takes the files that call a saw
+    that cannot run and those that are not what saw installs. Returns each folder with how many of them
+    it holds and whether any is not what saw installs."""
+    return [(folder, len({path for path in dead + altered if path.parent == folder}),
+             any(path.parent == folder for path in altered))
+            for folder in sorted({path.parent for path in dead + altered})]
+
+
+def _not_written(where: str, count: int, changed: bool, reason: str | None, fix_in_words: str) -> str:
+    """Write the sentence for saw's hook files in a folder `saw hook repair` does not write. Takes where
+    they are in words, how many, whether any is not what saw installs, the reason and the words naming
+    the command that puts saw's hooks back. Returns the sentence."""
+    audit = " — see `saw audit`" if changed else ""
+    return (f"{count} of saw's hook file(s) {where} are not what saw installs{audit}, and saw does not "
+            f"write there: it {reason}. Correct that, then run {fix_in_words}.")
 
 
 def _write_status(posture: hook_status.Posture, out) -> None:
@@ -1172,19 +1302,22 @@ def _print_json(posture: hook_status.Posture, changed: list[str] | None) -> None
     print(json.dumps(versioned("hook-status", hook_status.as_dict(posture, changed)), indent=2))
 
 
-def _begin_report(as_json: bool, no_stream: bool, changed: list[str]):
-    """Start a hook report. Takes whether JSON was asked for, whether streaming is off, and what
-    changed. Prints the document when JSON was asked for and returns the stream for the report."""
+def _begin_report(as_json: bool, no_stream: bool, changed: list[str], here: Path | None = None):
+    """Start a hook report. Takes whether JSON was asked for, whether streaming is off, what changed,
+    and the root of the repository the command runs in, or None. Prints the document when JSON was
+    asked for and returns the stream for the report."""
     if as_json:
-        _print_json(_posture(), changed)
+        _print_json(_posture(here), changed)
         return _tape(no_stream, sys.stderr)
     return _tape(no_stream)
 
 
-def status(*, no_stream: bool = False, as_json: bool = False) -> int:
-    """Report whether scan-on-clone is active and what would stop it. Returns the exit status."""
+def status(*, no_stream: bool = False, as_json: bool = False, standing_in: bool = False) -> int:
+    """Report whether scan-on-clone is active and what would stop it. Takes whether streaming is off,
+    whether JSON was asked for, and whether saw's hooks in the repository the command runs in count
+    too. Returns the exit status."""
     with busy("checking scan-on-clone…", no_stream=no_stream):
-        posture = _posture()
+        posture = _posture(_repo_root() if standing_in else None)
     if as_json:
         _print_json(posture, None)
         out = _tape(no_stream, sys.stderr)

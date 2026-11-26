@@ -71,12 +71,12 @@ class AnUpdateWithNamesThatAreHardToCopy(_TrackingCheckout):
         self._held(answer, code)
 
     def test_a_copy_that_could_not_be_written_keeps_the_update_from_reading_clean(self):
-        real = blob_copies._write
+        real = blob_copies.atomicwrite.replace
 
-        def refuse_one(where, data):
-            return False if where.name == "new.txt" else real(where, data)
+        def refuse_one(where, data, **kwargs):
+            return False if where.name == "new.txt" else real(where, data, **kwargs)
 
-        with mock.patch.object(blob_copies, "_write", side_effect=refuse_one):
+        with mock.patch.object(blob_copies.atomicwrite, "replace", side_effect=refuse_one):
             answer, code = self._prepare()
         self.assertIn("new.txt", answer["scan"]["results"][0]["error"])
         self._held(answer, code)
@@ -110,15 +110,14 @@ class CopyingOutByBlob(GitSandbox):
         self.assertEqual(sorted(name for _folder, names in copies.folders for name in names
                                 if name != "other.js"), ["Loader.js", "loader.js"])
 
-    def test_on_windows_each_name_reads_back_its_bytes_untranslated(self):
+    def test_each_name_reads_back_its_bytes_untranslated(self):
         repo = self.new_repo()
         for name, data in (("Loader.js", b"eval(1);\r\n"), ("loader.js", b"a\r\nb\x1ac\n"), ("other.js", b"x\n")):
             blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input=data,
                                   capture_output=True, check=True).stdout.decode().strip()
             self.git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{name}")
         self.git(repo, "commit", "-qm", "twins")
-        with mock.patch.object(blob_copies, "ON_WINDOWS", True):
-            copies = blob_copies.copy_out(repo, self.rev(repo), ("Loader.js", "loader.js", "other.js"), "twins")
+        copies = blob_copies.copy_out(repo, self.rev(repo), ("Loader.js", "loader.js", "other.js"), "twins")
         self.assertEqual(copies.not_copied, ())
         placed = {name: (folder / name).read_bytes() for folder, names in copies.folders for name in names}
         self.assertEqual(placed, {"Loader.js": b"eval(1);\r\n", "loader.js": b"a\r\nb\x1ac\n", "other.js": b"x\n"})

@@ -297,6 +297,12 @@ class TestHook(unittest.TestCase):
         self.assertTrue(m.called)
         cli.main(["hook", "status", "--no-stream"])
         self.assertTrue(m.call_args.kwargs["no_stream"])
+        self.assertTrue(m.call_args.kwargs["standing_in"])
+
+    @mock.patch("stayawake.bots.security.hook.repair", return_value=0)
+    def test_repair_counts_the_repository_it_runs_in(self, m):
+        self.assertEqual(cli.main(["hook", "repair", "--no-stream"]), 0)
+        self.assertTrue(m.call_args.kwargs["standing_in"])
 
     @mock.patch("stayawake.bots.security.hook.install", return_value=0)
     def test_install_passes_no_stream(self, m):

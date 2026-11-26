@@ -16,7 +16,7 @@ from stayawake.bots.security.dependencies import db
 from stayawake.bots.security.harden import live
 from stayawake.bots.security.hygiene.autorun import baseline
 from stayawake.lib import github_app
-from stayawake.utils import atomicwrite, io, pathsafe
+from stayawake.utils import atomicwrite, folders_posix, io, pathsafe
 
 
 class _Sandbox(unittest.TestCase):
@@ -28,7 +28,7 @@ class _Sandbox(unittest.TestCase):
         self.elsewhere.mkdir()
 
     def as_root(self):
-        patched = mock.patch.object(pathsafe, "trusted_link_owners", return_value={0})
+        patched = mock.patch.object(folders_posix, "trusted_link_owners", return_value={0})
         patched.start()
         self.addCleanup(patched.stop)
 
@@ -291,7 +291,7 @@ class TestAMoveBetweenDisksCopiesWhole(_Sandbox):
             if kwargs.get("dst_dir_fd") is not None:
                 raise OSError(errno.EXDEV, "cross-device")
             return real_rename(src, dst, *args, **kwargs)
-        with mock.patch.object(atomicwrite.os, "rename", side_effect=across_disks):
+        with mock.patch.object(folders_posix.os, "rename", side_effect=across_disks):
             atomicwrite.move_into(source, self.base / "kept", "hooks")
         moved = self.base / "kept" / "hooks" / "inner"
         self.assertFalse(source.exists())

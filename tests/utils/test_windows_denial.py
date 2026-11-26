@@ -2,6 +2,7 @@
 """A Windows denial is graded from the account that holds it, and asked of the system's own program."""
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,19 @@ class TestWhoHoldsIt(unittest.TestCase):
         self.assertEqual(winlock.grade("S-1-5-21-2", acting), "other")
         self.assertEqual(winlock.grade(None, acting), "other")
 
+    def test_a_link_is_trusted_only_from_the_system_an_administrator_or_the_acting_account(self):
+        acting = "S-1-5-21-1"
+        for owner in (winlock.SYSTEM, winlock.ADMINISTRATORS, acting):
+            self.assertTrue(winlock.trusted_owner(owner, acting, False), owner)
+        for owner in ("S-1-5-21-2", "S-1-5-32-545", "", None):
+            self.assertFalse(winlock.trusted_owner(owner, acting, False), owner)
+
+    def test_as_an_administrator_the_acting_accounts_own_link_is_not_trusted(self):
+        acting = "S-1-5-21-1"
+        self.assertFalse(winlock.trusted_owner(acting, acting, True))
+        for owner in (winlock.SYSTEM, winlock.ADMINISTRATORS):
+            self.assertTrue(winlock.trusted_owner(owner, acting, True), owner)
+
     def test_a_denial_is_graded_from_that_account(self):
         with tempfile.TemporaryDirectory() as folder:
             with mock.patch.object(hostdenial.sys, "platform", "win32"), \
@@ -28,6 +42,14 @@ class TestWhoHoldsIt(unittest.TestCase):
                  mock.patch.object(hostdenial.winlock, "current_sid", return_value="S-1-5-21-1"):
                 self.assertEqual(hostdenial.held_by(Path(folder)), hostdenial.ROOT_HELD)
 
+
+
+@unittest.skipUnless(os.name == "nt", "the account is read from Windows itself")
+class TestTheAccountThisProcessRunsAsIsRead(unittest.TestCase):
+    def test_the_acting_account_is_named(self):
+        sid = winlock.current_sid()
+        self.assertIsNotNone(sid)
+        self.assertTrue(sid.upper().startswith("S-1-5-"), sid)
 
 class TestTheDenialIsAskedOfTheSystemProgram(unittest.TestCase):
     def test_the_account_is_denied_adding_anything(self):
