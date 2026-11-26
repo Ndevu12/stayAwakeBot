@@ -71,7 +71,7 @@ def _answer_before_replay(folder: Path, command: TypedCommand, brings_no_files: 
     """Answer a git command before it is replayed, whatever repository it acts on. Takes where it
     runs, the command and whether the stand-in reads it as one that brings no files. Returns the
     answer, or None for a command saw replays."""
-    top = _top(folder)
+    top = top_of_working_tree(folder)
     runs = runs_from_the_folder.settings_running_working_tree_files(folder, top, command.settings)
     if runs:
         return Answer(ASKS, _runs(runs))
@@ -260,7 +260,7 @@ def _runs(settings: tuple[str, ...]) -> str:
             "check them first")
 
 
-def _top(folder: Path) -> "Path | None":
+def top_of_working_tree(folder: Path) -> "Path | None":
     """Find the top of the working tree a folder is in. Takes the folder. Returns it, or None."""
     top = stdout(folder, ["rev-parse", "--show-toplevel"], context=UNTRUSTED).strip()
     return Path(top) if top else None

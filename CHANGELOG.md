@@ -26,6 +26,9 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - `saw govern` never deletes a folder named as its holding directory: it refuses one inside any git
   repository or holding files it did not put there, and clears only what it put there.
+- In a terminal `saw govern install` covers, an update saw holds where there is no one to ask, such
+  as in a shell an agent runs, can now be let in: run `saw govern let-in` in a terminal, and saw
+  checks the same command again and asks you. The command it printed before could not let it in.
 
 ## [0.17.7] - 2026-11-26
 

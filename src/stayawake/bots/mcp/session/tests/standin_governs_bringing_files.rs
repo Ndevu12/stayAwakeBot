@@ -16,6 +16,7 @@ struct Fixture {
     dir: PathBuf,
     real_log: PathBuf,
     apply_log: PathBuf,
+    prepare_log: PathBuf,
     real_git: PathBuf,
     saw: PathBuf,
     holding: PathBuf,
@@ -28,6 +29,7 @@ impl Fixture {
         fs::create_dir_all(&dir).unwrap();
         let real_log = dir.join("real.log");
         let apply_log = dir.join("apply.log");
+        let prepare_log = dir.join("prepare.log");
         let real_git = dir.join("real-git");
         exec_script(&real_git, &format!("#!/bin/sh\necho \"$@\" >> {:?}\n", real_log));
         let saw = dir.join("fake-saw");
@@ -37,8 +39,9 @@ impl Fixture {
                 "#!/bin/sh\n\
                  if [ \"$1\" = scan ]; then echo scanned >> {:?}; exit 0; fi\n\
                  if [ \"$2\" = prepare ]; then\n\
+                 \tfor a in \"$@\"; do printf '[%s]' \"$a\"; done >> {:?}; echo >> {:?}\n\
                  \tif [ -n \"$SAW_FAKE_PASSTHROUGH\" ]; then echo '{{\"passthrough\":true,\"reason\":\"the command brings no files in\"}}'; exit 0; fi\n\
-                 \tif [ -n \"$SAW_FAKE_LET_IN\" ]; then echo '{{\"scan\":{{\"results\":[{{\"verdict\":\"suspicious\"}}]}},\"next_steps\":[\"Check .claude/settings.json\"],\"decision\":{{\"choices\":[\"let-in\",\"leave-unchanged\"],\"let_in\":[\"saw\",\"govern\",\"apply\",\"--accept\",\"c0ffee\"],\"confirm\":\"yes\"}}}}'; exit 0; fi\n\
+                 \tif [ -n \"$SAW_FAKE_LET_IN\" ]; then later=''; case \"$*\" in *--no-one-to-ask*) later=',\"let_in_later\":[\"saw\",\"govern\",\"let-in\"]';; esac; printf '%s%s}}}}\\n' '{{\"scan\":{{\"results\":[{{\"verdict\":\"suspicious\"}}]}},\"next_steps\":[\"Check .claude/settings.json\"],\"decision\":{{\"choices\":[\"let-in\",\"leave-unchanged\"],\"let_in\":[\"saw\",\"govern\",\"apply\",\"--accept\",\"c0ffee\"],\"confirm\":\"yes\"' \"$later\"; exit 0; fi\n\
                  \tif [ -n \"$SAW_FAKE_UNCHECKED\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{\"choices\":[\"run-as-typed\",\"leave-unchanged\"]}}}}'; exit 2; fi\n\
                  \tif [ -n \"$SAW_FAKE_NO_CHOICES\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{}}}}'; exit 2; fi\n\
                  \tif [ -n \"$SAW_FAKE_CHECKED_LEFT_OUT\" ]; then echo '{{\"scan\":{{\"any_error\":false,\"results\":[{{\"verdict\":\"clean\"}}]}},\"reason\":\"the update stops for conflicts that cannot be brought into the folder\",\"decision\":{{}}}}'; exit 2; fi\n\
@@ -49,11 +52,11 @@ impl Fixture {
                  fi\n\
                  if [ \"$2\" = apply ]; then echo applied >> {:?}; echo '{{\"applied\":true}}'; exit 0; fi\n\
                  exit 1\n",
-                apply_log, apply_log
+                apply_log, prepare_log, prepare_log, apply_log
             ),
         );
         let holding = dir.join("holding");
-        Fixture { dir: dir.clone(), real_log, apply_log, real_git, saw, holding }
+        Fixture { dir: dir.clone(), real_log, apply_log, prepare_log, real_git, saw, holding }
     }
 
     fn run(&self, args: &[&str], activated: bool, saw_present: bool, held: bool) -> std::process::ExitStatus {
@@ -184,6 +187,89 @@ fn system_mode_holds_an_infected_update_without_running_raw_git_and_cleans_up() 
     assert!(!f.applied(), "a held update is not applied");
     assert!(!f.real_ran(), "the raw git must not run for a held update");
     assert_eq!(fs::read_dir(&tmp).unwrap().count(), 0, "the held update's holding must be removed");
+}
+
+fn prepared(f: &Fixture) -> String {
+    fs::read_to_string(&f.prepare_log).unwrap_or_default()
+}
+
+#[test]
+fn system_mode_names_saws_let_in_for_a_held_update_with_no_one_to_ask() {
+    let f = Fixture::new("system-held-unattended");
+    let tmp = f.dir.join("systmp");
+    fs::create_dir_all(&tmp).unwrap();
+    let out = Command::new(STANDIN)
+        .args(["pull"])
+        .current_dir(&f.dir)
+        .env("SAW_STANDIN_TOOL", "git")
+        .env("SAW_REAL_GIT", &f.real_git)
+        .env("PATH", &f.dir)
+        .env("SAW_BIN", &f.saw)
+        .env("TMPDIR", &tmp)
+        .env("SAW_GOVERN_SYSTEM", "1")
+        .env_remove("SAW_GOVERN_HOLDING")
+        .env("SAW_FAKE_LET_IN", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_ne!(out.status.code(), Some(0));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("saw held this update for review and nothing changed. To review it and let it in: \
+                           saw govern let-in"), "{said}");
+    assert!(!said.contains("--into") && !said.contains("govern apply"), "it named a holding directory: {said}");
+    assert!(prepared(&f).contains("[--no-one-to-ask]"), "saw was not told no one can be asked");
+    assert_eq!(fs::read_dir(&tmp).unwrap().count(), 0, "the held update's holding must be removed");
+    assert!(!f.real_ran() && !f.applied());
+}
+
+/// Run the stand-in by its own name with `git` and the arguments, in a terminal saw does not cover.
+fn run_by_its_own_name(f: &Fixture, args: &[&str], saw: &Path, fake: &str) -> std::process::Output {
+    let plain = f.dir.join("plain");
+    fs::create_dir_all(&plain).unwrap();
+    let _ = std::os::unix::fs::symlink(&f.real_git, plain.join("git"));
+    Command::new(STANDIN)
+        .arg("git")
+        .args(args)
+        .current_dir(&f.dir)
+        .env("PATH", &plain)
+        .env("SAW_BIN", saw)
+        .env("TMPDIR", &f.dir)
+        .env(fake, "1")
+        .env_remove("SAW_STANDIN_TOOL")
+        .env_remove("SAW_GOVERN_SYSTEM")
+        .env_remove("SAW_GOVERN_HOLDING")
+        .env_remove("SAW_REAL_GIT")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn named_by_itself_it_has_saw_check_the_command_in_a_terminal_saw_does_not_cover() {
+    let f = Fixture::new("own-name-held");
+    let out = run_by_its_own_name(&f, &["pull"], &f.saw, "SAW_FAKE_LET_IN");
+    assert_ne!(out.status.code(), Some(0));
+    assert!(prepared(&f).contains("[--tool][git][--][pull]"), "saw was not asked: {}", prepared(&f));
+    assert!(!f.real_ran(), "the held update ran unchecked");
+    assert!(!f.applied(), "a held update was let in without the user");
+}
+
+#[test]
+fn named_by_itself_it_runs_the_real_git_on_the_path_when_saw_says_so() {
+    let f = Fixture::new("own-name-passthrough");
+    let out = run_by_its_own_name(&f, &["switch", "-c", "try"], &f.saw, "SAW_FAKE_PASSTHROUGH");
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(f.real_ran(), "the real git on the path did not run");
+}
+
+#[test]
+fn named_by_itself_it_never_runs_the_command_unchecked_when_saw_cannot_answer() {
+    let f = Fixture::new("own-name-no-saw");
+    let out = run_by_its_own_name(&f, &["pull"], &f.dir.join("no-such-saw"), "SAW_FAKE_LET_IN");
+    assert_ne!(out.status.code(), Some(0));
+    assert!(!f.real_ran(), "the command ran unchecked without saw");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("could not be checked"), "{said}");
 }
 
 #[test]
@@ -325,6 +411,7 @@ fn a_held_update_is_never_let_in_from_the_environment() {
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(said.contains("Check .claude/settings.json"), "{said}");
     assert!(said.contains("govern apply --accept c0ffee"), "{said}");
+    assert!(!prepared(&f).contains("[--no-one-to-ask]"), "a placer's check was kept for let-in");
 }
 
 #[test]
