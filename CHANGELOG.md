@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.17.7] - 2026-11-26
+
 ### Fixed
 - On Windows, a scan of a folder finds an editor task that runs a package.json script carrying a
   payload, as it does on macOS and Linux.
@@ -2139,7 +2141,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.6...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.7...HEAD
+[0.17.7]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.6...v0.17.7
 [0.17.6]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.5...v0.17.6
 [0.17.5]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.4...v0.17.5
 [0.17.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.3...v0.17.4
