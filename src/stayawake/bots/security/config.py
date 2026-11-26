@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from stayawake.utils.config import load_yaml
+from stayawake.lib.git.object_id import full_object_id
 from stayawake.bots.security.resolution import DEFAULT_CONFIG
 
 
@@ -19,7 +20,8 @@ def _announce(source: str | Path, cfg: dict) -> None:
         print(f"config: {source} ({len(rules)} allowlist rule(s) in effect)", file=sys.stderr)
 
 
-ALLOWLIST_SHAPE = "config `allowlist` must be a list of {signature, path_glob} mappings."
+ALLOWLIST_SHAPE = ("config `allowlist` must be a list of {signature, path_glob} or {signature, "
+                   "commit} mappings, each commit named by its full id.")
 
 
 def usable(config_path: str) -> bool:
@@ -34,9 +36,19 @@ def usable(config_path: str) -> bool:
 
 def allowlist_ok(cfg: dict) -> bool:
     """Tell whether a config's allowlist can be applied. Takes the config. Returns True when it is a
-    list of mappings."""
+    list of rules saw applies."""
     rules = cfg.get("allowlist") or []
-    return isinstance(rules, list) and all(isinstance(rule, dict) for rule in rules)
+    return isinstance(rules, list) and all(_rule_ok(rule) for rule in rules)
+
+
+def _rule_ok(rule) -> bool:
+    """Check that one allowlist rule is a mapping naming at most one of `path_glob` and `commit`, any
+    commit by its full id. Takes the rule. Returns whether it is."""
+    if not isinstance(rule, dict):
+        return False
+    if "commit" not in rule:
+        return True
+    return "path_glob" not in rule and full_object_id(rule["commit"]) is not None
 
 
 def _installed_with() -> str | None:
