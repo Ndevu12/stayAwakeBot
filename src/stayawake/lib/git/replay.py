@@ -14,7 +14,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from stayawake.lib.git import exec_keys, owned, subcommand_options
+from stayawake.lib.git import exec_keys, holding_directory, owned, subcommand_options
 from stayawake.lib.git.borrowed import carried_attributes, write_alternates
 from stayawake.lib.git.contexts import KEY_PREFIXES_A_CALLER_MAY_NOT_SET, KEYS_A_CALLER_MAY_NOT_SET
 from stayawake.lib.git.run import (LOCAL_TIMEOUT, OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run,
@@ -22,7 +22,7 @@ from stayawake.lib.git.run import (LOCAL_TIMEOUT, OPERATOR_CONFIG, OPERATOR_PUSH
 from stayawake.lib.git.typed_command import TypedCommand
 from stayawake.lib.git.write.branch import update_refs
 from stayawake.lib.git.write.working_tree import uncommitted_paths
-from stayawake.utils import folderlock, pathsafe
+from stayawake.utils import pathsafe
 
 NETWORK = frozenset({"pull", "fetch"})
 READS_STANDARD_INPUT = "a command that reads what you type cannot be checked"
@@ -301,26 +301,17 @@ def _same(one: Path, other: Path) -> bool:
     return os.path.realpath(one) == os.path.realpath(other)
 
 
-def _empty_keeping_the_hold(into: Path) -> None:
-    """Remove everything in the holding directory except a run's hold on it. Takes the directory."""
-    into.mkdir(parents=True, exist_ok=True)
-    for child in into.iterdir():
-        if child.name == folderlock.LOCK_NAME:
-            continue
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
-
-
 def reproduce(location: Location, into: Path, command: TypedCommand, *, with_files: bool) -> "Holding | str":
     """Make the copy a command replays in: borrowed objects, the refs, HEAD, operation state and
     index of its repository, and a working tree holding the folder's bytes. Takes the location, the
     holding directory, the command and whether the working tree is needed. Returns the copy, or a
     sentence when it could not be made."""
     into = Path(into)
-    _empty_keeping_the_hold(into)
-    bare, work = into / "repo.git", into / "work"
+    cleared = holding_directory.clear(into)
+    if cleared:
+        return cleared
+    into.mkdir(parents=True, exist_ok=True)
+    bare, work = into / holding_directory.REPOSITORY, into / holding_directory.WORK_TREE
     made = run(None, ["init", "--bare", "--quiet", f"--object-format={location.object_format}", "--template=",
                       str(bare)], context=SAW_OWNED)
     if made is None or made.returncode != 0:
@@ -358,11 +349,11 @@ def reproduce(location: Location, into: Path, command: TypedCommand, *, with_fil
         return "a place to check the update could not be made"
     base = stdout(bare, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], context=SAW_OWNED).strip()
     work.mkdir()
-    (into / "no-hooks").mkdir()
+    (into / holding_directory.NO_HOOKS).mkdir()
     (work / ".git").write_text(f"gitdir: {bare}\n", encoding="utf-8")
     owned.own(work)
     for key, value in (("core.bare", "false"), ("core.worktree", str(work)),
-                       ("core.hooksPath", str(into / "no-hooks")), ("core.precomposeUnicode", "false")):
+                       ("core.hooksPath", str(into / holding_directory.NO_HOOKS)), ("core.precomposeUnicode", "false")):
         if not run_ok(bare, ["config", key, value], context=SAW_OWNED):
             return "a place to check the update could not be made"
     if not _carry_tracking(location, command, bare):

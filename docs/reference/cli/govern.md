@@ -20,6 +20,9 @@ or its environment names. It scans each of them exactly as it would be written a
 verdict as the same document `saw scan --json` prints. Your open folder is not changed, and nothing
 from the incoming repository runs.
 
+Name a new or empty folder outside every git repository as the holding directory. saw refuses one
+inside a repository or holding files saw did not put there, and leaves that folder as it is.
+
 `--deadline SECONDS` stops the check in time; an unfinished check is yours to decide, as below.
 
 `saw govern apply` writes exactly what was checked into your open folder, without fetching again.
