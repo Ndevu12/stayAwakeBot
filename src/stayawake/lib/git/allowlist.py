@@ -15,7 +15,7 @@ UNTRUSTED_SUBCOMMANDS = frozenset({
     "cat-file", "ls-tree", "rev-list", "rev-parse", "for-each-ref", "show-ref", "merge-base",
     "diff", "diff-tree", "log", "show", "ls-files", "hash-object", "read-tree", "write-tree",
     "update-index", "commit-tree", "mktree", "update-ref", "config", "symbolic-ref", "remote",
-    "tag", "worktree", "check-attr",
+    "tag", "worktree", "check-attr", "ls-remote",
 })
 
 DIFF_SUBCOMMANDS = frozenset({"diff", "diff-tree", "log", "show"})
@@ -46,6 +46,7 @@ _REQUIRED_ONE_OF = {
     "hash-object": frozenset({"--no-filters"}),
     "update-index": frozenset({"--cacheinfo", "--index-info", "--force-remove", "--remove"}),
     "config": frozenset({"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l"}),
+    "ls-remote": frozenset({"--get-url"}),
     "tag": frozenset({"-l", "--list", "--points-at", "--contains", "--no-contains", "--merged",
                       "--no-merged"}),
 }

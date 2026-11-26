@@ -33,32 +33,6 @@ class Listed:
         return frozenset(name for name in every if name.startswith("--"))
 
 
-@dataclass(frozen=True)
-class Reading:
-    """A subcommand's arguments read by git's rules: its options as written with their values, its
-    words, the paths after `--`, and whether every option is one git lists, spelled in full."""
-
-    options: tuple[tuple[str, "str | None"], ...]
-    words: tuple[str, ...]
-    paths: tuple[str, ...]
-    known: bool
-
-    def names(self) -> list[str]:
-        """List the options as written, without their values."""
-        return [name for name, _value in self.options]
-
-    def last(self, *names: str) -> "str | None":
-        """Return which of `names` was given last, or None when none was."""
-        for name, _value in reversed(self.options):
-            if name in names:
-                return name
-        return None
-
-    def values(self, *names: str) -> list[str]:
-        """List the values given to any of `names`, in order."""
-        return [value for name, value in self.options if name in names and value is not None]
-
-
 _VALUE_KINDS = ("takes_the_next_word", "takes_the_rest_of_its_word", "takes_no_word")
 
 
@@ -102,66 +76,6 @@ SUBMODULE_WORDS_SAW_LEAVES_TO_YOU = frozenset({"add", "foreach"})
 SUBMODULE_WORDS_SAW_CHECKS = frozenset({"update"})
 
 
-def read(sub: str, args: list[str]) -> Reading:
-    """Split a subcommand's arguments the way git does. Takes the subcommand, as `LISTED` names it,
-    and the arguments after it. Returns the reading: an option saw does not list is read without a
-    value, unless it is the leading part of a long option that takes the next word."""
-    listed = LISTED.get(sub, Listed(frozenset()))
-    next_word = listed.takes_the_next_word
-    rest_of_word = listed.takes_the_rest_of_its_word
-    no_word = listed.takes_no_word
-    known = no_word is not None
-    options: list[tuple[str, str | None]] = []
-    words: list[str] = []
-    index = 0
-    options_end = False
-    while index < len(args):
-        arg = args[index]
-        index += 1
-        if arg == "--":
-            return Reading(tuple(options), tuple(words), tuple(args[index:]), known)
-        if options_end or arg == "-" or not arg.startswith("-"):
-            words.append(arg)
-            continue
-        if arg == "--end-of-options":
-            options_end = True
-            continue
-        if arg.startswith("--"):
-            name, joined, value = arg.partition("=")
-            if joined:
-                options.append((name, value))
-                known = known and (name in next_word or name in no_word)
-            elif name in next_word:
-                options.append((name, args[index] if index < len(args) else None))
-                known = known and index < len(args)
-                index += 1
-            elif no_word is not None and name in no_word:
-                options.append((name, None))
-            elif len(name) > 2 and any(option.startswith(name) for option in next_word if option.startswith("--")):
-                options.append((name, args[index] if index < len(args) else None))
-                known = False
-                index += 1
-            else:
-                options.append((name, None))
-                known = False
-            continue
-        bundle = arg[1:]
-        while bundle:
-            name, bundle = "-" + bundle[0], bundle[1:]
-            if name in next_word:
-                value = bundle or (args[index] if index < len(args) else None)
-                known = known and value is not None
-                index += 0 if bundle else 1
-                options.append((name, value))
-                break
-            if name in rest_of_word:
-                options.append((name, bundle or None))
-                break
-            options.append((name, None))
-            known = known and no_word is not None and name in no_word
-    return Reading(tuple(options), tuple(words), (), known)
-
-
 @dataclass(frozen=True)
 class Given:
     """An option git reads: how it is written, its full name, its value and whether that value is
@@ -185,10 +99,18 @@ def full_long_name(listed: Listed, written: str) -> "str | None":
 
 @dataclass(frozen=True)
 class Resolved:
-    """A subcommand's arguments up to `--`, read the way git reads them: its options and its words."""
+    """A subcommand's arguments read the way git reads them: its options, and its words, those after
+    `--` or `--end-of-options` included."""
 
     options: tuple[Given, ...]
     words: tuple[str, ...]
+
+    def last(self, *names: str) -> "str | None":
+        """Return which of the full `names` was given last, or None when none was."""
+        for option in reversed(self.options):
+            if option.name in names:
+                return option.name
+        return None
 
     def values(self, name: str) -> list[str]:
         """List the values given to the option with this full name, in order."""
@@ -196,10 +118,11 @@ class Resolved:
 
 
 def resolve(sub: str, args: list[str]) -> "Resolved | None":
-    """Read every option of a subcommand's arguments up to `--` or `--end-of-options` the way git
-    does: in full from a unique leading part, its `--no-` form, a bundle of short options, and a
-    value joined to it or in the next word. Takes the subcommand and its arguments. Returns its
-    options and words, None for an option git does not take or cannot tell apart."""
+    """Read a subcommand's arguments the way git does: each option up to `--` or `--end-of-options`
+    in full from a unique leading part, its `--no-` form, a bundle of short options, and a value
+    joined to it or in the next word. Each other argument is a word. Takes the subcommand and its
+    arguments. Returns its options and words, None for an option git does not take or cannot tell
+    apart."""
     listed = LISTED.get(sub)
     if listed is None or listed.takes_no_word is None:
         return None
@@ -211,6 +134,7 @@ def resolve(sub: str, args: list[str]) -> "Resolved | None":
         arg = args[index]
         index += 1
         if arg in ("--", "--end-of-options"):
+            words += args[index:]
             break
         if arg == "-" or not arg.startswith("-"):
             if not word_seen and f"{sub} {arg}" in LISTED:

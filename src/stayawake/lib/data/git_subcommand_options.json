@@ -154,7 +154,7 @@
     "fetch": {
       "takes_the_next_word": ["--deepen", "--depth", "--filter", "--jobs", "--negotiation-include", "--negotiation-restrict", "--negotiation-tip", "--recurse-submodules-default", "--refmap", "--server-option", "--shallow-exclude", "--shallow-since", "--submodule-prefix", "--upload-pack", "-j", "-o"],
       "takes_the_rest_of_its_word": [],
-      "takes_no_word": null
+      "takes_no_word": ["--all", "--append", "--atomic", "--auto-gc", "--auto-maintenance", "--dry-run", "--force", "--ipv4", "--ipv6", "--keep", "--multiple", "--negotiate-only", "--no-all", "--no-append", "--no-atomic", "--no-auto-gc", "--no-auto-maintenance", "--no-deepen", "--no-depth", "--no-dry-run", "--no-filter", "--no-force", "--no-jobs", "--no-keep", "--no-multiple", "--no-negotiate-only", "--no-negotiation-include", "--no-negotiation-restrict", "--no-negotiation-tip", "--no-porcelain", "--no-prefetch", "--no-progress", "--no-prune", "--no-prune-tags", "--no-quiet", "--no-recurse-submodules", "--no-recurse-submodules-default", "--no-server-option", "--no-set-upstream", "--no-shallow-exclude", "--no-shallow-since", "--no-show-forced-updates", "--no-stdin", "--no-submodule-prefix", "--no-tags", "--no-update-head-ok", "--no-update-shallow", "--no-upload-pack", "--no-verbose", "--no-write-commit-graph", "--no-write-fetch-head", "--porcelain", "--prefetch", "--progress", "--prune", "--prune-tags", "--quiet", "--recurse-submodules", "--refetch", "--set-upstream", "--show-forced-updates", "--stdin", "--tags", "--unshallow", "--update-head-ok", "--update-shallow", "--verbose", "--write-commit-graph", "--write-fetch-head", "-4", "-6", "-P", "-a", "-f", "-k", "-m", "-n", "-p", "-q", "-t", "-u", "-v"]
     },
     "for-each-ref": {
       "takes_the_next_word": ["--contains", "--count", "--exclude", "--format", "--merged", "--no-contains", "--no-merged", "--points-at", "--sort", "--start-after"],
@@ -213,7 +213,7 @@
     "merge": {
       "takes_the_next_word": ["--cleanup", "--file", "--into-name", "--message", "--strategy", "--strategy-option", "-F", "-X", "-m", "-s"],
       "takes_the_rest_of_its_word": ["-S"],
-      "takes_no_word": null
+      "takes_no_word": ["--abort", "--allow-unrelated-histories", "--autostash", "--commit", "--compact-summary", "--continue", "--edit", "--ff", "--ff-only", "--gpg-sign", "--log", "--no-abort", "--no-allow-unrelated-histories", "--no-autostash", "--no-cleanup", "--no-commit", "--no-compact-summary", "--no-continue", "--no-edit", "--no-ff", "--no-gpg-sign", "--no-into-name", "--no-log", "--no-message", "--no-overwrite-ignore", "--no-progress", "--no-quiet", "--no-quit", "--no-rerere-autoupdate", "--no-signoff", "--no-squash", "--no-stat", "--no-strategy", "--no-strategy-option", "--no-summary", "--no-verbose", "--no-verify", "--no-verify-signatures", "--overwrite-ignore", "--progress", "--quiet", "--quit", "--rerere-autoupdate", "--signoff", "--squash", "--stat", "--summary", "--verbose", "--verify", "--verify-signatures", "-e", "-n", "-q", "-v"]
     },
     "merge-base": {
       "takes_the_next_word": [],
@@ -311,7 +311,7 @@
     "pull": {
       "takes_the_next_word": ["--cleanup", "--deepen", "--depth", "--negotiation-include", "--negotiation-restrict", "--negotiation-tip", "--refmap", "--server-option", "--shallow-exclude", "--shallow-since", "--strategy", "--strategy-option", "--upload-pack", "-X", "-o", "-s"],
       "takes_the_rest_of_its_word": ["-S", "-j", "-r"],
-      "takes_no_word": null
+      "takes_no_word": ["--all", "--allow-unrelated-histories", "--append", "--autostash", "--commit", "--compact-summary", "--dry-run", "--edit", "--ff", "--ff-only", "--force", "--gpg-sign", "--ipv4", "--ipv6", "--jobs", "--keep", "--log", "--no-all", "--no-allow-unrelated-histories", "--no-append", "--no-autostash", "--no-cleanup", "--no-commit", "--no-compact-summary", "--no-deepen", "--no-depth", "--no-dry-run", "--no-edit", "--no-ff", "--no-force", "--no-gpg-sign", "--no-ipv4", "--no-ipv6", "--no-jobs", "--no-keep", "--no-log", "--no-negotiation-include", "--no-negotiation-restrict", "--no-negotiation-tip", "--no-progress", "--no-prune", "--no-quiet", "--no-rebase", "--no-recurse-submodules", "--no-server-option", "--no-set-upstream", "--no-shallow-exclude", "--no-shallow-since", "--no-show-forced-updates", "--no-signoff", "--no-squash", "--no-stat", "--no-strategy", "--no-strategy-option", "--no-summary", "--no-tags", "--no-update-shallow", "--no-upload-pack", "--no-verbose", "--no-verify", "--no-verify-signatures", "--progress", "--prune", "--quiet", "--rebase", "--recurse-submodules", "--set-upstream", "--show-forced-updates", "--signoff", "--squash", "--stat", "--summary", "--tags", "--unshallow", "--update-shallow", "--verbose", "--verify", "--verify-signatures", "-4", "-6", "-a", "-f", "-k", "-n", "-p", "-q", "-t", "-v"]
     },
     "push": {
       "takes_the_next_word": ["--exec", "--push-option", "--receive-pack", "--recurse-submodules", "--repo", "-o"],
@@ -333,7 +333,7 @@
     "rebase": {
       "takes_the_next_word": ["--empty", "--exec", "--onto", "--strategy", "--strategy-option", "--trailer", "--whitespace", "-C", "-X", "-s", "-x"],
       "takes_the_rest_of_its_word": ["-S", "-r"],
-      "takes_no_word": null
+      "takes_no_word": ["--abort", "--allow-empty-message", "--apply", "--autosquash", "--autostash", "--committer-date-is-author-date", "--continue", "--edit-todo", "--ff", "--force-rebase", "--fork-point", "--gpg-sign", "--ignore-date", "--ignore-whitespace", "--interactive", "--keep-base", "--keep-empty", "--merge", "--no-allow-empty-message", "--no-autosquash", "--no-autostash", "--no-committer-date-is-author-date", "--no-exec", "--no-ff", "--no-force-rebase", "--no-fork-point", "--no-gpg-sign", "--no-ignore-date", "--no-ignore-whitespace", "--no-keep-base", "--no-keep-empty", "--no-onto", "--no-preserve-merges", "--no-quiet", "--no-reapply-cherry-picks", "--no-rebase-merges", "--no-rerere-autoupdate", "--no-reschedule-failed-exec", "--no-reset-author-date", "--no-root", "--no-signoff", "--no-stat", "--no-strategy", "--no-strategy-option", "--no-trailer", "--no-update-refs", "--no-verbose", "--no-verify", "--no-whitespace", "--preserve-merges", "--quiet", "--quit", "--reapply-cherry-picks", "--rebase-merges", "--rerere-autoupdate", "--reschedule-failed-exec", "--reset-author-date", "--root", "--show-current-patch", "--signoff", "--skip", "--stat", "--update-refs", "--verbose", "--verify", "-f", "-i", "-k", "-m", "-n", "-p", "-q", "-v"]
     },
     "reflog": {
       "takes_the_next_word": ["--decorate-refs", "--decorate-refs-exclude", "-L"],

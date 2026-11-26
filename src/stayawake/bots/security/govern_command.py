@@ -22,6 +22,7 @@ UPDATES_SUBMODULES = "a command that also updates submodules cannot be checked"
 PUSHES_INTO_A_FOLDER = "a push into a repository with files on this machine cannot be checked"
 RUNS_A_PROGRAM = "a command that runs a program it names cannot be checked"
 READS_A_REPOSITORY_HERE = "a command that reads a repository on this machine cannot be checked"
+REACHES_A_REPOSITORY_GIT_DOES_NOT_NAME = "a push or ls-remote whose repository git does not name cannot be checked"
 NAMES_AN_UNLISTED_OPTION = ("a command with an option git does not list, or a shortened one that could mean "
                             "several, cannot be checked")
 LETS_A_PUSH_WRITE = "the command lets a push change this folder's files; check it first"
@@ -106,9 +107,11 @@ def _answer_before_replay(folder: Path, command: TypedCommand, brings_no_files: 
 def _updates_submodules(folder: Path, top: "Path | None", command: TypedCommand) -> bool:
     """Tell whether a command would also update submodules in the folder, which a replay never
     does. Takes where it runs, the folder's top and the command. Returns the answer."""
-    reading = subcommand_options.read(command.sub, list(command.rest))
-    asked = reading.last("--recurse-submodules", "--no-recurse-submodules")
-    if asked == "--recurse-submodules":
+    reading = subcommand_options.resolve(command.sub, list(command.rest))
+    asked = None if reading is None else reading.last("--recurse-submodules", "--no-recurse-submodules")
+    if reading is None and command.sub in subcommand_options.LISTED:
+        recurses = True
+    elif asked == "--recurse-submodules":
         values = reading.values("--recurse-submodules")
         recurses = not (values and values[-1].lower() in _SAYS_NO)
     elif asked:
@@ -193,9 +196,11 @@ def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
     resolved = subcommand_options.resolve("push", list(rest))
     if resolved is None:
         return Answer(UNCHECKED, NAMES_AN_UNLISTED_OPTION)
-    targets = [*resolved.values("--repo"), *resolved.words[:1]] or _remotes(folder)
-    for target in targets:
-        place = _local_place(folder, target)
+    addresses = runs_directly.destinations("push", resolved, folder)
+    if addresses is None:
+        return Answer(UNCHECKED, REACHES_A_REPOSITORY_GIT_DOES_NOT_NAME)
+    for address in addresses:
+        place = _local_place(folder, address)
         if place is not None and stdout(place, ["rev-parse", "--is-bare-repository"],
                                         context=UNTRUSTED).strip() != "true":
             return Answer(UNCHECKED, PUSHES_INTO_A_FOLDER)
@@ -208,28 +213,17 @@ def _ls_remote(folder: Path, rest: tuple[str, ...]) -> Answer:
     resolved = subcommand_options.resolve("ls-remote", list(rest))
     if resolved is None:
         return Answer(UNCHECKED, NAMES_AN_UNLISTED_OPTION)
-    targets = resolved.words[:1] or tuple(_remotes(folder, push=False))
-    if any(_local_place(folder, target, push=False) is not None for target in targets):
+    addresses = runs_directly.destinations("ls-remote", resolved, folder)
+    if addresses is None:
+        return Answer(UNCHECKED, REACHES_A_REPOSITORY_GIT_DOES_NOT_NAME)
+    if any(_local_place(folder, address) is not None for address in addresses):
         return Answer(UNCHECKED, READS_A_REPOSITORY_HERE)
     return Answer(PASSTHROUGH, "the command brings no files in")
 
 
-def _remotes(folder: Path, *, push: bool = True) -> list[str]:
-    """List the remotes a push or a read with no repository named may reach. Takes where it runs and
-    whether it pushes. Returns their names."""
-    pattern = r"^remote\..*\.(push)?url$" if push else r"^remote\..*\.url$"
-    listed = stdout(folder, ["config", "--name-only", "--get-regexp", pattern], context=UNTRUSTED)
-    return list(dict.fromkeys(line.removeprefix("remote.").rpartition(".")[0] for line in listed.splitlines() if line))
-
-
-def _local_place(folder: Path, target: str, *, push: bool = True) -> "Path | None":
-    """Find the folder on this machine a push or read target reaches, through the remote's address
-    when it names a remote. Takes where the command runs, the target and whether it pushes. Returns
-    the folder, or None for a target elsewhere."""
-    address = target
-    if not target.startswith(_LOCAL_PREFIXES) and target not in (".", "..") and not (folder / target).is_dir():
-        asked = ["remote", "get-url", *(["--push"] if push else []), target]
-        address = stdout(folder, asked, context=UNTRUSTED).strip() or target
+def _local_place(folder: Path, address: str) -> "Path | None":
+    """Find the folder on this machine an address git names reaches. Takes where the command runs
+    and the address. Returns the folder, or None for an address elsewhere."""
     if address.startswith("file://"):
         address = address[len("file://"):]
     elif address.startswith("file:"):

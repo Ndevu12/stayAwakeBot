@@ -21,7 +21,7 @@ RUNS_A_PROGRAM = "runs-a-program"
 WRITES_A_FILE = "writes-a-file"
 FETCHES = "fetches"
 NOT_READ = "gives-an-option-git-does-not-take"
-_REMOTE_ADDRESSES = r"^(remote\..*\.(url|pushurl)|url\..*\.(insteadof|pushinsteadof))$"
+_PUSH_REWRITES = r"^url\..*\.pushinsteadof$"
 
 
 @functools.lru_cache(maxsize=1)
@@ -135,7 +135,7 @@ def _names_what_saw_checks(sub: str, rest: list[str], settings: list[str], here:
         return True
     resolved = subcommand_options.resolve(sub, every)
     if sub in ("push", "ls-remote"):
-        return resolved is None or _reaches_this_machine(resolved, here, target)
+        return resolved is None or _reaches_this_machine(sub, resolved, here, target)
     if sub == "config":
         return not _config_only_reads(every, words)
     if sub == "remote":
@@ -201,15 +201,60 @@ def _may_name(arg: str, names: frozenset[str]) -> bool:
     return arg.startswith("-") and any(name[1] in arg[1:] for name in names if not name.startswith("--"))
 
 
-def _reaches_this_machine(resolved: subcommand_options.Resolved, here: Path, target: Path) -> bool:
-    """Tell whether a push or ls-remote may reach a repository on this machine: a target that is a
-    path, or a remote whose configured or rewritten address is a path. Takes the command's reading,
-    whose `--repo` values and first word are its targets, the folder it runs in and the folder it
-    acts on."""
-    targets = [*resolved.values("--repo"), *resolved.words[:1]]
-    if any(is_local_address(place) or (here / place).is_dir() for place in targets):
+def _reaches_this_machine(sub: str, resolved: subcommand_options.Resolved, here: Path, target: Path) -> bool:
+    """Tell whether a push or ls-remote may reach a repository on this machine: a word that is a
+    folder here, or any address git names for it that is not a network address. Takes the
+    subcommand, its reading, the folder it runs in and the folder it acts on."""
+    if any((here / word).is_dir() for word in resolved.words[:1]):
         return True
-    return not targets and _a_remote_is_local(target)
+    addresses = destinations(sub, resolved, target)
+    return addresses is None or any(is_local_address(address) for address in addresses)
+
+
+def destinations(sub: str, resolved: subcommand_options.Resolved, folder: Path) -> "list[str] | None":
+    """List the addresses a push or ls-remote reaches, asked of git: each repository the reading
+    names, or with none the remote git would use, through that remote's addresses. Takes the
+    subcommand, its reading and the folder it acts on. Returns the addresses, or None when git
+    names none or cannot answer."""
+    pushes = sub == "push"
+    named = [*resolved.values("--repo"), *resolved.words[:1]] if pushes else list(resolved.words[:1])
+    if not named and not pushes:
+        return _git_lines(folder, ["ls-remote", "--get-url"])
+    if not named:
+        tracking = _git_lines(folder, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"])
+        named = [name for name in remote_names(folder) if tracking and tracking[0].startswith(name + "/")]
+        if not named:
+            return None
+    addresses: list[str] = []
+    for repository in named:
+        if pushes:
+            configured = _git_lines(folder, ["remote", "get-url", "--push", "--all", repository])
+            if configured:
+                addresses += configured
+                continue
+            if _git_lines(folder, ["config", "--get-regexp", _PUSH_REWRITES]):
+                return None
+        given = _git_lines(folder, ["ls-remote", "--get-url", repository])
+        if not given:
+            return None
+        addresses += [*given, *([repository] if pushes else [])]
+    return addresses
+
+
+def remote_names(folder: Path) -> list[str]:
+    """List the remotes the folder's configuration gives an address. Takes the folder. Returns their
+    names."""
+    listed = _git_lines(folder, ["config", "--name-only", "--get-regexp", r"^remote\..*\.(push)?url$"]) or []
+    return list(dict.fromkeys(line.removeprefix("remote.").rpartition(".")[0] for line in listed))
+
+
+def _git_lines(folder: Path, args: list[str]) -> "list[str] | None":
+    """Ask git a question in the folder and read its answer. Takes the folder and git's arguments.
+    Returns the answer's lines, None for no answer."""
+    done = run(folder, args, context=UNTRUSTED)
+    if done is None or done.returncode != 0:
+        return None
+    return [line for line in (done.stdout or "").splitlines() if line.strip()] or None
 
 
 def is_local_address(address: str) -> bool:
@@ -219,21 +264,6 @@ def is_local_address(address: str) -> bool:
     slashes = [found for found in (address.find("/"), address.find("\\")) if found >= 0]
     drive = len(address) >= 2 and address[0].isascii() and address[0].isalpha() and address[1] == ":"
     return address.startswith("file:") or drive or colon < 0 or (bool(slashes) and min(slashes) < colon)
-
-
-def _a_remote_is_local(folder: Path) -> bool:
-    """Tell whether any remote's address, or an address rewrite, names a place on this machine.
-    Takes the folder whose configuration is read. Returns true when git cannot be run."""
-    listed = run(folder, ["config", "--get-regexp", _REMOTE_ADDRESSES], context=UNTRUSTED)
-    if listed is None:
-        return True
-    for line in (listed.stdout or "").splitlines():
-        key, _, value = line.partition(" ")
-        base, dot, _name = key.removeprefix("url.").rpartition(".")
-        rewritten = base if key.startswith("url.") and dot else None
-        if is_local_address(value if rewritten is None else rewritten):
-            return True
-    return False
 
 
 def _config_only_reads(options: list[str], words: list[str]) -> bool:

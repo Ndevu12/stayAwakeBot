@@ -212,7 +212,7 @@ fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: 
     match sub {
         _ if options_send_it_to_saw(sub, &every, resolved.as_ref()) => true,
         "init" | "maintenance" => true,
-        "push" | "ls-remote" => resolved.as_ref().is_none_or(|resolved| reaches_this_machine(resolved, reader)),
+        "push" | "ls-remote" => resolved.as_ref().is_none_or(|resolved| reaches_this_machine(sub, resolved, reader)),
         "config" => {
             let words: Vec<&str> = every.iter().copied().take_while(|arg| *arg != "--").filter(|arg| !arg.starts_with('-')).collect();
             !config_only_reads(&every, &words)
@@ -326,8 +326,8 @@ fn options_saw_checks(sub: &str) -> Vec<String> {
     checked
 }
 
-/// A subcommand's arguments up to `--`, read the way git reads them: each option's full name with
-/// its value, and the words.
+/// A subcommand's arguments read the way git reads them: each option's full name with its value,
+/// and the words, those after `--` or `--end-of-options` included.
 struct Resolved {
     options: Vec<(String, Option<String>)>,
     words: Vec<String>,
@@ -344,10 +344,10 @@ fn may_name(arg: &str, names: &[String]) -> bool {
     }
 }
 
-/// Read every option of a subcommand's arguments up to `--` or `--end-of-options` the way git does:
-/// in full from a unique leading part, its `--no-` form, a bundle of short options, and a value
-/// joined to it or in the next word. Returns each option's full name with its value, and the words,
-/// None for an option git does not take or cannot tell apart.
+/// Read a subcommand's arguments the way git does: each option up to `--` or `--end-of-options` in
+/// full from a unique leading part, its `--no-` form, a bundle of short options, and a value joined
+/// to it or in the next word. Each other argument is a word. Returns each option's full name with
+/// its value, and the words, None for an option git does not take or cannot tell apart.
 fn resolve(sub: &str, args: &[&str]) -> Option<Resolved> {
     let table = option_table();
     let mut options = table.subcommands.get(sub).filter(|options| options.lists_every_option)?;
@@ -358,6 +358,7 @@ fn resolve(sub: &str, args: &[&str]) -> Option<Resolved> {
     while let Some(arg) = args.get(index).copied() {
         index += 1;
         if arg == "--" || arg == "--end-of-options" {
+            words.extend(args[index..].iter().map(|word| word.to_string()));
             break;
         }
         if arg == "-" || !arg.starts_with('-') {
@@ -431,16 +432,72 @@ fn full_long_name(options: &Options, written: &str) -> Option<String> {
     }
 }
 
-/// Whether a push or ls-remote may reach a repository on this machine: a target that is a path, or
-/// a remote whose configured or rewritten address is a path. Takes the command's reading: each
-/// `--repo` value and the first word are its targets.
-fn reaches_this_machine(resolved: &Resolved, reader: &GitReader) -> bool {
-    let named = resolved.options.iter().filter(|(name, _)| name == "--repo").filter_map(|(_, value)| value.as_deref());
-    let targets: Vec<&str> = named.chain(resolved.words.first().map(String::as_str)).collect();
-    if targets.iter().any(|target| is_local_address(target) || Path::new(target).is_dir()) {
+/// Whether a push or ls-remote may reach a repository on this machine: a word that is a folder, or
+/// any address git names for it that is not a network address. Takes the subcommand and its
+/// reading.
+fn reaches_this_machine(sub: &str, resolved: &Resolved, reader: &GitReader) -> bool {
+    if resolved.words.first().is_some_and(|word| Path::new(word).is_dir()) {
         return true;
     }
-    targets.is_empty() && a_remote_is_local(reader)
+    destinations(sub, resolved, reader).is_none_or(|addresses| addresses.iter().any(|address| is_local_address(address)))
+}
+
+/// The addresses a push or ls-remote reaches, asked of git: each repository the reading names, or
+/// with none the remote git would use, through that remote's addresses. None when git names none or
+/// cannot answer.
+fn destinations(sub: &str, resolved: &Resolved, reader: &GitReader) -> Option<Vec<String>> {
+    let pushes = sub == "push";
+    let repo_values = resolved.options.iter().filter(|(name, _)| pushes && name == "--repo").filter_map(|(_, value)| value.clone());
+    let mut named: Vec<String> = repo_values.chain(resolved.words.first().cloned()).collect();
+    if named.is_empty() && !pushes {
+        return git_lines(reader, &["ls-remote", "--get-url"]);
+    }
+    if named.is_empty() {
+        let tracking = git_lines(reader, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"])?;
+        let remotes = git_lines(reader, &["config", "--name-only", "--get-regexp", r"^remote\..*\.(push)?url$"])?;
+        for key in remotes {
+            let name = key.strip_prefix("remote.").and_then(|rest| rest.rsplit_once('.')).map(|(name, _)| name.to_string());
+            if let Some(name) = name.filter(|name| tracking[0].starts_with(&format!("{name}/")) && !named.contains(name)) {
+                named.push(name);
+            }
+        }
+        if named.is_empty() {
+            return None;
+        }
+    }
+    let mut addresses = Vec::new();
+    for repository in named {
+        if pushes {
+            if let Some(configured) = git_lines(reader, &["remote", "get-url", "--push", "--all", &repository]) {
+                addresses.extend(configured);
+                continue;
+            }
+            if git_lines(reader, &["config", "--get-regexp", r"^url\..*\.pushinsteadof$"]).is_some() {
+                return None;
+            }
+        }
+        addresses.extend(git_lines(reader, &["ls-remote", "--get-url", &repository])?);
+        if pushes {
+            addresses.push(repository);
+        }
+    }
+    Some(addresses)
+}
+
+/// Ask the real git a question in the folder the command acts on. Returns the answer's lines, None
+/// when git cannot run, fails or answers nothing.
+fn git_lines(reader: &GitReader, args: &[&str]) -> Option<Vec<String>> {
+    let answered = Command::new(reader.real)
+        .current_dir(&reader.folder)
+        .args(args)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|answered| answered.status.success())?;
+    let lines: Vec<String> =
+        String::from_utf8_lossy(&answered.stdout).lines().filter(|line| !line.trim().is_empty()).map(String::from).collect();
+    (!lines.is_empty()).then_some(lines)
 }
 
 /// Whether an address names a place on this machine: a `file:` address, a drive letter, no `:`, or a
@@ -455,24 +512,6 @@ fn is_local_address(address: &str) -> bool {
         (Some(colon), Some(slash)) => slash < colon,
         (Some(_), None) => false,
     }
-}
-
-/// Whether any remote's address, or an address rewrite, names a place on this machine.
-fn a_remote_is_local(reader: &GitReader) -> bool {
-    let Ok(listed) = Command::new(reader.real)
-        .current_dir(&reader.folder)
-        .args(["config", "--get-regexp", r"^(remote\..*\.(url|pushurl)|url\..*\.(insteadof|pushinsteadof))$"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-    else {
-        return true;
-    };
-    String::from_utf8_lossy(&listed.stdout).lines().any(|line| {
-        let (key, value) = line.split_once(' ').unwrap_or((line, ""));
-        let rewritten = key.strip_prefix("url.").and_then(|rest| rest.rsplit_once('.')).map(|(base, _)| base);
-        is_local_address(rewritten.unwrap_or(value))
-    })
 }
 
 /// Whether a `git config` command only reads.

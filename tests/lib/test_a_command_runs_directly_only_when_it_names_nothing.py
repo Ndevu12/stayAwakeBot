@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from stayawake.lib.git import runs_directly, subcommand_options
+from tests.support.gitrepo import GitSandbox
 
 DOCUMENTED = Path(__file__).resolve().parent / "git_documented_revision_and_diff_options.json"
 LOG_FAMILY = ("log", "show", "diff", "rev-list", "whatchanged", "shortlog", "blame")
@@ -64,7 +65,7 @@ class ADirectRunNamesNoProgramAndNoFile(unittest.TestCase):
                 self.assertEqual(self._decided(*args), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
                 self.assertEqual(runs_directly.named_by_its_options(args[0], args[1:]), named)
         resolved = subcommand_options.resolve("push", ["--rep=x", "-o", "y", "--", "z"])
-        self.assertEqual((resolved.values("--repo"), resolved.values("--push-option"), resolved.words), (["x"], [], ()))
+        self.assertEqual((resolved.values("--repo"), resolved.values("--push-option"), resolved.words), (["x"], [], ("z",)))
 
     def test_a_grep_opening_its_files_in_a_program_goes_to_saw_in_every_form(self):
         for args in (["-O"], ["-Ovim"], ["-iO"], ["-nOvim"], ["-1O"], ["-O", "vim"], ["--open-files-in-pager"],
@@ -143,6 +144,48 @@ class ADirectRunNamesNoProgramAndNoFile(unittest.TestCase):
         self.assertEqual(documented_option("-n <number>"), ("-n", "required"))
         self.assertEqual(documented_option("-<number>"), ("-NUM", "none"))
         self.assertEqual(documented_option("--[no-]rename-empty"), ("--rename-empty", "none"))
+
+
+class APushOrLsRemoteRunsDirectlyOnlyToANetworkAddressGitNames(GitSandbox):
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.new_repo()
+        self.write(self.repo, "a.txt", "a\n")
+        self.commit(self.repo, "first")
+        self.other = self.new_repo("other")
+        self.branch = self.git(self.repo, "symbolic-ref", "--short", "HEAD").strip()
+
+    def _decided(self, *args: str) -> str:
+        return runs_directly.decide("git", list(args), self.repo, {})
+
+    def test_a_repository_after_the_end_of_options_is_the_one_git_reaches(self):
+        for args in (["push", "--", str(self.other)], ["push", "--end-of-options", str(self.other)],
+                     ["push", "-v", "--", str(self.other), "HEAD:main"], ["ls-remote", "--", str(self.other)]):
+            with self.subTest(args=args):
+                self.assertEqual(self._decided(*args), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
+
+    def test_a_push_naming_no_repository_reaches_the_remote_git_would_push_to(self):
+        self.git(self.repo, "remote", "add", "origin", "https://example.invalid/r")
+        self.git(self.repo, "update-ref", "refs/remotes/origin/" + self.branch, "HEAD")
+        self.git(self.repo, "branch", "--set-upstream-to=origin/" + self.branch)
+        for args in (["push"], ["push", "origin", self.branch], ["ls-remote"], ["ls-remote", "origin"]):
+            with self.subTest(args=args):
+                self.assertEqual(self._decided(*args), runs_directly.RUNS_AS_TYPED)
+        for key in ("remote.pushDefault", f"branch.{self.branch}.pushRemote"):
+            with self.subTest(key=key):
+                self.git(self.repo, "config", key, str(self.other))
+                self.assertEqual(self._decided("push"), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
+                self.git(self.repo, "config", "--unset", key)
+        self.git(self.repo, "remote", "set-url", "--push", "origin", str(self.other))
+        self.assertEqual(self._decided("push"), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
+
+    def test_a_shortened_recurse_option_is_read_in_full_with_its_value(self):
+        for written, value in (("--recurse=yes", "yes"), ("--recurse=no", "no"), ("--recurse-sub=on-demand", "on-demand")):
+            with self.subTest(written=written):
+                reading = subcommand_options.resolve("pull", [written])
+                self.assertEqual(reading.last("--recurse-submodules", "--no-recurse-submodules"), "--recurse-submodules")
+                self.assertEqual(reading.values("--recurse-submodules"), [value])
 
 
 if __name__ == "__main__":

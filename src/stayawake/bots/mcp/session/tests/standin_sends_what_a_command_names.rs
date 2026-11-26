@@ -7,6 +7,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 const STANDIN: &str = env!("CARGO_BIN_EXE_saw-git-standin");
+/// Answers the questions the stand-in asks git about where a push or ls-remote goes the way git
+/// answers them outside a repository, and leaves them out of the record of git running.
+const ANSWERS_LOOKUPS: &str = r#"case "$*" in
+  "remote get-url --push --all "*) exit 2 ;;
+  "config --name-only --get-regexp ^remote"*|"config --get-regexp ^url"*) exit 1 ;;
+  "rev-parse --abbrev-ref --symbolic-full-name @{push}") exit 128 ;;
+  "ls-remote --get-url"*) [ -n "$3" ] && echo "$3"; exit 0 ;;
+esac
+"#;
 const ASKED: &str = r#"{"reason":"the command makes git run files from this folder","checked":true,"decision":{"choices":["run-as-typed","leave-unchanged"]}}"#;
 
 fn exec_script(path: &Path, body: &str) {
@@ -28,7 +37,7 @@ impl Terminal {
         let dir = fs::canonicalize(&dir).unwrap();
         let real_log = dir.join("real.log");
         let saw_log = dir.join("saw.log");
-        exec_script(&dir.join("real-program"), &format!("#!/bin/sh\necho \"$@\" >> {real_log:?}\n"));
+        exec_script(&dir.join("real-program"), &format!("#!/bin/sh\n{ANSWERS_LOOKUPS}echo \"$@\" >> {real_log:?}\n"));
         exec_script(
             &dir.join("fake-saw"),
             &format!("#!/bin/sh\necho \"$@\" >> {saw_log:?}\nprintf '%s\\n' '{ASKED}'\nexit 2\n"),

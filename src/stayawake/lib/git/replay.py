@@ -217,20 +217,19 @@ def runs_other_commands(sub: str, args: list[str]) -> bool:
     with. Takes the subcommand and its arguments. Returns the answer."""
     long_options = _LONG_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, ())
     short_options = _SHORT_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, "")
-    for name, value in subcommand_options.read(sub, args).options:
+    if not long_options and not short_options and sub not in _TAKES_A_STRATEGY:
+        return False
+    reading = subcommand_options.resolve(sub, args)
+    if reading is None:
+        return True
+    for option in reading.options:
+        name, value = option.name, option.value
         interactive = (value or "").lower().startswith("i")
-        if name.startswith("--"):
-            if len(name) <= 2:
-                continue
-            if any(option.startswith(name) for option in long_options):
-                return True
-            if sub == "pull" and "--rebase".startswith(name) and interactive:
-                return True
-            if sub in _TAKES_A_STRATEGY and "--strategy".startswith(name) and value not in _BUILT_IN_STRATEGIES:
-                return True
-        elif name[1] in short_options or (sub == "pull" and name == "-r" and interactive):
+        if name in long_options or (len(name) == 2 and name[1] in short_options):
             return True
-        elif name == "-s" and sub in _TAKES_A_STRATEGY and value not in _BUILT_IN_STRATEGIES:
+        if sub == "pull" and name in ("--rebase", "-r") and interactive:
+            return True
+        if sub in _TAKES_A_STRATEGY and name in ("--strategy", "-s") and value not in _BUILT_IN_STRATEGIES:
             return True
     return False
 
@@ -802,7 +801,10 @@ def _pull(work: Path, args: list[str], signing: tuple[str, ...] = ()) -> tuple[b
     the pull's arguments and the signing settings. Returns whether it finished and what git wrote."""
     if not stdout(work, ["remote"], context=SAW_OWNED).strip():
         return False, ("", NO_REMOTE)
-    positionals = list(subcommand_options.read("pull", args).words)
+    reading = subcommand_options.resolve("pull", args)
+    if reading is None:
+        return False, ("", "the pull gives an option git does not list")
+    positionals = list(reading.words)
     fetched = run(work, ["fetch", *positionals[:1]], context=OPERATOR_PUSH)
     if fetched is None or fetched.returncode != 0:
         return False, ("", "the fetch did not finish")

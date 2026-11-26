@@ -17,6 +17,7 @@ from tests.support.gitrepo import GitSandbox
 _USAGE_LINE = re.compile(r"^(?:usage|\s*or):\s+git\s+\S+\s*(?P<rest>.*)$")
 _LEADING_OPTION = re.compile(r"\[-[\w-]+\]")
 _NUMBER_LINE = re.compile(r"^\s+-NUM\b")
+_NEGATABLE = re.compile(r"--\[no-\]([\w-]+)")
 _OPTION_LINE = re.compile(r"^\s+(?P<short>-\w)?(?:, )?(?P<long>--(?:\[no-\])?\w[\w-]*)?"
                           r"(?P<optional>\[=?[^\]\s]*\])?"
                           r"(?: (?P<required>[<({\[]\S*|\S*[()<>\[\]|]\S*|\.\.\.))?")
@@ -135,8 +136,10 @@ class TheOptionsGitTakesAValueFor(GitSandbox):
             taken = entry.get("captured_at", {}).get(running)
             if not taken or not subcommand_options.LISTED[sub].lists_its_options:
                 continue
+            usage = _help_all(repo, sub)
+            negatable = {"--no-" + name for name in _NEGATABLE.findall(usage)}
             with self.subTest(sub=sub, git=_GIT_VERSION):
-                self.assertEqual(sorted(set(taken) - set(options_in_usage(_help_all(repo, sub)))), [])
+                self.assertEqual(sorted(set(taken) - set(options_in_usage(usage)) - negatable), [])
 
     def test_every_word_a_command_starts_with_is_one_saw_decides(self):
         repo = self.new_repo()
