@@ -147,6 +147,15 @@ def borrow(operator_repo: str | Path, also_objects: Path | None = None) -> Itera
         scratch.release_path(where)
 
 
+def write_alternates(git_dir: Path, stores) -> None:
+    """Point a repository at further object directories, one to a line, each line ended by a
+    newline alone on every system. Takes its git directory and the object directories. Raises
+    `OSError` when the list cannot be written."""
+    (git_dir / "objects" / "info").mkdir(parents=True, exist_ok=True)
+    listed = b"".join(os.fsencode(str(store)) + b"\n" for store in dict.fromkeys(stores))
+    (git_dir / "objects" / "info" / "alternates").write_bytes(listed)
+
+
 def _make(bare: Path, operator_repo: Path, objects: Path, worktree: Path | None,
           fmt: str, also_objects: Path | None = None) -> Borrowed:
     made = run(None, ["init", "--bare", "--quiet", f"--object-format={fmt}", "--template=",
@@ -155,9 +164,7 @@ def _make(bare: Path, operator_repo: Path, objects: Path, worktree: Path | None,
         raise BorrowError(f"git could not create a repository at {bare}")
     owned.own(bare)
     try:
-        (bare / "objects" / "info").mkdir(parents=True, exist_ok=True)
-        alternates = f"{objects}\n" + (f"{also_objects}\n" if also_objects else "")
-        (bare / "objects" / "info" / "alternates").write_text(alternates, encoding="utf-8")
+        write_alternates(bare, [objects, *([also_objects] if also_objects else [])])
         shallow = attributes.read_regular(objects.parent / "shallow", limit=64 << 20)
         if shallow is not None:
             (bare / "shallow").write_bytes(shallow)

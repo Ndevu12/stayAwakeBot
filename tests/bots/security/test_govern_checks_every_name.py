@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 from stayawake.bots.security import govern
-from stayawake.lib.git import blob_copies
+from stayawake.lib.git import blob_copies, borrowed
 from stayawake.utils import exitcodes
 from tests.bots.security.test_govern_replays_a_tracking_checkout import _TrackingCheckout
 from tests.support import samples
@@ -126,9 +126,12 @@ class CopyingOutByBlob(GitSandbox):
         repo = self.new_repo()
         refused = ("aux.js", "Com1.txt", "lpt\u00b9.js", "a:b.js", "trailing.", "folder /x.js", "back\\slash.js",
                    "ask?.js", "nul")
-        for name in (*refused, "kept.js", "con-not-reserved.js"):
-            stage_blob(repo, name, _BENIGN)
-        self.git(repo, "commit", "-qm", "names")
+        received_from_elsewhere = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.protectNTFS",
+                                   "GIT_CONFIG_VALUE_0": "false"}
+        with mock.patch.dict(os.environ, received_from_elsewhere):
+            for name in (*refused, "kept.js", "con-not-reserved.js"):
+                stage_blob(repo, name, _BENIGN)
+            self.git(repo, "commit", "-qm", "names")
         with mock.patch.object(blob_copies, "ON_WINDOWS", True):
             copies = blob_copies.copy_out(repo, self.rev(repo), (*refused, "kept.js", "con-not-reserved.js"), "names")
         self.assertEqual(sorted(copies.not_copied), sorted(refused))
@@ -142,6 +145,20 @@ class CopyingOutByBlob(GitSandbox):
         copies = blob_copies.copy_out(repo, commit, ("kept.txt", "added-later.txt"), "absent")
         self.assertEqual([names for _folder, names in copies.folders], [("kept.txt",)])
         self.assertEqual(copies.not_copied, ())
+
+
+class AHoldingCopyReadsTheFoldersObjects(GitSandbox):
+
+    def test_a_repository_pointed_at_another_store_finds_its_commits(self):
+        repo = self.new_repo()
+        self.write(repo, "kept.txt", "kept\n")
+        commit = self.commit(repo, "start")
+        holding = self.owned(self.root / "holding.git")
+        subprocess.run(["git", "init", "-q", "--bare", str(holding)], check=True, capture_output=True)
+        borrowed.write_alternates(holding, [repo / ".git" / "objects"])
+        listed = (holding / "objects" / "info" / "alternates").read_bytes()
+        self.assertEqual(listed, os.fsencode(str(repo / ".git" / "objects")) + b"\n")
+        self.assertEqual(self.git(holding, "cat-file", "-t", commit).strip(), "commit")
 
 
 if __name__ == "__main__":

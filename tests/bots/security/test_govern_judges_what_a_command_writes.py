@@ -470,6 +470,7 @@ class WhatMakesGitRunFolderFilesIsAskedAbout(_Fetched):
         self.git(self.open, "fetch", "-q")
         answer, code = self._prepare("merge", "--ff-only", "origin/main")
         self.assertEqual(answer["scan"]["results"][0]["verdict"], "clean", answer)
+        self.assertIn("decision", answer, (code, answer))
         self.assertIn("let-in", answer["decision"]["choices"], answer)
         for name in changed:
             self.assertTrue(any(name in step for step in answer["next_steps"]), (name, answer))

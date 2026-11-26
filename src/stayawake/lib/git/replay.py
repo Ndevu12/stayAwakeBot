@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.lib.git import exec_keys, owned, subcommand_options
-from stayawake.lib.git.borrowed import carried_attributes
+from stayawake.lib.git.borrowed import carried_attributes, write_alternates
 from stayawake.lib.git.contexts import KEY_PREFIXES_A_CALLER_MAY_NOT_SET, KEYS_A_CALLER_MAY_NOT_SET
 from stayawake.lib.git.run import (LOCAL_TIMEOUT, OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run,
                                   run_ok, stdout, stdout_bytes, stdout_bytes_fed)
@@ -323,9 +323,7 @@ def reproduce(location: Location, into: Path, command: TypedCommand, *, with_fil
         if own_objects:
             stores.append(Path(own_objects) / "objects")
     try:
-        (bare / "objects" / "info").mkdir(parents=True, exist_ok=True)
-        (bare / "objects" / "info" / "alternates").write_text(
-            "".join(f"{store}\n" for store in dict.fromkeys(stores)), encoding="utf-8")
+        write_alternates(bare, stores)
         shallow = pathsafe.read_regular_no_follow(location.common_dir / "shallow", 64 << 20)
         if shallow is not None:
             (bare / "shallow").write_bytes(shallow)
