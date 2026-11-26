@@ -754,6 +754,15 @@ class ACommandThatWritesAFileItNamesIsAsked(_Fetched):
         self.assertFalse((self.open / "x.sh").exists())
         self._untouched()
 
+    def test_a_shortened_push_target_a_shortened_fetch_or_a_named_socket_is_asked(self):
+        for args, reason in ((["push", f"--rep={self.upstream}", "--all"], govern_command.PUSHES_INTO_A_FOLDER),
+                             (["remote", "add", "--fe", "other", str(self.upstream)], govern_command.FETCHES),
+                             (["remote", "add", "-ft", "main", "other", str(self.upstream)], govern_command.FETCHES),
+                             (["credential-cache", "--socket=../s", "get"], govern_command.WRITES_A_FILE)):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], reason)
+        self._untouched()
+
     def test_the_same_commands_without_them_run_as_typed(self):
         for args in (["diff", "HEAD", "origin/evil~1"], ["remote", "add", "other", str(self.upstream)],
                      ["log", "-1", "--", "--output=x"], ["grep", "-n", "new"], ["grep", "-eO", "new"],

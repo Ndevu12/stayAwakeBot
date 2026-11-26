@@ -109,7 +109,8 @@
     "credential-cache": {
       "takes_the_next_word": ["--socket", "--timeout"],
       "takes_the_rest_of_its_word": [],
-      "takes_no_word": ["--no-socket", "--no-timeout"]
+      "takes_no_word": ["--no-socket", "--no-timeout"],
+      "writes_a_file": ["--socket"]
     },
     "credential-store": {
       "takes_the_next_word": ["--file"],
@@ -389,7 +390,8 @@
     "remote add": {
       "takes_the_next_word": ["--master", "--track", "-m", "-t"],
       "takes_the_rest_of_its_word": [],
-      "takes_no_word": ["--fetch", "--mirror", "--no-fetch", "--no-master", "--no-mirror", "--no-tags", "--no-track", "--tags", "-f"]
+      "takes_no_word": ["--fetch", "--mirror", "--no-fetch", "--no-master", "--no-mirror", "--no-tags", "--no-track", "--tags", "-f"],
+      "fetches": ["--fetch", "-f"]
     },
     "remote get-url": {
       "takes_the_next_word": [],

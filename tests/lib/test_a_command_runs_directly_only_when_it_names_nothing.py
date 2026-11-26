@@ -53,6 +53,19 @@ class ADirectRunNamesNoProgramAndNoFile(unittest.TestCase):
                 self.assertEqual(self._decided(*args), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
                 self.assertEqual(runs_directly.named_by_its_options(args[0], args[1:]), runs_directly.RUNS_A_PROGRAM)
 
+    def test_a_shortened_repository_a_shortened_fetch_or_a_named_socket_goes_to_saw(self):
+        bare = self.folder / "bare.git"
+        bare.mkdir()
+        for args, named in ((["push", f"--rep={bare}", "--all"], None), (["push", "--repo", str(bare), "--all"], None),
+                            (["remote", "add", "--fe", "x", str(bare)], runs_directly.FETCHES),
+                            (["remote", "add", "-ft", "main", "y", str(bare)], runs_directly.FETCHES),
+                            (["credential-cache", f"--socket={bare}/s", "get"], runs_directly.WRITES_A_FILE)):
+            with self.subTest(args=args):
+                self.assertEqual(self._decided(*args), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
+                self.assertEqual(runs_directly.named_by_its_options(args[0], args[1:]), named)
+        resolved = subcommand_options.resolve("push", ["--rep=x", "-o", "y", "--", "z"])
+        self.assertEqual((resolved.values("--repo"), resolved.values("--push-option"), resolved.words), (["x"], [], ()))
+
     def test_a_grep_opening_its_files_in_a_program_goes_to_saw_in_every_form(self):
         for args in (["-O"], ["-Ovim"], ["-iO"], ["-nOvim"], ["-1O"], ["-O", "vim"], ["--open-files-in-pager"],
                      ["--open-files-in-pager=vim"], ["--open"], ["--open-f=vim"], ["-e", "x", "-O"],

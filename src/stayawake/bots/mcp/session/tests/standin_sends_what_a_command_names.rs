@@ -157,6 +157,27 @@ fn a_push_or_ls_remote_naming_a_program_by_a_leading_part_goes_to_saw_whatever_i
 }
 
 #[test]
+fn a_shortened_repository_a_shortened_fetch_or_a_named_socket_goes_to_saw() {
+    let terminal = Terminal::new("refuted");
+    let bare = terminal.dir.join("bare.git");
+    fs::create_dir_all(&bare).unwrap();
+    let bare = bare.to_string_lossy().into_owned();
+    let (shortened, socket) = (format!("--rep={bare}"), format!("--socket={bare}/s"));
+    let sent: &[&[&str]] = &[
+        &["push", &shortened, "--all"],
+        &["push", "--repo", &bare, "--all"],
+        &["remote", "add", "--fe", "x", &bare],
+        &["remote", "add", "-ft", "main", "y", &bare],
+        &["credential-cache", &socket, "get"],
+    ];
+    for args in sent {
+        terminal.run(args, &[]);
+        assert!(terminal.took(&terminal.saw_log).is_some_and(|asked| asked.contains("--brings-no-files")), "{args:?}");
+        assert!(terminal.took(&terminal.real_log).is_none(), "{args:?}: git ran before saw answered");
+    }
+}
+
+#[test]
 fn an_option_git_does_not_take_goes_to_saw_and_one_starting_a_program_the_operator_set_runs() {
     let terminal = Terminal::new("unread");
     for args in [&["status", "--bogus"][..], &["log", "--bogus"], &["status", "-Z"], &["grep", "--o", "x"]] {

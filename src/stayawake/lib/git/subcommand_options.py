@@ -13,7 +13,8 @@ from pathlib import Path
 class Listed:
     """The options git lists for one subcommand, by the value each takes: the next word, only what
     is joined to a short option, or none. `takes_no_word` is None where saw does not list them.
-    Also the options whose value names a program to run and those that name a file git writes,
+    Also the options whose value names a program to run, those that name a file git writes and
+    those that fetch,
     whether `git <subcommand> --help-all` lists its options, and whether git passes an option it
     does not take through as output."""
 
@@ -22,6 +23,7 @@ class Listed:
     takes_no_word: "frozenset[str] | None" = None
     runs_a_program: frozenset[str] = frozenset()
     writes_a_file: frozenset[str] = frozenset()
+    fetches: frozenset[str] = frozenset()
     lists_its_options: bool = True
     echoes_options_it_does_not_take: bool = False
 
@@ -72,7 +74,8 @@ def _listed(entry: dict, groups: dict) -> Listed:
                          if part is entry or key not in _VALUE_KINDS or name not in own)
     no_word = None if entry.get("takes_no_word", ()) is None else joined("takes_no_word")
     return Listed(joined("takes_the_next_word"), joined("takes_the_rest_of_its_word"), no_word,
-                  joined("runs_a_program"), joined("writes_a_file"), entry.get("lists_its_options", True),
+                  joined("runs_a_program"), joined("writes_a_file"), joined("fetches"),
+                  entry.get("lists_its_options", True),
                   entry.get("echoes_options_it_does_not_take", False))
 
 
@@ -180,15 +183,28 @@ def full_long_name(listed: Listed, written: str) -> "str | None":
     return leading[0] if len(leading) == 1 else None
 
 
-def options_given(sub: str, args: list[str]) -> "tuple[Given, ...] | None":
+@dataclass(frozen=True)
+class Resolved:
+    """A subcommand's arguments up to `--`, read the way git reads them: its options and its words."""
+
+    options: tuple[Given, ...]
+    words: tuple[str, ...]
+
+    def values(self, name: str) -> list[str]:
+        """List the values given to the option with this full name, in order."""
+        return [option.value for option in self.options if option.name == name and option.value is not None]
+
+
+def resolve(sub: str, args: list[str]) -> "Resolved | None":
     """Read every option of a subcommand's arguments up to `--` or `--end-of-options` the way git
     does: in full from a unique leading part, its `--no-` form, a bundle of short options, and a
-    value joined to it or in the next word. Takes the subcommand and its arguments. Returns the
-    options, None for an option git does not take or cannot tell apart."""
+    value joined to it or in the next word. Takes the subcommand and its arguments. Returns its
+    options and words, None for an option git does not take or cannot tell apart."""
     listed = LISTED.get(sub)
     if listed is None or listed.takes_no_word is None:
         return None
     given: list[Given] = []
+    words: list[str] = []
     word_seen = False
     index = 0
     while index < len(args):
@@ -200,6 +216,7 @@ def options_given(sub: str, args: list[str]) -> "tuple[Given, ...] | None":
             if not word_seen and f"{sub} {arg}" in LISTED:
                 listed = LISTED[f"{sub} {arg}"]
             word_seen = True
+            words.append(arg)
             continue
         if arg in EVERY_SUBCOMMAND_TAKES or listed.echoes_options_it_does_not_take:
             given.append(Given(arg, arg, None))
@@ -236,12 +253,14 @@ def options_given(sub: str, args: list[str]) -> "tuple[Given, ...] | None":
             if name not in (listed.takes_no_word or ()):
                 return None
             given.append(Given(name, name, None))
-    return tuple(given)
+    return Resolved(tuple(given), tuple(words))
 
 
-def runs_or_writes(sub: str) -> tuple[frozenset[str], frozenset[str]]:
+def options_saw_checks(sub: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
     """List the options of a subcommand, and of the words it takes, whose value names a program to
-    run, and those that name a file git writes. Takes the subcommand. Returns both."""
+    run, those that name a file git writes, and those that fetch. Takes the subcommand. Returns all
+    three."""
     parts = [listed for name, listed in LISTED.items() if name == sub or name.startswith(sub + " ")]
     return (frozenset(name for listed in parts for name in listed.runs_a_program),
-            frozenset(name for listed in parts for name in listed.writes_a_file))
+            frozenset(name for listed in parts for name in listed.writes_a_file),
+            frozenset(name for listed in parts for name in listed.fetches))

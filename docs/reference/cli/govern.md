@@ -172,6 +172,11 @@ fetched commit or an alias, answers `checked: true`. An unreadable line, such as
 unfamiliar option or an alias that runs a shell command, answers `readable: false` with the
 `reason`, and is checked. An editor uses it instead of reading git's options itself.
 
+A command runs as typed only when its options name no program to run, no file to write and no
+fetch. Programs and files named in your own environment, such as `GIT_EXTERNAL_DIFF`,
+`GIT_SSH_COMMAND`, `GIT_EDITOR`, `GIT_TRACE` or `GIT_INDEX_FILE`, are yours, and git uses them
+as you set them.
+
 ## Asking whether a tree is one saw let in
 
 ```text

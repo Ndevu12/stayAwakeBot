@@ -31,6 +31,7 @@ _SCHEDULES_FETCHES = frozenset({"start", "register"})
 _SAYS_NO = frozenset({"no", "false", "off", "0"})
 _ANSWER_FOR_WHAT_ITS_OPTIONS_NAME = {runs_directly.RUNS_A_PROGRAM: RUNS_A_PROGRAM,
                                      runs_directly.WRITES_A_FILE: WRITES_A_FILE,
+                                     runs_directly.FETCHES: FETCHES,
                                      runs_directly.NOT_READ: NAMES_AN_UNLISTED_OPTION}
 _BRINGS_NOTHING_BY_WORD = {"worktree": subcommand_options.WORKTREE_WORDS_THAT_BRING_NOTHING,
                            "submodule": subcommand_options.SUBMODULE_WORDS_THAT_BRING_NOTHING}
@@ -130,14 +131,12 @@ def _sent_for_what_it_names(folder: Path, top: "Path | None", command: TypedComm
     or the environment it names. Takes where it runs, the folder's top, and the command. Returns the
     answer."""
     rest = command.rest
-    before_paths = rest[:rest.index("--")] if "--" in rest else rest
     named = runs_directly.named_by_its_options(command.sub, list(rest))
     if named is not None:
         return Answer(UNCHECKED, _ANSWER_FOR_WHAT_ITS_OPTIONS_NAME[named])
     if command.sub == "remote":
-        words = [arg for arg in before_paths if not arg.startswith("-")]
-        if words[:1] == ["update"] or (words[:1] == ["add"] and any(
-                arg in ("-f", "--fetch") for arg in before_paths)):
+        resolved = subcommand_options.resolve("remote", list(rest))
+        if resolved is None or resolved.words[:1] == ("update",):
             return Answer(UNCHECKED, FETCHES)
     if command.sub == "push":
         return _push(folder, rest)
@@ -191,21 +190,10 @@ def _lets_a_push_write(settings) -> bool:
 def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
     """Answer a push: one that reaches a repository with a working tree on this machine asks first.
     Takes where it runs and its arguments. Returns the answer."""
-    with_a_value = subcommand_options.LISTED["push"].takes_the_next_word
-    words: list[str] = []
-    named = ""
-    index = 0
-    while index < len(rest) and rest[index] != "--":
-        arg = rest[index]
-        index += 1
-        name, joined, value = arg.partition("=")
-        if name in with_a_value:
-            given = value if joined else (rest[index] if index < len(rest) else "")
-            index += 0 if joined else 1
-            named = given if name == "--repo" else named
-        elif not arg.startswith("-"):
-            words.append(arg)
-    targets = [named or words[0]] if (named or words) else _remotes(folder)
+    resolved = subcommand_options.resolve("push", list(rest))
+    if resolved is None:
+        return Answer(UNCHECKED, NAMES_AN_UNLISTED_OPTION)
+    targets = [*resolved.values("--repo"), *resolved.words[:1]] or _remotes(folder)
     for target in targets:
         place = _local_place(folder, target)
         if place is not None and stdout(place, ["rev-parse", "--is-bare-repository"],
@@ -217,8 +205,10 @@ def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
 def _ls_remote(folder: Path, rest: tuple[str, ...]) -> Answer:
     """Answer an ls-remote: one that reads a repository on this machine asks first. Takes where it
     runs and its arguments. Returns the answer."""
-    words = subcommand_options.read("ls-remote", list(rest)).words
-    targets = words[:1] or tuple(_remotes(folder, push=False))
+    resolved = subcommand_options.resolve("ls-remote", list(rest))
+    if resolved is None:
+        return Answer(UNCHECKED, NAMES_AN_UNLISTED_OPTION)
+    targets = resolved.words[:1] or tuple(_remotes(folder, push=False))
     if any(_local_place(folder, target, push=False) is not None for target in targets):
         return Answer(UNCHECKED, READS_A_REPOSITORY_HERE)
     return Answer(PASSTHROUGH, "the command brings no files in")

@@ -31,8 +31,9 @@ reader, not the mechanism or the weakness it closed.
 - `saw govern` asks before a `git push` or `git ls-remote` that names a program to run, however the
   option is shortened, or that reaches a repository on this machine.
 - saw's git stand-in runs a command directly only when its options, read as git reads them, name no
-  program to run and no file to write. A command with an option git does not take, or a shortened
-  option that could mean more than one, goes to saw first. Options that start a program you set up,
+  program to run, no file to write, no fetch and no repository on this machine, however they are
+  shortened. A command with an option git does not take, or a shortened option that could mean more
+  than one, goes to saw first. Options that start a program you set up,
   such as signing or your diff tool, still run directly.
 - `saw govern classify` names the git command a line runs when an alias shares that command's name,
   as git ignores such an alias.
