@@ -22,6 +22,7 @@ from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.dependencies.installed import stated_at
 from stayawake.bots.security.signatures import every_signature
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.object_id import full_object_id
 from stayawake.lib.git.run import one_pass, stalls_recorded
 
 
@@ -42,13 +43,9 @@ def _accepts_all_signatures(matcher) -> bool:
 
 
 def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
-    """True if a finding is suppressed by the allowlist.
-
-    A rule must name a `signature` to suppress. A bare `path_glob` (no signature)
-    is intentionally NOT honored — it would blanket-suppress *every* signature on
-    that path, so a fresh payload dropped under e.g. a test-fixtures glob would slip
-    through silently. Fixture allowlisting therefore requires `signature` (+ optional
-    `path_glob` to scope it, and an optional exact `evidence` to name one finding)."""
+    """Match a finding against each allowlist rule by its signature and by each `path_glob`, `commit`
+    and `evidence` the rule gives. Takes the finding and the allowlist. Returns whether a rule
+    matches."""
     for rule in allowlist or []:
         if not isinstance(rule, dict):
             continue                       # defensive: skip a non-mapping rule (config is validated upstream)
@@ -58,10 +55,19 @@ def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
             continue                       # path-only rules are too broad — ignored
         if glob and not fnmatch(finding.path, glob):
             continue
+        if "commit" in rule and not _same_commit(rule["commit"], finding.commit_sha):
+            continue
         if "evidence" in rule and rule["evidence"] != finding.evidence:
             continue
         return True
     return False
+
+
+def _same_commit(named, found) -> bool:
+    """Compare the commit a rule names with the commit a finding came from, by full id. Takes the
+    rule's commit and the finding's. Returns whether they are the same commit."""
+    named_id = full_object_id(named)
+    return named_id is not None and named_id == full_object_id(found)
 
 
 def run_matchers(target, matcher_names: list[str],

@@ -35,10 +35,11 @@ targets:
     include_forks: false
     include_archived: false
 
-# Findings to ignore. Each rule MUST name a `signature`, optionally scoped by `path_glob`;
-# a bare `path_glob` is ignored.
+# Findings to ignore. Each rule MUST name a `signature`, optionally scoped by `path_glob` or by
+# `commit`, a commit's full id; a bare `path_glob` is ignored.
 #
-# The rules below cover this repository's own test material and are scoped to it.
+# The rules below cover this repository's own test material and are scoped to it, and two of its
+# own merge commits.
 allowlist:
   - {signature: fake-font-fa-solid-400, path_glob: "tests/**"}
   - {signature: fake-font-text-woff, path_glob: "tests/**"}
@@ -66,6 +67,8 @@ allowlist:
   - {signature: claude-hook-autorun, path_glob: "tests/**"}
   - {signature: claude-hook-runs-payload, path_glob: "tests/**"}
   - {signature: whitespace-concealment, path_glob: "tests/**"}
+  - {signature: evil-merge, commit: f75d2b92d102e73ecc38f9d0da3d2dbf6b857df8}
+  - {signature: evil-merge, commit: 0d63c24db636be8fa8289d4d9b0b1777cc8e0020}
 
 # Alerting. Channels read their secrets from env (SLACK_WEBHOOK_URL, GH_SECURITY_TOKEN).
 alerts:
