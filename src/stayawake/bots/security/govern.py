@@ -311,10 +311,11 @@ def _moved_to(result: "replay.Replayed") -> str:
 
 
 def _judged_whole(bare: Path, commit: str, judged: set, let_in_commit: str) -> bool:
-    """Tell whether every file of a commit's tree was judged: scanned by this check, let in before,
-    or held in the tree saw last let in at the same path with the same mode. Takes the holding git
-    directory, the commit, the (path, mode, blob) contents judged and that tree's commit, "" for
-    none. Returns the answer."""
+    """Tell whether every entry of a commit's tree was judged: each file scanned by this check, let
+    in before, or held in the tree saw last let in at the same path with the same mode, and each
+    submodule link held in that tree at the same path. Takes the holding git directory, the commit,
+    the (path, mode, blob) contents judged and that tree's commit, "" for none. Returns the
+    answer."""
     def files(tree: str) -> "set[tuple[str, str, str]] | None":
         listed = stdout_bytes(bare, ["ls-tree", "-r", "-z", tree], context=SAW_OWNED)
         if listed is None:
@@ -323,12 +324,13 @@ def _judged_whole(bare: Path, commit: str, judged: set, let_in_commit: str) -> b
         for record in listed.split(b"\0"):
             info, _, path = record.partition(b"\t")
             parts = info.split(b" ")
-            if path and len(parts) == 3 and parts[1] == b"blob":
+            if path and len(parts) == 3 and (parts[1] == b"blob" or parts[0] == _GITLINK):
                 found.add((os.fsdecode(path), parts[0].decode(), parts[2].decode()))
         return found
     wanted = files(commit)
     before = files(let_in_commit) if let_in_commit else set()
-    return wanted is not None and before is not None and wanted <= judged | before
+    scanned = {content for content in judged if content[1] != _GITLINK.decode()}
+    return wanted is not None and before is not None and wanted <= scanned | before
 
 
 def _write_replayed_state(into: Path, result: "replay.Replayed", releasable: bool, verdict: str, asks: bool,

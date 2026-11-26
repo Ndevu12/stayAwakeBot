@@ -14,7 +14,7 @@ from tests.support import samples
 from tests.support.gitrepo import GitSandbox
 
 
-class GovernLedger(GitSandbox):
+class _Ledger(GitSandbox):
     def setUp(self):
         super().setUp()
         cache = tempfile.mkdtemp()
@@ -45,6 +45,12 @@ class GovernLedger(GitSandbox):
     def _head(self):
         return self.git(self.repo, "rev-parse", "HEAD").strip()
 
+    def _has_main(self):
+        return self.git(self.repo, "branch", "--list", "main").strip() != ""
+
+
+class GovernLedger(_Ledger):
+
     def test_a_clean_governed_update_is_remembered(self):
         self.write(self.repo, "arrived.txt", "clean\n")
         self.commit(self.repo, "arrive")
@@ -65,6 +71,35 @@ class GovernLedger(GitSandbox):
         self.assertFalse(clean_ledger.scanned_clean(self.repo, key),
                          "an infected update must never be recorded clean")
 
+    def test_an_update_bringing_a_new_submodule_link_is_not_recorded_as_judged(self):
+        self.git(self.repo, "update-index", "--add", "--cacheinfo", f"160000,{self.start},sub")
+        self.git(self.repo, "commit", "-qm", "submodule link")
+        linked = self._head()
+        self.git(self.repo, "checkout", "-q", "main" if self._has_main() else "master")
+        payload, _ = self._govern_checkout_next()
+        self.assertTrue(payload.get("applied"), payload)
+        self.assertEqual(self._head(), linked)
+        self.assertFalse(clean_ledger.governed(self.repo, clean_ledger.clean_key(linked, None)))
+        self.assertEqual(clean_ledger.let_in_commit(self.repo, None), self.start)
+
+    def test_a_submodule_link_the_tree_saw_let_in_holds_is_judged(self):
+        self.git(self.repo, "checkout", "-q", "main" if self._has_main() else "master")
+        self.git(self.repo, "update-index", "--add", "--cacheinfo", f"160000,{self.start},sub")
+        self.git(self.repo, "commit", "-qm", "submodule link")
+        linked = self._head()
+        clean_ledger.remember(self.repo, clean_ledger.clean_key(linked, None))
+        self.git(self.repo, "checkout", "-q", "-b", "more")
+        self.write(self.repo, "arrived.txt", "clean\n")
+        self.git(self.repo, "add", "arrived.txt")
+        self.git(self.repo, "commit", "-qm", "arrive")
+        arrived = self._head()
+        self.git(self.repo, "checkout", "-q", "main" if self._has_main() else "master")
+        holding = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, holding, ignore_errors=True)
+        govern.prepare(str(self.repo), holding, "git", ["checkout", "more"], None)
+        self.assertTrue(govern.apply(str(self.repo), holding)[0].get("applied"))
+        self.assertTrue(clean_ledger.governed(self.repo, clean_ledger.clean_key(arrived, None)))
+
     def test_an_ungoverned_checkout_is_not_in_the_ledger(self):
         self.write(self.repo, "arrived.txt", "clean\n")
         self.commit(self.repo, "arrive")
@@ -72,11 +107,8 @@ class GovernLedger(GitSandbox):
         key = clean_ledger.clean_key(self._head(), None)
         self.assertFalse(clean_ledger.scanned_clean(self.repo, key))
 
-    def _has_main(self):
-        return self.git(self.repo, "branch", "--list", "main").strip() != ""
 
-
-class ARecordInsideAGitRepositoryCountsAsEmpty(GovernLedger):
+class ARecordInsideAGitRepositoryCountsAsEmpty(_Ledger):
 
     def _record_inside(self, *parts: str) -> Path:
         cache = self.repo.joinpath(*parts)

@@ -30,6 +30,8 @@ reader, not the mechanism or the weakness it closed.
   as git ignores such an alias.
 - saw reads and keeps its record of what it checked and let in only outside every git repository.
   When your cache folder lies inside one, saw checks each update afresh.
+- `saw govern verdict` answers `let-in` only for a tree whose submodule links saw let in before, so
+  an update that brings a new submodule link is not counted as one saw let in.
 
 ## [0.17.7] - 2026-11-26
 
