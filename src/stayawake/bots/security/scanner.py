@@ -42,6 +42,26 @@ def _accepts_all_signatures(matcher) -> bool:
         return False
 
 
+_RULE_KEYS = frozenset({"signature", "path_glob", "commit", "evidence"})
+
+
+def _unknown_keys(rule: dict[str, Any]) -> list[str]:
+    """Name the unknown keys of an allowlist rule. Takes the rule. Returns the keys, sorted."""
+    return sorted(str(key) for key in rule if key not in _RULE_KEYS)
+
+
+def unread_rule_notes(allowlist: list[dict[str, Any]] | None) -> list[str]:
+    """Write one note for each allowlist rule with an unknown key. Takes the allowlist. Returns the
+    notes."""
+    notes = []
+    for rule in allowlist or []:
+        if isinstance(rule, dict) and _unknown_keys(rule):
+            notes.append(f"An allowlist rule for {rule.get('signature', 'no signature')} has an unknown key "
+                         f"({', '.join(_unknown_keys(rule))}) and accepts nothing. Correct the rule in your "
+                         "saw config.")
+    return notes
+
+
 def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
     """Match a finding against each allowlist rule by its signature and by each `path_glob`, `commit`
     and `evidence` the rule gives. Takes the finding and the allowlist. Returns whether a rule
@@ -49,6 +69,8 @@ def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
     for rule in allowlist or []:
         if not isinstance(rule, dict):
             continue                       # defensive: skip a non-mapping rule (config is validated upstream)
+        if _unknown_keys(rule):
+            continue
         sig = rule.get("signature")
         glob = rule.get("path_glob")
         if not sig or sig != finding.signature_id:
@@ -157,6 +179,7 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     if read_errors and not result.error:
         result.error = unreadable(read_errors)
     result.notes.extend(coverage_notes or [])
+    result.notes.extend(note for note in unread_rule_notes(allowlist) if note not in result.notes)
     note = _payload_merge_note(result.findings)
     if note:
         result.notes.append(note)

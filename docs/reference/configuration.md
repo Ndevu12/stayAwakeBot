@@ -74,6 +74,9 @@ allowlist:
 An entry gives either `path_glob` or `commit`, never both. saw refuses a config whose allowlist
 breaks either rule.
 
+An entry with any other key, such as a misspelled `commit`, accepts nothing, and the report names
+the key to correct.
+
 The allowlist is yours, not the scanned repository's — see [trust
 model](../explanation/trust-model.md).
 

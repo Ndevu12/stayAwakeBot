@@ -102,6 +102,25 @@ class ACommitRuleMatchesTheFullIdOnly(unittest.TestCase):
                                  [("evil-merge", REVIEWED)])
 
 
+class ARuleWithAnUnknownKeyAcceptsNothing(unittest.TestCase):
+    def test_a_misspelled_commit_key_hides_nothing_and_is_named(self):
+        for key in ("comit", "Commit", "sha", "commits"):
+            with self.subTest(key=key):
+                rule = [{"signature": "evil-merge", key: REVIEWED}]
+                found = [_merge_finding(REVIEWED), _merge_finding(SAME_SHORT_ID), _merge_finding(None)]
+                result = finalize("repo", "local", {"git-history": found}, ["git-history"], [], [], None,
+                                  None, rule, ALL_SIGNATURES)
+                self.assertEqual(len(result.findings), 3)
+                self.assertTrue(any(key in note and "accepts nothing" in note for note in result.notes),
+                                result.notes)
+
+    def test_a_known_rule_names_no_note(self):
+        rule = [{"signature": "evil-merge", "commit": REVIEWED}]
+        result = finalize("repo", "local", {"git-history": [_merge_finding(REVIEWED)]}, ["git-history"],
+                          [], [], None, None, rule, ALL_SIGNATURES)
+        self.assertFalse([note for note in result.notes if "accepts nothing" in note])
+
+
 class APathGlobRuleIsUnchanged(unittest.TestCase):
     def _file_finding(self, path: str) -> Finding:
         return Finding("loader-seed-var", "code-loader", Severity.HIGH, path, "loader")
