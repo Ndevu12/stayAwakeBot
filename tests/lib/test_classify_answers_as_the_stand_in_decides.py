@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """saw govern classify answers checked for exactly the command lines saw's git stand-in sends to saw:
-both read the same table of command lines, which the stand-in's own tests read too."""
+both read the same table of command lines, which the stand-in's own tests read too. A line the
+stand-in runs directly may be answered checked, with a reason, for a repository it names that cannot
+be read."""
 from __future__ import annotations
 
 import json
@@ -38,6 +40,11 @@ class ClassifyAnswersAsTheStandInDecides(unittest.TestCase):
         for line in lines:
             with self.subTest(line=line):
                 body, _code = govern.classify(str(self.folder), line["tool"], line["args"])
+                if body["checked"] and not line["checked"]:
+                    self.assertTrue(any(arg.startswith(("--git-dir", "--work-tree", "--bare")) for arg in line["args"]))
+                    self.assertTrue(body.get("reason"))
+                    self.assertNotIn("run_with", body)
+                    continue
                 self.assertEqual(body["checked"], line["checked"])
 
     def test_a_setting_given_through_the_environment_sends_a_command_to_saw(self):

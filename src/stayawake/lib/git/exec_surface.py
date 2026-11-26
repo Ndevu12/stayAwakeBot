@@ -220,7 +220,7 @@ def links_to_no_git_directory(work_tree: Path) -> bool:
     return False
 
 
-def _common_dir_of(git_dir: Path) -> Path:
+def common_dir_of(git_dir: Path) -> Path:
     """Find where a git directory keeps what its worktrees share. Takes it. Returns that path."""
     text = pathsafe.read_regular_text(git_dir / "commondir")
     return _resolve(git_dir, text.strip()) if text and text.strip() else git_dir
@@ -589,7 +589,7 @@ def repository_views(work_tree: Path) -> list[Path]:
     git_dir = _git_dir_of(work_tree) or (work_tree if is_git_directory(work_tree) else None)
     if git_dir is None:
         return []
-    common_dir = _common_dir_of(git_dir)
+    common_dir = common_dir_of(git_dir)
     scratch_surface = ExecSurface(work_tree)
     main = _main_worktree(common_dir, _repo_config(git_dir, common_dir, scratch_surface))
     places: dict = {}
@@ -608,7 +608,7 @@ def _read_repository(surface: ExecSurface, tree: Path | None, git_dir: Path, ask
     asks git, the settings files already read in this pass, and whether it is a submodule. Returns the
     hooks directory of the view at `git_dir`, and the git directory of every submodule its views
     hold, each with its working tree when one is known."""
-    common_dir = _common_dir_of(git_dir)
+    common_dir = common_dir_of(git_dir)
     collected: set[str] = set()
     unsure: list[str] = []
     opened: list[ConfigEntry] = []
@@ -670,13 +670,17 @@ def _submodules_of(surface: ExecSurface, git_dir: Path | None,
     return found
 
 
-def read_exec_surface(work_tree: Path, ask=repository_settings) -> ExecSurface | None:
+def read_exec_surface(work_tree: Path, ask=repository_settings, *,
+                      git_dir: Path | None = None) -> ExecSurface | None:
     """Read what git would execute for a working tree: by parsing the repository's settings, and then
     with git for the repository and every submodule at any depth, each in every view of it. Takes the
-    tree, and the function that asks git which settings it reads. Returns the surface, with everything
-    that could not be read listed in `unexamined`, or None when it is not a git working tree."""
+    tree, the function that asks git which settings it reads, and the git directory git gives a
+    command there, if another than the tree's own. Returns the surface, with what could not be read
+    listed in `unexamined`, or None for a folder that is no git working tree."""
     root = Path(work_tree)
     files_read: dict = {}
+    if git_dir is not None:
+        return _read_with_git(root, ask, files_read, Path(git_dir))
     surface = _read_by_parsing(root, files_read)
     if surface is None and not is_git_directory(root):
         return None
@@ -703,7 +707,7 @@ def _read_by_parsing(work_tree: Path, files_read: dict) -> ExecSurface | None:
     git_dir = _git_dir_of(work_tree)
     if git_dir is None or links_to_no_git_directory(work_tree):
         return None
-    common_dir = _common_dir_of(git_dir)
+    common_dir = common_dir_of(git_dir)
     surface = ExecSurface(work_tree, git_dir, common_dir)
     try:
         if not git_dir.is_dir():
@@ -772,15 +776,16 @@ def _join(surface: ExecSurface, with_git: ExecSurface) -> None:
     surface.unexamined = list(dict.fromkeys([*surface.unexamined, *with_git.unexamined]))
 
 
-def _read_with_git(work_tree: Path, ask, files_read: dict) -> ExecSurface | None:
+def _read_with_git(work_tree: Path, ask, files_read: dict, given: Path | None = None) -> ExecSurface | None:
     """Read what git would execute for a working tree with git's own answer: for the repository and
     every submodule at any depth, each in every view of it. Takes the tree, the function that asks git
-    which settings it reads, and the settings files already read in this pass. Returns the surface,
-    or None when it is neither a git working tree nor a bare repository."""
-    git_dir = _git_dir_of(work_tree) or (work_tree if is_git_directory(work_tree) else None)
+    which settings it reads, the settings files already read in this pass, and the git directory to
+    read in place of the tree's own. Returns the surface, or None for a folder that is neither a git
+    working tree nor a bare repository."""
+    git_dir = given or _git_dir_of(work_tree) or (work_tree if is_git_directory(work_tree) else None)
     if git_dir is None:
         return None
-    common_dir = _common_dir_of(git_dir)
+    common_dir = common_dir_of(git_dir)
     surface = ExecSurface(work_tree, git_dir, common_dir)
     try:
         if not git_dir.is_dir():

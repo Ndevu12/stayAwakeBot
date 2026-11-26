@@ -190,7 +190,8 @@ def _do_apply(a: argparse.Namespace) -> int:
 
 
 def run_classify(a: argparse.Namespace) -> int:
-    payload, code = core.classify(a.repo, a.tool, _operator_args(a.args))
+    environment = core.take_command_environment()
+    payload, code = core.classify(a.repo, a.tool, _operator_args(a.args), {**os.environ, **environment})
     print(json.dumps(versioned("govern", payload)))
     return code
 
