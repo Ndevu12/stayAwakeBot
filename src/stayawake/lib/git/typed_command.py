@@ -14,6 +14,9 @@ LOCATION_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_
 _SETTINGS_VARIABLES = ("GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT")
 _NUMBERED_SETTINGS = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
 TEMPLATE_VARIABLE = "GIT_TEMPLATE_DIR"
+_PATHSPEC_VARIABLES = {"GIT_LITERAL_PATHSPECS": "literal", "GIT_GLOB_PATHSPECS": "glob",
+                       "GIT_NOGLOB_PATHSPECS": "noglob", "GIT_ICASE_PATHSPECS": "icase"}
+_UNREAD_VARIABLES = ("GIT_ATTR_SOURCE", "GIT_SHALLOW_FILE")
 _OPTIONS_NAMING_THE_REPOSITORY = ("--git-dir", "--work-tree")
 _OPTIONS_WITH_A_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env",
                          "--super-prefix", "--attr-source", "--shallow-file", "--exec-path")
@@ -66,7 +69,7 @@ def take_environment(environ: MutableMapping[str, str]) -> dict[str, str]:
     taken = {}
     for name in list(environ):
         if (name in LOCATION_VARIABLES or name in _SETTINGS_VARIABLES or name == TEMPLATE_VARIABLE
-                or name.startswith(_NUMBERED_SETTINGS)):
+                or name in _PATHSPEC_VARIABLES or name in _UNREAD_VARIABLES or name.startswith(_NUMBERED_SETTINGS)):
             taken[name] = environ.pop(name)
     return taken
 
@@ -77,11 +80,11 @@ def read(args: list[str], environment: "Mapping[str, str] | None" = None) -> "Ty
     git would not reach a subcommand saw can read, or its settings cannot be read."""
     environment = dict(environment or {})
     settings = _environment_settings(environment)
-    if settings is None:
+    if settings is None or any(environment.get(name) for name in _UNREAD_VARIABLES):
         return NOT_READ
     git_dir = work_tree = namespace = ""
     bare = False
-    flags: list[str] = []
+    flags = _pathspec_flags(environment)
     index = 0
     while index < len(args):
         arg = args[index]
@@ -128,6 +131,20 @@ def read(args: list[str], environment: "Mapping[str, str] | None" = None) -> "Ty
         elif name == "--namespace":
             namespace = value
     return NOT_READ
+
+
+def _pathspec_flags(environment: dict[str, str]) -> list[str]:
+    """Spell the pathspec variables of a command's environment in the form of git's own options.
+    Takes the environment. Returns the options."""
+    flags = []
+    for name, kind in _PATHSPEC_VARIABLES.items():
+        value = environment.get(name)
+        if value is None:
+            continue
+        on = value.strip().lower() not in ("", "0", "false", "no", "off")
+        if on or kind == "literal":
+            flags.append(f"--{kind}-pathspecs" if on else "--no-literal-pathspecs")
+    return flags
 
 
 def _environment_settings(environment: dict[str, str]) -> "list[tuple[str, str | None]] | None":

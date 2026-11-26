@@ -105,6 +105,18 @@ def ancestry(repo: str | Path, ancestor: str, descendant: str) -> bool | None:
     return res.returncode == 0
 
 
+def hooks_folder(repo: str | Path) -> Path | None:
+    """Find the folder git runs `repo`'s hooks from: `core.hooksPath`, taken from the top of the
+    working tree when relative, else the git directory's `hooks`. Takes the repository. Returns the
+    folder, or None when git could not say."""
+    top = stdout(repo, ["rev-parse", "--show-toplevel"]).strip()
+    configured = stdout(repo, ["config", "--get", "core.hooksPath"]).strip()
+    gitdir = stdout(repo, ["rev-parse", "--path-format=absolute", "--git-dir"]).strip()
+    if not top or not gitdir:
+        return None
+    return Path(top) / (Path(os.path.expanduser(configured)) if configured else Path(gitdir) / "hooks")
+
+
 def hook_files(repo: str | Path, paths: tuple[str, ...], folds_case=None,
                composes=None) -> tuple[str, ...] | None:
     """Pick the paths that lie in the folder git runs `repo`'s hooks from: `core.hooksPath`, taken
@@ -114,11 +126,9 @@ def hook_files(repo: str | Path, paths: tuple[str, ...], folds_case=None,
     folds case and composes names, `case_folds` and `composes_names` when none is given. Returns
     those paths, or None when git could not say where its hooks run from."""
     top = stdout(repo, ["rev-parse", "--show-toplevel"]).strip()
-    configured = stdout(repo, ["config", "--get", "core.hooksPath"]).strip()
-    gitdir = stdout(repo, ["rev-parse", "--path-format=absolute", "--git-dir"]).strip()
-    if not top or not gitdir:
+    folder = hooks_folder(repo)
+    if not top or folder is None:
         return None
-    folder = Path(top) / (Path(os.path.expanduser(configured)) if configured else Path(gitdir) / "hooks")
     fold = (folds_case or case_folds)(folder)
     compose = (composes or composes_names)(folder)
     hooks = _compared(os.path.realpath(folder), fold, compose)

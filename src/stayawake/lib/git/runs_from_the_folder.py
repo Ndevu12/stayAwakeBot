@@ -5,6 +5,7 @@ names a file or folder in the working tree."""
 from __future__ import annotations
 
 import functools
+import itertools
 import json
 import os
 import shlex
@@ -16,11 +17,14 @@ from typing import Callable
 import yaml
 
 from stayawake.lib.git import exec_keys, query
-from stayawake.lib.git.run import UNTRUSTED, stdout
+from stayawake.lib.git.run import UNTRUSTED, stdout, stdout_bytes
+from stayawake.utils import pathsafe
 
 MANAGERS_FILE = Path(__file__).resolve().parent.parent / "data" / "git_hook_managers.yml"
 _LARGEST_CONFIG = 1 << 20
-_MOST_NODES = 20000
+_MOST_FOLLOWED = 500
+_FOLLOW_DEPTH = 4
+_SEPARATORS = str.maketrans({char: " " for char in "\"'`,;:=()[]{}|&<>\t\r\n"})
 _INCLUDES = ("include.path",)
 _CONFIG_OPTIONS_WITH_A_VALUE = frozenset({"-f", "--file", "--blob", "--type", "--default", "--comment",
                                           "--value", "--url"})
@@ -38,11 +42,9 @@ EDITS_BY_HAND = "the command edits git's configuration in a way that cannot be c
 
 @dataclass(frozen=True)
 class HookManagers:
-    """What hook managers run or read: file patterns, files naming scripts under some keys, and the
-    package.json keys they read."""
+    """What hook managers run or read: file patterns, and the package.json keys they read."""
 
     files: tuple[str, ...]
-    names_scripts: tuple[tuple[str, tuple[str, ...]], ...]
     package_keys: tuple[str, ...]
 
 
@@ -52,38 +54,107 @@ def hook_managers(path: Path = MANAGERS_FILE) -> HookManagers:
     raises ValueError on a malformed file."""
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     files = tuple(str(item) for item in data.get("files") or ())
-    named = tuple((str(item["file"]), tuple(str(key) for key in item["keys"]))
-                  for item in data.get("names_scripts") or ())
     keys = tuple(str(key) for key in data.get("package_keys") or ())
-    if not files or not all(named_file in files for named_file, _keys in named):
-        raise ValueError(f"{path}: every file that names scripts must also be listed")
-    return HookManagers(files, named, keys)
+    if not files or not keys:
+        raise ValueError(f"{path}: hook manager files and package keys must both be listed")
+    return HookManagers(files, keys)
 
 
 def run_on_arrival(repo: Path, changed: tuple[str, ...], before: Callable[[str], "bytes | None"],
                    after: Callable[[str], "bytes | None"]) -> "tuple[str, ...] | None":
-    """Pick the changed paths that git, or a hook manager, runs or reads when git runs one of the
-    folder's hooks. Takes the repository, the changed paths relative to its top, and readers of a
-    path's bytes before and after the change, None for no file. Returns the paths picked, or None
-    when git could not say where the folder's hooks run from."""
+    """Pick the changed paths that git or a hook manager runs, or reads to decide what runs, on its
+    own: files in the folder git runs hooks from, hook manager files, files any of those name and
+    the files they name in turn, package.json's hook manager keys, and files or folders the folder's
+    configuration has git run or include. Takes the repository, the changed paths relative to its
+    top, and readers of a path's bytes before and after the change, None for no file. Returns the
+    paths picked, or None when git could not say where the folder's hooks run from or what it
+    tracks."""
+    folder, top = query.hooks_folder(repo), _top(repo)
     picked = query.hook_files(repo, changed)
-    if picked is None:
+    tracked = _tracked(repo)
+    configured = configured_paths(repo)
+    if folder is None or top is None or picked is None or tracked is None or configured is None:
         return None
     managers = hook_managers()
+    moved = set(changed)
+    known = tracked | moved
+
+    def current(rel: str) -> "bytes | None":
+        return after(rel) if rel in moved else before(rel)
+
+    manager_files = {rel for rel in known if any(fnmatchcase(rel.casefold(), pattern.casefold())
+                                                 for pattern in managers.files)}
+    named = _named_by_hooks(top, folder, manager_files, known, current, managers)
     found = list(picked)
-    found += [rel for rel in changed if any(fnmatchcase(rel.casefold(), pattern.casefold())
-                                            for pattern in managers.files)]
-    if "package.json" in changed and _package_keys_differ(before("package.json"), after("package.json"),
-                                                          managers.package_keys):
+    found += [rel for rel in changed if rel in manager_files or rel in named or _under(rel, configured)]
+    if "package.json" in moved and _package_keys_differ(before("package.json"), after("package.json"),
+                                                        managers.package_keys):
         found.append("package.json")
-    named = _named_scripts(managers, set(changed), before, after)
-    found += [rel for rel in changed if os.path.normpath(rel) in named]
     return tuple(dict.fromkeys(found))
+
+
+def _named_by_hooks(top: Path, folder: Path, manager_files: set[str], known: set[str],
+                    current: Callable[[str], "bytes | None"], managers: HookManagers) -> set[str]:
+    """Follow the files a hook or a hook manager file names, and the files those name, within a
+    bound. Takes the top of the working tree, the hooks folder, the hook manager files, every
+    tracked or changed path, a reader of a path's bytes as they will be, and the hook managers.
+    Returns the paths reached."""
+    waiting: list[tuple[str, str, int]] = []
+    for hook in _hooks_in(folder):
+        rel = _relative(top, hook)
+        data = current(rel) if rel not in (None, ".") else pathsafe.read_regular_no_follow(hook, _LARGEST_CONFIG)
+        if data:
+            waiting.append((_text(data), os.path.dirname(rel) if rel else "", 0))
+    for rel in manager_files:
+        data = current(rel)
+        if data:
+            waiting.append((_text(data), os.path.dirname(rel), 0))
+    package = current("package.json")
+    if package:
+        waiting.append((_package_hook_commands(package, managers.package_keys), "", 0))
+    reached: set[str] = set()
+    while waiting and len(reached) < _MOST_FOLLOWED:
+        text, beside, depth = waiting.pop()
+        for rel in _paths_in(text, beside) & known:
+            if rel in reached:
+                continue
+            reached.add(rel)
+            data = current(rel) if depth < _FOLLOW_DEPTH else None
+            if data and len(data) <= _LARGEST_CONFIG:
+                waiting.append((_text(data), os.path.dirname(rel), depth + 1))
+    return reached
+
+
+def _hooks_in(folder: Path) -> list[Path]:
+    """List the hook files in the folder git runs hooks from, leaving out samples. Takes the
+    folder. Returns them."""
+    try:
+        found = (entry for entry in folder.rglob("*") if entry.is_file() and not entry.name.endswith(".sample"))
+        return list(itertools.islice(found, _MOST_FOLLOWED))
+    except OSError:
+        return []
+
+
+def _package_hook_commands(data: bytes, keys: tuple[str, ...]) -> str:
+    """Read the commands package.json's hook manager keys give, with each npm script they name.
+    Takes package.json's bytes and the keys. Returns the commands as one text."""
+    try:
+        loaded = json.loads(data[:_LARGEST_CONFIG].decode("utf-8-sig"))
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    if not isinstance(loaded, dict):
+        return ""
+    text = " ".join(json.dumps(loaded[key]) for key in keys if key in loaded)
+    scripts = loaded.get("scripts") if isinstance(loaded.get("scripts"), dict) else {}
+    named = [scripts[word] for word in text.translate(_SEPARATORS).split()
+             if isinstance(scripts.get(word), str)]
+    return " ".join([text, *named])
 
 
 def _package_keys_differ(before: "bytes | None", after: "bytes | None", keys: tuple[str, ...]) -> bool:
     """Tell whether package.json's hook manager keys differ between two versions. Takes both
-    versions, None for no file, and the keys. Returns the answer, True for a version that cannot be read."""
+    versions, None for no file, and the keys. Returns the answer, True for a version that cannot be
+    read."""
     def read(data: "bytes | None") -> "dict | None":
         if data is None:
             return {}
@@ -98,59 +169,64 @@ def _package_keys_differ(before: "bytes | None", after: "bytes | None", keys: tu
     return any(old.get(key) != new.get(key) for key in keys)
 
 
-def _named_scripts(managers: HookManagers, changed: set[str], before: Callable[[str], "bytes | None"],
-                   after: Callable[[str], "bytes | None"]) -> set[str]:
-    """Collect the paths hook manager files name as scripts they run. Takes the hook managers, the
-    changed paths and readers of a path's bytes before and after. Returns the paths, normalised."""
-    named: set[str] = set()
-    for config, keys in managers.names_scripts:
-        data = after(config) if config in changed else before(config)
-        if not data or len(data) > _LARGEST_CONFIG:
-            continue
-        try:
-            loaded = yaml.safe_load(data)
-        except yaml.YAMLError:
-            continue
-        for command in _values_under(loaded, frozenset(keys)):
-            named.update(_paths_in(command, os.path.dirname(config)))
-    return named
-
-
-def _values_under(loaded, keys: frozenset[str]) -> list[str]:
-    """Collect every string value under one of `keys`, at any depth. Takes the loaded document and
-    the keys. Returns the values, stopping after a bounded number of nodes."""
-    values: list[str] = []
-    waiting = [loaded]
-    seen = 0
-    while waiting and seen < _MOST_NODES:
-        node = waiting.pop()
-        seen += 1
-        if isinstance(node, dict):
-            for key, value in node.items():
-                if key in keys and isinstance(value, str):
-                    values.append(value)
-                else:
-                    waiting.append(value)
-        elif isinstance(node, list):
-            waiting.extend(node)
-    return values
-
-
-def _paths_in(command: str, beside: str) -> set[str]:
-    """Read the words of a command line that name files. Takes the command and the folder of the
-    file it came from. Returns each word twice: a path from the top, and the word itself."""
-    try:
-        words = shlex.split(command, comments=True)
-    except ValueError:
-        words = command.split()
+def _paths_in(text: str, beside: str) -> set[str]:
+    """Read the words of a text that may name files. Takes the text and the folder of the file it
+    came from. Returns each word twice: a path from the top, and one from that folder."""
     paths: set[str] = set()
-    for word in words:
-        word = word.strip("'\"")
-        if not word or word.startswith("-") or word.startswith("/"):
+    for word in text.translate(_SEPARATORS).split():
+        if not word or word.startswith(("-", "$", "/", "~")):
             continue
         paths.add(os.path.normpath(word))
         paths.add(os.path.normpath(os.path.join(beside, word)))
     return paths
+
+
+def configured_paths(repo: Path) -> "set[str] | None":
+    """List the files and folders in the working tree that the folder's own configuration, local,
+    global or included, has git run or include. Takes the repository. Returns them relative to the
+    top, or None when git could not list its configuration."""
+    top = _top(repo)
+    listed = stdout_bytes(repo, ["config", "--list", "--show-origin", "-z"], context=UNTRUSTED)
+    if top is None or listed is None:
+        return None
+    fields = listed.split(b"\0")
+    settings = []
+    for origin, entry in zip(fields[0::2], fields[1::2]):
+        key, _, value = os.fsdecode(entry).partition("\n")
+        place = os.fsdecode(origin).removeprefix("file:")
+        beside = (Path(repo) / place).parent if place and not place.startswith(("command line:", "blob:")) else top
+        settings.append((key, value, beside))
+    return {rel for _text, rel in _named_paths(top, settings)}
+
+
+def _under(rel: str, folders: set[str]) -> bool:
+    """Tell whether a path is one of `folders` or inside one. Takes the path and the folders."""
+    return any(folder == "." or rel == folder or rel.startswith(folder.rstrip("/") + "/") for folder in folders)
+
+
+def _tracked(repo: Path) -> "set[str] | None":
+    """List the paths the folder tracks. Takes the repository. Returns them, or None."""
+    listed = stdout_bytes(repo, ["ls-files", "-z"], context=UNTRUSTED)
+    return None if listed is None else {os.fsdecode(path) for path in listed.split(b"\0") if path}
+
+
+def _top(repo: Path) -> "Path | None":
+    """Find the top of a repository's working tree. Takes the repository. Returns it, or None."""
+    top = stdout(repo, ["rev-parse", "--show-toplevel"], context=UNTRUSTED).strip()
+    return Path(top) if top else None
+
+
+def _relative(top: Path, path: Path) -> "str | None":
+    """Name a path from the top of the working tree. Takes the top and the path. Returns the name,
+    or None for a path outside it."""
+    resolved, root = os.path.realpath(path), os.path.realpath(top)
+    inside = resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep)
+    return os.path.relpath(resolved, root) if inside else None
+
+
+def _text(data: bytes) -> str:
+    """Decode a file's bytes for reading its words. Takes the bytes. Returns the text."""
+    return data[:_LARGEST_CONFIG].decode("utf-8", errors="replace")
 
 
 def settings_running_folder_files(top: "Path | None", settings) -> tuple[str, ...]:
@@ -160,30 +236,40 @@ def settings_running_folder_files(top: "Path | None", settings) -> tuple[str, ..
     picked one as `key=value`."""
     if top is None:
         return ()
-    picked = []
-    for key, value in settings:
+    return tuple(text for text, _rel in _named_paths(top, [(key, value, top) for key, value in settings]))
+
+
+def _named_paths(top: Path, settings) -> list[tuple[str, str]]:
+    """Find the settings that name a file or folder in a working tree for git to run or include.
+    Takes the top and the (key, value, folder a relative include starts from) settings. Returns
+    each as (`key=value`, the path from the top)."""
+    named = []
+    for key, value, beside in settings:
         if value is None:
             continue
         lowered = key.lower()
         if lowered in _INCLUDES or (lowered.startswith("includeif.") and lowered.endswith(".path")):
-            candidate, runs_a_program = value, False
+            candidate, start = value, beside
         else:
             rule = exec_keys.rule_for(key)
             if rule is None:
                 continue
             if rule.runs == exec_keys.HOOKS_DIRECTORY:
-                candidate, runs_a_program = value, False
+                candidate, start = value, top
             else:
                 command = rule.command(key, value)
-                words = shlex.split(command) if command else []
-                if not words:
+                try:
+                    words = shlex.split(command) if command else []
+                except ValueError:
+                    words = command.split() if command else []
+                if not words or "/" not in words[0]:
                     continue
-                candidate, runs_a_program = words[0], True
-        if runs_a_program and "/" not in candidate:
-            continue
-        if _inside(top, candidate):
-            picked.append(f"{key}={value}")
-    return tuple(picked)
+                candidate, start = words[0], top
+        path = Path(os.path.expanduser(candidate))
+        rel = _relative(top, path if path.is_absolute() else Path(start) / path)
+        if rel is not None and not (rel == ".git" or rel.startswith(".git" + os.sep)):
+            named.append((f"{key}={value}", rel))
+    return named
 
 
 def config_settings(rest: tuple[str, ...]) -> "tuple[tuple[str, str | None], ...] | str":
@@ -248,13 +334,3 @@ def lies_in_a_working_tree(folder: str, where: Path) -> bool:
     return bool(stdout(probe, ["rev-parse", "--show-toplevel"], context=UNTRUSTED).strip())
 
 
-def _inside(top: Path, named: str) -> bool:
-    """Tell whether a path, relative ones taken from the top, lies in the working tree and outside
-    its git directory. Takes the top and the path. Returns the answer."""
-    path = Path(os.path.expanduser(named))
-    path = path if path.is_absolute() else top / path
-    resolved = os.path.realpath(path)
-    root = os.path.realpath(top)
-    inside = resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep)
-    in_git = resolved.startswith(os.path.join(root, ".git") + os.sep) or resolved == os.path.join(root, ".git")
-    return inside and not in_git

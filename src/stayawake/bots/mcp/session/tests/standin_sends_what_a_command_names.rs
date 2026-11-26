@@ -133,3 +133,23 @@ fn a_check_that_needed_no_scan_is_said_to_be_checked() {
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(said.contains("saw: checked this update"), "{said}");
 }
+
+#[test]
+fn a_replayed_command_is_written_by_saw_and_never_run_again_with_its_words_handed_back() {
+    let terminal = Terminal::new("relayed");
+    let answer = r#"{"scan":{"results":[{"verdict":"clean"}],"any_error":false},"output":{"stdout":"listed\n","stderr":"Switched to a new branch try\n"}}"#;
+    exec_script(
+        &terminal.dir.join("fake-saw"),
+        &format!(
+            "#!/bin/sh\necho \"$@\" >> {:?}\n[ \"$2\" = prepare ] && printf '%s\\n' '{answer}'\nexit 0\n",
+            terminal.saw_log
+        ),
+    );
+    let out = terminal.run(&["checkout", "-b", "try"], &[]);
+    assert_eq!(out.status.code(), Some(0));
+    let asked = terminal.took(&terminal.saw_log).unwrap_or_default();
+    assert!(asked.contains("govern prepare") && asked.contains("govern apply"), "{asked:?}");
+    assert!(terminal.took(&terminal.real_log).is_none(), "git ran after saw wrote the result");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "listed\n");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Switched to a new branch try"));
+}

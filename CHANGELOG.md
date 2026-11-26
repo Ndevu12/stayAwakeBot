@@ -34,7 +34,8 @@ reader, not the mechanism or the weakness it closed.
   repository, index or objects the command or its environment names. What saw holds stays out of
   the folder, and a clean update is written exactly as it was checked.
 - An update that changes a file a hook manager runs or reads, such as a husky, lefthook or
-  pre-commit hook, is held until you let it in, even when nothing is found in it. A command that
+  pre-commit hook, a file any of those names, or a file your git configuration has git run or
+  include, is held until you let it in, even when nothing is found in it. A command that
   points git at files in your folder to run, such as setting `core.hooksPath`, or that copies hooks
   from a folder in a working tree into a new repository, asks you first.
 - A git command that writes a file it names, such as `git diff --output`, or that fetches through a

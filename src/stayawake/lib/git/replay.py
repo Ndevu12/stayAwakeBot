@@ -131,7 +131,7 @@ class Replayed:
     entries before and after as (mode, blob, stage); `refs` holds (ref, new, old); `state_left`
     and `state_removed` name operation state files the command left or removed, `pseudo_refs` the
     commits it pointed `ORIG_HEAD` and the like at. `finished` is whether git finished the command,
-    `said` what it said."""
+    `said` the end of what it said, and `output` what it wrote to its output and to its errors."""
 
     holding: Holding
     finished: bool
@@ -145,6 +145,7 @@ class Replayed:
     state_removed: tuple[str, ...]
     stash_log: "bytes | None"
     pseudo_refs: tuple[tuple[str, str], ...] = ()
+    output: tuple[str, str] = ("", "")
 
     @property
     def changes_nothing_but_refs(self) -> bool:
@@ -670,27 +671,33 @@ def replay(holding: Holding, command: TypedCommand, signing: tuple[str, ...], gh
     signing settings for commits it makes and, for a gh command, its arguments. Returns what changed."""
     where = holding.work / holding.location.prefix if holding.location.work_tree else holding.work
     if gh_args is not None:
-        finished, said = _run_gh(holding.work, gh_args)
+        finished, output = _run_gh(holding.work, gh_args)
     elif command.sub == "pull":
-        finished, said = _pull(holding.work, list(command.rest), signing)
+        finished, output = _pull(holding.work, list(command.rest), signing)
     elif command.sub == "fetch":
         if not stdout(holding.work, ["remote"], context=SAW_OWNED).strip():
-            return _read_result(holding, False, NO_REMOTE)
-        done = run(holding.work, ["fetch", *command.rest], context=OPERATOR_PUSH)
-        finished, said = done is not None and done.returncode == 0, (done.stderr if done else "")
+            return _read_result(holding, False, ("", NO_REMOTE))
+        finished, output = _ran(run(holding.work, ["fetch", *command.rest], context=OPERATOR_PUSH))
     else:
         settings = [arg for key, value in command.settings if key.lower() not in RECURSION_KEYS
                     for arg in ("-c", key if value is None else f"{key}={value}")]
         namespace = [f"--namespace={command.namespace}"] if command.namespace else []
-        done = run(where, [*signing, *settings, *command.flags, "--no-literal-pathspecs", *namespace,
-                           command.sub, *command.rest], context=SAW_OWNED, timeout=LOCAL_TIMEOUT * 5)
-        finished, said = done is not None and done.returncode == 0, ((done.stderr or done.stdout) if done else "")
-    return _read_result(holding, finished, said)
+        finished, output = _ran(run(where, [*signing, *settings, "--no-literal-pathspecs", *command.flags, *namespace,
+                                            command.sub, *command.rest], context=SAW_OWNED, timeout=LOCAL_TIMEOUT * 5))
+    return _read_result(holding, finished, output)
 
 
-def _read_result(holding: Holding, finished: bool, said: str) -> Replayed:
+def _ran(done) -> tuple[bool, tuple[str, str]]:
+    """Read whether a git command finished and what it wrote. Takes its completed process, None
+    when it did not run. Returns whether it finished, and its output and errors."""
+    if done is None:
+        return False, ("", "")
+    return done.returncode == 0, (done.stdout or "", done.stderr or "")
+
+
+def _read_result(holding: Holding, finished: bool, output: tuple[str, str]) -> Replayed:
     """Read what a replay changed in its holding copy. Takes the copy, whether git finished and what
-    it said. Returns what changed."""
+    it wrote to its output and errors. Returns what changed."""
     bare, work = holding.bare, holding.work
     after_entries = _entries(stdout_bytes(work, ["ls-files", "-s", "-z"], context=SAW_OWNED)) or {}
     index = tuple((os.fsdecode(path), holding.index.get(path, ()), after_entries.get(path, ()))
@@ -725,8 +732,9 @@ def _read_result(holding: Holding, finished: bool, said: str) -> Replayed:
     removed = tuple(name for name in holding.state if name not in present and name not in PSEUDO_REFS)
     log = pathsafe.read_regular_no_follow(bare / _STASH_LOG, _LARGEST_STATE_FILE)
     before_log = pathsafe.read_regular_no_follow(holding.location.common_dir / _STASH_LOG, _LARGEST_STATE_FILE)
-    return Replayed(holding, finished, (said or "").strip()[-600:], tuple(files), commit, index, refs, head,
-                    left, removed, log if log != before_log else None, pseudo)
+    said = (output[1] or output[0]).strip()[-600:]
+    return Replayed(holding, finished, said, tuple(files), commit, index, refs, head, left, removed,
+                    log if log != before_log else None, pseudo, output)
 
 
 def _holding_refs(bare: Path) -> tuple[dict, dict]:
@@ -757,23 +765,22 @@ def _read_text(path: Path) -> str:
     return data.decode(errors="replace") if data is not None else ""
 
 
-def _pull(work: Path, args: list[str], signing: tuple[str, ...] = ()) -> tuple[bool, str]:
+def _pull(work: Path, args: list[str], signing: tuple[str, ...] = ()) -> tuple[bool, tuple[str, str]]:
     """Fetch, then merge or rebase the way a pull does, in the holding copy. Takes the holding work tree,
-    the pull's arguments and the signing settings. Returns whether it finished and what git said."""
+    the pull's arguments and the signing settings. Returns whether it finished and what git wrote."""
     if not stdout(work, ["remote"], context=SAW_OWNED).strip():
-        return False, NO_REMOTE
+        return False, ("", NO_REMOTE)
     positionals = list(subcommand_options.read("pull", args).words)
     fetched = run(work, ["fetch", *positionals[:1]], context=OPERATOR_PUSH)
     if fetched is None or fetched.returncode != 0:
-        return False, "the fetch did not finish"
+        return False, ("", "the fetch did not finish")
     onto = [f"{positionals[0]}/{positionals[1]}"] if len(positionals) >= 2 else ["@{upstream}"]
     rebase = _pull_rebases(work, args)
     if rebase:
         command = ["rebase", *(["--rebase-merges"] if rebase == "merges" else []), *onto]
     else:
         command = ["merge", *_pull_ff(work, args), *onto]
-    done = run(work, [*signing, *command], context=SAW_OWNED, timeout=LOCAL_TIMEOUT * 5)
-    return done is not None and done.returncode == 0, (done.stderr if done else "")
+    return _ran(run(work, [*signing, *command], context=SAW_OWNED, timeout=LOCAL_TIMEOUT * 5))
 
 
 def _pull_rebases(work: Path, args: list[str]) -> str:
@@ -809,14 +816,14 @@ def _pull_ff(work: Path, args: list[str]) -> list[str]:
     return {"only": ["--ff-only"], "false": ["--no-ff"]}.get(value, [])
 
 
-def _run_gh(work: Path, args: list[str]) -> tuple[bool, str]:
+def _run_gh(work: Path, args: list[str]) -> tuple[bool, tuple[str, str]]:
     """Run a gh command in the holding work tree. Takes the work tree and the arguments. Returns
-    whether it finished and what it said."""
+    whether it finished and what it wrote."""
     program = shutil.which("gh")
     if not program:
-        return False, "gh was not found"
+        return False, ("", "gh was not found")
     try:
         result = subprocess.run([program, *args], cwd=work, capture_output=True, text=True, timeout=180)
     except (OSError, subprocess.TimeoutExpired):
-        return False, "the GitHub command did not finish"
-    return result.returncode == 0, result.stderr
+        return False, ("", "the GitHub command did not finish")
+    return result.returncode == 0, (result.stdout, result.stderr)

@@ -31,7 +31,8 @@ saw judges what the update brings. A finding a changed file already had before t
 listed under `pre_existing` and does not hold the update, unless it is confirmed. An update that
 changes a file in the folder git runs your hooks from is held until you let it in, even when
 nothing is found in it, and so is an update that changes a file a hook manager runs or reads, such as
-a husky, lefthook or pre-commit hook.
+a husky, lefthook or pre-commit hook, a file any of those names, or a file your configuration has git
+run or include.
 
 When the verdict is suspicious or infected, the update is held and your open folder stays as it
 was. The answer says what to do in `next_steps`, and its `decision` lets you let the update in after
@@ -39,7 +40,7 @@ you review it: `saw govern apply --repo <folder> --into <dir> --accept <commit>`
 commit saw checked. For an infected update, saw recommends leaving the folder unchanged; to let it in
 anyway, add `--confirm <folder name>`. `saw govern verdict` then answers that you let that tree in.
 A command that writes nothing into the folder or its index, such as creating a branch where the
-folder already is, answers `passthrough` and runs as typed. A command that stages files your folder
+folder already is, is carried out by saw exactly as it was checked, and what git said is shown. A command that stages files your folder
 does not hold, such as `git reset` to a fetched commit or staging part of a file, is checked first:
 a clean result is staged exactly as checked, and a finding holds the command, with the folder and
 its index as they were.

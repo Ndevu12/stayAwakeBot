@@ -65,6 +65,15 @@ class _Fetched(_TrackingCheckout):
         self.assertEqual((answer.get("passthrough"), code), (True, exitcodes.CLEAN), answer)
         self._untouched()
 
+    def _written_by_saw(self, *args: str, environment: "dict | None" = None) -> dict:
+        answer, code = self._prepare(*args, environment=environment)
+        self.assertEqual(code, exitcodes.CLEAN, answer)
+        self.assertNotIn("passthrough", answer)
+        self.assertIn("output", answer)
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertFalse((self.open / "loader.js").exists())
+        return answer
+
     def _blob(self, text: str) -> str:
         source = self.root / "staged-content"
         source.write_text(text, encoding="utf-8")
@@ -108,17 +117,42 @@ class EverySpellingIsJudgedByWhatItWrites(_Fetched):
         self.assertEqual(self.rev(self.open, "HEAD~1"), self.start)
         self.assertTrue((self.open / "new.txt").is_file())
 
-    def test_a_command_that_writes_nothing_runs_as_typed(self):
+    def test_a_command_that_writes_nothing_is_written_by_saw_and_never_run_again(self):
         for args in (["reset", "--soft", "HEAD"], ["reset", "--hard"], ["reset", "--", "kept.txt"],
                      ["reset", "origin/feature"], ["checkout", "-b", "try"], ["switch", "-c", "try-too"],
-                     ["stash", "list"], ["worktree", "list"], ["submodule", "status"],
-                     ["update-ref", "refs/heads/elsewhere", "HEAD"], ["reset", "--soft", "origin/evil~1"]):
+                     ["stash", "list"], ["update-ref", "refs/heads/elsewhere", "HEAD"]):
+            with self.subTest(args=args):
+                self._written_by_saw(*args)
+                self.assertEqual(self.rev(self.open), self.start)
+                self.git(self.open, "checkout", "-q", "main")
+        self.assertIn("try", self.git(self.open, "branch"))
+        for args in (["worktree", "list"], ["submodule", "status"]):
             with self.subTest(args=args):
                 self._passes(*args)
 
+    def test_what_the_replay_said_is_handed_back(self):
+        answer = self._written_by_saw("checkout", "-b", "said")
+        self.assertIn("said", answer["output"]["stderr"])
+
+    def test_a_ref_moved_after_the_check_brings_nothing_in(self):
+        answer, code = self._prepare("checkout", "-b", "raced", "origin/feature")
+        self.assertEqual(code, exitcodes.CLEAN, answer)
+        self.git(self.open, "update-ref", "refs/remotes/origin/feature", "refs/remotes/origin/evil~1")
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.assertEqual(self.rev(self.open), self.start)
+        self.assertFalse((self.open / "loader.js").exists())
+
+    def test_pathspec_settings_in_the_environment_are_replayed(self):
+        self._held("reset", "origin/evil~1", "--", "LOADER.JS", environment={"GIT_ICASE_PATHSPECS": "1"})
+        self._held("--icase-pathspecs", "checkout", "origin/evil~1", "--", "LOADER.JS")
+        answer, code = self._prepare("checkout", "origin/evil~1", "--", "*.js", environment={"GIT_LITERAL_PATHSPECS": "1"})
+        self.assertEqual(code, exitcodes.INCOMPLETE, answer)
+        self._untouched()
+        self._held("checkout", "origin/evil~1", "--", "*.js", environment={"GIT_GLOB_PATHSPECS": "1"})
+
     def test_the_files_a_moved_head_would_bring_are_judged_when_they_are_written(self):
-        self._passes("reset", "--soft", "origin/evil~1")
-        self.git(self.open, "reset", "-q", "--soft", "origin/evil~1")
+        self._written_by_saw("reset", "--soft", "origin/evil~1")
+        self.assertEqual(self.rev(self.open), self.rev(self.open, "origin/evil~1"))
         self.start = self.rev(self.open)
         answer, code = self._prepare("reset", "--hard")
         self.assertEqual(code, exitcodes.FINDINGS, answer)
@@ -223,7 +257,7 @@ class ACommandSawDoesNotReplayIsAsked(_Fetched):
                 self.assertEqual(answer["decision"]["scan_after"], ["saw", "scan", str(Path(self.open) / created)])
 
     def test_a_command_that_would_update_submodules_is_asked(self):
-        self._passes("checkout", "--recurse-submodules", "--", "kept.txt")
+        self._written_by_saw("checkout", "--recurse-submodules", "--", "kept.txt")
         (self.open / ".gitmodules").write_text('[submodule "sub"]\n\tpath = sub\n\turl = ../sub\n', encoding="utf-8")
         self.git(self.open, "add", ".gitmodules")
         self.git(self.open, "commit", "-qm", "modules")
@@ -234,7 +268,7 @@ class ACommandSawDoesNotReplayIsAsked(_Fetched):
                 self.assertEqual(self._asked(*args)["reason"], govern_command.UPDATES_SUBMODULES)
         self.git(self.open, "config", "submodule.recurse", "true")
         self._asked("restore", "kept.txt")
-        self._passes("restore", "--no-recurse-submodules", "kept.txt")
+        self._written_by_saw("restore", "--no-recurse-submodules", "kept.txt")
 
 
 class AnUpdateLandsAsGitWouldLandIt(_Fetched):
@@ -347,6 +381,90 @@ class WhatMakesGitRunFolderFilesIsAskedAbout(_Fetched):
         answer, code = self._prepare("merge", "--ff-only", "origin/main")
         self.assertEqual(code, exitcodes.CLEAN, answer)
         self.assertNotIn("decision", answer)
+
+    def _folder_configured(self, key: str, value: str, files: dict) -> None:
+        self._upstream(files)
+        self.git(self.open, "pull", "-q", "--ff-only")
+        self.git(self.open, "config", key, value)
+        self.start = self.rev(self.open)
+
+    def test_a_file_the_folders_configuration_includes_or_runs_is_held_for_review(self):
+        for key, value, name in (("include.path", "../shared.gitconfig", "shared.gitconfig"),
+                                 ("core.fsmonitor", "tools/fsm.sh", "tools/fsm.sh"),
+                                 ("includeIf.onbranch:main.path", "../shared.gitconfig", "shared.gitconfig")):
+            with self.subTest(key=key):
+                self._folder_configured(key, value, {name: "# first\n"})
+                self._upstream({name: "# changed\n"})
+                self._held_for_review(name)
+                self.git(self.open, "config", "--unset", key)
+                self.git(self.open, "merge", "-q", "--ff-only", "origin/main")
+                self.start = self.rev(self.open)
+
+    def test_a_file_the_global_configuration_runs_is_held_for_review(self):
+        from unittest import mock
+        global_config = self.root / "global.gitconfig"
+        global_config.write_text("[core]\n\tfsmonitor = tools/watch.sh\n", encoding="utf-8")
+        self._upstream({"tools/watch.sh": "exit 0\n"})
+        self.git(self.open, "pull", "-q", "--ff-only")
+        self.start = self.rev(self.open)
+        self._upstream({"tools/watch.sh": "echo changed\n"})
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(global_config)}):
+            self._held_for_review("tools/watch.sh")
+
+    def test_a_file_a_hook_names_is_held_for_review_and_so_is_the_file_it_names(self):
+        self._folder_configured("core.hooksPath", ".husky/_", {
+            ".husky/pre-commit": "sh tools/check.sh\n", "tools/check.sh": "sh tools/deeper.sh\n",
+            "tools/deeper.sh": "exit 0\n", "tools/other.sh": "exit 0\n"})
+        for name, text in (("tools/check.sh", "sh tools/deeper.sh\necho changed\n"), ("tools/deeper.sh", "echo changed\n")):
+            with self.subTest(name=name):
+                self._upstream({name: text})
+                self._held_for_review(name)
+                self.git(self.open, "merge", "-q", "--ff-only", "origin/main")
+                self.start = self.rev(self.open)
+        self._upstream({"tools/other.sh": "echo changed\n"})
+        self.git(self.open, "fetch", "-q")
+        answer, code = self._prepare("merge", "--ff-only", "origin/main")
+        self.assertEqual(code, exitcodes.CLEAN, answer)
+        self.assertNotIn("decision", answer)
+
+    def test_a_file_a_hook_outside_the_working_tree_names_is_held_for_review(self):
+        self._upstream({"scripts/pre.sh": "exit 0\n"})
+        self.git(self.open, "pull", "-q", "--ff-only")
+        hook = self.open / ".git" / "hooks" / "pre-commit"
+        hook.write_text("#!/bin/sh\n./scripts/pre.sh\n", encoding="utf-8")
+        self.start = self.rev(self.open)
+        self._upstream({"scripts/pre.sh": "echo changed\n"})
+        self._held_for_review("scripts/pre.sh")
+
+    def test_each_hook_manager_and_the_scripts_it_names_are_held_for_review(self):
+        for files in ({".huskyrc.json": '{"hooks":{"pre-commit":"node tools/check.js"}}'},
+                      {"husky.config.js": 'module.exports = {hooks: {"pre-commit": "node tools/check.js"}};'},
+                      {".overcommit.yml": "PreCommit:\n  Custom:\n    required_executable: tools/check.sh\n"},
+                      {".rusty-hook.toml": '[hooks]\npre-commit = "sh tools/check.sh"\n'},
+                      {"lefthook-local.toml": '[pre-commit.commands.check]\nrun = "sh tools/check.sh"\n'},
+                      {".config/lefthook.toml": '[pre-commit.commands.check]\nrun = "sh tools/check.sh"\n'},
+                      {"lint-staged.config.js": 'module.exports = { "*.js": "node tools/check.js" };'},
+                      {".lintstagedrc.json": '{"*.js": "node tools/check.js"}'},
+                      {"package.json": json.dumps({"gitHooks": {"pre-commit": "node tools/check.js"}})},
+                      {"package.json": json.dumps({"pre-commit": ["lint"], "scripts": {"lint": "node tools/check.js"}})},
+                      {"package.json": json.dumps({"lint-staged": {"*.js": "node tools/check.js"}})}):
+            name = next(iter(files))
+            with self.subTest(name=name, files=files):
+                self._held_for_review(*self._arrives(files))
+
+    def test_a_script_a_hook_key_runs_through_npm_is_held_for_review(self):
+        package = json.dumps({"pre-commit": ["lint"], "scripts": {"lint": "node tools/check.js"}})
+        self._upstream({"package.json": package, "tools/check.js": "1\n"})
+        self.git(self.open, "pull", "-q", "--ff-only")
+        self.start = self.rev(self.open)
+        self._upstream({"tools/check.js": "2\n"})
+        self._held_for_review("tools/check.js")
+
+    def _arrives(self, files: dict) -> tuple:
+        self.git(self.open, "checkout", "-q", "main")
+        self.git(self.open, "reset", "-q", "--hard", self.start)
+        self._upstream({**files, "tools/check.js": "1\n", "tools/check.sh": "exit 0\n"})
+        return tuple(files)
 
     def test_pointing_git_at_a_folder_of_hooks_asks_first(self):
         (self.open / ".githooks").mkdir()

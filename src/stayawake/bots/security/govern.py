@@ -58,6 +58,7 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     deadline, the command's environment and whether the stand-in reads the command as one that
     brings no files. Returns the answer and its exit: a passthrough, a scan, or a reason with a
     decision."""
+    _forget_state(Path(into))
     command = typed_command.TypedCommand("", ())
     if tool == "gh":
         if not incoming.gh_brings_files(list(args)):
@@ -80,12 +81,9 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
         return _unchecked(repo, holding)
     signing = fix_commit_signing(location.folder_repository or Path(repo))
     result = replay.replay(holding, command, signing, list(args) if tool == "gh" else None)
-    network = tool == "gh" or command.sub in replay.NETWORK
     stopped = _stop_to_carry(result, command)
     if stopped is not None:
         return _judge_arrived(repo, into, stopped, config, deadline)
-    if result.finished and not network and _lands_nothing(result):
-        return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
     if not result.finished and result.changes_nothing_but_refs and not result.refs:
         return _unchecked(repo, GIT_STOPPED + (f": {result.said}" if result.said else ""))
     return _judge_replayed(repo, into, result, config, deadline)
@@ -118,23 +116,6 @@ def _stop_to_carry(result: "replay.Replayed", command: "typed_command.TypedComma
     if not conflicted.stopped_for_conflicts(holding.work, holding.bare):
         return None
     return incoming.arrived_with_conflicts(holding.work, holding.bare, holding.base, command.sub or "gh")
-
-
-def _lands_nothing(result: "replay.Replayed") -> bool:
-    """Tell whether a replayed command writes no file and stages only what the folder already holds
-    at each path. Takes what the replay changed. Returns the answer."""
-    if result.files or result.state_left or result.state_removed:
-        return False
-    if not result.index:
-        return True
-    holds = _folder_holds(result.holding, [rel for rel, _before, _after in result.index])
-    for rel, before, after in result.index:
-        for mode, oid, stage in after:
-            if (mode, oid, stage) in before:
-                continue
-            if mode == _GITLINK or oid.decode() not in holds.get(rel, set()):
-                return False
-    return True
 
 
 def _folder_holds(holding: "replay.Holding", paths: list[str]) -> dict[str, set[str]]:
@@ -238,7 +219,7 @@ def _judge_replayed(repo: str, into: str, result: "replay.Replayed", config: str
         "let_in": blobs, "policy": clean_ledger.policy_digest(config), "moved_to": moved_to})
     if releasable:
         govern_status.write(repo, "checking", verdict=verdict, step="checked; ready to apply")
-        return answer, code
+        return {**answer, "output": {"stdout": result.output[0], "stderr": result.output[1]}}, code
     govern_status.write(repo, "held", verdict=verdict,
                         reasons=["the update was not applied; the open folder is unchanged"])
     if asks or verdict in govern_held.HELD_VERDICTS:
@@ -754,6 +735,18 @@ def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(body), encoding="utf-8")
     temporary.replace(path)
+
+
+def _forget_state(into: Path) -> None:
+    """Remove what an earlier check recorded in the holding directory. Takes the holding
+    directory. Returns nothing."""
+    try:
+        (Path(into) / _STATE).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        if (Path(into) / _STATE).exists():
+            raise
 
 
 def _read_state(into: Path) -> dict | None:

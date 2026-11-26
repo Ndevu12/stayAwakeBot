@@ -367,7 +367,20 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
         .stderr(Stdio::inherit())
         .status()
         .ok()?;
+    if applied.success() {
+        relay_output(&answer);
+    }
     applied.code().or(Some(0))
+}
+
+/// Write what git wrote when saw ran the command, to the same streams.
+fn relay_output(answer: &serde_json::Value) {
+    if let Some(text) = answer.pointer("/output/stdout").and_then(serde_json::Value::as_str) {
+        print!("{text}");
+    }
+    if let Some(text) = answer.pointer("/output/stderr").and_then(serde_json::Value::as_str) {
+        eprint!("{text}");
+    }
 }
 
 /// Say that saw held the update, with its verdict and what to do.

@@ -15,14 +15,17 @@ class CreatingABranch(_TrackingCheckout):
     def _head(self) -> str:
         return self.git(self.open, "rev-parse", "HEAD").strip()
 
-    def test_a_new_branch_where_the_folder_is_passes_through(self):
+    def test_a_new_branch_where_the_folder_is_is_made_by_saw(self):
         before = self._head()
-        for args in (["switch", "-c", "try"], ["switch", "--create", "try"], ["checkout", "-b", "try"]):
+        for branch, args in (("try", ["switch", "-c", "try"]), ("try-too", ["switch", "--create", "try-too"]),
+                             ("try-three", ["checkout", "-b", "try-three"])):
             with self.subTest(args=args):
                 answer, code = govern.prepare(str(self.open), str(self.into), "git", args)
-                self.assertEqual((answer.get("passthrough"), code), (True, exitcodes.CLEAN), answer)
+                self.assertEqual(code, exitcodes.CLEAN, answer)
                 self.assertNotIn("decision", answer)
+                self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
                 self.assertEqual(self._head(), before)
+                self.assertEqual(self.git(self.open, "branch", "--show-current").strip(), branch)
 
     def test_a_new_branch_from_another_commit_is_checked_and_applied(self):
         self.git(self.open, "fetch", "-q")
