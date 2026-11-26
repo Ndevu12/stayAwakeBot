@@ -104,16 +104,22 @@ const WRITE_AN_OUTPUT: &[&str] = &["diff", "diff-files", "diff-index", "diff-tre
     "range-diff"];
 /// `git config` options that only read.
 const CONFIG_READS: &[&str] = &["--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color",
-    "--get-colorbool", "--list", "-l"];
+    "--get-colorbool", "--list"];
 /// `git config` options that write.
 const CONFIG_WRITES: &[&str] = &["--add", "--replace-all", "--unset", "--unset-all", "--rename-section",
-    "--remove-section", "-e", "--edit"];
+    "--remove-section", "--edit"];
+/// Every other long option `git config` lists, which an abbreviation may also name.
+const CONFIG_OTHER_OPTIONS: &[&str] = &["--global", "--system", "--local", "--worktree", "--file", "--blob",
+    "--null", "--name-only", "--show-origin", "--show-scope", "--show-names", "--type", "--bool", "--int",
+    "--bool-or-int", "--bool-or-str", "--path", "--expiry-date", "--default", "--comment", "--fixed-value",
+    "--includes", "--all", "--regexp", "--value", "--url", "--append"];
 /// Push options that name a program to run.
 const PUSH_PROGRAM_OPTIONS: &[&str] = &["--receive-pack", "--exec"];
 /// Push options that take the next word as their value.
 const PUSH_OPTIONS_WITH_A_VALUE: &[&str] = &["--repo", "-o", "--push-option", "--receive-pack", "--exec"];
 /// Environment variables that give git settings.
-const SETTINGS_VARIABLES: &[&str] = &["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
+const SETTINGS_VARIABLES: &[&str] = &["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM", "GIT_CONFIG", "GIT_CONFIG_NOSYSTEM"];
 
 /// A git command line read through git's global options.
 struct GitLine<'a> {
@@ -125,12 +131,15 @@ struct GitLine<'a> {
     read: bool,
     /// The key of each `-c <key>=<value>` before the subcommand.
     settings: Vec<&'a str>,
+    /// Whether `--work-tree` names the working tree.
+    names_a_work_tree: bool,
 }
 
 /// Read git's global options up to the subcommand. Takes the arguments without the program name.
 /// Returns the reading, which stops at the first option the stand-in cannot read.
 fn read_git_line(args: &[String]) -> GitLine<'_> {
-    let mut line = GitLine { subcommand: None, folders: Vec::new(), read: true, settings: Vec::new() };
+    let mut line =
+        GitLine { subcommand: None, folders: Vec::new(), read: true, settings: Vec::new(), names_a_work_tree: false };
     let mut i = 0;
     while let Some(arg) = args.get(i).map(String::as_str) {
         if !arg.starts_with('-') {
@@ -139,6 +148,9 @@ fn read_git_line(args: &[String]) -> GitLine<'_> {
         }
         if GIT_QUERIES.contains(&arg) || arg.starts_with("--list-cmds=") {
             return line;
+        }
+        if arg == "--work-tree" || arg.starts_with("--work-tree=") {
+            line.names_a_work_tree = true;
         }
         if GIT_FLAGS.contains(&arg) || GIT_OPTIONS_WITH_JOINED_VALUE.iter().any(|p| arg.starts_with(p)) {
             i += 1;
@@ -200,7 +212,7 @@ fn git_sent(args: &[String], real: &Path) -> Sent {
     }
     let Some(at) = line.subcommand else { return Sent::No };
     let sub = args[at].as_str();
-    if !NEVER_BRINGS_FILES.contains(&sub) {
+    if !NEVER_BRINGS_FILES.contains(&sub) || line.names_a_work_tree || env::var_os("GIT_WORK_TREE").is_some() {
         return Sent::ToSaw;
     }
     let reader = GitReader { real, folder: PathBuf::from(target_repo(args)) };
@@ -293,12 +305,34 @@ fn a_remote_is_local(reader: &GitReader) -> bool {
 
 /// Whether a `git config` command only reads.
 fn config_only_reads(options: &[&str], words: &[&str]) -> bool {
-    if options.iter().any(|arg| CONFIG_WRITES.contains(&arg.split('=').next().unwrap_or(""))) {
+    let named: Vec<Option<&str>> =
+        options.iter().filter(|arg| arg.starts_with("--")).map(|arg| config_option(arg)).collect();
+    if named.iter().any(|option| option.map_or(true, |name| CONFIG_WRITES.contains(&name)))
+        || options.iter().any(|arg| *arg == "-e")
+    {
         return false;
     }
-    options.iter().any(|arg| CONFIG_READS.contains(arg))
+    named.iter().flatten().any(|name| CONFIG_READS.contains(name))
+        || options.iter().any(|arg| *arg == "-l")
         || matches!(words.first(), Some(&"get") | Some(&"list"))
         || (words.len() == 1 && !matches!(words[0], "set" | "unset" | "edit" | "rename-section" | "remove-section"))
+}
+
+/// The `git config` long option an argument names, in full: itself, the option its `--no-` form
+/// turns off, or the one option it abbreviates. None for an argument naming no listed option, or
+/// several.
+fn config_option(arg: &str) -> Option<&'static str> {
+    let written = arg.split('=').next().unwrap_or("");
+    let name = written.strip_prefix("--no-").unwrap_or(&written[2..]);
+    let listed = || CONFIG_READS.iter().chain(CONFIG_WRITES).chain(CONFIG_OTHER_OPTIONS).copied();
+    if let Some(exact) = listed().find(|option| &option[2..] == name) {
+        return Some(exact);
+    }
+    let mut abbreviated = listed().filter(|option| !name.is_empty() && option[2..].starts_with(name));
+    match (abbreviated.next(), abbreviated.next()) {
+        (Some(only), None) => Some(only),
+        _ => None,
+    }
 }
 
 /// Whether a gh command brings files into the open folder.

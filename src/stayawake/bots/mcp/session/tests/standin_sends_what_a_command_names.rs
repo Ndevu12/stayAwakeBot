@@ -92,6 +92,16 @@ fn a_command_that_names_what_saw_checks_goes_to_saw_and_does_not_run() {
         (&["maintenance", "run", "--task=prefetch"], &[]),
         (&["maintenance", "start"], &[]),
         (&["init", "new-project"], &[]),
+        (&["config", "--unset-a", "core.hooksPath"], &[]),
+        (&["config", "--remove-sec", "core"], &[]),
+        (&["config", "--rep", "core.hooksPath", ".githooks"], &[]),
+        (&["config", "--ad", "core.hooksPath", ".githooks"], &[]),
+        (&["config", "--ed"], &[]),
+        (&["config", "--get", "--unset", "x"], &[]),
+        (&["status"], &[("GIT_CONFIG_GLOBAL", "tools/dev.gitconfig")]),
+        (&["status"], &[("GIT_CONFIG_SYSTEM", "/etc/other")]),
+        (&["status"], &[("GIT_CONFIG", "x.cfg")]),
+        (&["status"], &[("GIT_CONFIG_NOSYSTEM", "1")]),
     ];
     for (args, environment) in named {
         let out = terminal.run(args, environment);
@@ -161,4 +171,66 @@ fn a_replayed_command_is_written_by_saw_and_never_run_again_with_its_words_hande
     assert!(terminal.took(&terminal.real_log).is_none(), "git ran after saw wrote the result");
     assert_eq!(String::from_utf8_lossy(&out.stdout), "listed\n");
     assert!(String::from_utf8_lossy(&out.stderr).contains("Switched to a new branch try"));
+}
+
+#[test]
+fn another_working_tree_sends_a_command_that_brings_nothing_to_saw() {
+    let terminal = Terminal::new("worktree");
+    for (args, environment) in [
+        (&["--work-tree=../other", "add", "loader.js"][..], &[][..]),
+        (&["--work-tree", "../other", "status"][..], &[][..]),
+        (&["status"][..], &[("GIT_WORK_TREE", "../other")][..]),
+    ] {
+        terminal.run(args, environment);
+        let asked = terminal.took(&terminal.saw_log).unwrap_or_default();
+        assert!(asked.contains("prepare") && !asked.contains("--brings-no-files"), "{args:?}: {asked:?}");
+        assert!(terminal.took(&terminal.real_log).is_none(), "{args:?}: git ran before saw answered");
+    }
+}
+
+/// Read the long options `git config` lists in its own usage.
+fn config_options_git_lists() -> Vec<String> {
+    let out = Command::new("git").args(["config", "--get", "-h"]).env_remove("SAW_GOVERN_SYSTEM")
+        .env_remove("SAW_GOVERN_HOLDING").output().unwrap();
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    text.lines()
+        .flat_map(|line| line.split_whitespace().take(3).collect::<Vec<_>>())
+        .filter(|word| word.starts_with("--"))
+        .map(|word| word.trim_end_matches(',').replace("--[no-]", "--"))
+        .collect()
+}
+
+#[test]
+fn every_config_option_git_lists_is_read_as_git_reads_it_however_it_is_abbreviated() {
+    const WRITES: &[&str] = &["--replace-all", "--add", "--unset", "--unset-all", "--rename-section",
+        "--remove-section", "--edit"];
+    const READS: &[&str] = &["--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "--get-color",
+        "--get-colorbool"];
+    const OTHERS: &[&str] = &["--global", "--system", "--local", "--worktree", "--file", "--blob", "--null",
+        "--name-only", "--show-origin", "--show-scope", "--show-names", "--type", "--bool", "--int",
+        "--bool-or-int", "--bool-or-str", "--path", "--expiry-date", "--default", "--comment", "--fixed-value",
+        "--includes"];
+    let listed = config_options_git_lists();
+    assert!(listed.len() > 20, "git config listed too few options: {listed:?}");
+    for option in &listed {
+        assert!(WRITES.contains(&option.as_str()) || READS.contains(&option.as_str()) || OTHERS.contains(&option.as_str()),
+                "git config lists {option}, which this test does not place");
+    }
+    let terminal = Terminal::new("config-options");
+    for write in WRITES {
+        for end in 4..=write.len() {
+            let spelled = &write[..end];
+            if listed.iter().filter(|option| option.starts_with(spelled)).count() != 1 {
+                continue;
+            }
+            terminal.run(&["config", spelled, "core.hooksPath", ".githooks"], &[]);
+            assert!(terminal.took(&terminal.saw_log).is_some(), "{spelled} was not sent to saw");
+            let _ = terminal.took(&terminal.real_log);
+        }
+    }
+    for read in READS {
+        terminal.run(&["config", read, "core.hooksPath"], &[]);
+        assert!(terminal.took(&terminal.saw_log).is_none(), "{read} was sent to saw");
+        assert!(terminal.took(&terminal.real_log).is_some(), "{read}: git did not run");
+    }
 }

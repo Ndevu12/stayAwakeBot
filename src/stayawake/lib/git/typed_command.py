@@ -17,6 +17,8 @@ TEMPLATE_VARIABLE = "GIT_TEMPLATE_DIR"
 _PATHSPEC_VARIABLES = {"GIT_LITERAL_PATHSPECS": "literal", "GIT_GLOB_PATHSPECS": "glob",
                        "GIT_NOGLOB_PATHSPECS": "noglob", "GIT_ICASE_PATHSPECS": "icase"}
 _UNREAD_VARIABLES = ("GIT_ATTR_SOURCE", "GIT_SHALLOW_FILE")
+SETTING_FILE_VARIABLES = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG")
+_COPIED_VARIABLES = (*SETTING_FILE_VARIABLES, "GIT_CONFIG_NOSYSTEM")
 _OPTIONS_NAMING_THE_REPOSITORY = ("--git-dir", "--work-tree")
 _OPTIONS_WITH_A_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env",
                          "--super-prefix", "--attr-source", "--shallow-file", "--exec-path")
@@ -36,7 +38,8 @@ class TypedCommand:
     `bare` says `--bare` was given. `flags` are git's own options a replay keeps. `settings` are the
     (key, value) pairs the environment and `-c` give, in the order git reads them, a value of None
     standing for a key given without `=`. `locations` are the variables that name the repository,
-    and `template` the folder `GIT_TEMPLATE_DIR` names."""
+    `template` the folder `GIT_TEMPLATE_DIR` names, and `setting_files` the configuration files the
+    environment names."""
 
     sub: str
     rest: tuple[str, ...]
@@ -48,6 +51,7 @@ class TypedCommand:
     settings: tuple[tuple[str, "str | None"], ...] = ()
     locations: tuple[tuple[str, str], ...] = ()
     template: str = ""
+    setting_files: tuple[str, ...] = ()
 
     @property
     def names_its_repository(self) -> bool:
@@ -65,8 +69,9 @@ class TypedCommand:
 
 def take_environment(environ: MutableMapping[str, str]) -> dict[str, str]:
     """Move the variables that name a command's repository, give it settings or name its template
-    out of an environment. Takes the environment, usually this process's own. Returns them."""
-    taken = {}
+    out of an environment, and copy the ones that name its configuration files. Takes the
+    environment, usually this process's own. Returns them."""
+    taken = {name: environ[name] for name in _COPIED_VARIABLES if name in environ}
     for name in list(environ):
         if (name in LOCATION_VARIABLES or name in _SETTINGS_VARIABLES or name == TEMPLATE_VARIABLE
                 or name in _PATHSPEC_VARIABLES or name in _UNREAD_VARIABLES or name.startswith(_NUMBERED_SETTINGS)):
@@ -91,8 +96,9 @@ def read(args: list[str], environment: "Mapping[str, str] | None" = None) -> "Ty
         if not arg.startswith("-"):
             locations = tuple((name, environment[name]) for name in LOCATION_VARIABLES if environment.get(name))
             namespace = namespace or environment.get("GIT_NAMESPACE", "")
+            files = tuple(environment[name] for name in SETTING_FILE_VARIABLES if environment.get(name))
             return TypedCommand(arg, tuple(args[index + 1:]), git_dir, work_tree, namespace, bare, tuple(flags),
-                                tuple(settings), locations, environment.get(TEMPLATE_VARIABLE, ""))
+                                tuple(settings), locations, environment.get(TEMPLATE_VARIABLE, ""), files)
         name, joined, value = arg.partition("=")
         if arg in _PRINTS_AND_STOPS or name in ("--super-prefix", "--attr-source", "--shallow-file",
                                                 "--config-env", "--exec-path", "--list-cmds"):

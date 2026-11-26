@@ -22,7 +22,7 @@ class GovernLedger(GitSandbox):
         os.environ["XDG_CONFIG_HOME"] = cache
         self.repo = self.new_repo("open")
         self.write(self.repo, "keep.txt", "a\n")
-        self.commit(self.repo, "start")
+        self.start = self.commit(self.repo, "start")
         self.git(self.repo, "checkout", "-q", "-b", "next")
 
     def tearDown(self):
@@ -36,6 +36,7 @@ class GovernLedger(GitSandbox):
     def _govern_checkout_next(self):
         holding = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, holding, ignore_errors=True)
+        clean_ledger.remember(self.repo, clean_ledger.clean_key(self.start, None))
         govern.prepare(str(self.repo), holding, "git", ["checkout", "next"], None)
         return govern.apply(str(self.repo), holding)
 

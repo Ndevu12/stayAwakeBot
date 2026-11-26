@@ -31,7 +31,8 @@ reader, not the mechanism or the weakness it closed.
   repository with `-R` is checked too, and after a clone or a new worktree you chose to run
   unchecked, the folder it created is scanned.
 - `saw govern` judges a git command by what it would write into your folder and its index, whatever
-  repository, index or objects the command or its environment names. What saw holds stays out of
+  repository, index or objects the command or its environment names, against what saw let into the
+  folder before, never against where your branch points. What saw holds stays out of
   the folder, and a clean update is written exactly as it was checked.
 - An update that changes a file a hook manager runs or reads, such as a husky, lefthook or
   pre-commit hook, a file any of those names, a package.json script or Makefile a hook runs, or a

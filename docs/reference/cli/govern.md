@@ -27,8 +27,10 @@ The extension calls it only when the verdict was clean or residue. When git woul
 in your folder, for example because it would overwrite uncommitted work, saw says what git says and
 the folder is not changed.
 
-saw judges what the update brings. A finding a changed file already had before the update is
-listed under `pre_existing` and does not hold the update, unless it is confirmed. An update that
+saw judges what the update brings against what it let into the folder before. A finding a changed
+file already had in a tree saw let in is listed under `pre_existing` and does not hold the update,
+unless it is confirmed. Anything else is judged in full, even when your branch already points at
+it. An update that
 changes a file in the folder git runs your hooks from is held until you let it in, even when
 nothing is found in it, and so is an update that changes a file a hook manager runs or reads, such as
 a husky, lefthook or pre-commit hook, a file any of those names, a package.json script or Makefile a

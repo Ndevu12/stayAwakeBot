@@ -7,7 +7,7 @@ import os
 import shutil
 import tempfile
 
-from stayawake.bots.security import govern
+from stayawake.bots.security import clean_ledger, govern
 from tests.support.gitrepo import GitSandbox
 
 
@@ -21,7 +21,7 @@ class GovernRestore(GitSandbox):
             os.environ[k] = base
         self.repo = self.new_repo("open")
         self.write(self.repo, "keep.txt", "a\n")
-        self.commit(self.repo, "start")
+        self.start = self.commit(self.repo, "start")
         self.git(self.repo, "checkout", "-q", "-b", "next")
 
     def tearDown(self):
@@ -45,6 +45,7 @@ class GovernRestore(GitSandbox):
         c1 = self._rev()
         self.git(self.repo, "checkout", "-q", self._default())
         holding = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, holding, ignore_errors=True)
+        clean_ledger.remember(self.repo, clean_ledger.clean_key(self.start, None))
         govern.prepare(str(self.repo), holding, "git", ["checkout", "next"], None)
         govern.apply(str(self.repo), holding)
         self.assertEqual(self._rev(), c1)

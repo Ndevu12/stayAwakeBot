@@ -51,11 +51,13 @@ _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
 _IDENTITY_KEYS = ("user.name", "user.email")
 _LONG_OPTIONS_THAT_RUN_A_PROGRAM = {
     "rebase": ("--exec", "--interactive", "--edit-todo"),
+    "add": ("--patch", "--interactive", "--edit"),
+    "stage": ("--patch", "--interactive", "--edit"),
     "merge": ("--edit",),
     "pull": ("--edit", "--upload-pack"),
     "fetch": ("--upload-pack",),
 }
-_SHORT_OPTIONS_THAT_RUN_A_PROGRAM = {"rebase": "xi", "merge": "e", "pull": "e"}
+_SHORT_OPTIONS_THAT_RUN_A_PROGRAM = {"rebase": "xi", "merge": "e", "pull": "e", "add": "pie", "stage": "pie"}
 _TAKES_A_STRATEGY = frozenset({"merge", "pull", "rebase"})
 _BUILT_IN_STRATEGIES = frozenset({"ort", "recursive", "resolve", "octopus", "ours", "subtree"})
 
@@ -76,6 +78,7 @@ REPLAYED = {
     "checkout": Replays(), "switch": Replays(), "restore": Replays(), "reset": Replays(),
     "merge": Replays(), "rebase": Replays(), "cherry-pick": Replays(), "revert": Replays(),
     "stash": Replays(), "update-index": Replays(), "update-ref": Replays(), "symbolic-ref": Replays(),
+    "add": Replays(), "stage": Replays(),
     "read-tree": Replays(writes_elsewhere=("--index-output",)),
     "checkout-index": Replays(writes_elsewhere=("--prefix", "--temp")),
     "apply": Replays(writes_elsewhere=("--unsafe-paths", "--build-fake-ancestor", "--output"),
@@ -87,11 +90,10 @@ REPLAYED = {
 @dataclass(frozen=True)
 class Location:
     """Where a command's repository is: where the command runs, its git directory, common
-    directory, the working tree the command runs inside (None when it runs outside one), index
-    file, object directory and further object directories, the command's place in the working
-    tree, the object format, the working tree's own repository top when it is one, whether saw can
-    write a result there: the command acts on the repository git finds there by itself, and whether
-    git gives the command a working tree at all."""
+    directory, the working tree git gives the command (None when it gives none), index file, object
+    directory and further object directories, the command's place in the working tree, the object
+    format, the working tree's own repository top when it is one, and whether saw can write a result
+    there: the command acts on the repository git finds there by itself."""
 
     folder: Path
     git_dir: Path
@@ -104,7 +106,11 @@ class Location:
     object_format: str
     folder_repository: "Path | None"
     writable: bool
-    has_a_working_tree: bool
+
+    @property
+    def has_a_working_tree(self) -> bool:
+        """Tell whether git gives the command a working tree, wherever it lies."""
+        return self.work_tree is not None
 
 
 @dataclass
@@ -252,13 +258,11 @@ def locate(folder: Path, command: TypedCommand) -> "Location | str":
     if not found or len(found) != 4:
         return "the folder is not in a git repository saw can read"
     git_dir, common_dir, inside, object_format = found
-    top, prefix = "", ""
-    if inside == "true":
-        placed = answer(["--show-toplevel", "--show-prefix"])
-        if not placed:
-            return "the folder is not in a git repository saw can read"
-        top, prefix = placed[0], placed[1] if len(placed) > 1 else ""
-    has_a_working_tree = bool(top) or answer(["--show-toplevel"]) is not None
+    placed = answer(["--show-toplevel", "--show-prefix"])
+    top = placed[0] if placed else ""
+    prefix = placed[1] if placed and len(placed) > 1 and inside == "true" else ""
+    if inside == "true" and not top:
+        return "the folder is not in a git repository saw can read"
     paths = answer(["--path-format=absolute", "--git-path", "index", "--git-path", "objects"])
     if not paths or len(paths) != 2:
         return "the folder is not in a git repository saw can read"
@@ -272,7 +276,7 @@ def locate(folder: Path, command: TypedCommand) -> "Location | str":
         Path(paths[1]), Path(common_dir) / "objects") and _is_default(folder_repository, Path(git_dir),
                                                                        Path(paths[0]))
     return Location(folder, Path(git_dir), Path(common_dir), work_tree, Path(paths[0]), Path(paths[1]), alternates,
-                    prefix, object_format or "sha1", folder_repository, writable, has_a_working_tree)
+                    prefix, object_format or "sha1", folder_repository, writable)
 
 
 def _own_repository(work_tree: "Path | None") -> "Path | None":
