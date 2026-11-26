@@ -38,9 +38,10 @@ SCHEMA = 1
 _STATE = "state.json"
 _HOLD_WAIT_SECONDS = 30.0
 _BUSY = "another saw run is using this holding folder"
-BROUGHT_IN, NOT_BROUGHT_IN, STATE_CHANGED, HELD, FOLDER_MAY_HAVE_CHANGED, NOTHING_TO_APPLY, BUSY = (
-    "brought_in", "not_brought_in", "state_changed", "held", "folder_may_have_changed",
-    "nothing_to_apply", "busy")
+(BROUGHT_IN, NOT_BROUGHT_IN, STATE_CHANGED, HELD, FOLDER_MAY_HAVE_CHANGED, NOTHING_TO_APPLY, BUSY,
+ HOLDING_UNUSABLE) = ("brought_in", "not_brought_in", "state_changed", "held", "folder_may_have_changed",
+                      "nothing_to_apply", "busy", "holding_unusable")
+_LEFT_PART_WAY = frozenset({incoming.WRITE_LEFT_PART_WAY, replayed_writer.LEFT_PART_WAY})
 REPLAYED = "replayed"
 GIT_STOPPED = "git stopped when saw ran the command"
 _GITLINK = b"160000"
@@ -464,16 +465,45 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
     the holding directory, the accepted commit, the typed confirmation and the id of the state the
     caller's prepare recorded. Returns whether it was applied, the outcome, the reason when not, and
     the exit."""
-    if not Path(into).is_dir():
+    state = _read_state(Path(into)) if Path(into).is_dir() else None
+    if state is None:
         return _applied(False, "there is no checked update to apply", NOTHING_TO_APPLY)
-    try:
-        with folderlock.held(Path(into), wait=_HOLD_WAIT_SECONDS):
+    if expect is not None and state.get("state_id") != expect:
+        return _replaced()
+    with contextlib.ExitStack() as hold:
+        try:
+            hold.enter_context(folderlock.held(Path(into), wait=_HOLD_WAIT_SECONDS))
+        except folderlock.Busy:
+            return _applied(False, _BUSY, BUSY)
+        except OSError as error:
+            return _applied(False, f"the holding directory could not be used: {error.strerror or error}",
+                            HOLDING_UNUSABLE)
+        try:
             return _apply_held(repo, into, accept, confirm, expect)
-    except folderlock.Busy:
-        return _applied(False, _BUSY, BUSY)
-    except OSError as error:
-        return _applied(False, f"the holding directory could not be used: {error.strerror or error}",
-                        NOT_BROUGHT_IN)
+        except OSError as error:
+            return _not_brought_in(repo, f"the update could not be written: {error.strerror or error}",
+                                   may_have_changed=True)
+
+
+def _replaced() -> tuple[dict, int]:
+    """Answer an apply whose released update another check replaced. Returns the answer."""
+    return _applied(False, "the checked update changed after it was released, so it was not applied",
+                    STATE_CHANGED)
+
+
+def _not_brought_in(repo: str, reason: str, *, may_have_changed: bool = False) -> tuple[dict, int]:
+    """Answer an apply that did not bring the update in, with the code that matches the folder:
+    `not_brought_in` when the writer left it unchanged, else `folder_may_have_changed` and where it
+    is. Takes the open folder, the reason and whether the folder may have changed whatever the
+    reason. Returns the answer."""
+    if not may_have_changed and reason not in _LEFT_PART_WAY:
+        govern_status.write(repo, "finished", reasons=[reason])
+        return _applied(False, reason, NOT_BROUGHT_IN)
+    matches = interrupted_apply(repo) or "neither"
+    govern_status.write(repo, "finished", reasons=[reason])
+    body, code = _applied(False, reason, FOLDER_MAY_HAVE_CHANGED)
+    body["matches"] = matches
+    return body, code
 
 
 def _apply_held(repo: str, into: str, accept: str | None, confirm: str | None,
@@ -490,8 +520,7 @@ def _apply_held(repo: str, into: str, accept: str | None, confirm: str | None,
     if state is None:
         return _applied(False, "there is no checked update to apply", NOTHING_TO_APPLY)
     if expect is not None and state.get("state_id") != expect:
-        return _applied(False, "the checked update changed after it was released, so it was not "
-                               "applied", STATE_CHANGED)
+        return _replaced()
     if state.get("mode") == incoming.UNCARRIED_CONFLICTS:
         return _applied(False, conflicted.CANNOT_CARRY, NOT_BROUGHT_IN)
     accepted_verdict = None
@@ -517,21 +546,21 @@ def _apply_held(repo: str, into: str, accept: str | None, confirm: str | None,
                         applying={"base": arrived.base, "commit": arrived.commit,
                                   "paths": list(arrived.paths)})
     reason = incoming.apply(Path(repo), Path(into), arrived)
-    if not reason and arrived.stopped:
+    if reason:
+        return _not_brought_in(repo, reason)
+    if arrived.stopped:
         return _left_to_resolve(repo, state, arrived.stopped, accepted_verdict)
-    if not reason and accepted_verdict:
+    if accepted_verdict:
         clean_ledger.remember_accepted(Path(repo), state["commit"], accepted_verdict)
         govern_status.write(repo, "applied", verdict=accepted_verdict,
                             reasons=[f"you let in an update saw found {accepted_verdict}"])
-    elif not reason:
+    else:
         if state.get("clean_mark"):
             clean_ledger.remember(Path(repo), state["clean_mark"])  # strictly-clean scan cache
         if state.get("applied_mark"):
             clean_ledger.remember_applied(Path(repo), state["applied_mark"])  # clean or residue
         govern_status.write(repo, "applied", verdict=state.get("verdict"))
-    else:
-        govern_status.write(repo, "finished", reasons=[reason])
-    return _applied(not reason, reason, NOT_BROUGHT_IN if reason else BROUGHT_IN)
+    return _applied(True, "", BROUGHT_IN)
 
 
 def interrupted_apply(repo: str) -> str | None:
@@ -542,9 +571,12 @@ def interrupted_apply(repo: str) -> str | None:
         return None
     applying = record["applying"]
     head = stdout(Path(repo), ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
+    differing = _paths_between(Path(repo), applying.get("base"), applying.get("commit"))
     changed = uncommitted_paths(Path(repo))
-    touched = changed is None or any(p.decode("utf-8", "surrogateescape") in set(applying.get("paths") or [])
-                                     for p in changed)
+    if differing is None or changed is None:
+        return "neither"
+    recorded = {os.fsencode(path) for path in applying.get("paths") or []}
+    touched = any(path in differing or path in recorded for path in changed)
     if not touched and head == applying.get("commit"):
         return "update"
     if not touched and head == applying.get("base"):
@@ -575,11 +607,11 @@ def _apply_replayed(repo: str, into: str, state: dict, accepted_verdict: str | N
     current().step("apply", "applying the checked update")
     govern_status.write(repo, "checking", step="applying the checked update",
                         applying={"base": state["base"], "commit": state["commit"],
-                                  "paths": list(state.get("paths") or [])})
+                                  "paths": [entry[0] for entry in written.files]})
     reason = replayed_writer.write(written)
     if reason:
-        govern_status.write(repo, "finished", reasons=[reason])
-    elif accepted_verdict:
+        return _not_brought_in(repo, reason)
+    if accepted_verdict:
         clean_ledger.remember_accepted(written.top, state.get("moved_to") or state["commit"], accepted_verdict)
         govern_status.write(repo, "applied", verdict=accepted_verdict,
                             reasons=[f"you let in an update saw found {accepted_verdict}"])
@@ -590,7 +622,7 @@ def _apply_replayed(repo: str, into: str, state: dict, accepted_verdict: str | N
             clean_ledger.remember_applied(written.top, state["applied_mark"])
         clean_ledger.remember_blobs(written.top, state.get("let_in") or [], state.get("policy") or "")
         govern_status.write(repo, "applied", verdict=state.get("verdict"))
-    return _applied(not reason, reason, NOT_BROUGHT_IN if reason else BROUGHT_IN)
+    return _applied(True, "", BROUGHT_IN)
 
 
 def _files_at(arrived: "incoming.Arrived") -> str:
@@ -680,6 +712,15 @@ def _listed(paths: tuple[str, ...]) -> str:
 def _finish(stopped: "conflicted.Stopped") -> str:
     """Return the git command that finishes the stopped operation. Takes the stop."""
     return conflicted.FINISH_COMMAND[stopped.operation]
+
+
+def _paths_between(repo: Path, base: str | None, commit: str | None) -> set[bytes] | None:
+    """Return every path that differs between two commits, deletions included. Takes the open
+    folder and the two commits. Returns the paths, or none when git cannot list them."""
+    if not (base and commit):
+        return None
+    listed = stdout_bytes(repo, ["diff", "--no-renames", "--name-only", "-z", base, commit], context=UNTRUSTED)
+    return None if listed is None else {path for path in listed.split(b"\0") if path}
 
 
 def _refuse_let_in(repo: str, state: dict, accept: str | None, confirm: str | None) -> str:

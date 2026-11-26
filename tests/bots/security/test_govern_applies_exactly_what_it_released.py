@@ -108,6 +108,24 @@ class GovernAppliesExactlyWhatItReleased(GitSandbox):
         self.assertIn("run-as-typed", body["decision"]["choices"])
         self.assertEqual(self.rev(self.repo), self.base)
 
+    def test_a_holding_folder_that_cannot_be_held_has_its_own_code(self):
+        released = self._prepare("next")
+        hold = self.into / folderlock.LOCK_NAME
+        hold.unlink()
+        hold.symlink_to(self.root / "nowhere")
+        applied = self._apply("--expect", released["state_id"])
+        self.assertEqual((applied["applied"], applied["outcome"]), (False, "holding_unusable"))
+        self.assertEqual(self.rev(self.repo), self.base)
+
+    def test_a_replaced_update_is_said_to_be_replaced_before_the_holding_folder_is_used(self):
+        self._prepare("next")
+        hold = self.into / folderlock.LOCK_NAME
+        hold.unlink()
+        hold.symlink_to(self.root / "nowhere")
+        applied = self._apply("--expect", "deadbeefdeadbeef")
+        self.assertEqual((applied["applied"], applied["outcome"]), (False, "state_changed"))
+        self.assertEqual(self.rev(self.repo), self.base)
+
     def test_a_run_that_dies_leaves_no_hold_behind(self):
         self.into.mkdir()
         holder = subprocess.Popen([sys.executable, "-c",

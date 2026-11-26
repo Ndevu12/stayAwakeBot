@@ -47,7 +47,7 @@ class AFailedWriteIsReportedAsItIs(GitSandbox):
 
     def test_a_write_that_fails_puts_back_what_it_removed(self):
         applied = self._apply()
-        self.assertFalse(applied["applied"])
+        self.assertEqual((applied["applied"], applied["outcome"]), (False, "not_brought_in"))
         self.assertEqual(applied["reason"], "the update could not be written into the open folder")
         self.assertEqual((self.repo / "a.txt").read_text(), "goes away\n")
         self.assertEqual((self.repo / "ro" / "b.txt").read_text(), "before\n")
@@ -57,7 +57,8 @@ class AFailedWriteIsReportedAsItIs(GitSandbox):
     def test_a_folder_that_cannot_be_put_back_is_said_to_have_changed(self):
         with mock.patch.object(replayed._Backups, "put_back", return_value=False):
             applied = self._apply()
-        self.assertFalse(applied["applied"])
+        self.assertEqual((applied["applied"], applied["outcome"], applied["matches"]),
+                         (False, "folder_may_have_changed", "neither"))
         self.assertEqual(applied["reason"], incoming.WRITE_LEFT_PART_WAY)
         self.assertFalse((self.repo / "a.txt").exists())
 

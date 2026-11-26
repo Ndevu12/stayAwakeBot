@@ -42,7 +42,8 @@ time uses a holding directory: a second one waits for the first, then answers `b
 | `state_changed` | Another check replaced the update you released, so nothing was applied. |
 | `nothing_to_apply` | No check has recorded an update in this holding directory. |
 | `busy` | Another saw run is using the holding directory. |
-| `folder_may_have_changed` | An earlier apply of this folder did not finish; `matches` says whether the folder is on the update, on the tree it had before (`base`), or `neither`. |
+| `holding_unusable` | The holding directory could not be used, so nothing was applied; `reason` says why. |
+| `folder_may_have_changed` | This apply could not be written and the folder could not be put back, or an earlier apply of this folder did not finish; `matches` says whether the folder is on the update, on the tree it had before (`base`), or `neither`. |
 
 saw judges what the update brings against what it let into the folder before. A finding a changed
 file already had in a tree saw let in is listed under `pre_existing` and does not hold the update,
