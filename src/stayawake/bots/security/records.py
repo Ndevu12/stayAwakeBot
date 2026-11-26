@@ -12,8 +12,8 @@ from stayawake.lib.git.inside_a_repository import lies_inside_a_repository
 from stayawake.utils import atomicwrite, env
 from stayawake.utils.streaming import say
 
-NOT_KEPT = ("saw keeps no records: its cache folder {folder} is inside a git repository. "
-            "Set XDG_CACHE_HOME to a folder outside it.")
+NOT_KEPT = (f"Every check starts over because {env.XDG_CACHE_HOME} lies inside a git repository. "
+            f"Set {env.XDG_CACHE_HOME} to a folder outside every git repository.")
 _told: set[str] = set()
 
 
@@ -46,7 +46,7 @@ def _inside_a_repository(place: str) -> bool:
 def not_kept() -> str:
     """Say that saw keeps no records, when its record folder lies inside a git repository. Returns
     the sentence, or ""."""
-    return "" if kept() else NOT_KEPT.format(folder=folder())
+    return "" if kept() else NOT_KEPT
 
 
 def read_text(where: Path) -> str:
@@ -94,8 +94,7 @@ def remove(where: Path) -> None:
 
 
 def _tell_once() -> None:
-    """Say on standard error, once per run for each record folder, that saw keeps no records."""
-    sentence = not_kept()
-    if sentence and sentence not in _told:
-        _told.add(sentence)
-        say(sentence, no_stream=True, out=sys.stderr)
+    """Say on standard error, once per run, that saw keeps no records."""
+    if NOT_KEPT not in _told:
+        _told.add(NOT_KEPT)
+        say(NOT_KEPT, no_stream=True, out=sys.stderr)

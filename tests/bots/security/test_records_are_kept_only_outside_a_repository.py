@@ -121,8 +121,8 @@ class NoRecordIsReadOrWrittenInsideARepository(_Records):
         return self.root / "checkout" / "cache"
 
     def said(self) -> str:
-        return (f"saw keeps no records: its cache folder {self.folder} is inside a git repository. Set "
-                "XDG_CACHE_HOME to a folder outside it.")
+        return ("Every check starts over because XDG_CACHE_HOME lies inside a git repository. Set "
+                "XDG_CACHE_HOME to a folder outside every git repository.")
 
     def test_saw_reads_no_record_it_keeps(self):
         read = self.read_by_saw()
@@ -139,8 +139,9 @@ class NoRecordIsReadOrWrittenInsideARepository(_Records):
             self.write_by_saw()
         self.assertFalse(self.folder.exists())
         said = " ".join(err.getvalue().split())
-        self.assertEqual(said.count("saw keeps no records"), 1, said)
+        self.assertEqual(said.count("Every check starts over"), 1, said)
         self.assertIn(self.said(), said)
+        self.assertNotIn(str(self.folder), said)
 
     def test_saw_doctor_says_saw_keeps_no_records(self):
         with mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None)):
@@ -153,6 +154,7 @@ class NoRecordIsReadOrWrittenInsideARepository(_Records):
                 with self.subTest(argv=argv), redirect_stdout(out), redirect_stderr(io.StringIO()):
                     cli.main(argv)
                 self.assertIn(self.said(), " ".join(out.getvalue().split()))
+                self.assertNotIn(str(self.folder), out.getvalue())
 
     def test_saw_govern_status_says_saw_keeps_no_records(self):
         out = io.StringIO()
@@ -160,6 +162,7 @@ class NoRecordIsReadOrWrittenInsideARepository(_Records):
                 redirect_stdout(out), redirect_stderr(io.StringIO()):
             cli.main(["govern", "status"])
         self.assertIn(self.said(), " ".join(out.getvalue().split()))
+        self.assertNotIn(str(self.folder), out.getvalue())
 
 
 class EveryRecordPathComesFromTheRecordFolder(GitSandbox):
@@ -179,7 +182,7 @@ class EveryRecordPathComesFromTheRecordFolder(GitSandbox):
         with mock.patch("stayawake.cli.commands.govern.standin_binary", return_value=None), \
                 redirect_stdout(out), redirect_stderr(io.StringIO()):
             cli.main(["govern", "status"])
-        self.assertNotIn("saw keeps no records", out.getvalue())
+        self.assertNotIn("Every check starts over", out.getvalue())
 
 
 if __name__ == "__main__":
