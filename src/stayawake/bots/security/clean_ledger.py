@@ -161,3 +161,40 @@ def accepted_verdict(root: Path, commit: str) -> str | None:
     if isinstance(entry, dict) and entry.get("commit") == commit and isinstance(entry.get("verdict"), str):
         return entry["verdict"]
     return None
+
+
+_MOST_LET_IN_BLOBS = 50000
+
+
+def let_in_blobs_path() -> Path:
+    """The record of file contents `saw govern` let into a repository, by path and blob id."""
+    return cache_path().with_name("govern-let-in-blobs.json")
+
+
+def remember_blobs(root: Path, blobs: dict[str, str], policy: str) -> None:
+    """Record the contents govern let into a repository, under the policy they were judged by.
+    Takes the root, each path with its blob id and the digest of the policy. A write that fails is
+    skipped."""
+    if not blobs or not policy:
+        return
+    try:
+        held = {r: k for r, k in _load_record(let_in_blobs_path()).items() if os.path.isdir(r) and isinstance(k, dict)}
+        kept = held.get(os.path.realpath(root), {})
+        pairs = [pair for pair in (kept.get("blobs") or []) if isinstance(pair, list) and len(pair) == 2] \
+            if kept.get("policy") == policy else []
+        known = {tuple(pair) for pair in pairs}
+        pairs += [[rel, oid] for rel, oid in sorted(blobs.items()) if (rel, oid) not in known]
+        held[os.path.realpath(root)] = {"policy": policy, "blobs": pairs[-_MOST_LET_IN_BLOBS:]}
+        atomicwrite.replace(let_in_blobs_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    except OSError:
+        pass
+
+
+def blobs_let_in(root: Path, config_path: str | None) -> set[tuple[str, str]]:
+    """Read the contents govern let into a repository under the current policy. Takes the root and
+    the operator config. Returns each (path, blob id), none after a change of policy."""
+    kept = _load_record(let_in_blobs_path()).get(os.path.realpath(root))
+    if not isinstance(kept, dict) or kept.get("policy") != policy_digest(config_path):
+        return set()
+    return {tuple(pair) for pair in kept.get("blobs") or [] if isinstance(pair, list) and len(pair) == 2}

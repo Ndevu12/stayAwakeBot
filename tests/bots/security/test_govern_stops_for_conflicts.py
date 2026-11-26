@@ -184,7 +184,7 @@ class AnUpdateThatStopsForConflicts(_StopsForConflicts):
     def test_a_failure_that_is_not_a_conflict_answers_as_before(self):
         answer, code = self._prepare("merge", "no-such-branch")
         self.assertEqual(code, exitcodes.INCOMPLETE)
-        self.assertEqual(answer["reason"], "the update did not finish cleanly")
+        self.assertTrue(answer["reason"].startswith(govern.GIT_STOPPED), answer)
         self.assertEqual(answer["decision"]["choices"], ["run-as-typed", "leave-unchanged"])
         self.assertNotIn("scan", answer)
         self._untouched()

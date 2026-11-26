@@ -400,6 +400,17 @@ def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[b
     return whole
 
 
+def write_files(repo: Path, worktree: Path, commit: str, paths: list[bytes]) -> bool:
+    """Write what `commit` records at `paths` into `worktree` the way a move to it writes them, and delete
+    each path it does not record. Takes the operator's repository, which holds the commit, the
+    working tree, the commit and the paths. Returns whether every one was written."""
+    try:
+        entries = landing_entries(repo, commit)
+    except (TreeStateUnknown, ValueError):
+        return False
+    return _write_paths(repo, worktree, commit, entries, paths)
+
+
 def _is_attributes_file(rel: bytes) -> bool:
     """Tell whether a path names a `.gitattributes` file. Takes the path. Returns the answer."""
     return rel == b".gitattributes" or rel.endswith(b"/.gitattributes")

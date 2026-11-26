@@ -50,6 +50,8 @@ def register(sub) -> None:
     pp.add_argument("--into", required=True, help="the holding directory saw owns")
     pp.add_argument("--tool", required=True, choices=core.TOOLS, help="which tool the command is")
     pp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
+    pp.add_argument("--brings-no-files", action="store_true",
+                    help="the stand-in reads the command as one that brings no files")
     add_progress_arg(pp)
     add_deadline_arg(pp, help="stop the check after SECONDS; an unfinished check is left to the user "
                               "to decide")
@@ -128,8 +130,10 @@ def run_prepare(a: argparse.Namespace) -> int:
 
 
 def _do_prepare(a: argparse.Namespace) -> int:
+    environment = core.take_command_environment()
     payload, code = core.prepare(a.repo, a.into, a.tool, _operator_args(a.args), a.config,
-                                 deadline=a.deadline)
+                                 deadline=a.deadline, environment=environment,
+                                 brings_no_files=a.brings_no_files)
     print(json.dumps(versioned("govern", payload)))
     return code
 

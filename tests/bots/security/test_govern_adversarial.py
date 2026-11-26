@@ -58,10 +58,11 @@ class GovernAdversarial(GitSandbox):
 
     def test_uncommitted_change_on_the_arriving_path_is_never_overwritten(self):
         self.write(self.repo, "arrived.txt", "mine\n")       # operator's own, on the path next brings in
-        self.assertEqual(self._prepare("checkout", "next")[0], exitcodes.CLEAN)
+        code, answer = self._prepare("checkout", "next")
+        self.assertEqual(code, exitcodes.INCOMPLETE, answer)
+        self.assertIn("would be overwritten", answer["reason"])
         code, applied = self._apply()
         self.assertFalse(applied["applied"], applied)
-        self.assertEqual(applied["reason"], "uncommitted work would be overwritten, so the folder was not changed")
         self.assertEqual(self.rev(self.repo), self.base)
         self.assertEqual((self.repo / "arrived.txt").read_text(encoding="utf-8"), "mine\n")
 

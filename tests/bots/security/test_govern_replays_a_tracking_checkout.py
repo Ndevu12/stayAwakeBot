@@ -6,9 +6,17 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from stayawake.lib.git import incoming
+from stayawake.lib.git import replay, typed_command
 from tests.support.gitrepo import GitSandbox
 from tests.support.local_remotes import allow_local_remotes
+
+
+class _Landed:
+    """What a replay lands: the holding work tree, the files written, the refs moved and the commit
+    HEAD names."""
+
+    def __init__(self, root, paths, refs, commit):
+        self.root, self.paths, self.refs, self.commit = root, paths, refs, commit
 
 
 class _TrackingCheckout(GitSandbox):
@@ -30,10 +38,22 @@ class _TrackingCheckout(GitSandbox):
         self.commit(self.upstream, "arrives")
         self.into = self.root / "holding"
 
+    def _replayed(self, *args: str):
+        command = typed_command.read(list(args))
+        location = replay.locate(self.open, command)
+        if isinstance(location, str):
+            return location
+        holding = replay.reproduce(location, self.into, command, with_files=command.sub != "fetch")
+        if isinstance(holding, str):
+            return holding
+        result = replay.replay(holding, command, ())
+        return result if result.finished else result.said or "git stopped"
+
     def _prepared(self, *args: str):
-        arrived = incoming.prepare(self.open, self.into, "git", list(args))
-        self.assertIsInstance(arrived, incoming.Arrived, f"{args}: {arrived}")
-        return arrived
+        result = self._replayed(*args)
+        self.assertIsInstance(result, replay.Replayed, f"{args}: {result}")
+        head = self.git(result.holding.bare, "rev-parse", "HEAD").strip()
+        return _Landed(result.holding.work, tuple(rel for rel, mode, _oid in result.files if mode), result.refs, head)
 
     def _copy_config(self) -> str:
         return (self.into / "repo.git" / "config").read_text()
@@ -75,13 +95,13 @@ class AReplayFromATrackingCheckout(_TrackingCheckout):
     def test_a_branch_that_exists_only_on_the_remote_is_checked_out(self):
         for args in (["checkout", "feature"], ["switch", "feature"]):
             with self.subTest(args=args):
-                self.assertIsInstance(incoming.prepare(self.open, self.into, "git", args), incoming.Arrived)
+                self.assertIsInstance(self._replayed(*args), replay.Replayed)
 
     def test_a_fetch_with_no_remote_is_never_reported_as_clean(self):
         self.git(self.open, "remote", "remove", "origin")
         for args in (["fetch"], ["fetch", "--all"]):
             with self.subTest(args=args):
-                self.assertIsInstance(incoming.prepare(self.open, self.into, "git", args), str)
+                self.assertIsInstance(self._replayed(*args), str)
 
     def test_nothing_in_the_repositorys_config_that_runs_a_program_reaches_the_copy(self):
         for key, value in (("remote.origin.uploadpack", "touch /tmp/never"),
@@ -101,7 +121,7 @@ class AReplayFromATrackingCheckout(_TrackingCheckout):
     def test_a_remote_url_that_names_a_program_runs_nothing(self):
         mark = Path(tempfile.mkdtemp()) / "ran"
         self.git(self.open, "config", "remote.origin.url", f"ext::sh -c touch% {mark}")
-        self.assertIsInstance(incoming.prepare(self.open, self.into, "git", ["fetch"]), str)
+        self.assertIsInstance(self._replayed("fetch"), str)
         self.assertFalse(mark.exists())
 
     def test_an_included_config_brings_nothing_into_the_copy(self):
@@ -110,7 +130,7 @@ class AReplayFromATrackingCheckout(_TrackingCheckout):
         included.write_text(f'[url "ext::sh -c touch% {mark}"]\n\tinsteadOf = {self.upstream}\n'
                             f'[remote "origin"]\n\tuploadpack = touch {mark}\n')
         self.git(self.open, "config", "include.path", str(included))
-        incoming.prepare(self.open, self.into, "git", ["fetch"])
+        self._replayed("fetch")
         copied = self._copy_config().lower()
         self.assertNotIn("insteadof", copied)
         self.assertNotIn("uploadpack", copied)

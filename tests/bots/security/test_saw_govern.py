@@ -31,24 +31,6 @@ class TestGovernCapability(unittest.TestCase):
         self.assertEqual(caps["schema_versions"].get("govern"), 1)
 
 
-class TestGovernRecognisedCommands(unittest.TestCase):
-    def test_the_inbound_commands_are_recognised(self):
-        for tool, args in [("git", ["pull"]), ("git", ["fetch", "origin"]),
-                           ("git", ["merge", "main"]), ("git", ["rebase", "origin/main"]),
-                           ("git", ["checkout", "main"]), ("git", ["switch", "main"]),
-                           ("git", ["submodule", "update", "--init"]),
-                           ("gh", ["pr", "checkout", "12"]), ("gh", ["repo", "sync"]),
-                           ("gh", ["release", "download"]), ("gh", ["run", "download", "4"])]:
-            with self.subTest(tool=tool, args=args):
-                self.assertTrue(govern.is_recognised(tool, args))
-
-    def test_a_command_that_brings_nothing_in_is_not_governed(self):
-        for tool, args in [("git", ["status"]), ("git", ["commit"]), ("git", ["push"]),
-                           ("gh", ["pr", "view"]), ("git", [])]:
-            with self.subTest(tool=tool, args=args):
-                self.assertFalse(govern.is_recognised(tool, args))
-
-
 class TestGovernFailsClosed(unittest.TestCase):
     def test_an_unrecognised_command_is_held_with_a_reason_and_no_scan(self):
         payload, code = govern.prepare("/repo", "/holding", "git", ["status"])

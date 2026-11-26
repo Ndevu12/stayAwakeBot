@@ -119,7 +119,9 @@ def _operator_layout(repo: Path) -> tuple[Path, Path | None, str]:
     return objects, (Path(top) if top else None), fmt
 
 
-def _carried_attributes(repo: Path, worktree: Path | None, common: Path) -> bytes:
+def carried_attributes(repo: Path, worktree: Path | None, common: Path) -> bytes:
+    """Build the one attributes file equivalent to a repository's. Takes the repository, its working
+    tree (None when bare) and its common git directory. Returns the bytes."""
     tracked = []
     if worktree is not None:
         listing = run(repo, ["ls-files", "-z"])
@@ -159,7 +161,7 @@ def _make(bare: Path, operator_repo: Path, objects: Path, worktree: Path | None,
         shallow = attributes.read_regular(objects.parent / "shallow", limit=64 << 20)
         if shallow is not None:
             (bare / "shallow").write_bytes(shallow)
-        carried = _carried_attributes(operator_repo, worktree, objects.parent)
+        carried = carried_attributes(operator_repo, worktree, objects.parent)
         (bare / "info").mkdir(exist_ok=True)
         (bare / "info" / "attributes").write_bytes(carried)
     except OSError as exc:

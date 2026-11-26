@@ -10,19 +10,23 @@ the payload is stamped with the schema by the CLI.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
+import os
 from pathlib import Path
 
-from stayawake.bots.security import clean_ledger, govern_carried, govern_held, govern_status
+from stayawake.bots.security import clean_ledger, govern_carried, govern_command, govern_held, govern_status
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.models import CLEAN, INFECTED, RESIDUE_VERDICT, ScanReport, ScanResult
 from stayawake.bots.security.scanner import joined, scan_target, unreadable
 from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
-from stayawake.lib.git import blob_copies, conflicted, incoming, query
-from stayawake.lib.git.run import UNTRUSTED, stdout
-from stayawake.lib.git.write.working_tree import uncommitted_paths
+from stayawake.lib.git import blob_copies, conflicted, incoming, query, replay, runs_from_the_folder, typed_command
+from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes
+from stayawake.lib.git.write import replayed as replayed_writer
+from stayawake.lib.git.write.working_tree import bytes_as_written, uncommitted_paths
+from stayawake.lib.signing.commits.git_command import fix_commit_signing
 from stayawake.utils import exitcodes, pathsafe, scratch
 from stayawake.utils.pace import DeadlineReached, Pace
 from stayawake.utils.progress_events import current
@@ -30,6 +34,9 @@ from stayawake.utils.timeutil import now_iso
 
 SCHEMA = 1
 _STATE = "state.json"
+REPLAYED = "replayed"
+GIT_STOPPED = "git stopped when saw ran the command"
+_GITLINK = b"160000"
 
 TOOLS = ("gh", "git")
 
@@ -37,29 +44,281 @@ TOOLS = ("gh", "git")
 LEAVE_UNCHANGED = "leave-unchanged"
 DECISION_CHOICES = ("run-as-typed", LEAVE_UNCHANGED)
 
-def is_recognised(tool: str, args: list[str]) -> bool:
-    """Whether `(tool, args)` is an incoming command saw governs. Takes the tool and the operator's
-    arguments without the program name. Returns the answer."""
-    return incoming.classify(tool, list(args)) is not None
+def take_command_environment() -> dict:
+    """Move the variables that name a command's repository, give it settings or name its template
+    out of this process's environment. Returns them, for `prepare`."""
+    return typed_command.take_environment(os.environ)
 
 
 def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None = None, *,
-            deadline: float | None = None) -> tuple[dict, int]:
-    """Materialise the update outside the open folder and scan what arrived. Takes the open folder,
-    the holding directory, the tool, the arguments, the config and the deadline. Returns the answer
-    and its exit: a passthrough, a scan, or a reason with a decision."""
-    if incoming.brings_nothing(tool, args, Path(repo)):
-        return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
-    if incoming.continues_a_rebase(tool, args):
-        return _continuing_a_rebase(repo, config, deadline)
-    staged = incoming.what_it_stages(Path(repo), tool, list(args))
-    if staged is not None:
-        return _check_what_it_stages(repo, staged, config, deadline)
+            deadline: float | None = None, environment: dict | None = None,
+            brings_no_files: bool = False) -> tuple[dict, int]:
+    """Replay a command in a holding copy saw owns and judge what it would write into the open
+    folder. Takes the open folder, the holding directory, the tool, the arguments, the config, the
+    deadline, the command's environment and whether the stand-in reads the command as one that
+    brings no files. Returns the answer and its exit: a passthrough, a scan, or a reason with a
+    decision."""
+    command = typed_command.TypedCommand("", ())
+    if tool == "gh":
+        if not incoming.gh_brings_files(list(args)):
+            return _unchecked(repo, replay.NOT_REPLAYED)
+    else:
+        read = typed_command.read(list(args), environment)
+        if isinstance(read, str):
+            return _unchecked(repo, read)
+        command = read
+        before = govern_command.before_replay(Path(repo), command, brings_no_files)
+        if before is not None:
+            return _answered_before_replay(repo, before, config, deadline)
     govern_status.write(repo, "checking", step="checking the incoming update")
     current().step("materialise", "checking the incoming update")
-    arrived = incoming.prepare(Path(repo), Path(into), tool, list(args))
+    location = replay.locate(Path(repo), command)
+    if isinstance(location, str):
+        return _unchecked(repo, location)
+    holding = replay.reproduce(location, Path(into), command, with_files=command.sub != "fetch")
+    if isinstance(holding, str):
+        return _unchecked(repo, holding)
+    signing = fix_commit_signing(location.folder_repository or Path(repo))
+    result = replay.replay(holding, command, signing, list(args) if tool == "gh" else None)
+    network = tool == "gh" or command.sub in replay.NETWORK
+    stopped = _stop_to_carry(result, command)
+    if stopped is not None:
+        return _judge_arrived(repo, into, stopped, config, deadline)
+    if result.finished and not network and _lands_nothing(result):
+        return {"passthrough": True, "reason": "the command brings no files in"}, exitcodes.CLEAN
+    if not result.finished and result.changes_nothing_but_refs and not result.refs:
+        return _unchecked(repo, GIT_STOPPED + (f": {result.said}" if result.said else ""))
+    return _judge_replayed(repo, into, result, config, deadline)
+
+
+def _answered_before_replay(repo: str, before: "govern_command.Answer", config: str | None,
+                            deadline: float | None) -> tuple[dict, int]:
+    """Turn an answer given before a replay into prepare's answer. Takes the open folder, the
+    answer, the config and the deadline. Returns the answer and its exit."""
+    if before.kind == govern_command.PASSTHROUGH:
+        return {"passthrough": True, "reason": before.reason}, exitcodes.CLEAN
+    if before.kind == govern_command.CONTINUES_A_REBASE:
+        return _continuing_a_rebase(repo, config, deadline)
+    if before.kind == govern_command.ASKS:
+        answer, code = _unchecked(repo, before.reason)
+        return {**answer, "checked": True}, code
+    return _unchecked(repo, before.reason, before.created)
+
+
+def _stop_to_carry(result: "replay.Replayed", command: "typed_command.TypedCommand"
+                   ) -> "incoming.Arrived | str | None":
+    """Describe a merge or rebase the replay stopped for conflicts, to carry into the folder. Takes
+    what the replay changed and the command. Returns what arrived, a sentence when it cannot be
+    described, or None when the replay did not stop for conflicts it started."""
+    holding = result.holding
+    if result.finished or not holding.location.writable:
+        return None
+    if not {"MERGE_HEAD", "rebase-merge", "rebase-apply"} & set(result.state_left):
+        return None
+    if not conflicted.stopped_for_conflicts(holding.work, holding.bare):
+        return None
+    return incoming.arrived_with_conflicts(holding.work, holding.bare, holding.base, command.sub or "gh")
+
+
+def _lands_nothing(result: "replay.Replayed") -> bool:
+    """Tell whether a replayed command writes no file and stages only what the folder already holds
+    at each path. Takes what the replay changed. Returns the answer."""
+    if result.files or result.state_left or result.state_removed:
+        return False
+    if not result.index:
+        return True
+    holds = _folder_holds(result.holding, [rel for rel, _before, _after in result.index])
+    for rel, before, after in result.index:
+        for mode, oid, stage in after:
+            if (mode, oid, stage) in before:
+                continue
+            if mode == _GITLINK or oid.decode() not in holds.get(rel, set()):
+                return False
+    return True
+
+
+def _folder_holds(holding: "replay.Holding", paths: list[str]) -> dict[str, set[str]]:
+    """Read the blob the folder holds at each path, in its files now and in its current commit.
+    Takes the holding copy and the paths. Returns each path's blob ids."""
+    holds: dict[str, set[str]] = {}
+    sources = [(holding.bare, holding.files_before, SAW_OWNED)]
+    own = holding.location.folder_repository
+    if own is not None:
+        sources.append((own, "HEAD", UNTRUSTED))
+    for where, tree, context in sources:
+        listed = stdout_bytes(where, ["ls-tree", "-r", "-z", tree, "--", *paths], context=context) or b""
+        for record in listed.split(b"\0"):
+            info, _, path = record.partition(b"\t")
+            parts = info.split(b" ")
+            if path and len(parts) == 3:
+                holds.setdefault(os.fsdecode(path), set()).add(parts[2].decode())
+    return holds
+
+
+def _new_staged(result: "replay.Replayed", let_in: set) -> list[tuple[str, str]]:
+    """List the index entries a replayed command stages whose content the folder does not hold and
+    saw has not let in. Takes what the replay changed and the contents saw let in. Returns each
+    (path, blob)."""
+    holds = _folder_holds(result.holding, [rel for rel, _before, _after in result.index])
+    written = {rel: oid for rel, _mode, oid in result.files}
+    staged = []
+    for rel, before, after in result.index:
+        for mode, oid, stage in after:
+            blob = oid.decode()
+            if ((mode, oid, stage) in before or mode == _GITLINK or blob in holds.get(rel, set())
+                    or written.get(rel) == blob or (rel, blob) in let_in):
+                continue
+            staged.append((rel, blob))
+    return list(dict.fromkeys(staged))
+
+
+def _judge_replayed(repo: str, into: str, result: "replay.Replayed", config: str | None,
+                    deadline: float | None) -> tuple[dict, int]:
+    """Scan what a replayed command writes and stages, in the form it will be written, and answer: ready to
+    write, held, or a reason with a decision. Takes the open folder, the holding directory, what
+    the replay changed, the config and the deadline. Returns the answer and its exit."""
+    holding = result.holding
+    location = holding.location
+    own = location.folder_repository
+    writer = own or holding.work
+    written_files = [(rel, mode, oid) for rel, mode, oid in result.files if mode]
+    let_in = clean_ledger.blobs_let_in(own, config) if own is not None else set()
+    judged = tuple(rel for rel, _mode, oid in written_files if (rel, oid) not in let_in)
+    staged = _new_staged(result, let_in)
+    current().step("scan", "scanning what arrived")
+    govern_status.write(repo, "checking", step="scanning what arrived")
+    try:
+        as_written = bytes_as_written(writer, result.files_after,
+                                      [os.fsencode(rel) for rel, _mode, _oid in written_files],
+                                      holding.bare / "objects") if written_files else {}
+        if as_written is None:
+            return _unchecked(repo, "the files the command writes could not be read")
+        landing = blob_copies.copy_out_as_written(writer, holding.work, result.files_after, judged,
+                                                  "the files an update brought in")
+        sides = ((blob_copies.copy_out_blobs(holding.work, tuple(staged), "the files a command stages"),
+                  tuple(rel for rel, _oid in staged)),) if staged else ()
+        payload, code, already_there = _scan_arrived(holding.work, landing, judged, config,
+                                                     _folder_commit(own), deadline, sides)
+    except DeadlineReached:
+        return _unchecked(repo, "the check did not finish before its deadline")
+    except ValueError as exc:
+        return _unchecked(repo, str(exc) or "the check could not use your config")
+    except OSError:
+        return _unchecked(repo, "the check could not finish")
+    verdict = _verdict(payload) or "incomplete"
+    current().step("verdict", "verdict: %s" % verdict)
+    scanned_clean = code == exitcodes.CLEAN and verdict in {CLEAN, RESIDUE_VERDICT}
+    top = location.work_tree or holding.work
+    runs = runs_from_the_folder.run_on_arrival(
+        writer, tuple(rel for rel, _mode, _oid in written_files),
+        lambda rel: pathsafe.read_regular_no_follow(top / rel, 1 << 20),
+        lambda rel: as_written.get(os.fsencode(rel)))
+    asks = scanned_clean and (runs is None or bool(runs))
+    writable = location.writable and result.finished and not result.state_left
+    moved_to = _moved_to(result)
+    answer: dict = {"scan": payload}
+    if already_there:
+        answer["pre_existing"] = already_there
+    findings = (payload.get("results") or [{}])[0].get("findings") or []
+    steps = govern_held.next_steps(verdict, findings, already_there, moved_to, can_let_in=writable)
+    if asks:
+        steps.append(f"The update changes {', '.join(runs or ('the folder git runs hooks from',))}, which git "
+                     "or a hook manager runs as a hook in this folder. Check it, then let it in.")
+    if steps:
+        answer["next_steps"] = steps
+    if not writable:
+        return _checked_and_not_written(repo, result, answer, code, verdict, scanned_clean)
+    releasable = scanned_clean and not asks
+    strictly_clean = code == exitcodes.CLEAN and verdict == CLEAN and not already_there
+    applied_mark = clean_ledger.clean_key(moved_to, config) if scanned_clean and moved_to else None
+    blobs = {rel: oid for rel, _mode, oid in written_files} | dict(staged)
+    _write_replayed_state(Path(into), result, releasable, verdict, asks, {
+        "clean_mark": applied_mark if strictly_clean else None, "applied_mark": applied_mark,
+        "written": {os.fsdecode(name): hashlib.sha256(data).hexdigest() for name, data in as_written.items()},
+        "let_in": blobs, "policy": clean_ledger.policy_digest(config), "moved_to": moved_to})
+    if releasable:
+        govern_status.write(repo, "checking", verdict=verdict, step="checked; ready to apply")
+        return answer, code
+    govern_status.write(repo, "held", verdict=verdict,
+                        reasons=["the update was not applied; the open folder is unchanged"])
+    if asks or verdict in govern_held.HELD_VERDICTS:
+        answer["decision"] = govern_held.decision(repo, into, moved_to or result.files_after, verdict)
+    else:
+        answer["decision"] = _unchecked(repo, "")[0]["decision"]
+    return answer, code
+
+
+def _checked_and_not_written(repo: str, result: "replay.Replayed", answer: dict, code: int, verdict: str,
+                             clean: bool) -> tuple[dict, int]:
+    """Answer a judged command saw does not write into the folder itself: held with no way to let it
+    in when the check found something, else the decision to run it as typed. Takes the open folder, what the replay
+    changed, the answer this far, the scan's exit, the verdict and whether the scan was clean.
+    Returns the answer and an exit that is never a success."""
+    if verdict in govern_held.HELD_VERDICTS:
+        govern_status.write(repo, "held", verdict=verdict,
+                            reasons=["the command did not run; the folder is unchanged"])
+        return answer, code
+    if not result.finished:
+        reason = GIT_STOPPED + (f": {result.said}" if result.said else "")
+    elif clean:
+        reason = "saw checked what the command writes, but cannot write it into this folder itself"
+    else:
+        reason = "the check could not finish"
+    unchecked, unchecked_code = _unchecked(repo, reason)
+    return {**answer, **unchecked}, unchecked_code
+
+
+def _moved_to(result: "replay.Replayed") -> str:
+    """Name the commit HEAD moves to, when the command moves it. Takes what the replay changed.
+    Returns the commit, or ""."""
+    holding = result.holding
+    after = stdout(holding.bare, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], context=SAW_OWNED).strip()
+    return after if after and after != holding.base else ""
+
+
+def _folder_commit(own: "Path | None") -> str:
+    """Name the folder's own current commit. Takes its repository top, None when it has none.
+    Returns the commit, or ""."""
+    if own is None:
+        return ""
+    return stdout(own, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], context=UNTRUSTED).strip()
+
+
+def _write_replayed_state(into: Path, result: "replay.Replayed", releasable: bool, verdict: str, asks: bool,
+                          judged: dict) -> None:
+    """Record a judged replay for `apply` to write. Takes the holding directory, what the replay
+    changed, whether it may be written, the verdict, whether it asks first, and what the judgement
+    adds. Returns nothing."""
+    holding = result.holding
+    top = holding.location.work_tree or holding.work
+
+    def entries(found) -> list:
+        return [[part.decode() for part in entry] for entry in found]
+    body = {"schema": SCHEMA, "mode": REPLAYED, "releasable": releasable,
+            "commit": judged.get("moved_to") or result.files_after,
+            "paths": [rel for rel, mode, _oid in result.files if mode],
+            "verdict": verdict, "asks": asks, "top": str(top), "git_dir": str(holding.location.git_dir),
+            "holding": str(holding.bare), "files_after": result.files_after,
+            "files": [list(entry) for entry in result.files],
+            "before": {rel: replayed_writer.state_of(top / rel) for rel, _mode, _oid in result.files},
+            "index": [[rel, entries(before), entries(after)] for rel, before, after in result.index],
+            "refs": [list(entry) for entry in result.refs], "head_before": holding.head,
+            "head_after": result.head, "state_removed": list(result.state_removed),
+            "stash_log": result.stash_log.hex() if result.stash_log is not None else None,
+            "base": holding.base, "pseudo_refs": [list(entry) for entry in result.pseudo_refs], **judged}
+    path = Path(into) / _STATE
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(body), encoding="utf-8")
+    temporary.replace(path)
+
+
+def _judge_arrived(repo: str, into: str, arrived: "incoming.Arrived | str", config: str | None,
+                   deadline: float | None) -> tuple[dict, int]:
+    """Scan what an update that stopped for conflicts brings and answer the way a carried stop is
+    answered. Takes the open folder, the holding directory, what arrived, the config and the
+    deadline. Returns the answer and its exit."""
     if isinstance(arrived, str):
-        return _unchecked(repo, arrived, incoming.folder_it_creates(tool, list(args)))
+        return _unchecked(repo, arrived)
     current().step("scan", "scanning what arrived")
     govern_status.write(repo, "checking", step="scanning what arrived")
     try:
@@ -155,39 +414,6 @@ def _unchecked(repo: str, reason: str, created: str | None = None) -> tuple[dict
     return {"reason": reason, "decision": decision}, exitcodes.INCOMPLETE
 
 
-def _check_what_it_stages(repo: str, staged: "incoming.Staged | str", config: str | None,
-                          deadline: float | None) -> tuple[dict, int]:
-    """Scan the files a command would stage, and let it run as typed when they are clean. Takes the
-    open folder, what the command stages, the operator config and the deadline. Returns a
-    passthrough carrying the scan, the scan of a held command, or a reason with a decision."""
-    if isinstance(staged, str):
-        return _unchecked(repo, staged)
-    purpose = "the files a command stages"
-    try:
-        landing = (blob_copies.copy_out(Path(repo), staged.commit, staged.paths, purpose) if staged.commit
-                   else blob_copies.copy_out_blobs(Path(repo), staged.blobs, purpose))
-        payload, code, already_there = _scan_arrived(Path(repo), landing, staged.paths, config, staged.base,
-                                                     deadline)
-    except DeadlineReached:
-        return _unchecked(repo, "the check did not finish before its deadline")
-    except ValueError as exc:
-        return _unchecked(repo, str(exc) or "the check could not use your config")
-    except OSError:
-        return _unchecked(repo, "the check could not finish")
-    verdict = _verdict(payload)
-    if code == exitcodes.CLEAN and verdict in {CLEAN, RESIDUE_VERDICT}:
-        return {"passthrough": True, "reason": "what the command stages was checked", "scan": payload}, code
-    if verdict not in govern_held.HELD_VERDICTS:
-        return _unchecked(repo, "the check could not finish")
-    govern_status.write(repo, "held", verdict=verdict, reasons=["the command did not run; the folder is unchanged"])
-    answer: dict = {"scan": payload}
-    findings = (payload.get("results") or [{}])[0].get("findings") or []
-    steps = govern_held.next_steps(verdict, findings, already_there, staged.commit, can_let_in=False)
-    if steps:
-        answer["next_steps"] = steps
-    return answer, code
-
-
 def apply(repo: str, into: str, accept: str | None = None, confirm: str | None = None) -> tuple[dict, int]:
     """Make the open folder match the checked tree, without fetching again. Takes the open folder,
     the holding directory, the accepted commit and the typed confirmation. Returns whether it was
@@ -203,6 +429,8 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
         if refused:
             return _applied(False, refused)
         accepted_verdict = state.get("verdict") if state.get("verdict") in govern_held.HELD_VERDICTS else None
+    if state.get("mode") == REPLAYED:
+        return _apply_replayed(repo, into, state, accepted_verdict)
     try:
         stopped = state.get("stopped")
         arrived = incoming.Arrived(
@@ -230,6 +458,44 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
         govern_status.write(repo, "applied", verdict=state.get("verdict"))
     else:
         govern_status.write(repo, "finished", reasons=[reason])
+    return _applied(not reason, reason)
+
+
+def _apply_replayed(repo: str, into: str, state: dict, accepted_verdict: str | None) -> tuple[dict, int]:
+    """Write a judged replay into the folder with saw's writers. Takes the open folder, the holding
+    directory, the recorded judgement and the verdict the user let in, if any. Returns whether it
+    was written, the reason when not, and the exit."""
+    try:
+        def entries(found) -> tuple:
+            return tuple(tuple(entry) for entry in found)
+        written = replayed_writer.Written(
+            top=Path(state["top"]), git_dir=Path(state["git_dir"]), holding=Path(state["holding"]),
+            files_after=state["files_after"], files=tuple(tuple(entry) for entry in state["files"]),
+            before=dict(state["before"]), digests=dict(state["written"]),
+            index=tuple((rel, entries(before), entries(after)) for rel, before, after in state["index"]),
+            refs=tuple(tuple(entry) for entry in state["refs"]), head_before=state["head_before"],
+            head_after=state["head_after"], state_removed=tuple(state["state_removed"]),
+            stash_log=bytes.fromhex(state["stash_log"]) if state.get("stash_log") else None, base=state["base"],
+            pseudo_refs=tuple(tuple(entry) for entry in state.get("pseudo_refs") or ()))
+    except (KeyError, TypeError, ValueError):
+        return _applied(False, "the checked update could not be read")
+    incoming.claim(into)
+    current().step("apply", "applying the checked update")
+    govern_status.write(repo, "checking", step="applying the checked update")
+    reason = replayed_writer.write(written)
+    if reason:
+        govern_status.write(repo, "finished", reasons=[reason])
+    elif accepted_verdict:
+        clean_ledger.remember_accepted(written.top, state.get("moved_to") or state["commit"], accepted_verdict)
+        govern_status.write(repo, "applied", verdict=accepted_verdict,
+                            reasons=[f"you let in an update saw found {accepted_verdict}"])
+    else:
+        if state.get("clean_mark"):
+            clean_ledger.remember(written.top, state["clean_mark"])
+        if state.get("applied_mark"):
+            clean_ledger.remember_applied(written.top, state["applied_mark"])
+        clean_ledger.remember_blobs(written.top, dict(state.get("let_in") or {}), state.get("policy") or "")
+        govern_status.write(repo, "applied", verdict=state.get("verdict"))
     return _applied(not reason, reason)
 
 
@@ -271,7 +537,7 @@ def _continuing_a_rebase(repo: str, config: str | None, deadline: float | None) 
     carried_here = govern_carried.carried_onto(repo) == onto
     if not only_picks:
         if not carried_here:
-            return _unchecked(repo, incoming.RUNS_OTHER_COMMANDS)
+            return _unchecked(repo, replay.RUNS_OTHER_COMMANDS)
         return _rebase_held(repo, "the rest of this rebase cannot be checked", {}, exitcodes.INCOMPLETE, [])
     if carried_here and govern_carried.carried(repo, onto, picks):
         return {"passthrough": True, "reason": "the rest of the rebase is what saw checked"}, exitcodes.CLEAN

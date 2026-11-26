@@ -1,0 +1,65 @@
+# Files a hook manager runs, or reads to decide what runs, when git runs one of this folder's hooks.
+#
+#   files            paths relative to the top of the working tree; `*` matches any text, `/` too
+#   names_scripts    a file whose values under `keys` are command lines naming scripts it runs
+#   package_keys     the keys of a top-level package.json that a hook manager reads
+version: 1
+
+files:
+  - .husky/*
+  - lefthook.yml
+  - lefthook.yaml
+  - lefthook.toml
+  - lefthook.json
+  - .lefthook.yml
+  - .lefthook.yaml
+  - .lefthook.toml
+  - .lefthook.json
+  - lefthook-local.yml
+  - lefthook-local.yaml
+  - .lefthook-local.yml
+  - .lefthook-local.yaml
+  - .config/lefthook.yml
+  - .config/lefthook.yaml
+  - .lefthook/*
+  - .lefthook-local/*
+  - .pre-commit-config.yaml
+  - .pre-commit-config.yml
+  - .simple-git-hooks.json
+  - .simple-git-hooks.js
+  - .simple-git-hooks.cjs
+  - .simple-git-hooks.mjs
+  - simple-git-hooks.json
+  - simple-git-hooks.js
+  - simple-git-hooks.cjs
+  - simple-git-hooks.mjs
+
+names_scripts:
+  - file: lefthook.yml
+    keys: [run, script]
+  - file: lefthook.yaml
+    keys: [run, script]
+  - file: .lefthook.yml
+    keys: [run, script]
+  - file: .lefthook.yaml
+    keys: [run, script]
+  - file: lefthook-local.yml
+    keys: [run, script]
+  - file: lefthook-local.yaml
+    keys: [run, script]
+  - file: .lefthook-local.yml
+    keys: [run, script]
+  - file: .lefthook-local.yaml
+    keys: [run, script]
+  - file: .config/lefthook.yml
+    keys: [run, script]
+  - file: .config/lefthook.yaml
+    keys: [run, script]
+  - file: .pre-commit-config.yaml
+    keys: [entry]
+  - file: .pre-commit-config.yml
+    keys: [entry]
+
+package_keys:
+  - husky
+  - simple-git-hooks
