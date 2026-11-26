@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from unittest import mock
 
 from stayawake.bots.security import govern
 from stayawake.lib.git import replay
@@ -193,6 +194,38 @@ class AFetchIntoACheckoutIsWrittenAsGitWritesIt(_Mirrored):
                 fetch_head = self._brought_in(checkout, "fetch", "--append", str(self.upstream), self.arrived)
                 self.assertTrue(fetch_head.startswith(earlier), fetch_head)
                 self.assertIn(self.arrived, fetch_head[len(earlier):])
+
+    def _with_an_unread_fetch_head(self, name: str, how: str):
+        checkout = self.owned(self.root / name)
+        self._raw("clone", "-q", "--no-local", str(self.mirror), str(checkout))
+        fetch_head = checkout / ".git" / "FETCH_HEAD"
+        if how == "linked":
+            elsewhere = self.root / f"{name}-fetch-head"
+            elsewhere.write_text(f"{'1' * 40}\t\tbranch 'main' of elsewhere\n", encoding="utf-8")
+            try:
+                os.symlink(elsewhere, fetch_head)
+            except (OSError, NotImplementedError):
+                self.skipTest("this system makes no symbolic links here")
+        else:
+            fetch_head.write_text(f"{'1' * 40}\t\tbranch 'main' of elsewhere\n" * 8, encoding="utf-8")
+        return checkout, fetch_head
+
+    def test_an_appending_fetch_to_an_unreadable_fetch_head_is_asked(self):
+        for how in ("linked", "too large"):
+            with self.subTest(how=how), mock.patch.object(replay, "_LARGEST_STATE_FILE",
+                                                          64 if how == "too large" else replay._LARGEST_STATE_FILE):
+                checkout, fetch_head = self._with_an_unread_fetch_head(how.replace(" ", "-"), how)
+                held = os.readlink(fetch_head) if how == "linked" else fetch_head.read_bytes()
+                answer, code = self._prepare(checkout, "fetch", "--append", str(self.upstream), self.arrived)
+                self.assertEqual((answer.get("reason"), code), (replay.FETCH_HEAD_UNREAD,
+                                                                exitcodes.INCOMPLETE), answer)
+                self.assertIn("decision", answer)
+                self.assertFalse(govern.apply(str(checkout), str(self.into))[0]["applied"])
+                self.assertEqual(os.readlink(fetch_head) if how == "linked" else fetch_head.read_bytes(), held)
+
+    def test_a_fetch_replacing_an_unreadable_fetch_head_is_written(self):
+        checkout, fetch_head = self._with_an_unread_fetch_head("replacing", "linked")
+        self.assertIn(self.arrived, self._brought_in(checkout, "fetch", str(self.upstream), self.arrived))
 
     def test_a_fetch_told_not_to_write_fetch_head_leaves_it_as_it_was(self):
         checkout, earlier = self._checkout_with_fetch_head("not-written")

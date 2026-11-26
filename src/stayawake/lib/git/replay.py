@@ -31,6 +31,7 @@ RUNS_OTHER_COMMANDS = "a command that runs other commands cannot be checked"
 NOT_REPLAYED = "that command cannot be checked"
 NO_REMOTE = "the repository has no remote to fetch from"
 FETCH_HEAD_NOT_COPIED = "the repository's FETCH_HEAD could not be copied for the check"
+FETCH_HEAD_UNREAD = "a fetch whose FETCH_HEAD cannot be read cannot be checked"
 RECURSION_KEYS = frozenset({"submodule.recurse", "fetch.recursesubmodules"})
 _RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
 _STATE_FILES = ("MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD")
@@ -50,6 +51,7 @@ _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "pru
                   "branch": frozenset({"remote", "merge", "rebase"})}
 _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
 _FETCH_HEAD = "FETCH_HEAD"
+_IN_PLACE_OF_AN_UNREAD_FETCH_HEAD = b"0" * 40 + b"\tnot-for-merge\t\n"
 _IDENTITY_KEYS = ("user.name", "user.email")
 _LONG_OPTIONS_THAT_RUN_A_PROGRAM = {
     "rebase": ("--exec", "--interactive", "--edit-todo"),
@@ -678,9 +680,10 @@ def _carried(key: str) -> bool:
 
 
 def replay(holding: Holding, command: TypedCommand, signing: tuple[str, ...], gh_args: "list[str] | None" = None
-           ) -> Replayed:
+           ) -> "Replayed | str":
     """Run a command in its holding copy and read what it changed. Takes the copy, the command, the
-    signing settings for commits it makes and, for a gh command, its arguments. Returns what changed."""
+    signing settings for commits it makes and, for a gh command, its arguments. Returns what changed,
+    or a sentence for a fetch whose `FETCH_HEAD` could not be read."""
     where = holding.work / holding.location.prefix if holding.location.work_tree else holding.work
     if gh_args is not None:
         finished, output = _run_gh(holding.work, gh_args)
@@ -689,7 +692,10 @@ def replay(holding: Holding, command: TypedCommand, signing: tuple[str, ...], gh
     elif command.sub == "fetch":
         if not stdout(holding.work, ["remote"], context=SAW_OWNED).strip():
             return _read_result(holding, False, ("", NO_REMOTE))
-        before = pathsafe.read_regular_no_follow(holding.location.git_dir / _FETCH_HEAD, _LARGEST_STATE_FILE)
+        held = holding.location.git_dir / _FETCH_HEAD
+        before = pathsafe.read_regular_no_follow(held, _LARGEST_STATE_FILE)
+        unread = before is None and os.path.lexists(held)
+        before = _IN_PLACE_OF_AN_UNREAD_FETCH_HEAD if unread else before
         try:
             if before is not None:
                 (holding.bare / _FETCH_HEAD).write_bytes(before)
@@ -697,6 +703,10 @@ def replay(holding: Holding, command: TypedCommand, signing: tuple[str, ...], gh
             return _read_result(holding, False, ("", FETCH_HEAD_NOT_COPIED))
         finished, output = _ran(run(holding.work, ["fetch", *command.rest], context=OPERATOR_PUSH))
         after = pathsafe.read_regular_no_follow(holding.bare / _FETCH_HEAD, _LARGEST_STATE_FILE)
+        if after is None and os.path.lexists(holding.bare / _FETCH_HEAD):
+            return FETCH_HEAD_UNREAD
+        if unread and after is not None and after != before and after.startswith(before):
+            return FETCH_HEAD_UNREAD
         return _read_result(holding, finished, output, after if after != before else None)
     else:
         settings = [arg for key, value in command.settings if key.lower() not in RECURSION_KEYS

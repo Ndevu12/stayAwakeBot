@@ -131,6 +131,8 @@ def _prepare_held(repo: str, into: str, holding_refusal: str, tool: str, args: l
         return _unchecked(repo, holding)
     signing = fix_commit_signing(location.folder_repository or Path(repo))
     result = replay.replay(holding, command, signing, list(args) if tool == "gh" else None)
+    if isinstance(result, str):
+        return _unchecked(repo, result)
     stopped = _stop_to_carry(result, command)
     if stopped is not None:
         return _judge_arrived(repo, into, stopped, config, deadline)
