@@ -30,6 +30,7 @@
     "--path", "--expiry-date", "--default", "--comment", "--fixed-value", "--includes", "--all", "--regexp", "--value",
     "--url", "--append"],
   "push_program_options": ["--receive-pack", "--exec"],
+  "grep_program_options": ["-O", "--open-files-in-pager"],
   "push_options_with_a_value": ["--repo", "-o", "--push-option", "--receive-pack", "--exec"],
   "settings_variables": ["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
     "GIT_CONFIG", "GIT_CONFIG_NOSYSTEM"],

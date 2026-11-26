@@ -162,8 +162,8 @@ enum Sent {
 
 /// Decide whether `(tool, args)` goes to `saw govern` first: every git command the stand-in cannot
 /// read with certainty as bringing no files into the folder, one that brings none but names a
-/// setting, an output file, a hooks template, a configuration change or a fetch, and gh's
-/// bringing-files commands.
+/// setting, an output file, a program, a hooks template, a configuration change or a fetch, and
+/// gh's bringing-files commands.
 fn sent_to_saw(tool: &str, args: &[String], real: &Path) -> Sent {
     match tool {
         "git" => git_sent(args, real),
@@ -192,7 +192,7 @@ fn git_sent(args: &[String], real: &Path) -> Sent {
 }
 
 /// Whether a command that brings no files names a setting that may run something, an output file,
-/// a hooks template, a configuration change or a fetch.
+/// a program, a hooks template, a configuration change or a fetch.
 fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: &GitReader) -> bool {
     let runs_something = |key: &&str| {
         let key = key.to_ascii_lowercase();
@@ -208,6 +208,7 @@ fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: 
         _ if table("subcommands_that_write_an_output").contains(&sub) => options.iter().any(|arg| *arg == "--output" || arg.starts_with("--output=")),
         "init" | "maintenance" => true,
         "push" => push_may_write_here(&options, reader),
+        "grep" => opens_files_in_a_program(&options),
         "config" => !config_only_reads(&options, &words),
         "remote" => words.first() == Some(&"update")
             || (words.first() == Some(&"add") && options.iter().any(|arg| *arg == "-f" || *arg == "--fetch")),
@@ -246,6 +247,20 @@ fn push_may_write_here(options: &[&str], reader: &GitReader) -> bool {
         Some(target) if target.contains(':') || target.contains('@') => false,
         _ => a_remote_is_local(reader),
     }
+}
+
+/// Whether a grep opens the files it finds in a program: a bundle of short options holding a listed
+/// one, or a long option abbreviating one.
+fn opens_files_in_a_program(options: &[&str]) -> bool {
+    let listed = table("grep_program_options");
+    options.iter().any(|arg| {
+        let name = arg.split('=').next().unwrap_or("");
+        if name.starts_with("--") {
+            name.len() > 3 && listed.iter().any(|option| option.starts_with("--") && option.starts_with(name))
+        } else {
+            name.starts_with('-') && listed.iter().any(|option| !option.starts_with("--") && arg[1..].contains(&option[1..]))
+        }
+    })
 }
 
 /// Whether an address names a place on this machine.

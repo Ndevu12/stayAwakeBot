@@ -723,9 +723,16 @@ class ACommandThatWritesAFileItNamesIsAsked(_Fetched):
                 self._asked(*args, brings_no_files=True)
                 self.assertFalse((self.open / "x.sh").exists())
 
+    def test_a_grep_opening_the_files_it_finds_in_a_program_is_asked(self):
+        for args in (["grep", "-Otouch", "new"], ["grep", "-iO", "new"], ["grep", "--open-files-in-pager=touch", "new"],
+                     ["grep", "--open", "new"], ["grep", "-e", "new", "-O"]):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], govern_command.RUNS_A_PROGRAM)
+
     def test_the_same_commands_without_them_run_as_typed(self):
         for args in (["diff", "HEAD", "origin/evil~1"], ["remote", "add", "other", str(self.upstream)],
-                     ["log", "-1", "--", "--output=x"]):
+                     ["log", "-1", "--", "--output=x"], ["grep", "-n", "new"], ["grep", "-eO", "new"],
+                     ["grep", "-n", "new", "--", "-O"]):
             with self.subTest(args=args):
                 self._passes(*args, brings_no_files=True)
 

@@ -110,7 +110,7 @@ def _names_commands(setting: str) -> bool:
 def _names_what_saw_checks(sub: str, rest: list[str], settings: list[str], here: Path, target: Path,
                            environ: Mapping[str, str]) -> bool:
     """Tell whether a command that brings no files names a setting that may run something, an output
-    file, a hooks template, a configuration change or a fetch. Takes the subcommand, its arguments,
+    file, a program, a hooks template, a configuration change or a fetch. Takes the subcommand, its arguments,
     the settings the line gives, the folder it runs in, the folder it acts on and the environment."""
     known = tables()
 
@@ -128,6 +128,8 @@ def _names_what_saw_checks(sub: str, rest: list[str], settings: list[str], here:
         return True
     if sub == "push":
         return _push_may_write_here(options, here, target)
+    if sub == "grep":
+        return _opens_files_in_a_program(options)
     if sub == "config":
         return not _config_only_reads(options, words)
     if sub == "remote":
@@ -163,6 +165,20 @@ def _push_may_write_here(options: list[str], here: Path, target: Path) -> bool:
     if pushed_to is not None and (":" in pushed_to or "@" in pushed_to):
         return False
     return _a_remote_is_local(target)
+
+
+def _opens_files_in_a_program(options: list[str]) -> bool:
+    """Tell whether a grep opens the files it finds in a program: a bundle of short options holding a
+    listed one, or a long option abbreviating one. Takes the grep's options."""
+    listed = tables()["grep_program_options"]
+    for arg in options:
+        name = arg.split("=")[0]
+        if name.startswith("--"):
+            if len(name) > 3 and any(option.startswith(name) for option in listed if option.startswith("--")):
+                return True
+        elif name.startswith("-") and any(option[1:] in arg[1:] for option in listed if not option.startswith("--")):
+            return True
+    return False
 
 
 def _is_local_address(address: str) -> bool:

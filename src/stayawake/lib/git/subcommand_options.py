@@ -142,6 +142,10 @@ LISTED = {
         _with_negations("--checkout", "--detach", "--force", "--guess-remote", "--lock", "--orphan", "--quiet",
                         "--relative-paths", "--track", "-d", "-f", "-q")
         | _negations("--reason")),
+    "grep": Listed(
+        frozenset({"-A", "-B", "-C", "-e", "-f", "-m", "--after-context", "--before-context", "--context",
+                   "--max-count", "--max-depth", "--threads"}),
+        frozenset({"-O"})),
     "update-index": Listed(
         frozenset({"--cacheinfo", "--chmod", "--index-version"}),
         frozenset(),
