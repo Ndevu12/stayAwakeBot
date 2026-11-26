@@ -37,6 +37,26 @@ def _short_names_are_made() -> bool:
         shutil.rmtree(probe, ignore_errors=True)
 
 
+def _views_scanned(views: list):
+    """Record each folder of copies scanned, with each file's size, and the names not copied. Takes
+    the list the records go into. Returns the patch that records them."""
+    real = govern._scan_copies
+
+    def recorded(copies, policy):
+        views.append({"folders": [{name: _size(folder / name) for name in names} for folder, names in copies.folders],
+                      "not_copied": list(copies.not_copied)})
+        return real(copies, policy)
+    return mock.patch.object(govern, "_scan_copies", side_effect=recorded)
+
+
+def _size(path: Path) -> "int | str":
+    """Measure a copied file. Takes its path. Returns its size, or why it could not be measured."""
+    try:
+        return path.stat().st_size
+    except OSError as error:
+        return type(error).__name__
+
+
 def _commit_of(repo, files: dict) -> str:
     """Make a commit holding each file, written straight into git's trees, whatever names the local
     disk or git's own checks refuse. Takes the repository and each name with its text. Returns the
@@ -100,9 +120,11 @@ class AnUpdateWithNamesThatAreHardToCopy(_TrackingCheckout):
         self.git(self.upstream, "add", ".vscode/tasks.json", "package.json")
         stage_blob(self.upstream, "Package.json", json.dumps({"name": "app"}))
         self.git(self.upstream, "commit", "-qm", "task and twins")
-        answer, code = self._prepare()
+        views: list = []
+        with _views_scanned(views):
+            answer, code = self._prepare()
         found = {f["signature_id"] for f in answer["scan"]["results"][0]["findings"]}
-        self.assertIn("vscode-task-runs-payload-script", found, answer)
+        self.assertIn("vscode-task-runs-payload-script", found, (views, answer))
         self._held(answer, code)
 
     def test_what_a_command_stages_is_scanned_beside_what_it_writes(self):
@@ -110,10 +132,12 @@ class AnUpdateWithNamesThatAreHardToCopy(_TrackingCheckout):
         self.commit(self.upstream, "task")
         script = json.dumps({"name": "app", "scripts": {"watch": f"node {samples.FONT_PAYLOAD}"}})
         blob = _git_fed(self.open, ["hash-object", "-w", "--stdin"], script.encode())
-        with mock.patch.object(govern, "_new_staged", return_value=[("package.json", "100644", blob)]):
+        views: list = []
+        with mock.patch.object(govern, "_new_staged", return_value=[("package.json", "100644", blob)]), \
+                _views_scanned(views):
             answer, code = self._prepare()
         found = {f["signature_id"] for f in answer["scan"]["results"][0]["findings"]}
-        self.assertIn("vscode-task-runs-payload-script", found, answer)
+        self.assertIn("vscode-task-runs-payload-script", found, (views, answer))
 
     @unittest.skipIf(os.name == "nt", POSIX_ONLY)
     def test_a_path_too_long_to_open_by_its_full_name_is_not_passed_over(self):
@@ -220,6 +244,20 @@ class CopyingOutByBlob(GitSandbox):
         copies = blob_copies.copy_out(repo, commit, ("kept.txt", "added-later.txt"), "absent")
         self.assertEqual([names for _folder, names in copies.folders], [("kept.txt",)])
         self.assertEqual(copies.not_copied, ())
+
+
+class AFolderIsWalkedUnderTheNamesGitGives(GitSandbox):
+
+    def test_each_file_a_walk_finds_is_named_with_forward_slashes(self):
+        from stayawake.bots.security.targets.local import LocalRepoTarget
+        from stayawake.bots.security.hook_policy import operator_policy
+        folder = self.owned(self.root / "copies")
+        (folder / ".vscode").mkdir(parents=True)
+        (folder / ".vscode" / "tasks.json").write_text(_TASKS, encoding="utf-8")
+        (folder / "package.json").write_text("{}", encoding="utf-8")
+        with LocalRepoTarget(str(folder), str(folder), operator_policy(None).opts,
+                             include_only=("package.json",)) as target:
+            self.assertEqual(sorted(target.unnarrowed().iter_files()), [".vscode/tasks.json", "package.json"])
 
 
 class AHoldingCopyReadsTheFoldersObjects(GitSandbox):
