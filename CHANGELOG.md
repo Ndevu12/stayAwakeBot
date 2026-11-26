@@ -20,6 +20,9 @@ reader, not the mechanism or the weakness it closed.
 - `saw govern classify --json` says how saw reads a git or gh command line: whether it could be
   read, its subcommand after aliases, the folder it acts on and whether saw checks it before it
   runs, exactly as saw's git stand-in decides.
+- `saw govern guard --json` says how to run a git command in a folder you did not create so that no
+  program the folder's own git settings name starts, while your own identity, signing, hooks,
+  credential helpers and transports keep working. `saw capabilities` names it as `govern.guard`.
 
 ### Fixed
 - `saw govern` never deletes a folder named as its holding directory: it refuses one inside any git

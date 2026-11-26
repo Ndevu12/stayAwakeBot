@@ -23,6 +23,21 @@ _RUNS = frozenset({COMMAND, AFTER_BANG, UNLESS_BOOLEAN, HOOKS_DIRECTORY, EXT_TRA
 _DRIVERS = frozenset({"filter", "diff", "merge"})
 _BOOLEAN_WORDS = frozenset({"true", "false", "yes", "no", "on", "off", "1", "0", ""})
 _EXT_PREFIX = "ext::"
+_OVERRIDE_FIELDS = frozenset({"setting", "environment", "value", "reset", "leading_option"})
+
+
+@dataclass(frozen=True)
+class Override:
+    """How a folder's own value of a key is kept from running. `setting` or `environment` names
+    what is set to `value` instead of the key, `reset` names the key whose empty value clears the
+    list this key adds to, and `leading_option` says a value starting with a git option is set
+    again too. With none of the first three, the key itself is set again."""
+
+    setting: str | None = None
+    environment: str | None = None
+    value: str = ""
+    reset: str | None = None
+    leading_option: bool = False
 
 
 @dataclass(frozen=True)
@@ -34,6 +49,7 @@ class ExecKey:
     bang: bool = False
     driver: str | None = None
     fires_on_its_own: bool = False
+    override: Override = Override()
 
     def matches(self, key: str) -> bool:
         """Say whether a listed key is this entry. Takes the key as git lists it. Returns True
@@ -78,7 +94,23 @@ def _entry(raw: dict) -> ExecKey:
     if driver is not None and driver not in _DRIVERS:
         raise ValueError(f"git exec key {key}: unknown `driver` {driver!r}")
     return ExecKey(key=key, runs=runs, bang=bool(raw.get("bang", False)), driver=driver,
-                   fires_on_its_own=bool(raw.get("fires_on_its_own", False)))
+                   fires_on_its_own=bool(raw.get("fires_on_its_own", False)),
+                   override=_override(key, raw.get("override") or {}))
+
+
+def _override(key: str, raw: dict) -> Override:
+    """Read one entry's `override`. Takes the entry's key and the mapping. Returns it, or raises
+    ValueError on a malformed one."""
+    if not isinstance(raw, dict) or set(raw) - _OVERRIDE_FIELDS:
+        raise ValueError(f"git exec key {key}: malformed `override` {raw!r}")
+    if sum(raw.get(name) is not None for name in ("setting", "environment", "reset")) > 1:
+        raise ValueError(f"git exec key {key}: `override` names more than one way")
+    texts = {name: raw.get(name) for name in ("setting", "environment", "reset", "value")}
+    if any(text is not None and not isinstance(text, str) for text in texts.values()):
+        raise ValueError(f"git exec key {key}: `override` values are text")
+    return Override(setting=texts["setting"], environment=texts["environment"],
+                    value=texts["value"] or "", reset=texts["reset"],
+                    leading_option=bool(raw.get("leading_option", False)))
 
 
 @functools.lru_cache(maxsize=None)

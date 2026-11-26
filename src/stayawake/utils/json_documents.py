@@ -29,7 +29,7 @@ SCHEMA_VERSION_OF_EACH_DOCUMENT = {
 ALSO_PRINTED_BY = {
     "hook-status": (("hook", "install"), ("hook", "repair")),
     "govern": (("govern", "prepare"), ("govern", "apply"), ("govern", "classify"), ("govern", "verdict"),
-               ("govern", "restore")),
+               ("govern", "restore"), ("govern", "guard")),
 }
 
 

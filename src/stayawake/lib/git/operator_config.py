@@ -25,6 +25,26 @@ def global_config(repo: str | Path | None = None) -> dict[str, str]:
     return found
 
 
+OPERATOR_SCOPES = ("system", "global")
+
+
+def operator_entries(repo: str | Path) -> list[tuple[str, str | None]] | None:
+    """List every entry of the operator's own configuration, system and global scopes and what they
+    include, in the order git applies them in a folder. Takes the folder conditional includes are
+    matched against. Returns each listed key with its value (None for a bare key), or None when git
+    could not list them."""
+    res = run(repo, ["config", "--list", "--show-scope", "-z"])
+    if res is None or res.returncode != 0:
+        return None
+    fields = (res.stdout or "").split("\0")
+    found: list[tuple[str, str | None]] = []
+    for scope, entry in zip(fields[0::2], fields[1::2]):
+        key, newline, value = entry.partition("\n")
+        if scope in OPERATOR_SCOPES and key:
+            found.append((key, value if newline else None))
+    return found
+
+
 def config_files() -> list[Path] | None:
     """List the files git reads the operator's own configuration from, system and global scopes and
     what they include, each once, in git's order. Returns them, or None when git could not list

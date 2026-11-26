@@ -13,6 +13,14 @@
 #   driver            the attribute that must select this entry before it runs:
 #                     filter | diff | merge (OPTIONAL)
 #   fires_on_its_own  git runs it during ordinary operations nobody asked it to run (OPTIONAL)
+#   override          how `saw govern guard` keeps a folder's own value from running (OPTIONAL;
+#                     without it the key is set again, to the operator's own value or to one that
+#                     runs nothing):
+#                       setting, value      set this other key instead; `{subsection}` is this key's
+#                       environment, value  set this environment variable instead
+#                       reset               the key adds to a list that this key set empty clears:
+#                                           clear it, then add back the operator's own entries
+#                       leading_option      a value whose first word is a git option is set again too
 version: 1
 
 keys:
@@ -27,6 +35,7 @@ keys:
   - key: core.sshcommand
   - key: core.askpass
   - key: core.gitproxy
+    override: {environment: GIT_PROXY_COMMAND, value: ""}
   - key: sequence.editor
   - key: pager.*
     runs: unless-boolean
@@ -34,10 +43,13 @@ keys:
   - key: alias.*
     runs: after-bang
     bang: true
+    override: {leading_option: true}
   - key: credential.helper
     bang: true
+    override: {reset: credential.helper}
   - key: credential.*.helper
     bang: true
+    override: {reset: credential.helper}
   - key: filter.*.clean
     driver: filter
     fires_on_its_own: true
@@ -65,16 +77,21 @@ keys:
   - key: gpg.*.program
     fires_on_its_own: true
   - key: remote.*.uploadpack
+    override: {setting: protocol.file.allow, value: never}
   - key: remote.*.receivepack
+    override: {setting: protocol.file.allow, value: never}
   - key: submodule.*.update
     runs: after-bang
     bang: true
   - key: url.*.insteadof
     runs: ext-transport
+    override: {setting: protocol.ext.allow, value: never}
   - key: url.*.pushinsteadof
     runs: ext-transport
+    override: {setting: protocol.ext.allow, value: never}
   - key: protocol.ext.allow
     runs: enables-transport
+    override: {setting: protocol.ext.allow, value: never}
   - key: gpg.ssh.defaultkeycommand
     fires_on_its_own: true
   - key: core.alternaterefscommand
@@ -90,9 +107,11 @@ keys:
   - key: remote.*.url
     runs: ext-address
     fires_on_its_own: true
+    override: {setting: protocol.ext.allow, value: never}
   - key: remote.*.pushurl
     runs: ext-address
     fires_on_its_own: true
+    override: {setting: protocol.ext.allow, value: never}
 
   - key: lfs.customtransfer.*.path
     fires_on_its_own: true
@@ -104,3 +123,4 @@ keys:
     fires_on_its_own: true
   - key: hook.*.command
     fires_on_its_own: true
+    override: {setting: "hook.{subsection}.enabled", value: "false"}

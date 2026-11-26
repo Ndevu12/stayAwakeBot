@@ -12,6 +12,7 @@ from stayawake.bots.security import govern as core
 from stayawake.bots.mcp.launch import standin_binary
 from stayawake.cli.argtypes import add_deadline_arg, add_progress_arg, progress_requested
 from stayawake.cli.helptext import add_command
+from stayawake.lib.git import folder_guard
 from stayawake.utils import exitcodes
 from stayawake.utils.progress_events import covering
 from stayawake.utils.json_documents import versioned
@@ -96,6 +97,21 @@ def register(sub) -> None:
     cp.add_argument("args", nargs=argparse.REMAINDER, help="the command's arguments, after --")
     cp.set_defaults(func=run_classify)
 
+    gp = add_command(
+        actions, "guard",
+        help="say how to run git in a folder without starting what its settings name",
+        description=(
+            "Read the folder's own git settings, and say which settings and environment keep a git "
+            "command line there from starting any program they name. Your own settings are kept. A "
+            "command that is not safe to run answers guarded: false with the reason. Nothing in the "
+            "folder is run."),
+        examples=[("saw govern guard --json --repo . -- status", "ask how to run a status")],
+        stream=False)
+    gp.add_argument("--json", action="store_true", help="machine-readable output")
+    gp.add_argument("--repo", default=".", help="the folder the command runs in")
+    gp.add_argument("args", nargs=argparse.REMAINDER, help="the command's arguments, after --")
+    gp.set_defaults(func=run_guard)
+
     vp = add_command(
         actions, "verdict",
         help="say whether the open folder's tree is one saw let in",
@@ -173,6 +189,12 @@ def run_classify(a: argparse.Namespace) -> int:
     payload, code = core.classify(a.repo, a.tool, _operator_args(a.args))
     print(json.dumps(versioned("govern", payload)))
     return code
+
+
+def run_guard(a: argparse.Namespace) -> int:
+    answer = folder_guard.guard(a.repo, _operator_args(a.args), os.environ)
+    print(json.dumps(versioned("govern", answer.payload())))
+    return exitcodes.INCOMPLETE if answer.refusal else exitcodes.CLEAN
 
 
 def run_verdict(a: argparse.Namespace) -> int:

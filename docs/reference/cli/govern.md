@@ -165,6 +165,32 @@ fetched commit or an alias, answers `checked: true`. An unreadable line, such as
 unfamiliar option or an alias that runs a shell command, answers `readable: false` with the
 `reason`, and is checked. An editor uses it instead of reading git's options itself.
 
+## Running git in a folder you did not create
+
+```text
+saw govern guard --json --repo <folder> -- <arguments>
+```
+
+`saw govern guard` says how to run a git command line in a folder so that no program the folder's
+own git settings name starts: hooks, filters, diff and merge drivers, aliases, editors, pagers,
+credential helpers, signing, ssh and proxy commands. It reads the folder's settings, its worktrees'
+and submodules' and what they include, without running anything there, and answers `guarded: true`
+with:
+
+- `arguments`: git's own options to put right after `git` and before your arguments;
+- `environment`: variables to set for that command;
+- `settings`: each setting those options give, in order.
+
+Your own settings stay in force. A setting the folder replaces goes back to your value, or to one
+that runs nothing when you have none, so a folder that sets its own editor or signing program makes
+that command fail rather than run it. Hooks run from your own hooks folder, or from an empty one saw
+keeps. A command that only reads or writes settings, such as `git config --get`, gets no settings,
+so it reports what the folder says.
+
+A command that is not safe to run answers `guarded: false` with the `reason`, for example one that
+names its own repository. Do not run it then. An editor uses this instead of keeping its own list of
+settings.
+
 ## Asking whether a tree is one saw let in
 
 ```text
