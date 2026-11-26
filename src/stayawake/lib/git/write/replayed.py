@@ -6,7 +6,6 @@ judged with."""
 from __future__ import annotations
 
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from stayawake.lib.git.run import UNTRUSTED, stdout_bytes, stdout_bytes_fed
 from stayawake.lib.git.write.branch import update_refs
 from stayawake.lib.git.write.transfer import adopt_objects, missing_objects
 from stayawake.lib.git.write.working_tree import write_files, written_digest
+from stayawake.lib.git.index_copy import copy_index
 from stayawake.utils import pathsafe, scratch
 
 ABSENT = "absent"
@@ -205,7 +205,7 @@ class _IndexLock:
         Returns whether the copy holds them."""
         try:
             if self.index.exists():
-                shutil.copyfile(self.index, self.private)
+                copy_index(self.index, self.private)
             else:
                 self.private.unlink(missing_ok=True)
         except OSError:
@@ -217,7 +217,7 @@ class _IndexLock:
     def swap(self) -> bool:
         """Put the prepared copy in place of the index. Returns whether it is in place."""
         try:
-            shutil.copyfile(self.private, self.lock)
+            copy_index(self.private, self.lock)
             os.replace(self.lock, self.index)
             self.held = False
             return True
