@@ -24,8 +24,8 @@ from stayawake.bots.security.scanner import joined, scan_target, unreadable
 from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
-from stayawake.lib.git import (blob_copies, command_line, conflicted, incoming, query, replay, runs_directly,
-                              runs_from_the_folder, typed_command)
+from stayawake.lib.git import (blob_copies, command_line, conflicted, holding_directory, incoming, query,
+                               replay, runs_directly, runs_from_the_folder, typed_command)
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes
 from stayawake.lib.git.write import replayed as replayed_writer
 from stayawake.lib.git.write.working_tree import bytes_as_written, uncommitted_paths
@@ -36,7 +36,7 @@ from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
 
 SCHEMA = 1
-_STATE = "state.json"
+_STATE = holding_directory.STATE
 _HOLD_WAIT_SECONDS = 30.0
 _BUSY = "another saw run is using this holding folder"
 (BROUGHT_IN, NOT_BROUGHT_IN, STATE_CHANGED, HELD, FOLDER_MAY_HAVE_CHANGED, NOTHING_TO_APPLY, BUSY,
@@ -84,6 +84,9 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     deadline, the command's environment and whether the stand-in reads the command as one that
     brings no files. Returns the answer and its exit: a passthrough, a scan, a reason with a
     decision, or busy when another run holds the holding directory past the wait."""
+    refused = holding_directory.overlaps(Path(repo), Path(into)) or holding_directory.holds_other_files(Path(into))
+    if refused:
+        return _unchecked(repo, refused)
     with contextlib.ExitStack() as hold:
         try:
             Path(into).mkdir(parents=True, exist_ok=True)
@@ -99,7 +102,9 @@ def _prepare_held(repo: str, into: str, tool: str, args: list[str], config: str 
                   deadline: float | None, environment: dict | None, brings_no_files: bool) -> tuple[dict, int]:
     """Prepare while holding the holding directory. Takes what `prepare` takes. Returns what it
     returns."""
-    _forget_state(Path(into))
+    refused = holding_directory.clear(Path(into))
+    if refused:
+        return _unchecked(repo, refused)
     command = typed_command.TypedCommand("", ())
     if tool == "gh":
         if not runs_directly.gh_brings_files(list(args)):
@@ -347,7 +352,7 @@ def _write_replayed_state(into: Path, result: "replay.Replayed", releasable: boo
             "base": holding.base, "pseudo_refs": [list(entry) for entry in result.pseudo_refs],
             "fetch_head": result.fetch_head.hex() if result.fetch_head is not None else None, **judged}
     path = Path(into) / _STATE
-    temporary = path.with_suffix(".json.tmp")
+    temporary = Path(into) / holding_directory.STATE_BEING_WRITTEN
     temporary.write_text(json.dumps(body), encoding="utf-8")
     temporary.replace(path)
     return state_id
@@ -469,6 +474,9 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
     the holding directory, the accepted commit, the typed confirmation and the id of the state the
     caller's prepare recorded. Returns whether it was applied, the outcome, the reason when not, and
     the exit."""
+    refused = holding_directory.overlaps(Path(repo), Path(into))
+    if refused:
+        return _applied(False, refused, HOLDING_UNUSABLE)
     state = _read_state(Path(into)) if Path(into).is_dir() else None
     if state is None:
         return _applied(False, "there is no checked update to apply", NOTHING_TO_APPLY)
@@ -922,22 +930,10 @@ def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
             "clean_mark": clean_mark, "applied_mark": applied_mark, "verdict": verdict,
             "written": written or {}, "asks": asks}
     path = Path(into) / _STATE
-    temporary = path.with_suffix(".json.tmp")
+    temporary = Path(into) / holding_directory.STATE_BEING_WRITTEN
     temporary.write_text(json.dumps(body), encoding="utf-8")
     temporary.replace(path)
     return state_id
-
-
-def _forget_state(into: Path) -> None:
-    """Remove what an earlier check recorded in the holding directory. Takes the holding
-    directory. Returns nothing."""
-    try:
-        (Path(into) / _STATE).unlink()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        if (Path(into) / _STATE).exists():
-            raise
 
 
 def _read_state(into: Path) -> dict | None:

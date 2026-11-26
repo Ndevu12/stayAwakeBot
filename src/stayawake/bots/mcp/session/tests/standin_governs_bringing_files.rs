@@ -349,3 +349,18 @@ fn a_command_that_brings_no_files_runs_as_typed() {
     assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
+
+#[test]
+fn a_placers_holding_directory_and_what_it_holds_are_left_in_place() {
+    for held in [false, true] {
+        let f = Fixture::new(if held { "placer-held" } else { "placer-clean" });
+        fs::create_dir_all(&f.holding).unwrap();
+        fs::write(f.holding.join("notes.txt"), "notes\n").unwrap();
+        let _ = f.run(&["pull"], true, true, held);
+        assert_eq!(
+            fs::read_to_string(f.holding.join("notes.txt")).unwrap(),
+            "notes\n",
+            "the stand-in never removes a holding directory it did not make"
+        );
+    }
+}

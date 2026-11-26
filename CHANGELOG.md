@@ -21,6 +21,10 @@ reader, not the mechanism or the weakness it closed.
   read, its subcommand after aliases, the folder it acts on and whether saw checks it before it
   runs, exactly as saw's git stand-in decides.
 
+### Fixed
+- `saw govern` never deletes a folder named as its holding directory: it refuses one that is your
+  open folder, inside it or contains it, and clears only what it put there.
+
 ## [0.17.7] - 2026-11-26
 
 ### Fixed
