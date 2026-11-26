@@ -56,6 +56,8 @@
   "push_program_options": ["--receive-pack", "--exec"],
   "grep_program_options": ["-O", "--open-files-in-pager"],
   "push_options_with_a_value": ["--repo", "-o", "--push-option", "--receive-pack", "--exec"],
+  "ls_remote_program_options": ["--upload-pack", "--exec"],
+  "ls_remote_options_with_a_value": ["--upload-pack", "--exec", "--sort", "-o", "--server-option"],
   "settings_variables": ["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
     "GIT_CONFIG", "GIT_CONFIG_NOSYSTEM"],
   "gh_repository_options": ["-R", "--repo"],

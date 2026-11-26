@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git import incoming, replay, runs_from_the_folder, subcommand_options
+from stayawake.lib.git import incoming, replay, runs_directly, runs_from_the_folder, subcommand_options
 from stayawake.lib.git.run import UNTRUSTED, stdout
 from stayawake.lib.git.typed_command import TypedCommand, folder_it_creates
 
@@ -21,9 +21,11 @@ FETCHES = "the command fetches outside the check; fetch with git fetch instead"
 UPDATES_SUBMODULES = "a command that also updates submodules cannot be checked"
 PUSHES_INTO_A_FOLDER = "a push into a repository with files on this machine cannot be checked"
 RUNS_A_PROGRAM = "a command that runs a program it names cannot be checked"
+READS_A_REPOSITORY_HERE = "a command that reads a repository on this machine cannot be checked"
 LETS_A_PUSH_WRITE = "the command lets a push change this folder's files; check it first"
 NO_WORKING_TREE = "the repository the command acts on has no working tree"
 _PUSH_PROGRAM_OPTIONS = ("--receive-pack", "--exec")
+_LS_REMOTE_PROGRAM_OPTIONS = ("--upload-pack", "--exec")
 _OPENS_FILES_IN_A_PROGRAM = "--open-files-in-pager"
 _PUSH_OPTIONS_WITH_A_VALUE = frozenset({"--repo", "-o", "--push-option", "--receive-pack", "--exec"})
 _LOCAL_PREFIXES = ("/", "./", "../", "~", "file:")
@@ -140,6 +142,8 @@ def _sent_for_what_it_names(folder: Path, top: "Path | None", command: TypedComm
             return Answer(UNCHECKED, FETCHES)
     if command.sub == "push":
         return _push(folder, rest)
+    if command.sub == "ls-remote":
+        return _ls_remote(folder, rest)
     if command.sub == "grep" and _opens_files_in_a_program(rest):
         return Answer(UNCHECKED, RUNS_A_PROGRAM)
     if command.sub == "maintenance":
@@ -190,6 +194,8 @@ def _lets_a_push_write(settings) -> bool:
 def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
     """Answer a push: one that runs a program it names, or that reaches a repository with a working
     tree on this machine, asks first. Takes where it runs and its arguments. Returns the answer."""
+    if runs_directly.names_a_program(list(rest), _PUSH_PROGRAM_OPTIONS):
+        return Answer(UNCHECKED, RUNS_A_PROGRAM)
     words: list[str] = []
     named = ""
     index = 0
@@ -197,8 +203,6 @@ def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
         arg = rest[index]
         index += 1
         name, joined, value = arg.partition("=")
-        if arg.startswith("--") and len(name) > 3 and any(option.startswith(name) for option in _PUSH_PROGRAM_OPTIONS):
-            return Answer(UNCHECKED, RUNS_A_PROGRAM)
         if name in _PUSH_OPTIONS_WITH_A_VALUE:
             given = value if joined else (rest[index] if index < len(rest) else "")
             index += 0 if joined else 1
@@ -214,6 +218,18 @@ def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
     return Answer(PASSTHROUGH, "the command brings no files in")
 
 
+def _ls_remote(folder: Path, rest: tuple[str, ...]) -> Answer:
+    """Answer an ls-remote: one that runs a program it names, or that reads a repository on this
+    machine, asks first. Takes where it runs and its arguments. Returns the answer."""
+    if runs_directly.names_a_program(list(rest), _LS_REMOTE_PROGRAM_OPTIONS):
+        return Answer(UNCHECKED, RUNS_A_PROGRAM)
+    words = subcommand_options.read("ls-remote", list(rest)).words
+    targets = words[:1] or tuple(_remotes(folder, push=False))
+    if any(_local_place(folder, target, push=False) is not None for target in targets):
+        return Answer(UNCHECKED, READS_A_REPOSITORY_HERE)
+    return Answer(PASSTHROUGH, "the command brings no files in")
+
+
 def _opens_files_in_a_program(rest: tuple[str, ...]) -> bool:
     """Tell whether a grep opens the files it finds in a program. Takes its arguments. Returns the
     answer."""
@@ -221,25 +237,27 @@ def _opens_files_in_a_program(rest: tuple[str, ...]) -> bool:
     return any(name == "-O" or (len(name) > 3 and _OPENS_FILES_IN_A_PROGRAM.startswith(name)) for name in names)
 
 
-def _remotes(folder: Path) -> list[str]:
-    """List the remotes a push with no repository named may reach. Takes where it runs. Returns
-    their names."""
-    listed = stdout(folder, ["config", "--name-only", "--get-regexp", r"^remote\..*\.(push)?url$"], context=UNTRUSTED)
+def _remotes(folder: Path, *, push: bool = True) -> list[str]:
+    """List the remotes a push or a read with no repository named may reach. Takes where it runs and
+    whether it pushes. Returns their names."""
+    pattern = r"^remote\..*\.(push)?url$" if push else r"^remote\..*\.url$"
+    listed = stdout(folder, ["config", "--name-only", "--get-regexp", pattern], context=UNTRUSTED)
     return list(dict.fromkeys(line.removeprefix("remote.").rpartition(".")[0] for line in listed.splitlines() if line))
 
 
-def _local_place(folder: Path, target: str) -> "Path | None":
-    """Find the folder on this machine a push target reaches, through the remote's push address when
-    it names a remote. Takes where the push runs and the target. Returns the folder, or None for a
-    target elsewhere."""
+def _local_place(folder: Path, target: str, *, push: bool = True) -> "Path | None":
+    """Find the folder on this machine a push or read target reaches, through the remote's address
+    when it names a remote. Takes where the command runs, the target and whether it pushes. Returns
+    the folder, or None for a target elsewhere."""
     address = target
     if not target.startswith(_LOCAL_PREFIXES) and target not in (".", "..") and not (folder / target).is_dir():
-        address = stdout(folder, ["remote", "get-url", "--push", target], context=UNTRUSTED).strip() or target
+        asked = ["remote", "get-url", *(["--push"] if push else []), target]
+        address = stdout(folder, asked, context=UNTRUSTED).strip() or target
     if address.startswith("file://"):
         address = address[len("file://"):]
     elif address.startswith("file:"):
         address = address[len("file:"):]
-    elif "://" in address or (":" in address and not address.startswith(_LOCAL_PREFIXES)):
+    elif "://" in address or not runs_directly.is_local_address(address):
         return None
     path = Path(os.path.expanduser(address))
     path = path if path.is_absolute() else folder / path

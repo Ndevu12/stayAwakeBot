@@ -685,16 +685,29 @@ class ACommandThatWritesAFileItNamesIsAsked(_Fetched):
                      ["push", f"file://{other}", "HEAD:refs/heads/x"], ["push", "origin", "HEAD:refs/heads/x"],
                      ["push"], ["push", "--receive-pack=git receive-pack", "https://example.invalid/r"],
                      ["push", "--exec", "git receive-pack", "https://example.invalid/r"],
-                     ["-c", "receive.denyCurrentBranch=updateInstead", "push", ".", "HEAD:main"]):
+                     ["-c", "receive.denyCurrentBranch=updateInstead", "push", ".", "HEAD:main"],
+                     ["push", "--e=touch x", "./dst:x"], ["push", "--e=touch x", f"{self.root}/nodir:y"],
+                     ["push", "--recurse-submodules", "--", "--exec=touch x", "origin"]):
             with self.subTest(args=args):
                 self._asked(*args, brings_no_files=True)
+
+    def test_an_ls_remote_that_runs_a_program_or_reads_a_repository_here_is_asked(self):
+        for args, reason in ((["ls-remote", "--upload-pack=touch x", str(self.upstream)], govern_command.RUNS_A_PROGRAM),
+                             (["ls-remote", "--exec=touch x", "https://example.invalid/r"], govern_command.RUNS_A_PROGRAM),
+                             (["ls-remote", "--u=touch x", "https://example.invalid/r"], govern_command.RUNS_A_PROGRAM),
+                             (["ls-remote", str(self.upstream)], govern_command.READS_A_REPOSITORY_HERE),
+                             (["ls-remote"], govern_command.READS_A_REPOSITORY_HERE)):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], reason)
+        self.assertFalse((self.open / "x").exists())
 
     def test_a_push_elsewhere_or_into_a_repository_without_files_runs_as_typed(self):
         bare = self.root / "bare.git"
         self._raw("clone", "-q", "--bare", str(self.upstream), str(bare))
         self.git(self.open, "remote", "set-url", "origin", "https://example.invalid/team/r")
         for args in (["push", str(bare), "HEAD:refs/heads/x"], ["push", "https://example.invalid/r", "main"],
-                     ["push", "git@example.invalid:team/r", "main"], ["push", "origin", "main"], ["push"]):
+                     ["push", "git@example.invalid:team/r", "main"], ["push", "origin", "main"], ["push"],
+                     ["ls-remote", "--sort", "refname", "https://example.invalid/r"], ["ls-remote"]):
             with self.subTest(args=args):
                 self._passes(*args, brings_no_files=True)
 

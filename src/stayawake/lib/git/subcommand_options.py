@@ -142,6 +142,7 @@ LISTED = {
         _with_negations("--checkout", "--detach", "--force", "--guess-remote", "--lock", "--orphan", "--quiet",
                         "--relative-paths", "--track", "-d", "-f", "-q")
         | _negations("--reason")),
+    "ls-remote": Listed(frozenset({"--upload-pack", "--exec", "--sort", "-o", "--server-option"})),
     "grep": Listed(
         frozenset({"-A", "-B", "-C", "-e", "-f", "-m", "--after-context", "--before-context", "--context",
                    "--max-count", "--max-depth", "--threads"}),

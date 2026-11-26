@@ -212,7 +212,10 @@ fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: 
     match sub {
         _ if table("subcommands_that_write_an_output").contains(&sub) => every.iter().any(|arg| *arg == "--output" || arg.starts_with("--output=")),
         "init" | "maintenance" => true,
-        "push" => names_a_push_program(&every) || push_may_write_here(&options, reader),
+        "push" => names_a_program(&every, "push_program_options")
+            || reaches_this_machine(&options, "push_options_with_a_value", reader),
+        "ls-remote" => names_a_program(&every, "ls_remote_program_options")
+            || reaches_this_machine(&options, "ls_remote_options_with_a_value", reader),
         "grep" => opens_files_in_a_program(&every),
         "config" => !config_only_reads(&every, &words),
         "remote" => words.first() == Some(&"update")
@@ -227,27 +230,25 @@ struct GitReader<'a> {
     folder: PathBuf,
 }
 
-/// Whether any argument of a push, `--` and the words after it included, may name a program to run: a
-/// long option abbreviating a listed one.
-fn names_a_push_program(every: &[&str]) -> bool {
+/// Whether any argument, `--` and the words after it included, may name a program to run: a long
+/// option that is, or begins, one the named table lists.
+fn names_a_program(every: &[&str], programs: &str) -> bool {
     every.iter().any(|arg| {
         let name = arg.split('=').next().unwrap_or("");
-        name.starts_with("--") && name.len() > 3 && table("push_program_options").iter().any(|o| o.starts_with(name))
+        name.starts_with("--") && name.len() > 2 && table(programs).iter().any(|o| o.starts_with(name))
     })
 }
 
-/// Whether a push names a program to run, or may reach a repository on this machine: a target that
-/// is a path, or a remote whose configured or rewritten address is a path.
-fn push_may_write_here(options: &[&str], reader: &GitReader) -> bool {
+/// Whether a push or ls-remote may reach a repository on this machine: a target that is a path, or
+/// a remote whose configured or rewritten address is a path. Takes the options before `--` and the
+/// table of the options that take a value.
+fn reaches_this_machine(options: &[&str], with_a_value: &str, reader: &GitReader) -> bool {
     let mut target = None;
     let mut index = 0;
     while let Some(arg) = options.get(index).copied() {
         index += 1;
         let name = arg.split('=').next().unwrap_or("");
-        if name.starts_with("--") && name.len() > 3 && table("push_program_options").iter().any(|o| o.starts_with(name)) {
-            return true;
-        }
-        if table("push_options_with_a_value").contains(&name) {
+        if table(with_a_value).contains(&name) {
             let value = if arg.contains('=') { arg.splitn(2, '=').nth(1) } else { index += 1; options.get(index - 1).copied() };
             if name == "--repo" {
                 target = value;
@@ -270,16 +271,25 @@ fn opens_files_in_a_program(options: &[&str]) -> bool {
     options.iter().any(|arg| {
         let name = arg.split('=').next().unwrap_or("");
         if name.starts_with("--") {
-            name.len() > 3 && listed.iter().any(|option| option.starts_with("--") && option.starts_with(name))
+            name.len() > 2 && listed.iter().any(|option| option.starts_with("--") && option.starts_with(name))
         } else {
             name.starts_with('-') && listed.iter().any(|option| !option.starts_with("--") && arg[1..].contains(&option[1..]))
         }
     })
 }
 
-/// Whether an address names a place on this machine.
+/// Whether an address names a place on this machine: a `file:` address, a drive letter, no `:`, or a
+/// `/` or `\\` before the first `:`.
 fn is_local_address(address: &str) -> bool {
-    address.starts_with("file:") || !address.contains(':')
+    let bytes = address.as_bytes();
+    let drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    let colon = address.find(':');
+    let slash = address.find(|c| c == '/' || c == '\\');
+    address.starts_with("file:") || drive || match (colon, slash) {
+        (None, _) => true,
+        (Some(colon), Some(slash)) => slash < colon,
+        (Some(_), None) => false,
+    }
 }
 
 /// Whether any remote's address, or an address rewrite, names a place on this machine.

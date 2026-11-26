@@ -28,6 +28,8 @@ reader, not the mechanism or the weakness it closed.
   repository or holding files it did not put there, and clears only what it put there.
 - `saw govern` asks before a `git grep` that opens the files it finds in a program (`-O` or
   `--open-files-in-pager`).
+- `saw govern` asks before a `git push` or `git ls-remote` that names a program to run, however the
+  option is shortened, or that reaches a repository on this machine.
 - `saw govern classify` names the git command a line runs when an alias shares that command's name,
   as git ignores such an alias.
 - saw keeps its records of what it checked and let in only outside every git repository. When it

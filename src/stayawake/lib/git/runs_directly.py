@@ -128,7 +128,11 @@ def _names_what_saw_checks(sub: str, rest: list[str], settings: list[str], here:
     if sub in ("init", "maintenance"):
         return True
     if sub == "push":
-        return _names_a_push_program(every) or _push_may_write_here(options, here, target)
+        return (names_a_program(every, known["push_program_options"])
+                or _reaches_this_machine(options, known["push_options_with_a_value"], here, target))
+    if sub == "ls-remote":
+        return (names_a_program(every, known["ls_remote_program_options"])
+                or _reaches_this_machine(options, known["ls_remote_options_with_a_value"], here, target))
     if sub == "grep":
         return _opens_files_in_a_program(every)
     if sub == "config":
@@ -138,31 +142,27 @@ def _names_what_saw_checks(sub: str, rest: list[str], settings: list[str], here:
     return False
 
 
-def _names_a_push_program(every: list[str]) -> bool:
-    """Tell whether any argument of a push, `--` and the words after it included, may name a program
-    to run: a long option abbreviating a listed one. Takes the push's arguments."""
-    listed = tables()["push_program_options"]
+def names_a_program(every: list[str], programs: tuple[str, ...]) -> bool:
+    """Tell whether any argument, `--` and the words after it included, may name a program to run: a
+    long option that is, or begins, a listed one. Takes the arguments and the listed options."""
     for arg in every:
         name = arg.split("=")[0]
-        if name.startswith("--") and len(name) > 3 and any(option.startswith(name) for option in listed):
+        if name.startswith("--") and len(name) > 2 and any(option.startswith(name) for option in programs):
             return True
     return False
 
 
-def _push_may_write_here(options: list[str], here: Path, target: Path) -> bool:
-    """Tell whether a push names a program to run, or may reach a repository on this machine: a
-    target that is a path, or a remote whose configured or rewritten address is a path. Takes the
-    push's options, the folder it runs in and the folder it acts on."""
-    known = tables()
+def _reaches_this_machine(options: list[str], with_a_value: tuple[str, ...], here: Path, target: Path) -> bool:
+    """Tell whether a push or ls-remote may reach a repository on this machine: a target that is a
+    path, or a remote whose configured or rewritten address is a path. Takes the options before
+    `--`, the options that take a value, the folder it runs in and the folder it acts on."""
     pushed_to = None
     index = 0
     while index < len(options):
         arg = options[index]
         index += 1
         name = arg.split("=")[0]
-        if name.startswith("--") and len(name) > 3 and any(o.startswith(name) for o in known["push_program_options"]):
-            return True
-        if name in known["push_options_with_a_value"]:
+        if name in with_a_value:
             if "=" in arg:
                 value = arg.split("=", 1)[1]
             else:
@@ -172,7 +172,7 @@ def _push_may_write_here(options: list[str], here: Path, target: Path) -> bool:
                 pushed_to = value
         elif not arg.startswith("-") and pushed_to is None:
             pushed_to = arg
-    if pushed_to is not None and (_is_local_address(pushed_to) or (here / pushed_to).is_dir()):
+    if pushed_to is not None and (is_local_address(pushed_to) or (here / pushed_to).is_dir()):
         return True
     if pushed_to is not None and (":" in pushed_to or "@" in pushed_to):
         return False
@@ -187,16 +187,20 @@ def _opens_files_in_a_program(options: list[str]) -> bool:
     for arg in options:
         name = arg.split("=")[0]
         if name.startswith("--"):
-            if len(name) > 3 and any(option.startswith(name) for option in listed if option.startswith("--")):
+            if len(name) > 2 and any(option.startswith(name) for option in listed if option.startswith("--")):
                 return True
         elif name.startswith("-") and any(option[1:] in arg[1:] for option in listed if not option.startswith("--")):
             return True
     return False
 
 
-def _is_local_address(address: str) -> bool:
-    """Tell whether an address names a place on this machine. Takes the address."""
-    return address.startswith("file:") or ":" not in address
+def is_local_address(address: str) -> bool:
+    """Tell whether an address names a place on this machine: a `file:` address, a drive letter, no
+    `:`, or a `/` or `\\` before the first `:`. Takes the address."""
+    colon = address.find(":")
+    slashes = [found for found in (address.find("/"), address.find("\\")) if found >= 0]
+    drive = len(address) >= 2 and address[0].isascii() and address[0].isalpha() and address[1] == ":"
+    return address.startswith("file:") or drive or colon < 0 or (bool(slashes) and min(slashes) < colon)
 
 
 def _a_remote_is_local(folder: Path) -> bool:
@@ -209,7 +213,7 @@ def _a_remote_is_local(folder: Path) -> bool:
         key, _, value = line.partition(" ")
         base, dot, _name = key.removeprefix("url.").rpartition(".")
         rewritten = base if key.startswith("url.") and dot else None
-        if _is_local_address(value if rewritten is None else rewritten):
+        if is_local_address(value if rewritten is None else rewritten):
             return True
     return False
 
