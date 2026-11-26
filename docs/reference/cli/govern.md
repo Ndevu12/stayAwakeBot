@@ -113,6 +113,7 @@ it in.
 saw govern install
 saw govern status
 saw govern uninstall
+saw govern let-in [--repo <folder>]
 ```
 
 The editor extension checks updates for the folders you open in the editor. To check them in your
@@ -143,8 +144,14 @@ set `SAW_GOVERN_DECISION=run-as-typed` or `SAW_GOVERN_DECISION=leave-unchanged` 
 Whenever git does not run and saw does not write what the command would, saw says so and the command
 does not report success, so a command chained after it with `&&` does not run.
 A held update prints what to do and asks whether to let it in: a yes for a suspicious update, the
-folder name for an infected one. That is never decided ahead; where there is no one to ask, the
-folder is left as it is and saw prints the command to let it in.
+folder name for an infected one. That is never decided ahead; where there is no one to ask, such as
+a shell an agent runs, the folder is left as it is and saw says to run `saw govern let-in`.
+
+`saw govern let-in` runs the held command again in your terminal, in the folder it ran in: saw checks
+it again and asks you whether to let the update in. Nothing is let in without your answer, and it
+needs a person at a terminal. saw keeps only the command, its folder and when it ran, never the
+files, and only the latest one for each folder. Add `--repo <folder>` for an update held for a
+folder other than the one you are in.
 
 `saw govern status` says whether your terminals are covered and whether the shell you are in is
 covered yet. `saw govern uninstall` takes it back out, and your editor is unaffected. saw always
