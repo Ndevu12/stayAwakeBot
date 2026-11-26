@@ -118,16 +118,15 @@ def _stop_to_carry(result: "replay.Replayed", command: "typed_command.TypedComma
     return incoming.arrived_with_conflicts(holding.work, holding.bare, holding.base, command.sub or "gh")
 
 
-def _folder_holds(holding: "replay.Holding", paths: list[str]) -> dict[str, set[str]]:
-    """Read the blob the folder holds at each path, in its files now and in its current commit.
-    Takes the holding copy and the paths. Returns each path's blob ids."""
+def _folder_holds(holding: "replay.Holding", paths: list[str], let_in_commit: str) -> dict[str, set[str]]:
+    """Read the blob the folder holds at each path in its own files now, and in the tree saw last let
+    into it. Takes the holding copy, the paths and that commit, "" for none. Returns each path's
+    blob ids."""
     holds: dict[str, set[str]] = {}
-    sources = [(holding.bare, holding.files_before, SAW_OWNED)]
-    own = holding.location.folder_repository
-    if own is not None:
-        sources.append((own, "HEAD", UNTRUSTED))
-    for where, tree, context in sources:
-        listed = stdout_bytes(where, ["ls-tree", "-r", "-z", tree, "--", *paths], context=context) or b""
+    sources = [(holding.bare, holding.files_before)] if holding.location.writable else []
+    sources += [(holding.bare, let_in_commit)] if let_in_commit else []
+    for where, tree in sources:
+        listed = stdout_bytes(where, ["ls-tree", "-r", "-z", tree, "--", *paths], context=SAW_OWNED) or b""
         for record in listed.split(b"\0"):
             info, _, path = record.partition(b"\t")
             parts = info.split(b" ")
@@ -136,11 +135,11 @@ def _folder_holds(holding: "replay.Holding", paths: list[str]) -> dict[str, set[
     return holds
 
 
-def _new_staged(result: "replay.Replayed", let_in: set) -> list[tuple[str, str]]:
+def _new_staged(result: "replay.Replayed", let_in: set, let_in_commit: str) -> list[tuple[str, str]]:
     """List the index entries a replayed command stages whose content the folder does not hold and
-    saw has not let in. Takes what the replay changed and the contents saw let in. Returns each
-    (path, blob)."""
-    holds = _folder_holds(result.holding, [rel for rel, _before, _after in result.index])
+    saw has not let in. Takes what the replay changed, the contents saw let in and the tree it last
+    let in, "" for none. Returns each (path, blob)."""
+    holds = _folder_holds(result.holding, [rel for rel, _before, _after in result.index], let_in_commit)
     written = {rel: oid for rel, _mode, oid in result.files}
     staged = []
     for rel, before, after in result.index:
@@ -164,8 +163,9 @@ def _judge_replayed(repo: str, into: str, result: "replay.Replayed", config: str
     writer = own or holding.work
     written_files = [(rel, mode, oid) for rel, mode, oid in result.files if mode]
     let_in = clean_ledger.blobs_let_in(own, config) if own is not None else set()
+    let_in_commit = (clean_ledger.let_in_commit(own, config) or "") if own is not None else ""
     judged = tuple(rel for rel, _mode, oid in written_files if (rel, oid) not in let_in)
-    staged = _new_staged(result, let_in)
+    staged = _new_staged(result, let_in, let_in_commit)
     current().step("scan", "scanning what arrived")
     govern_status.write(repo, "checking", step="scanning what arrived")
     try:
@@ -179,7 +179,7 @@ def _judge_replayed(repo: str, into: str, result: "replay.Replayed", config: str
         sides = ((blob_copies.copy_out_blobs(holding.work, tuple(staged), "the files a command stages"),
                   tuple(rel for rel, _oid in staged)),) if staged else ()
         payload, code, already_there = _scan_arrived(holding.work, landing, judged, config,
-                                                     _folder_commit(own), deadline, sides)
+                                                     let_in_commit, deadline, sides)
     except DeadlineReached:
         return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:
@@ -211,7 +211,9 @@ def _judge_replayed(repo: str, into: str, result: "replay.Replayed", config: str
         return _checked_and_not_written(repo, result, answer, code, verdict, scanned_clean)
     releasable = scanned_clean and not asks
     strictly_clean = code == exitcodes.CLEAN and verdict == CLEAN and not already_there
-    applied_mark = clean_ledger.clean_key(moved_to, config) if scanned_clean and moved_to else None
+    judged_now = {(rel, oid) for rel, _mode, oid in written_files} | set(staged)
+    whole = scanned_clean and moved_to and _judged_whole(holding.bare, moved_to, judged_now | let_in, let_in_commit)
+    applied_mark = clean_ledger.clean_key(moved_to, config) if whole else None
     blobs = {rel: oid for rel, _mode, oid in written_files} | dict(staged)
     _write_replayed_state(Path(into), result, releasable, verdict, asks, {
         "clean_mark": applied_mark if strictly_clean else None, "applied_mark": applied_mark,
@@ -238,7 +240,7 @@ def _checked_and_not_written(repo: str, result: "replay.Replayed", answer: dict,
     if verdict in govern_held.HELD_VERDICTS:
         govern_status.write(repo, "held", verdict=verdict,
                             reasons=["the command did not run; the folder is unchanged"])
-        return answer, code
+        return answer, exitcodes.INCOMPLETE if code == exitcodes.CLEAN else code
     if not result.finished:
         reason = GIT_STOPPED + (f": {result.said}" if result.said else "")
     elif clean:
@@ -257,12 +259,24 @@ def _moved_to(result: "replay.Replayed") -> str:
     return after if after and after != holding.base else ""
 
 
-def _folder_commit(own: "Path | None") -> str:
-    """Name the folder's own current commit. Takes its repository top, None when it has none.
-    Returns the commit, or ""."""
-    if own is None:
-        return ""
-    return stdout(own, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], context=UNTRUSTED).strip()
+def _judged_whole(bare: Path, commit: str, judged: set, let_in_commit: str) -> bool:
+    """Tell whether every file of a commit's tree was judged: scanned by this check, let in before,
+    or held in the tree saw last let in at the same path. Takes the holding git directory, the
+    commit, the (path, blob) pairs judged and that tree's commit, "" for none. Returns the answer."""
+    def files(tree: str) -> "set[tuple[str, str]] | None":
+        listed = stdout_bytes(bare, ["ls-tree", "-r", "-z", tree], context=SAW_OWNED)
+        if listed is None:
+            return None
+        found = set()
+        for record in listed.split(b"\0"):
+            info, _, path = record.partition(b"\t")
+            parts = info.split(b" ")
+            if path and len(parts) == 3 and parts[1] == b"blob":
+                found.add((os.fsdecode(path), parts[2].decode()))
+        return found
+    wanted = files(commit)
+    before = files(let_in_commit) if let_in_commit else set()
+    return wanted is not None and before is not None and wanted <= judged | before
 
 
 def _write_replayed_state(into: Path, result: "replay.Replayed", releasable: bool, verdict: str, asks: bool,
@@ -308,8 +322,9 @@ def _judge_arrived(repo: str, into: str, arrived: "incoming.Arrived | str", conf
         sides = tuple((blob_copies.copy_out_as_written(Path(repo).resolve(), arrived.root, commit, names,
                                                        "the files an update brings, as one side has them"), names)
                       for commit, names in arrived.versions)
+        let_in_commit = clean_ledger.let_in_commit(Path(repo).resolve(), config) or ""
         payload, code, already_there = _scan_arrived(arrived.root, landing, arrived.paths, config,
-                                                     arrived.base, deadline, sides)
+                                                     let_in_commit, deadline, sides)
     except DeadlineReached:
         return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:

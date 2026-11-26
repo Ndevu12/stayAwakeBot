@@ -51,6 +51,9 @@ def before_replay(folder: Path, command: TypedCommand, brings_no_files: bool) ->
     runs = runs_from_the_folder.settings_running_folder_files(top, command.settings)
     if runs:
         return Answer(ASKS, _runs(runs))
+    named_files = _setting_files_running_folder_files(folder, top, command.setting_files)
+    if named_files:
+        return Answer(ASKS, _runs(named_files))
     if _lets_a_push_write(command.settings) and command.sub == "push":
         return Answer(UNCHECKED, PUSHES_INTO_A_FOLDER)
     if brings_no_files:
@@ -130,6 +133,25 @@ def _sent_for_what_it_names(folder: Path, top: "Path | None", command: TypedComm
         if _lets_a_push_write(settings):
             return Answer(ASKS, LETS_A_PUSH_WRITE)
     return Answer(PASSTHROUGH, "the command brings no files in")
+
+
+def _setting_files_running_folder_files(folder: Path, top: "Path | None", files: tuple[str, ...]) -> tuple[str, ...]:
+    """Pick the configuration files the environment names that lie in the working tree, or whose
+    settings make git run a file or folder there. Takes where the command runs, the top of the
+    working tree and the files. Returns each picked file or setting."""
+    if top is None:
+        return ()
+    picked: list[str] = []
+    for name in files:
+        path = Path(os.path.expanduser(name))
+        path = path if path.is_absolute() else folder / path
+        if runs_from_the_folder.lies_in(top, path):
+            picked.append(name)
+            continue
+        listed = stdout(folder, ["config", "--file", str(path), "--includes", "--list", "-z"], context=UNTRUSTED)
+        settings = [(key, value) for key, _, value in (entry.partition("\n") for entry in listed.split("\0")) if key]
+        picked += runs_from_the_folder.settings_running_folder_files(top, settings)
+    return tuple(picked)
 
 
 def _lets_a_push_write(settings) -> bool:

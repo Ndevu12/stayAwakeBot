@@ -51,11 +51,13 @@ _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
 _IDENTITY_KEYS = ("user.name", "user.email")
 _LONG_OPTIONS_THAT_RUN_A_PROGRAM = {
     "rebase": ("--exec", "--interactive", "--edit-todo"),
+    "add": ("--patch", "--interactive", "--edit"),
+    "stage": ("--patch", "--interactive", "--edit"),
     "merge": ("--edit",),
     "pull": ("--edit", "--upload-pack"),
     "fetch": ("--upload-pack",),
 }
-_SHORT_OPTIONS_THAT_RUN_A_PROGRAM = {"rebase": "xi", "merge": "e", "pull": "e"}
+_SHORT_OPTIONS_THAT_RUN_A_PROGRAM = {"rebase": "xi", "merge": "e", "pull": "e", "add": "pie", "stage": "pie"}
 _TAKES_A_STRATEGY = frozenset({"merge", "pull", "rebase"})
 _BUILT_IN_STRATEGIES = frozenset({"ort", "recursive", "resolve", "octopus", "ours", "subtree"})
 
@@ -74,6 +76,7 @@ REPLAYED = {
     "checkout": Replays(), "switch": Replays(), "restore": Replays(), "reset": Replays(),
     "merge": Replays(), "rebase": Replays(), "cherry-pick": Replays(), "revert": Replays(),
     "stash": Replays(), "update-index": Replays(), "update-ref": Replays(), "symbolic-ref": Replays(),
+    "add": Replays(), "stage": Replays(),
     "read-tree": Replays(writes_elsewhere=("--index-output",)),
     "checkout-index": Replays(writes_elsewhere=("--prefix", "--temp")),
     "apply": Replays(writes_elsewhere=("--unsafe-paths", "--build-fake-ancestor", "--output"),
@@ -246,12 +249,11 @@ def locate(folder: Path, command: TypedCommand) -> "Location | str":
     if not found or len(found) != 4:
         return "the folder is not in a git repository saw can read"
     git_dir, common_dir, inside, object_format = found
-    top, prefix = "", ""
-    if inside == "true":
-        placed = answer(["--show-toplevel", "--show-prefix"])
-        if not placed:
-            return "the folder is not in a git repository saw can read"
-        top, prefix = placed[0], placed[1] if len(placed) > 1 else ""
+    placed = answer(["--show-toplevel", "--show-prefix"])
+    top = placed[0] if placed else ""
+    prefix = placed[1] if placed and len(placed) > 1 and inside == "true" else ""
+    if inside == "true" and not top:
+        return "the folder is not in a git repository saw can read"
     paths = answer(["--path-format=absolute", "--git-path", "index", "--git-path", "objects"])
     if not paths or len(paths) != 2:
         return "the folder is not in a git repository saw can read"

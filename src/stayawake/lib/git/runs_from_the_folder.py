@@ -294,6 +294,13 @@ def _tracked(repo: Path) -> "set[str] | None":
     return None if listed is None else {os.fsdecode(path) for path in listed.split(b"\0") if path}
 
 
+def lies_in(top: Path, path: Path) -> bool:
+    """Tell whether a path lies in a working tree, outside its git directory. Takes the top and the
+    path. Returns the answer."""
+    rel = _relative(top, path)
+    return rel is not None and rel != "." and not (rel == ".git" or rel.startswith(".git" + os.sep))
+
+
 def _git_dir(repo: Path) -> "Path | None":
     """Find a repository's git directory. Takes the repository. Returns it, or None."""
     found = stdout(repo, ["rev-parse", "--path-format=absolute", "--absolute-git-dir"], context=UNTRUSTED).strip()

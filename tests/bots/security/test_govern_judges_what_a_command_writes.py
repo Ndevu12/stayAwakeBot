@@ -3,8 +3,10 @@
 however the command is spelled and whichever repository, index or objects it names."""
 from __future__ import annotations
 
+import base64
 import json
 import os
+import random
 import shutil
 import subprocess
 from pathlib import Path
@@ -16,6 +18,8 @@ from tests.bots.security.test_govern_replays_a_tracking_checkout import _Trackin
 from tests.support import samples
 
 _LOADER = 'var _0x=[String.%s(127)];eval(_0x.join(""));\n' % samples.FROM_CHAR_CODE
+_PACKED = "const s='%s';new Function(Buffer.from(s,'base64').toString())();\n" % base64.b64encode(
+    random.Random(7).randbytes(4500)).decode()
 
 
 class _Fetched(_TrackingCheckout):
@@ -180,6 +184,105 @@ class EverySpellingIsJudgedByWhatItWrites(_Fetched):
             with self.subTest(args=args):
                 self._held(*args)
         self._asked("update-index", "--add", f"--cacheinfo=100644,{infected},loader.js")
+
+
+class AMovedHeadIsNeverTakenAsJudged(_Fetched):
+    """HEAD reaches a commit saw held without anything being written. The files it would bring are
+    judged in full when they are."""
+
+    def _then_a_hard_reset_is_held(self) -> None:
+        moved = self.rev(self.open)
+        answer, code = self._prepare("reset", "--hard")
+        self.assertEqual(code, exitcodes.FINDINGS, answer)
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "infected", answer)
+        self.assertFalse(govern.apply(str(self.open), str(self.into))[0]["applied"])
+        self.assertEqual(self.rev(self.open), moved)
+        self.assertFalse((self.open / "loader.js").exists())
+
+    def test_a_suspicious_file_another_working_tree_would_stage_is_held_with_a_failing_exit(self):
+        other = self.root / "packed"
+        other.mkdir()
+        (other / "loader.js").write_text(_PACKED, encoding="utf-8")
+        answer, code = self._prepare(f"--work-tree={other}", "add", "loader.js")
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "suspicious", answer)
+        self.assertNotEqual(code, exitcodes.CLEAN)
+        self.assertNotIn("decision", answer)
+        self.assertNotIn("loader.js", self.git(self.open, "ls-files"))
+
+    def test_a_soft_reset_to_a_held_commit_records_nothing_and_its_files_are_judged(self):
+        from stayawake.bots.security import clean_ledger
+        self._written_by_saw("reset", "--soft", "origin/evil~1")
+        moved = self.rev(self.open)
+        self.assertEqual(moved, self.rev(self.open, "origin/evil~1"))
+        self.assertFalse(clean_ledger.is_applied(self.open, clean_ledger.clean_key(moved, None)))
+        self.assertFalse(clean_ledger.scanned_clean(self.open, clean_ledger.clean_key(moved, None)))
+        self.assertIsNone(clean_ledger.let_in_commit(self.open, None))
+        self._then_a_hard_reset_is_held()
+
+    def test_a_branch_pointed_at_a_held_commit_and_made_head_is_judged_when_written(self):
+        self.git(self.open, "branch", "elsewhere", "origin/evil~1")
+        self.git(self.open, "symbolic-ref", "HEAD", "refs/heads/elsewhere")
+        self._then_a_hard_reset_is_held()
+
+    def test_a_suspicious_file_head_already_holds_is_still_held_when_written(self):
+        self.write(self.upstream, "loader.js", _PACKED)
+        self.commit(self.upstream, "packed")
+        self.git(self.open, "fetch", "-q")
+        answer, _code = self._prepare("checkout", "origin/main")
+        self.assertEqual(answer["scan"]["results"][0]["verdict"], "suspicious", answer)
+        for chain in ((["reset", "-q", "--soft", "origin/main"],),
+                      (["branch", "packed", "origin/main"], ["symbolic-ref", "HEAD", "refs/heads/packed"])):
+            with self.subTest(chain=chain):
+                self.git(self.open, "checkout", "-q", "-f", "main")
+                self.git(self.open, "reset", "-q", "--hard", self.start)
+                for step in chain:
+                    self.git(self.open, *step)
+                moved = self.rev(self.open)
+                answer, code = self._prepare("reset", "--hard")
+                self.assertEqual(answer["scan"]["results"][0]["verdict"], "suspicious", answer)
+                self.assertNotIn("pre_existing", answer)
+                self.assertFalse(govern.apply(str(self.open), str(self.into))[0]["applied"])
+                self.assertEqual(self.rev(self.open), moved)
+                self.assertFalse((self.open / "loader.js").exists())
+
+    def test_a_commit_made_from_another_working_tree_is_judged_when_written(self):
+        other = self.root / "other"
+        other.mkdir()
+        (other / "loader.js").write_text(_LOADER, encoding="utf-8")
+        self._held(f"--work-tree={other}", "add", "loader.js")
+        self._raw(f"--work-tree={other}", "add", "loader.js")
+        self._raw("commit", "-qm", "from elsewhere")
+        self._then_a_hard_reset_is_held()
+
+    def test_a_clean_update_onto_a_tree_saw_never_judged_is_not_recorded_as_judged(self):
+        from stayawake.bots.security import clean_ledger
+        answer, code = self._prepare("merge", "--ff-only", "origin/main")
+        self.assertEqual(code, exitcodes.CLEAN, answer)
+        self.assertTrue(govern.apply(str(self.open), str(self.into))[0]["applied"])
+        self.assertIsNone(clean_ledger.let_in_commit(self.open, None))
+
+    def test_another_working_tree_on_a_command_that_brings_nothing_is_asked(self):
+        self._asked(f"--work-tree={self.root}", "status")
+
+
+class ConfigurationFilesTheEnvironmentNamesAreChecked(_Fetched):
+
+    def test_one_in_the_folder_or_one_running_folder_files_asks_first(self):
+        self.write(self.open, "tools/dev.gitconfig", "[diff]\n\trenames = true\n")
+        outside = self.root / "outside.gitconfig"
+        outside.write_text("[core]\n\tfsmonitor = sh tools/mon.sh\n", encoding="utf-8")
+        self.write(self.open, "tools/mon.sh", "exit 0\n")
+        self.git(self.open, "add", "tools")
+        self.git(self.open, "commit", "-qm", "tools")
+        self.start = self.rev(self.open)
+        for name, value in (("GIT_CONFIG_GLOBAL", "tools/dev.gitconfig"), ("GIT_CONFIG_SYSTEM", str(outside)),
+                            ("GIT_CONFIG", str(outside))):
+            with self.subTest(name=name):
+                self._asked("status", environment={name: value}, brings_no_files=True)
+        plain = self.root / "plain.gitconfig"
+        plain.write_text("[user]\n\tname = Me\n", encoding="utf-8")
+        answer, code = self._prepare("status", environment={"GIT_CONFIG_GLOBAL": str(plain)}, brings_no_files=True)
+        self.assertEqual((answer.get("passthrough"), code), (True, exitcodes.CLEAN), answer)
 
 
 class ACommandNamingAnotherRepositoryIsJudged(_Fetched):
