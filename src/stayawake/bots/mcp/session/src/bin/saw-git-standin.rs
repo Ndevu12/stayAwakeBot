@@ -39,9 +39,12 @@ fn main() {
         eprintln!("saw: could not find the real {tool}");
         exit(127);
     });
-    if governing() && asks_saw_first(&tool, &args) {
-        if let Some(code) = govern(&tool, &args, &real) {
-            exit(code);                            // governed: saw applied it, or held it
+    if governing() {
+        let sent = sent_to_saw(&tool, &args);
+        if sent != Sent::No {
+            if let Some(code) = govern(&tool, &args, &real, sent == Sent::ForWhatItNames) {
+                exit(code);                        // governed: saw applied it, or held it
+            }
         }
     }
     run_real(&real, &args);                        // not governed, or saw could not answer
@@ -91,6 +94,22 @@ const GIT_FLAGS: &[&str] = &[
 const GIT_QUERIES: &[&str] = &["-h", "--help", "-v", "--version", "--exec-path", "--html-path", "--man-path", "--info-path"];
 /// Configuration sections that change which commands git runs under a name.
 const SECTIONS_THAT_NAME_COMMANDS: &[&str] = &["alias", "include", "includeif"];
+/// Settings that make git run nothing. Any other setting a command line gives is sent to saw.
+const SETTINGS_THAT_RUN_NOTHING: &[&str] = &["user.name", "user.email", "core.quotepath", "init.defaultbranch",
+    "commit.gpgsign", "tag.gpgsign", "color.ui"];
+/// Sections whose every setting makes git run nothing.
+const SECTIONS_THAT_RUN_NOTHING: &[&str] = &["advice", "color"];
+/// Subcommands that write a file `--output` names.
+const WRITE_AN_OUTPUT: &[&str] = &["diff", "diff-files", "diff-index", "diff-tree", "log", "show", "whatchanged",
+    "range-diff"];
+/// `git config` options that only read.
+const CONFIG_READS: &[&str] = &["--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color",
+    "--get-colorbool", "--list", "-l"];
+/// `git config` options that write.
+const CONFIG_WRITES: &[&str] = &["--add", "--replace-all", "--unset", "--unset-all", "--rename-section",
+    "--remove-section", "-e", "--edit"];
+/// Environment variables that give git settings.
+const SETTINGS_VARIABLES: &[&str] = &["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
 
 /// A git command line read through git's global options.
 struct GitLine<'a> {
@@ -100,12 +119,14 @@ struct GitLine<'a> {
     folders: Vec<&'a str>,
     /// Whether every option before the subcommand is one the stand-in reads with certainty.
     read: bool,
+    /// The key of each `-c <key>=<value>` before the subcommand.
+    settings: Vec<&'a str>,
 }
 
 /// Read git's global options up to the subcommand. Takes the arguments without the program name.
 /// Returns the reading, which stops at the first option the stand-in cannot read.
 fn read_git_line(args: &[String]) -> GitLine<'_> {
-    let mut line = GitLine { subcommand: None, folders: Vec::new(), read: true };
+    let mut line = GitLine { subcommand: None, folders: Vec::new(), read: true, settings: Vec::new() };
     let mut i = 0;
     while let Some(arg) = args.get(i).map(String::as_str) {
         if !arg.starts_with('-') {
@@ -130,6 +151,9 @@ fn read_git_line(args: &[String]) -> GitLine<'_> {
         if arg == "-C" {
             line.folders.push(value);
         }
+        if arg == "-c" {
+            line.settings.push(value.split('=').next().unwrap_or(""));
+        }
         i += 2;
     }
     line
@@ -141,26 +165,81 @@ fn names_commands(setting: &str) -> bool {
     SECTIONS_THAT_NAME_COMMANDS.contains(&section.as_str())
 }
 
-/// Whether the stand-in asks `saw govern` before running `(tool, args)`: every git command it
-/// cannot read with certainty as bringing no files into the folder, and gh's bringing-files
-/// commands.
-fn asks_saw_first(tool: &str, args: &[String]) -> bool {
+/// Whether the stand-in sends a command to `saw govern` before it runs, and why.
+#[derive(PartialEq)]
+enum Sent {
+    /// It runs as typed.
+    No,
+    /// saw checks it.
+    ToSaw,
+    /// It brings no files, and saw checks what a setting, an option or the environment names.
+    ForWhatItNames,
+}
+
+/// Decide whether `(tool, args)` goes to `saw govern` first: every git command the stand-in cannot
+/// read with certainty as bringing no files into the folder, one that brings none but names a
+/// setting, an output file, a hooks template, a configuration change or a fetch, and gh's
+/// bringing-files commands.
+fn sent_to_saw(tool: &str, args: &[String]) -> Sent {
     match tool {
-        "git" => !git_brings_no_files(args),
-        "gh" => gh_brings_files_in(args),
+        "git" => git_sent(args),
+        "gh" if gh_brings_files_in(args) => Sent::ToSaw,
+        _ => Sent::No,
+    }
+}
+
+/// Decide whether a git command goes to saw first.
+fn git_sent(args: &[String]) -> Sent {
+    let line = read_git_line(args);
+    if !line.read {
+        return Sent::ToSaw;
+    }
+    let Some(at) = line.subcommand else { return Sent::No };
+    let sub = args[at].as_str();
+    if !NEVER_BRINGS_FILES.contains(&sub) {
+        return Sent::ToSaw;
+    }
+    if names_what_saw_checks(sub, &args[at + 1..], &line.settings) {
+        Sent::ForWhatItNames
+    } else {
+        Sent::No
+    }
+}
+
+/// Whether a command that brings no files names a setting that may run something, an output file,
+/// a hooks template, a configuration change or a fetch.
+fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str]) -> bool {
+    let runs_something = |key: &&str| {
+        let key = key.to_ascii_lowercase();
+        let section = key.split('.').next().unwrap_or("");
+        !(SETTINGS_THAT_RUN_NOTHING.contains(&key.as_str()) || SECTIONS_THAT_RUN_NOTHING.contains(&section))
+    };
+    if settings.iter().any(runs_something) || SETTINGS_VARIABLES.iter().any(|name| env::var_os(name).is_some()) {
+        return true;
+    }
+    let options: Vec<&str> = rest.iter().map(String::as_str).take_while(|arg| *arg != "--").collect();
+    let words: Vec<&str> = options.iter().copied().filter(|arg| !arg.starts_with('-')).collect();
+    match sub {
+        _ if WRITE_AN_OUTPUT.contains(&sub) => options.iter().any(|arg| *arg == "--output" || arg.starts_with("--output=")),
+        "init" => env::var_os("GIT_TEMPLATE_DIR").is_some() || options.iter().any(|arg| {
+            let name = arg.split('=').next().unwrap_or("");
+            name.len() > 3 && "--template".starts_with(name)
+        }),
+        "config" => !config_only_reads(&options, &words),
+        "remote" => words.first() == Some(&"update")
+            || (words.first() == Some(&"add") && options.iter().any(|arg| *arg == "-f" || *arg == "--fetch")),
         _ => false,
     }
 }
 
-/// Whether git, given `args`, reaches only a subcommand that brings no files into the folder, or
-/// none at all.
-fn git_brings_no_files(args: &[String]) -> bool {
-    let line = read_git_line(args);
-    if !line.read {
+/// Whether a `git config` command only reads.
+fn config_only_reads(options: &[&str], words: &[&str]) -> bool {
+    if options.iter().any(|arg| CONFIG_WRITES.contains(&arg.split('=').next().unwrap_or(""))) {
         return false;
     }
-    let Some(at) = line.subcommand else { return true };
-    NEVER_BRINGS_FILES.contains(&args[at].as_str())
+    options.iter().any(|arg| CONFIG_READS.contains(arg))
+        || matches!(words.first(), Some(&"get") | Some(&"list"))
+        || (words.len() == 1 && !matches!(words[0], "set" | "unset" | "edit" | "rename-section" | "remove-section"))
 }
 
 /// Whether a gh command brings files into the open folder.
@@ -195,10 +274,10 @@ fn target_repo(args: &[String]) -> String {
 
 /// Run the check. Returns an exit code when the command was governed (applied or held), or `None`
 /// to fall back to the real program (saw absent or it could not answer — fail open, never break git).
-fn govern(tool: &str, args: &[String], real: &Path) -> Option<i32> {
+fn govern(tool: &str, args: &[String], real: &Path, for_what_it_names: bool) -> Option<i32> {
     let saw = real_saw()?;
     let (holding, temporary) = holding_dir()?;
-    let code = govern_with(&saw, tool, args, &holding, real);
+    let code = govern_with(&saw, tool, args, &holding, real, for_what_it_names);
     if temporary {
         let _ = std::fs::remove_dir_all(&holding); // never leave a held update on disk
     }
@@ -228,7 +307,8 @@ fn holding_dir() -> Option<(PathBuf, bool)> {
 
 /// Run `saw govern prepare`, then `apply` when it comes back clean. Returns the exit code, or
 /// `None` to fall back to the real program (fail open, never break git).
-fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &Path) -> Option<i32> {
+fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &Path,
+               for_what_it_names: bool) -> Option<i32> {
     let repo = target_repo(args);
     let mut prepare = Command::new(saw);
     prepare
@@ -236,6 +316,7 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, real: &P
         .arg(&repo)
         .arg("--into")
         .arg(holding)
+        .args(if for_what_it_names { &["--brings-no-files"][..] } else { &[][..] })
         .args(["--tool", tool, "--"])
         .args(args)
         .stdout(Stdio::piped())
@@ -378,10 +459,12 @@ fn unchecked_reason(answer: &str) -> Option<String> {
     Some(reason.unwrap_or("the update could not be checked").to_string())
 }
 
-/// Whether saw's answer finished a scan of the update, with nothing left unread.
+/// Whether saw's answer says it checked the command: a finished scan with nothing left unread, or
+/// a check that needed no scan.
 fn scan_finished(answer: &serde_json::Value) -> bool {
-    answer.get("scan").is_some()
-        && answer.pointer("/scan/any_error").and_then(serde_json::Value::as_bool) == Some(false)
+    answer.get("checked").and_then(serde_json::Value::as_bool) == Some(true)
+        || (answer.get("scan").is_some()
+            && answer.pointer("/scan/any_error").and_then(serde_json::Value::as_bool) == Some(false))
 }
 
 /// Whether saw's answer names running the command as typed among its choices.
