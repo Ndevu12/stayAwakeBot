@@ -206,16 +206,17 @@ fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: 
     if settings.iter().any(runs_something) || table("settings_variables").iter().any(|name| env::var_os(name).is_some()) {
         return true;
     }
-    let options: Vec<&str> = rest.iter().map(String::as_str).take_while(|arg| *arg != "--").collect();
+    let every: Vec<&str> = rest.iter().map(String::as_str).collect();
+    let options: Vec<&str> = every.iter().copied().take_while(|arg| *arg != "--").collect();
     let words: Vec<&str> = options.iter().copied().filter(|arg| !arg.starts_with('-')).collect();
     match sub {
-        _ if table("subcommands_that_write_an_output").contains(&sub) => options.iter().any(|arg| *arg == "--output" || arg.starts_with("--output=")),
+        _ if table("subcommands_that_write_an_output").contains(&sub) => every.iter().any(|arg| *arg == "--output" || arg.starts_with("--output=")),
         "init" | "maintenance" => true,
-        "push" => push_may_write_here(&options, reader),
-        "grep" => opens_files_in_a_program(&options),
-        "config" => !config_only_reads(&options, &words),
+        "push" => names_a_push_program(&every) || push_may_write_here(&options, reader),
+        "grep" => opens_files_in_a_program(&every),
+        "config" => !config_only_reads(&every, &words),
         "remote" => words.first() == Some(&"update")
-            || (words.first() == Some(&"add") && options.iter().any(|arg| *arg == "-f" || *arg == "--fetch")),
+            || (words.first() == Some(&"add") && every.iter().any(|arg| *arg == "-f" || *arg == "--fetch")),
         _ => false,
     }
 }
@@ -224,6 +225,15 @@ fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: 
 struct GitReader<'a> {
     real: &'a Path,
     folder: PathBuf,
+}
+
+/// Whether any argument of a push, `--` and the words after it included, may name a program to run: a
+/// long option abbreviating a listed one.
+fn names_a_push_program(every: &[&str]) -> bool {
+    every.iter().any(|arg| {
+        let name = arg.split('=').next().unwrap_or("");
+        name.starts_with("--") && name.len() > 3 && table("push_program_options").iter().any(|o| o.starts_with(name))
+    })
 }
 
 /// Whether a push names a program to run, or may reach a repository on this machine: a target that
@@ -253,8 +263,8 @@ fn push_may_write_here(options: &[&str], reader: &GitReader) -> bool {
     }
 }
 
-/// Whether a grep opens the files it finds in a program: a bundle of short options holding a listed
-/// one, or a long option abbreviating one.
+/// Whether any argument of a grep, `--` and the words after it included, may open the files it finds
+/// in a program: a bundle of short options holding a listed one, or a long option abbreviating one.
 fn opens_files_in_a_program(options: &[&str]) -> bool {
     let listed = table("grep_program_options");
     options.iter().any(|arg| {

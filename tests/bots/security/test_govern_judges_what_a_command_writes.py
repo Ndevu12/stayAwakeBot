@@ -725,7 +725,8 @@ class ACommandThatWritesAFileItNamesIsAsked(_Fetched):
 
     def test_a_grep_opening_the_files_it_finds_in_a_program_is_asked(self):
         for args in (["grep", "-Otouch", "new"], ["grep", "-iO", "new"], ["grep", "--open-files-in-pager=touch", "new"],
-                     ["grep", "--open", "new"], ["grep", "-e", "new", "-O"]):
+                     ["grep", "--open", "new"], ["grep", "-e", "new", "-O"], ["grep", "-e", "--", "-Otouch x; true"],
+                     ["grep", "-e", "--", "--open-files-in-pager=touch"], ["grep", "-e", "--", "--open-files=touch"]):
             with self.subTest(args=args):
                 self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], govern_command.RUNS_A_PROGRAM)
 

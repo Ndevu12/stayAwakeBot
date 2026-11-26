@@ -120,20 +120,32 @@ def _names_what_saw_checks(sub: str, rest: list[str], settings: list[str], here:
                     or key.split(".")[0] in known["sections_that_run_nothing"])
     if any(runs_something(key) for key in settings) or any(name in environ for name in known["settings_variables"]):
         return True
+    every = list(rest)
     options = rest[:rest.index("--")] if "--" in rest else list(rest)
     words = [arg for arg in options if not arg.startswith("-")]
     if sub in known["subcommands_that_write_an_output"]:
-        return any(arg == "--output" or arg.startswith("--output=") for arg in options)
+        return any(arg == "--output" or arg.startswith("--output=") for arg in every)
     if sub in ("init", "maintenance"):
         return True
     if sub == "push":
-        return _push_may_write_here(options, here, target)
+        return _names_a_push_program(every) or _push_may_write_here(options, here, target)
     if sub == "grep":
-        return _opens_files_in_a_program(options)
+        return _opens_files_in_a_program(every)
     if sub == "config":
-        return not _config_only_reads(options, words)
+        return not _config_only_reads(every, words)
     if sub == "remote":
-        return words[:1] == ["update"] or (words[:1] == ["add"] and any(arg in ("-f", "--fetch") for arg in options))
+        return words[:1] == ["update"] or (words[:1] == ["add"] and any(arg in ("-f", "--fetch") for arg in every))
+    return False
+
+
+def _names_a_push_program(every: list[str]) -> bool:
+    """Tell whether any argument of a push, `--` and the words after it included, may name a program
+    to run: a long option abbreviating a listed one. Takes the push's arguments."""
+    listed = tables()["push_program_options"]
+    for arg in every:
+        name = arg.split("=")[0]
+        if name.startswith("--") and len(name) > 3 and any(option.startswith(name) for option in listed):
+            return True
     return False
 
 
@@ -168,8 +180,9 @@ def _push_may_write_here(options: list[str], here: Path, target: Path) -> bool:
 
 
 def _opens_files_in_a_program(options: list[str]) -> bool:
-    """Tell whether a grep opens the files it finds in a program: a bundle of short options holding a
-    listed one, or a long option abbreviating one. Takes the grep's options."""
+    """Tell whether any argument of a grep, `--` and the words after it included, may open the files it
+    finds in a program: a bundle of short options holding a listed one, or a long option abbreviating
+    one. Takes the grep's arguments."""
     listed = tables()["grep_program_options"]
     for arg in options:
         name = arg.split("=")[0]
