@@ -103,6 +103,24 @@ class AliasesAreExpandedAsGitExpandsThem(GitSandbox):
         self.assertIsNone(_read("pr", "list", tool="gh").kind)
 
 
+class EachSubcommandsOptionsAreReadAsGitReadsThem(GitSandbox):
+
+    def test_an_option_that_takes_no_value_leaves_the_commit_a_command_brings(self):
+        for args in (["checkout", "-m", "origin/x"], ["checkout", "--recurse-submodules", "origin/x"],
+                     ["switch", "-m", "origin/x"]):
+            with self.subTest(args=args):
+                self.assertEqual(_read(*args).kind, args[0])
+
+    def test_a_word_after_an_option_that_takes_one_is_its_value(self):
+        for args in (["merge", "-m", "--abort", "origin/x"], ["checkout", "-b", "--orphan", "origin/x"]):
+            with self.subTest(args=args):
+                self.assertEqual(_read(*args).kind, args[0])
+
+    def test_a_new_branch_where_the_folder_is_brings_nothing(self):
+        self.assertIsNone(_read("checkout", "--orphan", "fresh").kind)
+        self.assertIsNone(_read("merge", "--abort").kind)
+
+
 class SawGovernClassifyAnswers(GitSandbox):
 
     def _classify(self, repo: Path, *args: str) -> tuple[int, dict]:

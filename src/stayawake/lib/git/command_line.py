@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from stayawake.lib.git import subcommand_options
 from stayawake.lib.git.run import UNTRUSTED, stdout
 
 GIT_FLAGS = frozenset({
@@ -21,8 +22,6 @@ GIT_VALUED_JOINED = ("--git-dir=", "--work-tree=", "--namespace=", "--config-env
 GIT_QUERIES = frozenset({"--exec-path", "--html-path", "--man-path", "--info-path"})
 GIT_AS_COMMANDS = {"--help": "help", "-h": "help", "--version": "version", "-v": "version"}
 BRINGING = frozenset({"pull", "merge", "rebase", "fetch", "checkout", "switch", "submodule"})
-OPTION_VALUE = frozenset({"-b", "-B", "-c", "-C", "-m", "--orphan", "--recurse-submodules", "--conflict",
-                          "--create", "--force-create"})
 GH_INBOUND = frozenset({("pr", "checkout"), ("repo", "sync"), ("release", "download"), ("run", "download")})
 GH_VALUED = frozenset({"-R", "--repo"})
 _MOST_ALIASES = 16
@@ -158,12 +157,12 @@ def _read_git(args: list[str], folder: Path, alias_of: AliasReader) -> Reading:
 
 def git_kind(sub: str, rest: list[str]) -> str | None:
     """Return the kind of files-bringing command a git subcommand is, or none. Takes the subcommand
-    and its arguments."""
-    if any(flag in rest for flag in ("--abort", "--quit", "--dry-run")):
+    and its arguments, read with git's options for that subcommand."""
+    if {"--abort", "--quit", "--dry-run"} & set(subcommand_options.read(sub, list(rest)).names()):
         return None
     if sub in {"pull", "merge", "rebase", "fetch"}:
         return sub
-    if sub == "submodule" and positionals(rest)[:1] == ["update"]:
+    if sub == "submodule" and positionals(sub, rest)[:1] == ["update"]:
         return sub
     if sub == "checkout" and checkout_brings(rest):
         return sub
@@ -172,31 +171,21 @@ def git_kind(sub: str, rest: list[str]) -> str | None:
     return None
 
 
-def positionals(args: list[str]) -> list[str]:
-    """Return a subcommand's positional arguments. Takes its arguments."""
-    words: list[str] = []
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        if arg == "--":
-            break
-        if arg.startswith("-") and arg != "-":
-            index += 2 if arg in OPTION_VALUE and "=" not in arg else 1
-            continue
-        words.append(arg)
-        index += 1
-    return words
+def positionals(sub: str, args: list[str]) -> list[str]:
+    """Return a subcommand's words before `--`, read with git's options for it. Takes the
+    subcommand and its arguments."""
+    return list(subcommand_options.read(sub, list(args)).words)
 
 
 def checkout_brings(args: list[str]) -> bool:
     """Tell whether a checkout moves the folder to another commit. Takes its arguments."""
-    if "--orphan" in args:
+    if "--orphan" in subcommand_options.read("checkout", list(args)).names():
         return False
-    return len(positionals(args[:args.index("--")] if "--" in args else args)) > 0
+    return len(positionals("checkout", args)) > 0
 
 
 def switch_brings(args: list[str]) -> bool:
     """Tell whether a switch moves the folder to another commit. Takes its arguments."""
-    if "--orphan" in args:
+    if "--orphan" in subcommand_options.read("switch", list(args)).names():
         return False
-    return len(positionals(args)) > 0
+    return len(positionals("switch", args)) > 0
