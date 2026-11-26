@@ -12,7 +12,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git import owned
+from stayawake.lib.git import command_line, owned
 from stayawake.lib.git.borrowed import BorrowError, place
 from stayawake.lib.git.run import OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run_ok, stdout, stdout_bytes
 from stayawake.lib.git.write.branch import refs_under, update_refs
@@ -22,14 +22,7 @@ from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_wa
 from stayawake.lib.signing.commits.git_command import fix_commit_signing
 from stayawake.utils import folderlock
 
-_GLOBAL = frozenset({
-    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
-    "--config-env", "--exec-path",
-})
-_OPTION_VALUE = frozenset({"-b", "-B", "-c", "-C", "-m", "--orphan", "--recurse-submodules", "--conflict",
-                           "--create", "--force-create"})
 _RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
-_GH_INBOUND = frozenset({("pr", "checkout"), ("repo", "sync"), ("release", "download"), ("run", "download")})
 _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "prune"}),
                   "branch": frozenset({"remote", "merge", "rebase"})}
 _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
@@ -49,32 +42,31 @@ class Arrived:
     refs: tuple[tuple[str, str, str], ...]
 
 
-def classify(tool: str, args: list[str]) -> str | None:
-    """The bringing-files command `args` is, or None when saw does not check it. Takes `git` or
-    `gh` and the arguments without the program name. Returns the command kind, or None."""
-    if tool == "git":
-        return _git_kind(args)
-    if tool == "gh":
-        words = [a for a in args if a != "--" and not a.startswith("-")]
-        if tuple(words[:2]) in _GH_INBOUND:
-            return "gh"
-    return None
+def _reading(repo: Path, tool: str, args: list[str]) -> "command_line.Reading":
+    """Read a command for the open folder. Takes the open folder, the tool and the arguments.
+    Returns the reading, with aliases from the open folder."""
+    return command_line.read(tool, list(args), Path(repo),
+                             lambda _folder, name: command_line.configured_alias(Path(repo), name))
 
 
-def brings_nothing(tool: str, args: list[str]) -> bool:
-    """Tell whether a command moves nothing into the open folder. Takes the tool and the arguments
-    without the program name. Returns the answer."""
-    parsed = _parse_git(args) if tool == "git" else None
-    if parsed is None:
+def brings_nothing(repo: Path, tool: str, args: list[str]) -> bool:
+    """Tell whether a command moves nothing into the open folder. Takes the open folder, the tool
+    and the arguments without the program name. Returns the answer."""
+    reading = _reading(Path(repo), tool, args)
+    if not reading.readable or tool != "git":
         return False
-    sub, rest = parsed
-    return (sub == "checkout" and not _checkout_brings(rest)) or (sub == "switch" and not _switch_brings(rest))
+    rest = list(reading.rest)
+    return ((reading.subcommand == "checkout" and not command_line.checkout_brings(rest))
+            or (reading.subcommand == "switch" and not command_line.switch_brings(rest)))
 
 
 def refusal(repo: Path, into: Path, tool: str, args: list[str]) -> str:
     """Say why a command cannot be prepared, before anything is written. Takes the open folder, the
     holding directory, `git` or `gh`, and the arguments. Returns the sentence, or "" when it can."""
-    if classify(tool, args) is None:
+    reading = _reading(Path(repo), tool, args)
+    if not reading.readable:
+        return f"the command line could not be read: {reading.reason}"
+    if reading.kind is None:
         return "saw does not check that command"
     repo, into = Path(repo).resolve(), Path(into).resolve()
     if not (repo / ".git").exists() and _git_dir(repo) is None:
@@ -91,7 +83,8 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
     refused = refusal(repo, into, tool, args)
     if refused:
         return refused
-    kind = classify(tool, args)
+    reading = _reading(Path(repo), tool, args)
+    kind = reading.kind
     repo, into = Path(repo).resolve(), Path(into).resolve()
     base = stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
     if not base:
@@ -129,7 +122,7 @@ def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | st
         return "saw could not prepare a place to check the update"
     if head.startswith("ref: "):
         run_ok(borrowed.path, ["symbolic-ref", "HEAD", head.removeprefix("ref: ").strip()], context=SAW_OWNED)
-    ran = _run_command(work, tool, args, kind, fix_commit_signing(repo))
+    ran = _run_command(work, tool, args, reading, fix_commit_signing(repo))
     if ran:
         return ran
     after = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
@@ -243,72 +236,6 @@ def restore(repo: Path, commit: str) -> str:
     return ""
 
 
-def _git_kind(args: list[str]) -> str | None:
-    parsed = _parse_git(args)
-    if parsed is None:
-        return None
-    sub, rest = parsed
-    if any(flag in rest for flag in ("--abort", "--quit", "--dry-run")):
-        return None
-    if sub in {"pull", "merge", "rebase", "fetch"}:
-        return sub
-    if sub == "submodule" and _positionals(rest)[:1] == ["update"]:
-        return sub
-    if sub == "checkout" and _checkout_brings(rest):
-        return sub
-    if sub == "switch" and _switch_brings(rest):
-        return sub
-    return None
-
-
-def _parse_git(args: list[str]) -> "tuple[str, list[str]] | None":
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        if arg.startswith("-C") and len(arg) > 2:
-            index += 1
-            continue
-        if arg in _GLOBAL or arg.startswith("--git-dir=") or arg.startswith("--work-tree="):
-            index += 1 if "=" in arg else 2
-            continue
-        if arg.startswith("-"):
-            index += 1
-            continue
-        return arg, args[index + 1:]
-    return None
-
-
-def _positionals(args: list[str]) -> list[str]:
-    words: list[str] = []
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        if arg == "--":
-            break
-        if arg.startswith("-") and arg != "-":
-            index += 2 if arg in _OPTION_VALUE and "=" not in arg else 1
-            continue
-        words.append(arg)
-        index += 1
-    return words
-
-
-def _checkout_brings(args: list[str]) -> bool:
-    """Tell whether a checkout moves the folder to another commit. Takes its arguments. Returns the
-    answer."""
-    if "--orphan" in args:
-        return False
-    return len(_positionals(args[:args.index("--")] if "--" in args else args)) > 0
-
-
-def _switch_brings(args: list[str]) -> bool:
-    """Tell whether a switch moves the folder to another commit. Takes its arguments. Returns the
-    answer."""
-    if "--orphan" in args:
-        return False
-    return len(_positionals(args)) > 0
-
-
 def _empty_keeping_the_hold(into: Path) -> None:
     """Remove everything in the holding directory except a run's hold on it. Takes the directory."""
     into.mkdir(parents=True, exist_ok=True)
@@ -321,13 +248,11 @@ def _empty_keeping_the_hold(into: Path) -> None:
             child.unlink()
 
 
-def _run_command(work: Path, tool: str, args: list[str], kind: str, signing: tuple[str, ...] = ()) -> str:
+def _run_command(work: Path, tool: str, args: list[str], reading: "command_line.Reading",
+                 signing: tuple[str, ...] = ()) -> str:
     if tool == "gh":
         return _run_gh(work, args)
-    parsed = _parse_git(args)
-    if parsed is None:
-        return "saw does not check that command"
-    sub, rest = parsed
+    kind, sub, rest = reading.kind, reading.subcommand, list(reading.rest)
     if kind in ("pull", "fetch") and not stdout(work, ["remote"], context=SAW_OWNED).strip():
         return "the repository has no remote to fetch from"
     if kind == "pull":
@@ -338,7 +263,7 @@ def _run_command(work: Path, tool: str, args: list[str], kind: str, signing: tup
 
 
 def _pull(work: Path, args: list[str], signing: tuple[str, ...] = ()) -> str:
-    positionals = _positionals(args)
+    positionals = command_line.positionals(args)
     if not run_ok(work, ["fetch", *positionals[:1]], context=OPERATOR_PUSH):
         return "the fetch did not finish"
     onto = [f"{positionals[0]}/{positionals[1]}"] if len(positionals) >= 2 else ["@{upstream}"]

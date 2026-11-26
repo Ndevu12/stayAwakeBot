@@ -17,6 +17,8 @@ reader, not the mechanism or the weakness it closed.
 - `saw govern apply --expect <state_id>` brings in exactly the update its own `prepare` checked, one
   saw run at a time per holding directory, and `--json` names what happened in `outcome`. `saw govern
   verdict` says where a folder is after an apply that did not finish.
+- `saw govern classify --json` says how saw reads a git or gh command line: whether it could be
+  read, its subcommand after aliases, the folder it acts on and whether it brings files in.
 
 ## [0.17.6] - 2026-11-25
 
@@ -32,6 +34,8 @@ reader, not the mechanism or the weakness it closed.
   written. saw gives the full path each time.
 
 ### Fixed
+- `saw govern prepare` checks an update however the command is written: with any of git's global
+  options, or through an alias. A command line it cannot read is left to your decision.
 - saw runs the real git even in a terminal where an editor's git stand-in comes first, so its own
   git work is not slowed down or given the stand-in's settings.
 - `saw govern` no longer lets an update in over uncommitted work on a file the update changes. It

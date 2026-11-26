@@ -77,6 +77,22 @@ def register(sub) -> None:
     add_progress_arg(ap)
     ap.set_defaults(func=run_apply)
 
+    cp = add_command(
+        actions, "classify",
+        help="say how saw reads a git or gh command line",
+        description=(
+            "Read a git or gh command line the way the program does and say whether it could be "
+            "read, its subcommand after aliases, the folder it acts on, and whether it brings files "
+            "in, which saw checks before they land. An unreadable command line answers "
+            "readable: false with the reason."),
+        examples=[("saw govern classify --json --tool git --repo . -- pull", "ask about a pull")],
+        stream=False)
+    cp.add_argument("--json", action="store_true", help="machine-readable output")
+    cp.add_argument("--repo", default=".", help="the folder the command runs in")
+    cp.add_argument("--tool", required=True, choices=core.TOOLS, help="which tool the command is")
+    cp.add_argument("args", nargs=argparse.REMAINDER, help="the command's arguments, after --")
+    cp.set_defaults(func=run_classify)
+
     vp = add_command(
         actions, "verdict",
         help="say whether the open folder's tree is one saw let in",
@@ -142,6 +158,12 @@ def run_apply(a: argparse.Namespace) -> int:
 
 def _do_apply(a: argparse.Namespace) -> int:
     payload, code = core.apply(a.repo, a.into, a.accept, a.confirm, a.expect)
+    print(json.dumps(versioned("govern", payload)))
+    return code
+
+
+def run_classify(a: argparse.Namespace) -> int:
+    payload, code = core.classify(a.repo, a.tool, _operator_args(a.args))
     print(json.dumps(versioned("govern", payload)))
     return code
 
