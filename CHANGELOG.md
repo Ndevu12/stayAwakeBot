@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- On Windows, a scan of a folder finds an editor task that runs a package.json script carrying a
+  payload, as it does on macOS and Linux.
 - `saw govern` checks every file an update brings, including names that differ only in case and
   paths too long to read the usual way.
 - After a pull, merge, checkout or rebase, saw's git hook checks every file it brought, including
