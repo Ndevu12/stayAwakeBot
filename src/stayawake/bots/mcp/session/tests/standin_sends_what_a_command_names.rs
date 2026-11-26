@@ -121,7 +121,6 @@ fn a_command_that_names_nothing_saw_checks_runs_as_typed() {
         &["-c", "color.ui=always", "log"],
         &["-c", "advice.detachedHead=false", "status"],
         &["diff", "HEAD"],
-        &["log", "-1", "--", "--output=x"],
         &["push", "https://example.invalid/r", "main"],
         &["push", "git@example.invalid:team/r", "main"],
         &["config", "--get", "core.hooksPath"],
@@ -135,6 +134,16 @@ fn a_command_that_names_nothing_saw_checks_runs_as_typed() {
         assert!(terminal.took(&terminal.saw_log).is_none(), "{args:?}: saw was asked");
         assert!(terminal.took(&terminal.real_log).is_some(), "{args:?}: git did not run");
     }
+}
+
+#[test]
+fn a_path_named_like_an_option_after_the_separator_is_asked() {
+    let terminal = Terminal::new("separator");
+    let out = terminal.run(&["log", "-1", "--", "--output=x"], &[]);
+    let asked = terminal.took(&terminal.saw_log).unwrap_or_default();
+    assert!(asked.contains("--brings-no-files"), "saw was not told: {asked:?}");
+    assert!(terminal.took(&terminal.real_log).is_none(), "git ran before saw answered");
+    assert_ne!(out.status.code(), Some(0));
 }
 
 #[test]

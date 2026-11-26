@@ -12,6 +12,7 @@
   {"tool": "git", "args": ["log", "--oneline"], "checked": false},
   {"tool": "git", "args": ["diff"], "checked": false},
   {"tool": "git", "args": ["diff", "--output=out.txt"], "checked": true},
+  {"tool": "git", "args": ["log", "-1", "--", "--output=x"], "checked": true},
   {"tool": "git", "args": ["grep", "-Ovim", "x"], "checked": true},
   {"tool": "git", "args": ["grep", "-iO", "x"], "checked": true},
   {"tool": "git", "args": ["grep", "--open-files-in-pager=vim", "x"], "checked": true},
