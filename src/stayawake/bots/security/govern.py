@@ -181,7 +181,7 @@ def _judge_replayed(repo: str, into: str, result: "replay.Replayed", config: str
                                              "the files a command stages"),
                   tuple(rel for rel, _mode, _oid in staged)),) if staged else ()
         payload, code, already_there = _scan_arrived(holding.work, landing, judged, config,
-                                                     let_in_commit, deadline, sides)
+                                                     let_in_commit, deadline, sides, own)
     except DeadlineReached:
         return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:
@@ -327,8 +327,9 @@ def _judge_arrived(repo: str, into: str, arrived: "incoming.Arrived | str", conf
                                                        "the files an update brings, as one side has them"), names)
                       for commit, names in arrived.versions)
         let_in_commit = clean_ledger.let_in_commit(Path(repo).resolve(), config) or ""
+        top = stdout(Path(repo), ["rev-parse", "--show-toplevel"], context=UNTRUSTED).strip()
         payload, code, already_there = _scan_arrived(arrived.root, landing, arrived.paths, config,
-                                                     let_in_commit, deadline, sides)
+                                                     let_in_commit, deadline, sides, Path(top) if top else None)
     except DeadlineReached:
         return _unchecked(repo, "the check did not finish before its deadline")
     except ValueError as exc:
@@ -668,13 +669,14 @@ def _scan_files(files: Path, paths: tuple[str, ...], policy) -> ScanResult:
 
 def _scan_arrived(root: Path, landing: "blob_copies.BlobCopies", paths: tuple[str, ...], config: str | None,
                   base: str | None = None, deadline: float | None = None,
-                  versions: tuple = ()) -> tuple[dict, int, list[dict]]:
+                  versions: tuple = (), folder: "Path | None" = None) -> tuple[dict, int, list[dict]]:
     """Scan the files an update brought, as they will be written, and each other version of files
     it brings, within `deadline` seconds when given. Takes the holding work tree, the copies of what
-    lands, the arrived paths, the operator config, the commit the folder had before, the deadline
-    and the copies of the other versions as (copies, paths). Returns the scan document, its exit,
-    and the findings the folder already had before the update, which do not count toward the
-    verdict. Raises DeadlineReached at the deadline."""
+    lands, the arrived paths, the operator config, the commit saw last let in, the deadline, the
+    copies of the other versions as (copies, paths) and the top of the folder whose files are on
+    disk now. Returns the scan document, its exit, and the findings the folder already had before
+    the update, on disk or in the commit saw let in, which do not count toward the verdict. Raises
+    DeadlineReached at the deadline."""
     policy = operator_policy(config)
     sides = [(landing, paths), *versions]
     counted = sum(len(names) for _, names in sides)
@@ -687,10 +689,9 @@ def _scan_arrived(root: Path, landing: "blob_copies.BlobCopies", paths: tuple[st
         try:
             for copied, names in sides:
                 found = _scan_copies(copied, policy)
-                if base and found.findings:
-                    before = blob_copies.copy_out(Path(root), base, names,
-                                                  "the files an update changed, as they were before")
-                    already += govern_held.set_aside_already_there(found, _scan_copies(before, policy))
+                if found.findings and (base or folder):
+                    before = _scan_before(root, base, folder, names, policy)
+                    already += govern_held.set_aside_already_there(found, before)
                 result = found if result is None else joined(result, found)
         except KeyboardInterrupt:
             if pace.expired:
@@ -712,6 +713,21 @@ def _scan_arrived(root: Path, landing: "blob_copies.BlobCopies", paths: tuple[st
         if body not in already_there:
             already_there.append(body)
     return _in_plain_words(report.to_payload()), code, already_there
+
+
+def _scan_before(root: Path, base: str | None, folder: "Path | None", names: tuple[str, ...], policy) -> ScanResult:
+    """Scan the files an update changes in the form the folder had them before it: on disk now, and
+    in the commit saw last let in. Takes the holding work tree, that commit, the folder's top, the
+    paths and the operator's policy. Returns one result."""
+    befores = []
+    if folder is not None:
+        befores.append(blob_copies.copy_out_files(folder, names, "the files an update changes, as they are on disk"))
+    if base:
+        befores.append(blob_copies.copy_out(Path(root), base, names, "the files an update changed, as saw let them in"))
+    result = _scan_copies(befores[0], policy)
+    for copies in befores[1:]:
+        result = joined(result, _scan_copies(copies, policy))
+    return result
 
 
 def _scan_copies(copies: "blob_copies.BlobCopies", policy) -> ScanResult:

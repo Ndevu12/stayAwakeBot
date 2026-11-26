@@ -12,7 +12,7 @@ from stayawake.lib.git import objects
 from stayawake.lib.git.borrowed import object_directory
 from stayawake.lib.git.objects import FILE_AND_LINK_MODES
 from stayawake.lib.git.write.working_tree import TreeStateUnknown, bytes_as_written, landing_entries
-from stayawake.utils import atomicwrite, scratch
+from stayawake.utils import atomicwrite, pathsafe, scratch
 
 _BLOBS_PER_READ = 256
 _LARGEST_BATCHED_BLOB = 16 << 20
@@ -52,6 +52,22 @@ def copy_out_blobs(repo: Path, named: tuple[tuple[str, str], ...], purpose: str)
     with each blob the repository does not hold listed as not copied."""
     contents = _read(repo, [oid for _path, oid in named])
     return _in_folders([(path, contents.get(oid)) for path, oid in named], purpose)
+
+
+def copy_out_files(top: Path, paths: tuple[str, ...], purpose: str) -> BlobCopies:
+    """Copy each path's bytes the folder holds now, into folders laid out as `_in_folders` lays
+    them. Takes the top of the working tree, the paths and what the copies are for. Returns the
+    copies, leaving out each path that is not a regular file inside the folder."""
+    root = os.path.realpath(top)
+    files: list[tuple[str, bytes | None]] = []
+    for rel in paths:
+        where = Path(top) / rel
+        if not os.path.realpath(where).startswith(root.rstrip(os.sep) + os.sep):
+            continue
+        data = pathsafe.read_regular_no_follow(where, _LARGEST_BATCHED_BLOB)
+        if data is not None:
+            files.append((rel, data))
+    return _in_folders(files, purpose)
 
 
 def copy_out_as_written(repo: Path, holding: Path, commit: str, paths: tuple[str, ...],
