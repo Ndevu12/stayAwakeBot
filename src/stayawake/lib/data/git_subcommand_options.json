@@ -1,5 +1,5 @@
 {
-  "read_from": "git version 2.55.0 --help-all, and its Documentation at v2.34.0 and v2.56.1",
+  "read_from": "git version 2.55.0 --help-all, the options git's source adds by v2.56.1 (each entry's captured_at), and git's Documentation at v2.34.0 and v2.56.1",
   "every_subcommand_takes": ["-h", "--help", "--help-all", "--git-completion-helper", "--git-completion-helper-all"],
   "option_groups": {
     "revisions_and_diffs": {
@@ -13,7 +13,8 @@
     "add": {
       "takes_the_next_word": ["--chmod", "--inter-hunk-context", "--pathspec-from-file", "--unified", "-U"],
       "takes_the_rest_of_its_word": [],
-      "takes_no_word": ["--all", "--auto-advance", "--dry-run", "--edit", "--force", "--ignore-errors", "--ignore-missing", "--ignore-removal", "--intent-to-add", "--interactive", "--no-all", "--no-auto-advance", "--no-chmod", "--no-dry-run", "--no-edit", "--no-force", "--no-ignore-errors", "--no-ignore-missing", "--no-ignore-removal", "--no-intent-to-add", "--no-interactive", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-refresh", "--no-renormalize", "--no-sparse", "--no-update", "--no-verbose", "--no-warn-embedded-repo", "--patch", "--pathspec-file-nul", "--refresh", "--renormalize", "--sparse", "--update", "--verbose", "--warn-embedded-repo", "-A", "-N", "-e", "-f", "-i", "-n", "-p", "-u", "-v"]
+      "takes_no_word": ["--all", "--auto-advance", "--dry-run", "--edit", "--force", "--ignore-errors", "--ignore-missing", "--ignore-removal", "--intent-to-add", "--interactive", "--no-all", "--no-auto-advance", "--no-chmod", "--no-dry-run", "--no-edit", "--no-force", "--no-ignore-errors", "--no-ignore-missing", "--no-ignore-removal", "--no-intent-to-add", "--no-interactive", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-refresh", "--no-renormalize", "--no-resolved", "--no-sparse", "--no-update", "--no-verbose", "--no-warn-embedded-repo", "--patch", "--pathspec-file-nul", "--refresh", "--renormalize", "--resolved", "--sparse", "--update", "--verbose", "--warn-embedded-repo", "-A", "-N", "-e", "-f", "-i", "-n", "-p", "-u", "-v"],
+      "captured_at": {"v2.56.1": ["--no-resolved", "--resolved"]}
     },
     "annotate": {
       "takes_the_next_word": ["--contents", "--diff-algorithm", "--ignore-rev", "--ignore-revs-file", "-L", "-S"],
@@ -28,9 +29,10 @@
       "with": ["revisions_and_diffs"]
     },
     "branch": {
-      "takes_the_next_word": ["--contains", "--format", "--merged", "--no-contains", "--no-merged", "--points-at", "--set-upstream-to", "--sort", "--with", "--without", "-u"],
+      "takes_the_next_word": ["--contains", "--delete-merged", "--forked", "--format", "--merged", "--no-contains", "--no-merged", "--points-at", "--set-upstream-to", "--sort", "--with", "--without", "-u"],
       "takes_the_rest_of_its_word": ["-t"],
-      "takes_no_word": ["--abbrev", "--all", "--color", "--column", "--copy", "--create-reflog", "--delete", "--edit-description", "--force", "--ignore-case", "--list", "--move", "--no-abbrev", "--no-color", "--no-column", "--no-copy", "--no-create-reflog", "--no-delete", "--no-edit-description", "--no-force", "--no-format", "--no-ignore-case", "--no-list", "--no-move", "--no-omit-empty", "--no-points-at", "--no-quiet", "--no-recurse-submodules", "--no-set-upstream", "--no-set-upstream-to", "--no-show-current", "--no-sort", "--no-track", "--no-unset-upstream", "--no-verbose", "--omit-empty", "--quiet", "--recurse-submodules", "--remotes", "--set-upstream", "--show-current", "--track", "--unset-upstream", "--verbose", "-C", "-D", "-M", "-a", "-c", "-d", "-f", "-i", "-l", "-m", "-q", "-r", "-v"]
+      "takes_no_word": ["--abbrev", "--all", "--color", "--column", "--copy", "--create-reflog", "--delete", "--dry-run", "--edit-description", "--force", "--ignore-case", "--list", "--move", "--no-abbrev", "--no-color", "--no-column", "--no-copy", "--no-create-reflog", "--no-delete", "--no-dry-run", "--no-edit-description", "--no-force", "--no-format", "--no-ignore-case", "--no-list", "--no-move", "--no-omit-empty", "--no-points-at", "--no-quiet", "--no-recurse-submodules", "--no-set-upstream", "--no-set-upstream-to", "--no-show-current", "--no-sort", "--no-track", "--no-unset-upstream", "--no-verbose", "--omit-empty", "--quiet", "--recurse-submodules", "--remotes", "--set-upstream", "--show-current", "--track", "--unset-upstream", "--verbose", "-C", "-D", "-M", "-a", "-c", "-d", "-f", "-i", "-l", "-m", "-q", "-r", "-v"],
+      "captured_at": {"v2.56.1": ["--delete-merged", "--dry-run", "--forked", "--no-dry-run"]}
     },
     "cat-file": {
       "takes_the_next_word": ["--filter", "--path"],
@@ -434,8 +436,9 @@
     "repack": {
       "takes_the_next_word": ["--combine-cruft-below-size", "--cruft-expiration", "--depth", "--expire-to", "--filter", "--filter-to", "--geometric", "--keep-pack", "--max-cruft-size", "--max-pack-size", "--name-hash-version", "--threads", "--unpack-unreachable", "--window", "--window-memory", "-g"],
       "takes_the_rest_of_its_word": [],
-      "takes_no_word": ["--cruft", "--delta-islands", "--keep-unreachable", "--local", "--no-cruft", "--no-cruft-expiration", "--no-delta-islands", "--no-depth", "--no-expire-to", "--no-filter", "--no-filter-to", "--no-geometric", "--no-keep-pack", "--no-keep-unreachable", "--no-local", "--no-name-hash-version", "--no-pack-kept-objects", "--no-path-walk", "--no-quiet", "--no-threads", "--no-unpack-unreachable", "--no-window", "--no-window-memory", "--no-write-bitmap-index", "--no-write-midx", "--pack-kept-objects", "--path-walk", "--quiet", "--write-bitmap-index", "--write-midx", "-A", "-F", "-a", "-b", "-d", "-f", "-i", "-k", "-l", "-m", "-n", "-q"],
-      "writes_a_file": ["--filter-to", "--expire-to"]
+      "takes_no_word": ["--cruft", "--delta-islands", "--drop-filtered", "--dry-run", "--keep-unreachable", "--local", "--no-cruft", "--no-cruft-expiration", "--no-delta-islands", "--no-depth", "--no-drop-filtered", "--no-dry-run", "--no-expire-to", "--no-filter", "--no-filter-to", "--no-geometric", "--no-keep-pack", "--no-keep-unreachable", "--no-local", "--no-name-hash-version", "--no-pack-kept-objects", "--no-path-walk", "--no-quiet", "--no-threads", "--no-unpack-unreachable", "--no-window", "--no-window-memory", "--no-write-bitmap-index", "--no-write-midx", "--pack-kept-objects", "--path-walk", "--quiet", "--write-bitmap-index", "--write-midx", "-A", "-F", "-a", "-b", "-d", "-f", "-i", "-k", "-l", "-m", "-n", "-q"],
+      "writes_a_file": ["--filter-to", "--expire-to"],
+      "captured_at": {"v2.56.1": ["--drop-filtered", "--dry-run", "--no-drop-filtered", "--no-dry-run"]}
     },
     "reset": {
       "takes_the_next_word": ["--inter-hunk-context", "--pathspec-from-file", "--unified", "-U"],
@@ -492,7 +495,8 @@
     "stage": {
       "takes_the_next_word": ["--chmod", "--inter-hunk-context", "--pathspec-from-file", "--unified", "-U"],
       "takes_the_rest_of_its_word": [],
-      "takes_no_word": ["--all", "--auto-advance", "--dry-run", "--edit", "--force", "--ignore-errors", "--ignore-missing", "--ignore-removal", "--intent-to-add", "--interactive", "--no-all", "--no-auto-advance", "--no-chmod", "--no-dry-run", "--no-edit", "--no-force", "--no-ignore-errors", "--no-ignore-missing", "--no-ignore-removal", "--no-intent-to-add", "--no-interactive", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-refresh", "--no-renormalize", "--no-sparse", "--no-update", "--no-verbose", "--no-warn-embedded-repo", "--patch", "--pathspec-file-nul", "--refresh", "--renormalize", "--sparse", "--update", "--verbose", "--warn-embedded-repo", "-A", "-N", "-e", "-f", "-i", "-n", "-p", "-u", "-v"]
+      "takes_no_word": ["--all", "--auto-advance", "--dry-run", "--edit", "--force", "--ignore-errors", "--ignore-missing", "--ignore-removal", "--intent-to-add", "--interactive", "--no-all", "--no-auto-advance", "--no-chmod", "--no-dry-run", "--no-edit", "--no-force", "--no-ignore-errors", "--no-ignore-missing", "--no-ignore-removal", "--no-intent-to-add", "--no-interactive", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-refresh", "--no-renormalize", "--no-resolved", "--no-sparse", "--no-update", "--no-verbose", "--no-warn-embedded-repo", "--patch", "--pathspec-file-nul", "--refresh", "--renormalize", "--resolved", "--sparse", "--update", "--verbose", "--warn-embedded-repo", "-A", "-N", "-e", "-f", "-i", "-n", "-p", "-u", "-v"],
+      "captured_at": {"v2.56.1": ["--no-resolved", "--resolved"]}
     },
     "status": {
       "takes_the_next_word": [],

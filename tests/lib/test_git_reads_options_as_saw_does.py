@@ -4,6 +4,7 @@ git takes a value for is one saw skips the value of, and the hooks folder compar
 filesystem's own rules."""
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import unicodedata
@@ -125,6 +126,17 @@ class TheOptionsGitTakesAValueFor(GitSandbox):
                 self.assertEqual(sorted(name for name, kind in listed.items() if kind != "required"
                                         and name not in table.takes_no_word | table.takes_the_rest_of_its_word),
                                  [])
+
+    def test_every_option_the_table_took_from_the_git_under_test_is_one_it_lists(self):
+        repo = self.new_repo()
+        running = "v" + _GIT_VERSION.split()[-1]
+        entries = json.loads(subcommand_options.TABLE_FILE.read_text(encoding="utf-8"))["subcommands"]
+        for sub, entry in entries.items():
+            taken = entry.get("captured_at", {}).get(running)
+            if not taken or not subcommand_options.LISTED[sub].lists_its_options:
+                continue
+            with self.subTest(sub=sub, git=_GIT_VERSION):
+                self.assertEqual(sorted(set(taken) - set(options_in_usage(_help_all(repo, sub)))), [])
 
     def test_every_word_a_command_starts_with_is_one_saw_decides(self):
         repo = self.new_repo()
