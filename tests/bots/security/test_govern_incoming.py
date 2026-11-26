@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 from contextlib import redirect_stdout
 from unittest import mock
 
 from stayawake import cli
+from stayawake.bots.security import govern
 from stayawake.utils import exitcodes
 from tests.support import samples
 from tests.support.gitrepo import GitSandbox
@@ -97,9 +99,11 @@ class GovernIncoming(GitSandbox):
         self.git(self.repo, "checkout", "-q", "main")
 
     def _refused_and_untouched(self, expected: dict[str, str]) -> None:
-        code, applied = self._apply()
-        self.assertFalse(applied["applied"], applied)
-        self.assertEqual(applied["reason"], "uncommitted work would be overwritten, so the folder was not changed")
+        code, answer = self._prepare("checkout", "changes-keep")
+        self.assertEqual(code, exitcodes.INCOMPLETE, answer)
+        self.assertTrue(answer["reason"].startswith(govern.GIT_STOPPED), answer)
+        self.assertIn("local changes", answer["reason"])
+        self.assertFalse(self._apply()[1]["applied"])
         self.assertEqual(self.rev(self.repo), self.base)
         for name, text in expected.items():
             self.assertEqual((self.repo / name).read_text(encoding="utf-8"), text)
@@ -107,22 +111,17 @@ class GovernIncoming(GitSandbox):
     def test_uncommitted_work_on_a_file_the_update_changes_stops_the_update(self):
         self._update_changing_keep("from upstream\n")
         self.write(self.repo, "keep.txt", "already\nmine\n")
-        self.assertEqual(self._prepare("checkout", "changes-keep")[0], exitcodes.CLEAN)
         self._refused_and_untouched({"keep.txt": "already\nmine\n"})
 
-    def test_uncommitted_work_identical_to_the_update_lets_it_in(self):
+    def test_uncommitted_work_identical_to_the_update_stops_it_as_git_does(self):
         self._update_changing_keep("from upstream\n")
         self.write(self.repo, "keep.txt", "from upstream\n")
-        self.assertEqual(self._prepare("checkout", "changes-keep")[0], exitcodes.CLEAN)
-        code, applied = self._apply()
-        self.assertTrue(applied["applied"], applied)
-        self.assertEqual(self.git(self.repo, "status", "--porcelain").strip(), "")
+        self._refused_and_untouched({"keep.txt": "from upstream\n"})
 
     def test_a_staged_change_unlike_either_side_stops_the_update(self):
         self._update_changing_keep("from upstream\n")
         self.write(self.repo, "keep.txt", "staged here\n")
         self.git(self.repo, "add", "keep.txt")
-        self.assertEqual(self._prepare("checkout", "changes-keep")[0], exitcodes.CLEAN)
         self._refused_and_untouched({"keep.txt": "staged here\n"})
 
     def test_an_infected_check_leaves_the_folder_and_refuses_apply(self):
@@ -154,11 +153,23 @@ class GovernIncoming(GitSandbox):
         self.assertNotIn("scan", body)
         self.assertEqual(self.rev(self.repo), self.base)
 
-    def test_a_merge_in_progress_is_not_overwritten(self):
+    def test_a_merge_left_with_nothing_to_resolve_is_cleared_as_git_clears_it(self):
         (self.repo / ".git" / "MERGE_HEAD").write_text(self.base + "\n", encoding="utf-8")
         self._prepare("checkout", "next")
         code, applied = self._apply()
-        self.assertFalse(applied["applied"])
+        self.assertTrue(applied["applied"], applied)
+        self.assertTrue((self.repo / "arrived.txt").exists())
+        self.assertFalse((self.repo / ".git" / "MERGE_HEAD").exists())
+
+    def test_a_merge_with_conflicts_left_stops_the_update(self):
+        (self.repo / ".git" / "MERGE_HEAD").write_text(self.base + "\n", encoding="utf-8")
+        blob = self.git(self.repo, "rev-parse", "HEAD:keep.txt").strip()
+        lines = f"0 {'0' * 40}\tkeep.txt\n" + "".join(f"100644 {blob} {stage}\tkeep.txt\n" for stage in (1, 2, 3))
+        subprocess.run(["git", "-C", str(self.repo), "update-index", "--index-info"], input=lines, text=True,
+                       check=True, capture_output=True)
+        code, answer = self._prepare("checkout", "next")
+        self.assertEqual(code, exitcodes.INCOMPLETE, answer)
+        self.assertFalse(self._apply()[1]["applied"])
         self.assertEqual(self.rev(self.repo), self.base)
         self.assertFalse((self.repo / "arrived.txt").exists())
 

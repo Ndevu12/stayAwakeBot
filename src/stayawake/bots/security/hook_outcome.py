@@ -38,13 +38,14 @@ RECORD_NOT_WRITTEN = "record not written"
 SETTINGS_NOT_SET = "settings not set"
 SETTINGS_SWITCHED_OFF = "settings switched off"
 HOOKS_FOLDER_REFUSED = "hooks folder refused"
+NOT_REWRITTEN = "not rewritten"
 STILL_IN_SETTINGS = "still in settings"
 
 
 @dataclass(frozen=True)
 class Action:
     """One thing `saw hook` did, or could not do, at one place: its state, the place, what kind of
-    thing it was, the repository it was in, and the reason a folder git uses was refused."""
+    thing it was, the repository it was in, and the reason a folder was refused or not written."""
     state: str
     path: Path
     kind: str = ""
@@ -72,10 +73,13 @@ def lines(actions: list[Action], *, again: str, removing: bool = False) -> list[
     in_repositories: dict[str, list[Path]] = {}
     elsewhere: set[str] = set()
     refused: list[Action] = []
+    not_rewritten: list[Action] = []
     still_set: list[str] = []
     for a in actions:
         if a.kind == HOOKS_FOLDER_REFUSED:
             refused.append(a)
+        elif a.kind == NOT_REWRITTEN:
+            not_rewritten.append(a)
         elif a.kind == STILL_IN_SETTINGS:
             still_set.append(str(a.path))
         elif a.repository is None:
@@ -129,7 +133,16 @@ def lines(actions: list[Action], *, again: str, removing: bool = False) -> list[
     say(SETTINGS_NOT_SET, "saw's scan could not be set in your git settings, so it runs only where "
                           "saw's hooks are in place.", "dim")
     say(SETTINGS_SWITCHED_OFF, "saw's scan is switched off in your git settings, so it was left off.", "dim")
+    left_in: dict[str, list[Action]] = {}
+    for a in not_rewritten:
+        left_in.setdefault(os.path.realpath(a.path.parent), []).append(a)
     for a in refused:
+        there = left_in.pop(os.path.realpath(a.path), [])
+        also = (f" {len(there)} of saw's hook file(s) there were not rewritten. Correct that, then run "
+                f"`{again}`." if there else "")
         out.append((f"saw's hooks were not put in {_shown([a.path])}, the folder git runs every "
-                    f"repository's hooks from: it {a.reason}.", "dim"))
+                    f"repository's hooks from: it {a.reason}.{also}", "warn" if there else "dim"))
+    for group in left_in.values():
+        out.append((f"{len(group)} of saw's hook file(s) in {_shown([group[0].path.parent])} were not "
+                    f"rewritten: it {group[0].reason}. Correct that, then run `{again}`.", "warn"))
     return out

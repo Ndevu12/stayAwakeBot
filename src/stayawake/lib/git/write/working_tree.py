@@ -6,6 +6,7 @@ A checkout follows its branch by writing the changed paths with those same conve
 saw-owned repository and swapping in an index prepared on a private copy."""
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -14,12 +15,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git import operator_config
-from stayawake.lib.git.borrowed import borrow
+from stayawake.lib.git.borrowed import BorrowError, borrow
 from stayawake.lib.git.objects import blob_id
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes, stdout_bytes_fed
 from stayawake.lib.git.write.checkouts import Checkout
 from stayawake.utils import scratch
-from stayawake.utils.pathsafe import passes_through_a_link
+from stayawake.utils.pathsafe import passes_through_a_link, read_regular_no_follow
 
 _GITLINK = b"160000"
 _SYMLINK = b"120000"
@@ -35,8 +36,10 @@ class TreeStateUnknown(OSError):
     """git could not list what a checkout holds."""
 
 
-def _tree_entries(worktree: Path, commit: str) -> dict[bytes, tuple[bytes, bytes]]:
-    """`{path: (mode, id)}` for every file `commit` records."""
+def landing_entries(worktree: Path, commit: str) -> dict[bytes, tuple[bytes, bytes]]:
+    """List every entry `commit` records under the name a move writes it. Takes a repository holding
+    the commit and the commit. Returns `{path: (mode, id)}`. Raises TreeStateUnknown when git could
+    not list them."""
     out = stdout_bytes(worktree, ["ls-tree", "-r", "-z", "--full-tree", commit], context=UNTRUSTED)
     if out is None:
         raise TreeStateUnknown(f"{commit[:12]} could not be listed")
@@ -221,7 +224,7 @@ def uncommitted_paths(worktree: str | Path, *, _depth: int = 0) -> list[bytes] |
     try:
         head = stdout(worktree, ["rev-parse", "--verify", "--quiet", "HEAD"],
                       context=UNTRUSTED).strip()
-        committed = _tree_entries(worktree, head) if head else {}
+        committed = landing_entries(worktree, head) if head else {}
         indexed = _index_entries(worktree)
     except (TreeStateUnknown, ValueError):
         return None
@@ -321,8 +324,8 @@ def changes_in_the_way(worktree: str | Path, commit: str) -> ChangesInTheWay | N
     try:
         head = stdout(worktree, ["rev-parse", "--verify", "--quiet", "HEAD"],
                       context=UNTRUSTED).strip()
-        committed = _tree_entries(worktree, head) if head else {}
-        target = _tree_entries(worktree, commit)
+        committed = landing_entries(worktree, head) if head else {}
+        target = landing_entries(worktree, commit)
         indexed = _index_entries(worktree)
     except (TreeStateUnknown, ValueError):
         return None
@@ -379,44 +382,134 @@ def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
 
 def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[bytes]) -> bool:
     """Write what `commit` records at `paths` into `worktree`, converted by git's built-in
-    end-of-line and ident rules, and delete every path in `paths` it does not record; a directory
-    holding anything is left in place, as git leaves it. Returns whether every one was written."""
-    deleted = [p for p in paths if p not in entries]
+    end-of-line and ident rules and the attributes `commit` records, and delete every path in
+    `paths` it does not record. A directory holding anything is left in place, the way git leaves
+    it, and a path reached through a link is left alone. Returns whether every one was written."""
+    whole = all([_removed(worktree, rel) for rel in paths if rel not in entries])
     written = [p for p in paths if p in entries and entries[p][0] != _GITLINK]
-    for rel in deleted:
-        if passes_through_a_link(worktree, worktree / os.fsdecode(rel)):
-            return False
-        target = worktree / os.fsdecode(rel)
-        try:
-            if target.is_dir() and not target.is_symlink():
-                if not any(target.iterdir()):
-                    target.rmdir()
-                continue
-            if os.path.lexists(target):
-                target.unlink()
-        except OSError:
-            return False
+    if not written:
+        return whole
+    attributes = [rel for rel in written if _is_attributes_file(rel)]
+    rest = [rel for rel in written if not _is_attributes_file(rel)]
+    with borrow(repo) as borrowed, borrowed.own_attributes_then(_NO_FILTER):
+        conversion = _conversion_config(worktree)
+        for batch in (attributes, rest):
+            if batch and _checked_out(borrowed, conversion, commit, batch, worktree,
+                                      to_temporary_files=False) is None:
+                return False
+    return whole
+
+
+def write_files(repo: Path, worktree: Path, commit: str, paths: list[bytes]) -> bool:
+    """Write what `commit` records at `paths` into `worktree` the way a move to it writes them, and delete
+    each path it does not record. Takes the operator's repository, which holds the commit, the
+    working tree, the commit and the paths. Returns whether every one was written."""
+    try:
+        entries = landing_entries(repo, commit)
+    except (TreeStateUnknown, ValueError):
+        return False
+    return _write_paths(repo, worktree, commit, entries, paths)
+
+
+def _is_attributes_file(rel: bytes) -> bool:
+    """Tell whether a path names a `.gitattributes` file. Takes the path. Returns the answer."""
+    return rel == b".gitattributes" or rel.endswith(b"/.gitattributes")
+
+
+def _removed(worktree: Path, rel: bytes) -> bool:
+    """Delete a path a commit does not record, and every folder it leaves empty. A path reached
+    through a link and a directory holding anything are left in place. Takes the working tree and
+    the path. Returns whether nothing is left there but such a directory."""
+    target = worktree / os.fsdecode(rel)
+    if passes_through_a_link(worktree, target):
+        return False
+    try:
+        if target.is_dir() and not target.is_symlink():
+            if not any(target.iterdir()):
+                target.rmdir()
+            return True
+        if os.path.lexists(target):
+            target.unlink()
         parent = target.parent
         while parent != worktree and parent.is_dir() and not any(parent.iterdir()):
             parent.rmdir()
             parent = parent.parent
-    if not written:
-        return True
-    with borrow(repo) as borrowed, borrowed.attributes_then(_NO_FILTER):
-        index = scratch.new_file("an index to write a checkout from")
-        try:
-            index.unlink()
-            env = {"GIT_INDEX_FILE": str(index)}
-            loaded = borrowed.run(["read-tree", commit], env=env)
-            if loaded is None or loaded.returncode != 0:
-                return False
-            done = stdout_bytes_fed(borrowed.path, [*_conversion_config(worktree), "--work-tree",
-                                                    str(worktree), "checkout-index", "-f", "-z",
-                                                    "--stdin"],
-                                    b"\0".join(written) + b"\0", env=env, context=SAW_OWNED)
-            return done is not None
-        finally:
-            scratch.release_path(index)
+    except OSError:
+        return False
+    return True
+
+
+def _checked_out(borrowed, conversion: list[str], commit: str, paths: list[bytes], destination: Path, *,
+                 to_temporary_files: bool) -> bytes | None:
+    """Check out `paths` as `commit` records them into `destination`, converted by the operator's
+    end-of-line settings and the attributes the borrowed repository holds. Takes the borrowed
+    repository, the settings as `-c` arguments, the commit, the paths, the folder and whether each
+    file goes to a temporary name there. Returns git's listing, or None when git could not."""
+    index = scratch.new_file("an index to write a checkout from")
+    try:
+        index.unlink()
+        env = {"GIT_INDEX_FILE": str(index)}
+        loaded = borrowed.run(["read-tree", commit], env=env)
+        if loaded is None or loaded.returncode != 0:
+            return None
+        return stdout_bytes_fed(borrowed.path, [*conversion, "--work-tree", str(destination), "checkout-index",
+                                                "-f", "-z", *(["--temp"] if to_temporary_files else []),
+                                                "--stdin"],
+                                b"\0".join(paths) + b"\0", env=env, context=SAW_OWNED)
+    finally:
+        scratch.release_path(index)
+
+
+def bytes_as_written(repo: Path, commit: str, paths: list[bytes],
+                     also_objects: Path | None = None) -> dict[bytes, bytes] | None:
+    """Produce each path's bytes in the form a move to `commit` writes into `repo`'s working tree.
+    Takes the operator's repository, the commit, the paths and a further object directory holding
+    the commit. Returns each path's bytes, or None when git could not produce every one."""
+    if not paths:
+        return {}
+    where = scratch.new_dir("the files an update writes")
+    try:
+        with borrow(repo, also_objects) as borrowed, borrowed.own_attributes_then(_NO_FILTER):
+            listed = _checked_out(borrowed, _conversion_config(repo), commit, paths, where,
+                                  to_temporary_files=True)
+        if listed is None:
+            return None
+        made: dict[bytes, bytes] = {}
+        for record in listed.split(b"\0"):
+            temporary, _, path = record.partition(b"\t")
+            if not path:
+                continue
+            data = _whole_file(where / os.fsdecode(temporary))
+            if data is None:
+                return None
+            made[path] = data
+        return made if set(made) == set(paths) else None
+    except (BorrowError, OSError):
+        return None
+    finally:
+        scratch.release_path(where)
+
+
+def written_digest(path: Path) -> str | None:
+    """Hash what a checkout left at `path`: a link's target, else the file's bytes. Takes the path.
+    Returns the sha256, or None when nothing readable is there."""
+    try:
+        if os.path.islink(path):
+            return hashlib.sha256(os.fsencode(os.readlink(path))).hexdigest()
+    except OSError:
+        return None
+    data = _whole_file(path)
+    return None if data is None else hashlib.sha256(data).hexdigest()
+
+
+def _whole_file(path: Path) -> bytes | None:
+    """Read a regular file whole without following a link. Takes the path. Returns its bytes, or
+    None for anything other than a readable regular file."""
+    try:
+        found = os.lstat(path)
+    except OSError:
+        return None
+    return read_regular_no_follow(path, found.st_size) if stat.S_ISREG(found.st_mode) else None
 
 
 def rewrite_index(worktree: str | Path, feed: bytes) -> bool:
@@ -468,14 +561,17 @@ class PreparedMove:
 
     `keep` names paths left as they are on disk; each keeps what was staged there, or follows the
     branch when nothing was. `restage` gives, for kept paths, the index entries to put back
-    exactly (None for no entry). `kept_entries` records what was staged at each kept path before
-    the move."""
+    exactly (None for no entry). `conflict_stages` gives, for paths left in conflict, the (mode,
+    object, stage) entries to put there in place of `new`'s. `kept_entries` records what was staged
+    at each kept path before the move."""
 
     def __init__(self, repo: Path, holder: Checkout, old: str, new: str,
-                 keep: frozenset[bytes] = frozenset(), restage: dict | None = None):
+                 keep: frozenset[bytes] = frozenset(), restage: dict | None = None,
+                 conflict_stages: dict | None = None):
         self.repo, self.holder, self.old, self.new = repo, holder, old, new
         self.keep = keep
         self.restage = restage
+        self.conflict_stages = conflict_stages or {}
         self.kept_entries: dict = {}
         self.lock = holder.gitdir / "index.lock"
         self.staged = scratch.new_file("the index a checkout moves to")
@@ -488,12 +584,12 @@ class PreparedMove:
         happened; on False nothing is held, and False when a path the move rewrites passes
         through a filter."""
         try:
-            before = _tree_entries(self.holder.worktree, self.old)
-            self.target = _tree_entries(self.holder.worktree, self.new)
+            before = landing_entries(self.holder.worktree, self.old)
+            self.target = landing_entries(self.holder.worktree, self.new)
         except (TreeStateUnknown, ValueError):
             return False
-        self.paths = sorted(p for p in set(before) | set(self.target)
-                            if before.get(p) != self.target.get(p))
+        self.paths = sorted(p for p in set(before) | set(self.target) | set(self.conflict_stages)
+                            if before.get(p) != self.target.get(p) or p in self.conflict_stages)
         files = [p for p in self.paths
                  if any(side.get(p, (_GITLINK,))[0] != _GITLINK for side in (before, self.target))]
         if files:
@@ -509,7 +605,11 @@ class PreparedMove:
         self.kept_entries = {p: staged.get(p) for p in self.paths if p in self.keep}
         lines = []
         for p in self.paths:
-            if p in self.keep and self.restage is not None and p in self.restage:
+            if p in self.conflict_stages:
+                lines.append(b"0 %s\t%s\0" % (zero, p))
+                lines += [b"%s %s %s\t%s\0" % (mode, oid, stage, p)
+                          for mode, oid, stage in self.conflict_stages[p]]
+            elif p in self.keep and self.restage is not None and p in self.restage:
                 entry = self.restage[p]
                 lines.append(b"%s %s\t%s\0" % (entry[0], entry[1], p) if entry is not None
                              else b"0 %s\t%s\0" % (zero, p))
@@ -531,12 +631,16 @@ class PreparedMove:
             return False
         return True
 
-    def apply(self) -> bool:
-        """Write the changed paths and swap in the prepared index. Returns whether both landed;
-        on False the index is untouched and the lock released."""
+    def apply(self, expected: dict[bytes, str] | None = None) -> bool:
+        """Write the changed paths and swap in the prepared index. Takes, when given, the sha256 each
+        written file must hold. Returns whether both landed and every written file holds its
+        digest. On False the index is untouched and the lock released."""
         try:
-            if not _write_paths(self.repo, self.holder.worktree, self.new, self.target,
-                                [p for p in self.paths if p not in self.keep]):
+            written = [p for p in self.paths if p not in self.keep]
+            if not _write_paths(self.repo, self.holder.worktree, self.new, self.target, written):
+                self.release()
+                return False
+            if expected is not None and not self._holds(expected, written):
                 self.release()
                 return False
             shutil.copyfile(self.staged, self.lock)
@@ -547,14 +651,37 @@ class PreparedMove:
             self.release()
             return False
 
+    def _holds(self, expected: dict[bytes, str], written: list[bytes]) -> bool:
+        """Tell whether each written file holds the digest expected of it. Takes the digests and the
+        paths written. Returns the answer."""
+        for rel in written:
+            if rel in self.target and self.target[rel][0] != _GITLINK:
+                found = written_digest(self.holder.worktree / os.fsdecode(rel))
+                if found is None or expected.get(rel) != found:
+                    return False
+        return True
+
     def restore_files(self) -> bool:
         """Write the changed paths back to what `old` records. Returns whether all were."""
         try:
-            before = _tree_entries(self.holder.worktree, self.old)
+            before = landing_entries(self.holder.worktree, self.old)
             return _write_paths(self.repo, self.holder.worktree, self.old, before,
                                 [p for p in self.paths if p not in self.keep])
         except (TreeStateUnknown, OSError, ValueError):
             return False
+
+    def undo(self, before: list[bytes]) -> bool:
+        """Write back to `old` each changed path that matched `old` before the move. Takes what
+        `uncommitted_paths` listed before the move. Returns whether the working tree now differs
+        from HEAD exactly where it did then."""
+        dirty = set(before)
+        try:
+            entries = landing_entries(self.holder.worktree, self.old)
+            _write_paths(self.repo, self.holder.worktree, self.old, entries,
+                         [p for p in self.paths if p not in self.keep and p not in dirty])
+        except (TreeStateUnknown, OSError, ValueError):
+            pass
+        return uncommitted_paths(self.holder.worktree) == sorted(before)
 
     def release(self) -> None:
         """Drop the lock if still held, and the private index."""

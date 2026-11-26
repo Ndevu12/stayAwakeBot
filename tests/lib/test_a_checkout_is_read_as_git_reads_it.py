@@ -237,7 +237,7 @@ class TestASubmodulesWorkIsKept(_Checkout):
     def test_moving_away_from_it_leaves_its_directory(self):
         (self.repo / "lib" / "new.js").write_text("mine\n")
         head = self.rev(self.repo)
-        entries = {p: e for p, e in working_tree._tree_entries(self.repo, head).items()
+        entries = {p: e for p, e in working_tree.landing_entries(self.repo, head).items()
                    if p != b"lib"}
         self.assertTrue(working_tree._write_paths(self.repo, self.repo, head, entries, [b"lib"]))
         self.assertEqual("mine\n", (self.repo / "lib" / "new.js").read_text())

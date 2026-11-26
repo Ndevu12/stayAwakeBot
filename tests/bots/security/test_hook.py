@@ -22,8 +22,10 @@ from stayawake.bots.security.dependencies import db
 from stayawake.bots.security.models import ScanResult
 from tests.bots.security._osv_fixtures import mal_record, osv_zip
 from tests.support import samples
+from tests.support.long_paths import POSIX_ONLY, stage_blob, too_long_by_its_full_name
 
 _INFECTED = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"   # confirmed worm markers
+_LOADER = "var _0x=[String.%s(127)];eval(_0x.join(\"\"));\n" % samples.FROM_CHAR_CODE
 
 
 def _run(repo, *args):
@@ -260,7 +262,7 @@ class TestTheHookJudgesAsTheScanDoes(_Isolated):
     def test_a_pull_git_cannot_describe_scans_the_whole_tree(self):
         repo = self._repo_here({"a.txt": "ok\n"})
         (repo / ".git" / "ORIG_HEAD").write_text(self._head(repo) + "\n")
-        with mock.patch.object(hook, "stdout_bytes", return_value=None):
+        with mock.patch("stayawake.lib.git.query.stdout_bytes", return_value=None):
             self.assertEqual(hook._scan_scope("post-merge", ["0"], repo), (None, "pull"))
 
     def test_an_infection_is_reported_before_an_unreadable_file(self):
@@ -888,6 +890,34 @@ class TestRunEventScope(_Isolated):
         self._in_repo(repo)
         with mock.patch.object(hook.checkout_writes, "git_started_ns", return_value=None):
             self.assertEqual(hook.run_event("post-checkout", [hook._NULL_REV, "x", "0"]), 1)
+
+    @unittest.skipIf(os.name == "nt", POSIX_ONLY)
+    def test_a_pulled_file_too_long_to_open_by_its_full_name_keeps_the_pull_from_reading_clean(self):
+        repo = _repo({"app.js": "export const x = 1;\n"})
+        self._in_repo(repo)
+        first = hook.gitutil.stdout(repo, ["rev-parse", "HEAD"]).strip()
+        stage_blob(repo, too_long_by_its_full_name(repo), _LOADER)
+        _run(repo, "commit", "-qm", "pulled")
+        _run(repo, "reset", "-q", "--hard")
+        _run(repo, "update-ref", "ORIG_HEAD", first)
+        self.assertNotEqual(hook.run_event("post-merge", ["0"]), 0)
+
+    def test_names_that_share_a_file_on_disk_are_each_scanned_after_a_pull(self):
+        import unicodedata
+        for label, payload, benign in (("case", "Loader.js", "loader.js"),
+                                       ("composed", unicodedata.normalize("NFD", "café.js"),
+                                        unicodedata.normalize("NFC", "café.js"))):
+            with self.subTest(label=label):
+                repo = _repo({"app.js": "export const x = 1;\n"})
+                self._in_repo(repo)
+                first = hook.gitutil.stdout(repo, ["rev-parse", "HEAD"]).strip()
+                stage_blob(repo, payload, _LOADER)
+                stage_blob(repo, benign, "module.exports = 1;\n")
+                _run(repo, "commit", "-qm", "pulled")
+                _run(repo, "reset", "-q", "--hard")
+                _run(repo, "update-ref", "ORIG_HEAD", first)
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(hook.run_event("post-merge", ["0"]), 1)
 
     def test_pull_diff_scans_only_changed_files(self):
         repo = _repo({"app.js": "export const x = 1;\n"})
