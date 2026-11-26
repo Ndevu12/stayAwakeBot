@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -49,11 +50,13 @@ class LetInLater(unittest.TestCase):
         os.chdir(self.folder)
         self.addCleanup(os.chdir, here)
 
-    def _prepare(self, answer: dict, *flags: str, args=("pull",)) -> dict:
+    def _prepare(self, answer: dict, *flags: str, args=("pull",), repo=None, cwd=None) -> dict:
+        if cwd is not None:
+            os.chdir(cwd)
         with mock.patch.object(govern, "prepare", return_value=(json.loads(json.dumps(answer)), 1)), \
                 redirect_stdout(io.StringIO()) as out:
-            cli.main(["govern", "prepare", "--repo", str(self.folder), "--into", "unused", "--tool", "git",
-                      *flags, "--", *args])
+            cli.main(["govern", "prepare", "--repo", str(repo or self.folder), "--into", "unused",
+                      "--tool", "git", *flags, "--", *args])
         return json.loads(out.getvalue())
 
     def _let_in(self, attended: bool, *flags: str) -> tuple[int, str]:
@@ -69,9 +72,9 @@ class LetInLater(unittest.TestCase):
     def test_an_unattended_hold_keeps_only_the_command_the_folder_and_the_time(self):
         printed = self._prepare(_HELD, "--no-one-to-ask", args=("pull", "origin", "main"))
         record = self._kept()
-        self.assertEqual(set(record), {"version", "folder", "ran_in", "command", "at"})
+        self.assertEqual(set(record), {"version", "repository", "ran_in", "command", "at"})
         self.assertEqual(record["command"], ["git", "pull", "origin", "main"])
-        self.assertEqual(record["folder"], os.path.realpath(self.folder))
+        self.assertEqual(record["repository"], os.path.realpath(self.folder))
         self.assertEqual(printed["decision"]["let_in_later"], ["saw", "govern", "let-in"])
 
     def test_nothing_is_kept_where_someone_can_be_asked_or_nothing_is_held(self):
@@ -117,6 +120,37 @@ class LetInLater(unittest.TestCase):
         self.assertEqual(os.path.realpath(where), os.path.realpath(self.folder))
         self.assertEqual(argv, ["git", "pull", "origin", "it's main"])
         self.assertIsNone(self._kept(), "the held command is still kept after it ran")
+
+    def test_a_command_held_in_a_subfolder_is_let_in_from_anywhere_in_the_repository(self):
+        top = self.folder / "repository"
+        for sub in ("src/deep", "docs"):
+            (top / sub).mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(top)], check=True,
+                       env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+        os.chdir(top / "src" / "deep")
+        printed = self._prepare(_HELD, "--no-one-to-ask", args=("pull",), repo=top / "src" / "deep")
+        self.assertEqual(printed["decision"]["let_in_later"], ["saw", "govern", "let-in"])
+        for here, flags in ((top, ()), (top / "docs", ()), (self.folder, ("--repo", str(top / "docs")))):
+            with self.subTest(here=str(here)):
+                self._prepare(_HELD, "--no-one-to-ask", args=("pull",), repo=top / "src" / "deep",
+                              cwd=top / "src" / "deep")
+                os.chdir(here)
+                code, said = self._let_in(True, *flags)
+                self.assertEqual(code, 0, said)
+                where, *argv = self.ran.read_text().splitlines()
+                self.assertEqual(os.path.realpath(where), os.path.realpath(top / "src" / "deep"))
+                self.assertEqual(argv, ["git", "pull"])
+                self.assertIsNone(govern_held_commands.read(str(top)))
+
+    def test_from_outside_the_repository_the_let_in_command_names_its_top_folder(self):
+        top = self.folder / "repository"
+        (top / "src").mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(top)], check=True,
+                       env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+        printed = self._prepare(_HELD, "--no-one-to-ask", args=("-C", "repository/src", "pull"),
+                                repo=top / "src")
+        self.assertEqual(printed["decision"]["let_in_later"],
+                         ["saw", "govern", "let-in", "--repo", os.path.realpath(top)])
 
     def test_with_nothing_held_it_says_so_and_runs_nothing(self):
         code, said = self._let_in(attended=True)

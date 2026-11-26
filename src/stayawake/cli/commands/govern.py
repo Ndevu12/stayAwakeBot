@@ -139,7 +139,7 @@ def register(sub) -> None:
         examples=[("saw govern let-in", "review the update held here"),
                   ("saw govern let-in --repo ~/code/app", "review one held for another folder")],
         stream=False)
-    lp.add_argument("--repo", default=".", help="the folder the update was held for")
+    lp.add_argument("--repo", default=".", help="any folder in the repository the update was held for")
     lp.set_defaults(func=run_let_in)
 
     for name, helptext, description, example in _PLACEMENT:
@@ -215,7 +215,8 @@ def run_let_in(a: argparse.Namespace) -> int:
     folder = os.path.realpath(a.repo)
     record = govern_held_commands.read(folder)
     if record is None:
-        print(f"saw: no update is held for review in {folder}.", file=sys.stderr)
+        print(f"saw: no update is held for review in {govern_held_commands.repository_of(folder)}.",
+              file=sys.stderr)
         return exitcodes.DID_NOT_RUN
     if not (sys.stdin.isatty() and sys.stderr.isatty()):
         print("saw: saw govern let-in needs a person at a terminal; nothing ran.", file=sys.stderr)
