@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from stayawake.lib.git import allowlist, command_line, exec_surface, operator_config
+from stayawake.lib.git import command_line, exec_surface, operator_config, replay, typed_command
 from stayawake.lib.git.exec_keys import (ENABLES_TRANSPORT, HOOKS_DIRECTORY, UNLESS_BOOLEAN, ExecKey,
                                          exec_keys, rule_for, subsection)
-from stayawake.lib.git.run import one_pass, run, stalls_recorded
+from stayawake.lib.git.run import one_pass, stalls_recorded
 from stayawake.utils import env as saw_env
 
 NO_HOOKS_FOLDER = ("saw", "git-runs-no-hooks")
@@ -21,8 +21,7 @@ VALUE_VARIABLE_PREFIX = "SAW_GUARD_VALUE_"
 ALLOWED_PROTOCOLS = "GIT_ALLOW_PROTOCOL"
 SUBCOMMANDS_THAT_REPORT_SETTINGS = frozenset({"config", "var"})
 _EDITS_SETTINGS = frozenset({"-e", "--edit"})
-_NAMES_ITS_REPOSITORY = ("--git-dir", "--work-tree")
-_REPOSITORY_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
+_ASKS_ONLY_ABOUT_GIT = frozenset({None, "version"})
 _UNREADABLE = "�"
 
 
@@ -66,16 +65,21 @@ def _guard(folder: Path, args: list[str], environ: Mapping[str, str]) -> Guard:
     reading = command_line.read("git", args, folder)
     if reading.readable and _reports_settings(reading.subcommand, reading.rest):
         return Guard(where)
-    if _names_its_repository(args, environ):
-        return Guard(where, refusal="the command names a repository of its own with --git-dir, "
-                                    "--work-tree or the environment")
+    command = typed_command.read(list(args), dict(environ))
+    if isinstance(command, str):
+        if located.subcommand in _ASKS_ONLY_ABOUT_GIT:
+            return Guard(where)
+        return Guard(where, refusal=f"this command line cannot be read: {command}")
     hooks, why = no_hooks_folder()
     if hooks is None:
         return Guard(where, refusal=why)
-    operator = operator_config.operator_entries(where)
+    git_dir, why = _repository(where, command)
+    if why:
+        return Guard(where, refusal=why)
+    operator = operator_config.operator_entries(git_dir or where)
     if operator is None:
         return Guard(where, refusal=f"your own git settings did not load in {where}")
-    commands, why = _folder_commands(where)
+    commands, why = _folder_commands(git_dir, where) if git_dir is not None else ([], "")
     if why:
         return Guard(where, refusal=why)
     settings, environment, why = _overrides(commands, operator, hooks, environ)
@@ -102,13 +106,19 @@ def _reports_settings(subcommand: str | None, rest: tuple[str, ...]) -> bool:
     return not (_EDITS_SETTINGS & set(rest) or (subcommand == "config" and positionals[:1] == ["edit"]))
 
 
-def _names_its_repository(args: list[str], environ: Mapping[str, str]) -> bool:
-    """Whether a command names its repository itself, by one of git's own options or the
-    environment. Takes the arguments and the environment."""
-    global_options, _, _ = allowlist.split(list(args))
-    joined = tuple(f"{option}=" for option in _NAMES_ITS_REPOSITORY)
-    return (any(arg in _NAMES_ITS_REPOSITORY or arg.startswith(joined) for arg in global_options)
-            or any(environ.get(name) for name in _REPOSITORY_VARIABLES))
+def _repository(where: Path, command: typed_command.TypedCommand) -> tuple[Path | None, str]:
+    """Find the git directory a command acts on, the way git finds it: by its options, its
+    environment or the folder. Takes the folder and the command. Returns the git directory, None
+    when there is no repository, or why the one it acts on cannot be read."""
+    location = replay.locate(where, command)
+    if not isinstance(location, str):
+        shared = exec_surface.common_dir_of(location.git_dir)
+        if os.path.realpath(shared) != os.path.realpath(location.common_dir):
+            return None, "the command names a common directory of its own"
+        return location.git_dir, ""
+    if command.names_its_repository or _looks_like_a_repository(where):
+        return None, f"{where}: {location}"
+    return None, ""
 
 
 def no_hooks_folder() -> tuple[Path | None, str]:
@@ -131,18 +141,11 @@ def no_hooks_folder() -> tuple[Path | None, str]:
     return folder, ""
 
 
-def _folder_commands(where: Path) -> tuple[list[exec_surface.Command], str]:
-    """Read every program-running entry of the folder's own configuration: its repository, worktrees,
-    submodules and what they include. Takes the folder. Returns them, or no entries and why they
-    could not all be read."""
-    found = run(where, ["rev-parse", "--absolute-git-dir"])
-    if found is None:
-        return [], f"git could not be run in {where}"
-    if found.returncode != 0:
-        if _looks_like_a_repository(where):
-            return [], f"{where} holds a repository git does not open"
-        return [], ""
-    surface = exec_surface.read_exec_surface(Path(found.stdout.strip()))
+def _folder_commands(git_dir: Path, where: Path) -> tuple[list[exec_surface.Command], str]:
+    """Read every program-running entry of a repository's own configuration: its own, its worktrees'
+    and submodules', and what they include. Takes its git directory and the folder the command runs
+    in. Returns them, or no entries and why they could not all be read."""
+    surface = exec_surface.read_exec_surface(git_dir, git_dir=git_dir)
     if surface is None:
         return [], f"the git settings of {where} did not load"
     if surface.unexamined:
@@ -180,6 +183,8 @@ def _overrides(commands: list[exec_surface.Command], operator: list[tuple[str, s
         if _UNREADABLE in key:
             return [], {}, "a setting in this folder has a name that is not valid text"
         override = rule.override
+        if override.refuse:
+            return [], {}, f"this folder's settings name a program in {key} that cannot be kept from running"
         if override.environment:
             if override.environment in environ:
                 continue

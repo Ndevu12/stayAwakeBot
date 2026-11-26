@@ -9,6 +9,7 @@
 #                       ext-transport      the subsection after `ext::` is a command line
 #                       ext-address        a value starting `ext::` is a command line
 #                       enables-transport  the value switches a command-running transport on
+#                       absolute-path      a value that is an absolute path is a program
 #   bang              a leading `!` is shell syntax to strip before reading the command (OPTIONAL)
 #   driver            the attribute that must select this entry before it runs:
 #                     filter | diff | merge (OPTIONAL)
@@ -21,6 +22,12 @@
 #                       reset               the key adds to a list that this key set empty clears:
 #                                           clear it, then add back the operator's own entries
 #                       leading_option      a value whose first word is a git option is set again too
+#                       refuse              it cannot be kept from running: a folder that sets it
+#                                           is not vouched for
+#
+# `runs_nothing` lists keys whose name looks like a program's but whose value git never runs from a
+# folder's settings, each with why. Every key git documents whose last part names a program is in
+# one of the two lists.
 version: 1
 
 keys:
@@ -124,3 +131,45 @@ keys:
   - key: hook.*.command
     fires_on_its_own: true
     override: {setting: "hook.{subsection}.enabled", value: "false"}
+  - key: tar.*.command
+  - key: difftool.*.path
+  - key: mergetool.*.path
+  - key: man.*.path
+  - key: browser.*.path
+  - key: guitool.*.cmd
+  - key: imap.tunnel
+  - key: instaweb.httpd
+  - key: remote.*.vcs
+  - key: sendemail.headercmd
+  - key: sendemail.*.sendmailcmd
+  - key: sendemail.*.tocmd
+  - key: sendemail.*.cccmd
+  - key: sendemail.*.headercmd
+  - key: sendemail.smtpserver
+    runs: absolute-path
+  - key: sendemail.*.smtpserver
+    runs: absolute-path
+  - key: svn.authorsprog
+  - key: gc.recentobjectshook
+    override: {refuse: true}
+
+runs_nothing:
+  - {key: advice.*, why: "a message switch"}
+  - {key: color.pager, why: "a colour switch"}
+  - {key: column.clean, why: "a layout setting"}
+  - {key: core.quotepath, why: "a display switch"}
+  - {key: credential.usehttppath, why: "a switch"}
+  - {key: diff.*.cachetextconv, why: "a switch"}
+  - {key: rebase.reschedulefailedexec, why: "a switch"}
+  - {key: fsck.gitmodulespath, why: "names a check"}
+  - {key: receive.fsck.gitmodulespath, why: "names a check"}
+  - {key: help.htmlpath, why: "names a folder git reads"}
+  - {key: http.sslcapath, why: "names a folder git reads"}
+  - {key: instaweb.modulepath, why: "names a folder git reads"}
+  - {key: sendemail.smtpsslcertpath, why: "names a file git reads"}
+  - {key: include.path, why: "names a settings file, whose settings are read as the folder's"}
+  - {key: includeif.*.path, why: "names a settings file, whose settings are read as the folder's"}
+  - {key: http.proxy, why: "names a proxy server"}
+  - {key: remote.*.proxy, why: "names a proxy server"}
+  - {key: gitcvs.dbdriver, why: "names a database driver"}
+  - {key: uploadpack.packobjectshook, why: "git reads it only from your own settings"}

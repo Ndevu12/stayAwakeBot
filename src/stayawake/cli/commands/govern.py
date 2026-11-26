@@ -192,7 +192,8 @@ def run_classify(a: argparse.Namespace) -> int:
 
 
 def run_guard(a: argparse.Namespace) -> int:
-    answer = folder_guard.guard(a.repo, _operator_args(a.args), os.environ)
+    environment = core.take_command_environment()
+    answer = folder_guard.guard(a.repo, _operator_args(a.args), {**os.environ, **environment})
     print(json.dumps(versioned("govern", answer.payload())))
     return exitcodes.INCOMPLETE if answer.refusal else exitcodes.CLEAN
 

@@ -173,9 +173,9 @@ saw govern guard --json --repo <folder> -- <arguments>
 
 `saw govern guard` says how to run a git command line in a folder so that no program the folder's
 own git settings name starts: hooks, filters, diff and merge drivers, aliases, editors, pagers,
-credential helpers, signing, ssh and proxy commands. It reads the folder's settings, its worktrees'
-and submodules' and what they include, without running anything there, and answers `guarded: true`
-with:
+credential helpers, signing, ssh and proxy commands, archive filters and the tools git hands work
+to. It reads the settings of the repository the command acts on, its worktrees' and submodules' and
+what they include, without running anything there, and answers `guarded: true` with:
 
 - `arguments`: git's own options to put right after `git` and before your arguments;
 - `environment`: variables to set for that command;
@@ -188,7 +188,7 @@ keeps. A command that only reads or writes settings, such as `git config --get`,
 so it reports what the folder says.
 
 A command that is not safe to run answers `guarded: false` with the `reason`, for example one that
-names its own repository. Do not run it then. An editor uses this instead of keeping its own list of
+names a repository that cannot be read. Do not run it then. An editor uses this instead of keeping its own list of
 settings.
 
 ## Asking whether a tree is one saw let in

@@ -24,6 +24,11 @@ RAN = "a program the folder's settings name started"
 CREDENTIAL_QUESTION = "protocol=https\nhost=example.invalid\n\n"
 PROGRAM = "@PROGRAM@"
 SOURCE = "@SOURCE@"
+OUTPUT = "@OUTPUT@"
+OPERATOR_PROGRAMS = ("vim", "vimdiff", "firefox", "man")
+"""Programs on the operator's own path that a tool falls back to, each doing nothing."""
+MAY_BE_MISSING = frozenset({"hook.planted", "alias.command", "imap.tunnel"})
+"""Cases this git may not support. One whose program does not start unguarded is skipped."""
 
 # Each case: the marker its program leaves, the folder's settings naming it, and the operator's
 # command that reaches it.
@@ -43,6 +48,16 @@ CASES = (
      ("credential", "fill")),
     ("diff.external", "[diff]\n\texternal = @PROGRAM@\n", ("diff",)),
     ("core.sshCommand", "[core]\n\tsshCommand = @PROGRAM@\n", ("ls-remote", "ssh://127.0.0.1:1/x")),
+    ("tar.command", '[tar "planted"]\n\tcommand = @PROGRAM@\n',
+     ("archive", "--format=planted", "-o", OUTPUT, "HEAD")),
+    ("tar.gz.command", '[tar "tar.gz"]\n\tcommand = @PROGRAM@\n', ("archive", "-o", OUTPUT + ".tar.gz", "HEAD")),
+    ("difftool.path", '[diff]\n\ttool = vimdiff\n[difftool "vimdiff"]\n\tpath = @PROGRAM@\n', ("difftool", "-y")),
+    ("man.path", '[man "man"]\n\tpath = @PROGRAM@\n', ("help", "log")),
+    ("man.cmd", '[man]\n\tviewer = planted\n[man "planted"]\n\tcmd = @PROGRAM@\n', ("help", "log")),
+    ("browser.path", '[web]\n\tbrowser = firefox\n[browser "firefox"]\n\tpath = @PROGRAM@\n',
+     ("web--browse", "http://example.invalid/")),
+    ("imap.tunnel", "[imap]\n\ttunnel = @PROGRAM@\n\tfolder = drafts\n", ("imap-send",)),
+    ("alias.command", '[alias "sub"]\n\tcommand = !@PROGRAM@\n', ("sub",)),
 )
 
 # The operator's commands driven over the hostile repository, each reaching some of its programs.
@@ -65,30 +80,40 @@ class GuardSandbox(HostileRepoSandbox):
         self.operator_config = self.owned(self.root / "operator.gitconfig")
         self.operator_config.write_text(
             "[user]\n\tname = Operator Person\n\temail = operator@example.invalid\n", encoding="utf-8")
-        operator = mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(self.operator_config)})
+        tools = self.owned(self.root / "operator-path")
+        tools.mkdir()
+        for name in OPERATOR_PROGRAMS:
+            (tools / name).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            (tools / name).chmod(0o755)
+        operator = mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(self.operator_config),
+                                                "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"})
         operator.start()
         self.addCleanup(operator.stop)
 
     def answer(self, folder: Path, *args: str, environ: dict | None = None) -> folder_guard.Guard:
         return folder_guard.guard(folder, list(args), dict(os.environ) if environ is None else environ)
 
-    def guarded(self, folder: Path, *args: str) -> subprocess.CompletedProcess:
-        """Run the operator's command in the folder with the guard's answer applied."""
-        answer = self.answer(folder, *args)
+    def guarded(self, folder: Path, *args: str, named: dict | None = None) -> subprocess.CompletedProcess:
+        """Run the operator's command in the folder with the guard's answer applied. Takes the
+        folder, the arguments and the variables naming the command's repository."""
+        answer = self.answer(folder, *args, environ={**os.environ, **(named or {})})
         self.assertEqual("", answer.refusal, args)
-        return self._git(folder, [*answer.arguments, *args], dict(answer.environment))
+        return self._git(folder, [*answer.arguments, *args], {**(named or {}), **dict(answer.environment)})
 
-    def unguarded(self, folder: Path, *args: str) -> subprocess.CompletedProcess:
-        return self._git(folder, list(args), {})
+    def unguarded(self, folder: Path, *args: str, named: dict | None = None) -> subprocess.CompletedProcess:
+        return self._git(folder, list(args), dict(named or {}))
 
     def _git(self, folder: Path, argv: list[str], extra: dict) -> subprocess.CompletedProcess:
         environment = {key: value for key, value in os.environ.items()
-                       if key.lower() not in ("http_proxy", "https_proxy", "all_proxy")}
-        asks = "credential" in argv
-        return subprocess.run(["git", *argv], cwd=folder, env={**environment, **extra},
-                              input=CREDENTIAL_QUESTION if asks else None,
-                              stdin=None if asks else subprocess.DEVNULL,
+                       if key.lower() not in ("http_proxy", "https_proxy", "all_proxy", "browser")}
+        fed = (CREDENTIAL_QUESTION if "credential" in argv
+               else self._patch(folder) if "imap-send" in argv else None)
+        return subprocess.run(["git", *argv], cwd=folder, env={**environment, **extra}, input=fed,
+                              stdin=None if fed is not None else subprocess.DEVNULL,
                               capture_output=True, text=True, timeout=120)
+
+    def _patch(self, folder: Path) -> str:
+        return self.git(folder, "format-patch", "--stdout", "-1", "HEAD")
 
     def marks(self, name: str) -> HostileRepo:
         """A sentinel directory and the one program that leaves a marker in it."""
@@ -124,11 +149,12 @@ class TestTheAnswerKeepsEveryKindOfSettingFromStartingAProgram(GuardSandbox):
                 with (folder / ".git" / "config").open("a", encoding="utf-8") as config:
                     config.write(settings.replace(PROGRAM, program).replace(SOURCE, str(source)))
                 (folder / "f.txt").write_text("changed\n", encoding="utf-8")
-                argv = tuple(word.replace(SOURCE, str(source)) for word in command)
+                output = str(self.root / f"{marker}.out")
+                argv = tuple(word.replace(SOURCE, str(source)).replace(OUTPUT, output) for word in command)
 
                 self.unguarded(folder, *argv)
-                if marker == "hook.planted" and not marks.fired():
-                    self.skipTest("this git runs no hook defined in settings")
+                if marker in MAY_BE_MISSING and not marks.fired():
+                    self.skipTest(f"this git does not run {marker}")
                 self.assertEqual([marker], marks.fired(), "the case does not reach its program")
                 marks.clear()
 
@@ -260,6 +286,57 @@ class TestTheOperatorsOwnSettingsStillWork(GuardSandbox):
         self.assertEqual([], planted.fired(), RAN)
 
 
+class TestTheRepositoryTheCommandActsOn(GuardSandbox):
+    """The settings read are those of the repository git gives the command, wherever it names it."""
+
+    def assert_starts_only_unguarded(self, marks: HostileRepo, folder: Path, *args: str,
+                                     named: dict | None = None) -> None:
+        self.unguarded(folder, *args, named=named)
+        self.assertNotEqual([], marks.fired(), "the case does not reach its program")
+        marks.clear()
+        self.guarded(folder, *args, named=named)
+        self.assertEqual([], marks.fired(), RAN)
+
+    def test_a_bare_command_reads_the_folder_it_acts_on(self):
+        folder = self.plain_folder("folder")
+        source = self.plain_folder("source")
+        subprocess.run(["git", "init", "-q", "--bare", str(folder)], check=True, capture_output=True,
+                       stdin=subprocess.DEVNULL)
+        marks = self.marks("bare")
+        with (folder / "config").open("a", encoding="utf-8") as config:
+            config.write(f'[remote "origin"]\n\turl = {source}\n'
+                         f"\tuploadpack = {self._program(marks, 'remote.uploadpack')}\n")
+        self.assert_starts_only_unguarded(marks, folder, "--bare", "fetch", "-q", "origin")
+
+    def test_a_command_naming_another_repository_reads_that_repositorys_settings(self):
+        folder = self.plain_folder("folder")
+        other = self.plain_folder("other")
+        marks = self.marks("other")
+        self.git(other, "config", "core.fsmonitor", self._program(marks, "core.fsmonitor"))
+        self.write(other, "f.txt", "changed\n")
+        self.assert_starts_only_unguarded(marks, folder, "--git-dir", str(other / ".git"),
+                                          "--work-tree", str(other), "status")
+
+    def test_the_environment_naming_another_repository_reads_that_repositorys_settings(self):
+        folder = self.plain_folder("folder")
+        other = self.plain_folder("other")
+        marks = self.marks("other")
+        self.git(other, "config", "core.fsmonitor", self._program(marks, "core.fsmonitor"))
+        self.write(other, "f.txt", "changed\n")
+        self.assert_starts_only_unguarded(marks, folder, "status",
+                                          named={"GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other)})
+
+    def test_a_remote_helper_the_folder_names_is_not_started(self):
+        folder = self.plain_folder("folder")
+        marks = self.marks("helper")
+        (marks.bin / "git-remote-planted").symlink_to("mark")
+        self.git(folder, "remote", "add", "origin", "https://example.invalid/x")
+        self.git(folder, "config", "remote.origin.vcs", "planted")
+        with mock.patch.dict(os.environ, {"PATH": f"{marks.bin}{os.pathsep}{os.environ['PATH']}",
+                                          "GIT_ALLOW_PROTOCOL": f"{self.PROTOCOLS}:planted"}):
+            self.assert_starts_only_unguarded(marks, folder, "fetch", "-q", "origin")
+
+
 class TestTheAnswer(GuardSandbox):
     """What the answer holds, and when saw does not vouch for a command."""
 
@@ -298,12 +375,20 @@ class TestTheAnswer(GuardSandbox):
         unguarded = self.unguarded(folder, "rev-parse", "--git-path", "hooks").stdout
         self.assertEqual(unguarded, self.guarded(folder, "rev-parse", "--git-path", "hooks").stdout)
 
-    def test_a_command_that_names_its_own_repository_is_not_vouched_for(self):
+    def test_a_repository_the_command_names_that_cannot_be_read_is_not_vouched_for(self):
         folder = self.plain_folder("plain")
-        self.assertTrue(self.answer(folder, "--git-dir", str(folder / ".git"), "status").refusal)
-        self.assertTrue(self.answer(folder, "status", environ={**os.environ,
-                                                               "GIT_DIR": str(folder / ".git")}).refusal)
+        self.assertTrue(self.answer(folder, "--git-dir", str(self.root / "no-such"), "status").refusal)
         self.assertEqual("", self.answer(folder, "rev-parse", "--git-dir").refusal)
+
+    def test_a_program_nothing_keeps_from_running_is_not_vouched_for(self):
+        folder = self.plain_folder("plain")
+        self.git(folder, "config", "gc.recentObjectsHook", str(self.root / "keeps-objects"))
+        self.assertIn("gc.recentobjectshook", self.answer(folder, "gc").refusal)
+
+    def test_a_merge_tool_path_the_folder_names_is_set_again(self):
+        folder = self.plain_folder("plain")
+        self.git(folder, "config", "mergetool.vimdiff.path", str(self.root / "planted"))
+        self.assertIn(("mergetool.vimdiff.path", ""), self.answer(folder, "mergetool").settings)
 
     def test_settings_that_do_not_load_keep_the_command_from_running(self):
         folder = self.plain_folder("plain")

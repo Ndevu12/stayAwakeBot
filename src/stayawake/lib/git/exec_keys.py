@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import os
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -18,26 +19,29 @@ HOOKS_DIRECTORY = "hooks-directory"
 EXT_TRANSPORT = "ext-transport"
 EXT_ADDRESS = "ext-address"
 ENABLES_TRANSPORT = "enables-transport"
+ABSOLUTE_PATH = "absolute-path"
 _RUNS = frozenset({COMMAND, AFTER_BANG, UNLESS_BOOLEAN, HOOKS_DIRECTORY, EXT_TRANSPORT,
-                   EXT_ADDRESS, ENABLES_TRANSPORT})
+                   EXT_ADDRESS, ENABLES_TRANSPORT, ABSOLUTE_PATH})
 _DRIVERS = frozenset({"filter", "diff", "merge"})
 _BOOLEAN_WORDS = frozenset({"true", "false", "yes", "no", "on", "off", "1", "0", ""})
 _EXT_PREFIX = "ext::"
-_OVERRIDE_FIELDS = frozenset({"setting", "environment", "value", "reset", "leading_option"})
+_OVERRIDE_FIELDS = frozenset({"setting", "environment", "value", "reset", "leading_option", "refuse"})
 
 
 @dataclass(frozen=True)
 class Override:
     """How a folder's own value of a key is kept from running. `setting` or `environment` names
     what is set to `value` instead of the key, `reset` names the key whose empty value clears the
-    list this key adds to, and `leading_option` says a value starting with a git option is set
-    again too. With none of the first three, the key itself is set again."""
+    list this key adds to, `leading_option` says a value starting with a git option is set again
+    too, and `refuse` says nothing keeps it from running. With none of these, the key itself is set
+    again."""
 
     setting: str | None = None
     environment: str | None = None
     value: str = ""
     reset: str | None = None
     leading_option: bool = False
+    refuse: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,8 @@ class ExecKey:
             return None
         if self.runs == EXT_ADDRESS:
             return text[len(_EXT_PREFIX):] if text.lower().startswith(_EXT_PREFIX) else None
+        if self.runs == ABSOLUTE_PATH:
+            return text if os.path.isabs(os.path.expanduser(text)) else None
         return text[1:].lstrip() if self.bang and text.startswith("!") else text
 
 
@@ -110,7 +116,8 @@ def _override(key: str, raw: dict) -> Override:
         raise ValueError(f"git exec key {key}: `override` values are text")
     return Override(setting=texts["setting"], environment=texts["environment"],
                     value=texts["value"] or "", reset=texts["reset"],
-                    leading_option=bool(raw.get("leading_option", False)))
+                    leading_option=bool(raw.get("leading_option", False)),
+                    refuse=bool(raw.get("refuse", False)))
 
 
 @functools.lru_cache(maxsize=None)
@@ -119,6 +126,33 @@ def exec_keys(path: Path = KEYS_FILE) -> tuple[ExecKey, ...]:
     order; raises ValueError on a malformed file."""
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return tuple(_entry(raw) for raw in data.get("keys") or ())
+
+
+@dataclass(frozen=True)
+class RunsNothing:
+    """A key whose name looks like a program's but whose value git never runs from a folder's
+    settings, and why."""
+
+    key: str
+    why: str
+
+    def matches(self, key: str) -> bool:
+        """Say whether a listed key is this entry. Takes the listed key."""
+        return fnmatchcase(key.lower(), self.key)
+
+
+@functools.lru_cache(maxsize=None)
+def runs_nothing(path: Path = KEYS_FILE) -> tuple[RunsNothing, ...]:
+    """Load the keys that run nothing. Takes the file (default: the shipped list). Returns its
+    entries in file order, or raises ValueError on a malformed file."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    found = []
+    for raw in data.get("runs_nothing") or ():
+        key, why = (raw.get("key"), raw.get("why")) if isinstance(raw, dict) else (None, None)
+        if not isinstance(key, str) or key != key.lower() or not isinstance(why, str) or not why:
+            raise ValueError(f"git runs-nothing entry needs a lowercase `key` and a `why`: {raw!r}")
+        found.append(RunsNothing(key, why))
+    return tuple(found)
 
 
 @functools.lru_cache(maxsize=4096)
