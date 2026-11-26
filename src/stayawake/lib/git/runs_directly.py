@@ -10,12 +10,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
+from stayawake.lib.git import subcommand_options
 from stayawake.lib.git.run import UNTRUSTED, run
 
 TABLES_FILE = Path(__file__).resolve().parent.parent / "data" / "git_runs_directly.json"
 RUNS_AS_TYPED = "runs-as-typed"
 CHECKED = "checked"
 CHECKED_FOR_WHAT_IT_NAMES = "checked-for-what-it-names"
+RUNS_A_PROGRAM = "runs-a-program"
+WRITES_A_FILE = "writes-a-file"
+NOT_READ = "gives-an-option-git-does-not-take"
 _REMOTE_ADDRESSES = r"^(remote\..*\.(url|pushurl)|url\..*\.(insteadof|pushinsteadof))$"
 
 
@@ -110,8 +114,9 @@ def _names_commands(setting: str) -> bool:
 def _names_what_saw_checks(sub: str, rest: list[str], settings: list[str], here: Path, target: Path,
                            environ: Mapping[str, str]) -> bool:
     """Tell whether a command that brings no files names a setting that may run something, an output
-    file, a program, a hooks template, a configuration change or a fetch. Takes the subcommand, its arguments,
-    the settings the line gives, the folder it runs in, the folder it acts on and the environment."""
+    file, a program, an option git does not take, a hooks template, a configuration change or a
+    fetch. Takes the subcommand, its arguments, the settings the line gives, the folder it runs in,
+    the folder it acts on and the environment."""
     known = tables()
 
     def runs_something(key: str) -> bool:
@@ -123,18 +128,12 @@ def _names_what_saw_checks(sub: str, rest: list[str], settings: list[str], here:
     every = list(rest)
     options = rest[:rest.index("--")] if "--" in rest else list(rest)
     words = [arg for arg in options if not arg.startswith("-")]
-    if sub in known["subcommands_that_write_an_output"]:
-        return any(arg == "--output" or arg.startswith("--output=") for arg in every)
+    if named_anywhere(sub, every) is not None:
+        return True
     if sub in ("init", "maintenance"):
         return True
-    if sub == "push":
-        return (names_a_program(every, known["push_program_options"])
-                or _reaches_this_machine(options, known["push_options_with_a_value"], here, target))
-    if sub == "ls-remote":
-        return (names_a_program(every, known["ls_remote_program_options"])
-                or _reaches_this_machine(options, known["ls_remote_options_with_a_value"], here, target))
-    if sub == "grep":
-        return _opens_files_in_a_program(every)
+    if sub in ("push", "ls-remote"):
+        return _reaches_this_machine(options, sub, here, target)
     if sub == "config":
         return not _config_only_reads(every, words)
     if sub == "remote":
@@ -142,20 +141,69 @@ def _names_what_saw_checks(sub: str, rest: list[str], settings: list[str], here:
     return False
 
 
-def names_a_program(every: list[str], programs: tuple[str, ...]) -> bool:
-    """Tell whether any argument, `--` and the words after it included, may name a program to run: a
-    long option that is, or begins, a listed one. Takes the arguments and the listed options."""
-    for arg in every:
-        name = arg.split("=")[0]
-        if name.startswith("--") and len(name) > 2 and any(option.startswith(name) for option in programs):
-            return True
-    return False
+def named_by_its_options(sub: str, args: list[str]) -> str | None:
+    """Name what a subcommand's options, read the way git reads them up to `--`, have git do that
+    saw checks: run a program one names, write a file one names, or none git takes. A value in the
+    next word that may itself name such an option counts as one. Takes the subcommand and its arguments.
+    Returns RUNS_A_PROGRAM, WRITES_A_FILE, NOT_READ, also for a subcommand off the direct-run list,
+    or None for a subcommand read by its own rule and for options that name neither."""
+    if sub in tables()["subcommands_read_by_their_own_rule"]:
+        return None
+    if sub not in tables()["subcommands_that_bring_no_files"]:
+        return NOT_READ
+    programs, writes = subcommand_options.runs_or_writes(sub)
+    given = subcommand_options.options_given(sub, args)
+    if given is None:
+        written = args[:args.index("--")] if "--" in args else args
+        return _first_named(written, programs, writes) or NOT_READ
+    for option in given:
+        if option.name in programs:
+            return RUNS_A_PROGRAM
+        if option.name in writes:
+            return WRITES_A_FILE
+        named = _first_named([option.value] if option.value_is_the_next_word and option.value else [],
+                             programs, writes)
+        if named:
+            return named
+    return None
 
 
-def _reaches_this_machine(options: list[str], with_a_value: tuple[str, ...], here: Path, target: Path) -> bool:
+def named_anywhere(sub: str, args: list[str]) -> str | None:
+    """Name what a subcommand's arguments may have git do that saw checks: any argument, a value,
+    `--` and the words after it included, that is or begins an option that runs a program or writes
+    a file, then what its options name read the way git reads them. Takes the subcommand and its
+    arguments.
+    Returns RUNS_A_PROGRAM, WRITES_A_FILE, NOT_READ or None."""
+    programs, writes = subcommand_options.runs_or_writes(sub)
+    return _first_named(args, programs, writes) or named_by_its_options(sub, args)
+
+
+def _first_named(args: list[str], programs: frozenset[str], writes: frozenset[str]) -> str | None:
+    """Name the first argument that may name a program option or a written-file option. Takes the
+    arguments and both sets of options. Returns RUNS_A_PROGRAM, WRITES_A_FILE or None."""
+    for arg in args:
+        if _may_name(arg, programs):
+            return RUNS_A_PROGRAM
+        if _may_name(arg, writes):
+            return WRITES_A_FILE
+    return None
+
+
+def _may_name(arg: str, names: frozenset[str]) -> bool:
+    """Tell whether an argument may name one of the options: a long option that is, or is the
+    leading part of, one, or a bundle of short options holding one. Takes the argument and the
+    options."""
+    if arg.startswith("--"):
+        written = arg.partition("=")[0]
+        return len(written) > 2 and any(name.startswith(written) for name in names if name.startswith("--"))
+    return arg.startswith("-") and any(name[1] in arg[1:] for name in names if not name.startswith("--"))
+
+
+def _reaches_this_machine(options: list[str], sub: str, here: Path, target: Path) -> bool:
     """Tell whether a push or ls-remote may reach a repository on this machine: a target that is a
     path, or a remote whose configured or rewritten address is a path. Takes the options before
-    `--`, the options that take a value, the folder it runs in and the folder it acts on."""
+    `--`, the subcommand, the folder it runs in and the folder it acts on."""
+    with_a_value = subcommand_options.LISTED[sub].takes_the_next_word
     pushed_to = None
     index = 0
     while index < len(options):
@@ -177,21 +225,6 @@ def _reaches_this_machine(options: list[str], with_a_value: tuple[str, ...], her
     if pushed_to is not None and (":" in pushed_to or "@" in pushed_to):
         return False
     return _a_remote_is_local(target)
-
-
-def _opens_files_in_a_program(options: list[str]) -> bool:
-    """Tell whether any argument of a grep, `--` and the words after it included, may open the files it
-    finds in a program: a bundle of short options holding a listed one, or a long option abbreviating
-    one. Takes the grep's arguments."""
-    listed = tables()["grep_program_options"]
-    for arg in options:
-        name = arg.split("=")[0]
-        if name.startswith("--"):
-            if len(name) > 2 and any(option.startswith(name) for option in listed if option.startswith("--")):
-                return True
-        elif name.startswith("-") and any(option[1:] in arg[1:] for option in listed if not option.startswith("--")):
-            return True
-    return False
 
 
 def is_local_address(address: str) -> bool:

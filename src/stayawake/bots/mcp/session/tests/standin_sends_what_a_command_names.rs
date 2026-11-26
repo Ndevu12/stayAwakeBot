@@ -137,6 +137,42 @@ fn a_command_that_names_nothing_saw_checks_runs_as_typed() {
 }
 
 #[test]
+fn a_push_or_ls_remote_naming_a_program_by_a_leading_part_goes_to_saw_whatever_its_target() {
+    let terminal = Terminal::new("leading-part");
+    let absent = format!("{}/nodir:y", terminal.dir.display());
+    let sent: &[&[&str]] = &[
+        &["push", "--e=touch x", "./dst:x"],
+        &["push", "--e=touch x", &absent],
+        &["ls-remote", "--upload-pack=touch x", "../src"],
+        &["ls-remote", "--exec=touch x", "../src"],
+        &["ls-remote", "--u=touch x", "../src"],
+    ];
+    for args in sent {
+        let out = terminal.run(args, &[]);
+        let asked = terminal.took(&terminal.saw_log).unwrap_or_default();
+        assert!(asked.contains("--brings-no-files"), "{args:?}: saw was not told: {asked:?}");
+        assert!(terminal.took(&terminal.real_log).is_none(), "{args:?}: git ran before saw answered");
+        assert_ne!(out.status.code(), Some(0), "{args:?}");
+    }
+}
+
+#[test]
+fn an_option_git_does_not_take_goes_to_saw_and_one_starting_a_program_the_operator_set_runs() {
+    let terminal = Terminal::new("unread");
+    for args in [&["status", "--bogus"][..], &["log", "--bogus"], &["status", "-Z"], &["grep", "--o", "x"]] {
+        terminal.run(args, &[]);
+        assert!(terminal.took(&terminal.saw_log).is_some_and(|asked| asked.contains("--brings-no-files")), "{args:?}");
+        assert!(terminal.took(&terminal.real_log).is_none(), "{args:?}: git ran before saw answered");
+    }
+    for args in [&["commit", "-S", "-m", "x"][..], &["log", "--show-signature"], &["diff", "--ext-diff"], &["status"],
+                 &["log"], &["diff"]] {
+        terminal.run(args, &[]);
+        assert!(terminal.took(&terminal.saw_log).is_none(), "{args:?}: saw was asked");
+        assert!(terminal.took(&terminal.real_log).is_some(), "{args:?}: git did not run");
+    }
+}
+
+#[test]
 fn a_path_named_like_an_option_after_the_separator_is_asked() {
     let terminal = Terminal::new("separator");
     let out = terminal.run(&["log", "-1", "--", "--output=x"], &[]);

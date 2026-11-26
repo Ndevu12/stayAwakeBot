@@ -743,10 +743,22 @@ class ACommandThatWritesAFileItNamesIsAsked(_Fetched):
             with self.subTest(args=args):
                 self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], govern_command.RUNS_A_PROGRAM)
 
+    def test_an_unlisted_option_or_one_that_writes_a_file_is_asked(self):
+        for args, reason in ((["status", "--bogus"], govern_command.NAMES_AN_UNLISTED_OPTION),
+                             (["log", "--o", "-1"], govern_command.WRITES_A_FILE),
+                             (["log", "--out=x.sh", "-1"], govern_command.WRITES_A_FILE),
+                             (["repack", "--filter-to=../x"], govern_command.WRITES_A_FILE),
+                             (["checkout", "origin/evil"], govern_command.NAMES_AN_UNLISTED_OPTION)):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], reason)
+        self.assertFalse((self.open / "x.sh").exists())
+        self._untouched()
+
     def test_the_same_commands_without_them_run_as_typed(self):
         for args in (["diff", "HEAD", "origin/evil~1"], ["remote", "add", "other", str(self.upstream)],
                      ["log", "-1", "--", "--output=x"], ["grep", "-n", "new"], ["grep", "-eO", "new"],
-                     ["grep", "-n", "new", "--", "-O"]):
+                     ["grep", "-n", "new", "--", "-O"], ["log", "--show-signature", "-1"],
+                     ["diff", "--ext-diff", "HEAD", "origin/evil~1"], ["status", "-sb"], ["commit", "-S", "-m", "x"]):
             with self.subTest(args=args):
                 self._passes(*args, brings_no_files=True)
 

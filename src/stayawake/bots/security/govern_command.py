@@ -22,17 +22,16 @@ UPDATES_SUBMODULES = "a command that also updates submodules cannot be checked"
 PUSHES_INTO_A_FOLDER = "a push into a repository with files on this machine cannot be checked"
 RUNS_A_PROGRAM = "a command that runs a program it names cannot be checked"
 READS_A_REPOSITORY_HERE = "a command that reads a repository on this machine cannot be checked"
+NAMES_AN_UNLISTED_OPTION = ("a command with an option git does not list, or a shortened one that could mean "
+                            "several, cannot be checked")
 LETS_A_PUSH_WRITE = "the command lets a push change this folder's files; check it first"
 NO_WORKING_TREE = "the repository the command acts on has no working tree"
-_PUSH_PROGRAM_OPTIONS = ("--receive-pack", "--exec")
-_LS_REMOTE_PROGRAM_OPTIONS = ("--upload-pack", "--exec")
-_OPENS_FILES_IN_A_PROGRAM = "--open-files-in-pager"
-_PUSH_OPTIONS_WITH_A_VALUE = frozenset({"--repo", "-o", "--push-option", "--receive-pack", "--exec"})
 _LOCAL_PREFIXES = ("/", "./", "../", "~", "file:")
 _SCHEDULES_FETCHES = frozenset({"start", "register"})
 _SAYS_NO = frozenset({"no", "false", "off", "0"})
-_WRITES_AN_OUTPUT = frozenset({"diff", "diff-files", "diff-index", "diff-tree", "log", "show", "whatchanged",
-                               "range-diff", "format-patch"})
+_ANSWER_FOR_WHAT_ITS_OPTIONS_NAME = {runs_directly.RUNS_A_PROGRAM: RUNS_A_PROGRAM,
+                                     runs_directly.WRITES_A_FILE: WRITES_A_FILE,
+                                     runs_directly.NOT_READ: NAMES_AN_UNLISTED_OPTION}
 _BRINGS_NOTHING_BY_WORD = {"worktree": subcommand_options.WORKTREE_WORDS_THAT_BRING_NOTHING,
                            "submodule": subcommand_options.SUBMODULE_WORDS_THAT_BRING_NOTHING}
 
@@ -132,9 +131,9 @@ def _sent_for_what_it_names(folder: Path, top: "Path | None", command: TypedComm
     answer."""
     rest = command.rest
     before_paths = rest[:rest.index("--")] if "--" in rest else rest
-    if command.sub in _WRITES_AN_OUTPUT and any(arg == "--output" or arg.startswith("--output=")
-                                                 for arg in before_paths):
-        return Answer(UNCHECKED, WRITES_A_FILE)
+    named = runs_directly.named_by_its_options(command.sub, list(rest))
+    if named is not None:
+        return Answer(UNCHECKED, _ANSWER_FOR_WHAT_ITS_OPTIONS_NAME[named])
     if command.sub == "remote":
         words = [arg for arg in before_paths if not arg.startswith("-")]
         if words[:1] == ["update"] or (words[:1] == ["add"] and any(
@@ -144,8 +143,6 @@ def _sent_for_what_it_names(folder: Path, top: "Path | None", command: TypedComm
         return _push(folder, rest)
     if command.sub == "ls-remote":
         return _ls_remote(folder, rest)
-    if command.sub == "grep" and _opens_files_in_a_program(rest):
-        return Answer(UNCHECKED, RUNS_A_PROGRAM)
     if command.sub == "maintenance":
         return _maintenance(folder, rest)
     if command.sub == "init":
@@ -192,10 +189,9 @@ def _lets_a_push_write(settings) -> bool:
 
 
 def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
-    """Answer a push: one that runs a program it names, or that reaches a repository with a working
-    tree on this machine, asks first. Takes where it runs and its arguments. Returns the answer."""
-    if runs_directly.names_a_program(list(rest), _PUSH_PROGRAM_OPTIONS):
-        return Answer(UNCHECKED, RUNS_A_PROGRAM)
+    """Answer a push: one that reaches a repository with a working tree on this machine asks first.
+    Takes where it runs and its arguments. Returns the answer."""
+    with_a_value = subcommand_options.LISTED["push"].takes_the_next_word
     words: list[str] = []
     named = ""
     index = 0
@@ -203,7 +199,7 @@ def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
         arg = rest[index]
         index += 1
         name, joined, value = arg.partition("=")
-        if name in _PUSH_OPTIONS_WITH_A_VALUE:
+        if name in with_a_value:
             given = value if joined else (rest[index] if index < len(rest) else "")
             index += 0 if joined else 1
             named = given if name == "--repo" else named
@@ -219,22 +215,13 @@ def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
 
 
 def _ls_remote(folder: Path, rest: tuple[str, ...]) -> Answer:
-    """Answer an ls-remote: one that runs a program it names, or that reads a repository on this
-    machine, asks first. Takes where it runs and its arguments. Returns the answer."""
-    if runs_directly.names_a_program(list(rest), _LS_REMOTE_PROGRAM_OPTIONS):
-        return Answer(UNCHECKED, RUNS_A_PROGRAM)
+    """Answer an ls-remote: one that reads a repository on this machine asks first. Takes where it
+    runs and its arguments. Returns the answer."""
     words = subcommand_options.read("ls-remote", list(rest)).words
     targets = words[:1] or tuple(_remotes(folder, push=False))
     if any(_local_place(folder, target, push=False) is not None for target in targets):
         return Answer(UNCHECKED, READS_A_REPOSITORY_HERE)
     return Answer(PASSTHROUGH, "the command brings no files in")
-
-
-def _opens_files_in_a_program(rest: tuple[str, ...]) -> bool:
-    """Tell whether a grep opens the files it finds in a program. Takes its arguments. Returns the
-    answer."""
-    names = subcommand_options.read("grep", list(rest)).names()
-    return any(name == "-O" or (len(name) > 3 and _OPENS_FILES_IN_A_PROGRAM.startswith(name)) for name in names)
 
 
 def _remotes(folder: Path, *, push: bool = True) -> list[str]:

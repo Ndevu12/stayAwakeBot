@@ -166,7 +166,8 @@ enum Sent {
 
 /// Decide whether `(tool, args)` goes to `saw govern` first: every git command the stand-in cannot
 /// read with certainty as bringing no files into the folder, one that brings none but names a
-/// setting, an output file, a program, a hooks template, a configuration change or a fetch, and
+/// setting, an output file, a program, an option git does not take, a hooks template, a
+/// configuration change or a fetch, and
 /// gh's bringing-files commands.
 fn sent_to_saw(tool: &str, args: &[String], real: &Path) -> Sent {
     match tool {
@@ -196,7 +197,7 @@ fn git_sent(args: &[String], real: &Path) -> Sent {
 }
 
 /// Whether a command that brings no files names a setting that may run something, an output file,
-/// a program, a hooks template, a configuration change or a fetch.
+/// a program, an option git does not take, a hooks template, a configuration change or a fetch.
 fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: &GitReader) -> bool {
     let runs_something = |key: &&str| {
         let key = key.to_ascii_lowercase();
@@ -210,13 +211,9 @@ fn names_what_saw_checks(sub: &str, rest: &[String], settings: &[&str], reader: 
     let options: Vec<&str> = every.iter().copied().take_while(|arg| *arg != "--").collect();
     let words: Vec<&str> = options.iter().copied().filter(|arg| !arg.starts_with('-')).collect();
     match sub {
-        _ if table("subcommands_that_write_an_output").contains(&sub) => every.iter().any(|arg| *arg == "--output" || arg.starts_with("--output=")),
+        _ if options_send_it_to_saw(sub, &every) => true,
         "init" | "maintenance" => true,
-        "push" => names_a_program(&every, "push_program_options")
-            || reaches_this_machine(&options, "push_options_with_a_value", reader),
-        "ls-remote" => names_a_program(&every, "ls_remote_program_options")
-            || reaches_this_machine(&options, "ls_remote_options_with_a_value", reader),
-        "grep" => opens_files_in_a_program(&every),
+        "push" | "ls-remote" => reaches_this_machine(&options, sub, reader),
         "config" => !config_only_reads(&every, &words),
         "remote" => words.first() == Some(&"update")
             || (words.first() == Some(&"add") && every.iter().any(|arg| *arg == "-f" || *arg == "--fetch")),
@@ -230,25 +227,201 @@ struct GitReader<'a> {
     folder: PathBuf,
 }
 
-/// Whether any argument, `--` and the words after it included, may name a program to run: a long
-/// option that is, or begins, one the named table lists.
-fn names_a_program(every: &[&str], programs: &str) -> bool {
-    every.iter().any(|arg| {
-        let name = arg.split('=').next().unwrap_or("");
-        name.starts_with("--") && name.len() > 2 && table(programs).iter().any(|o| o.starts_with(name))
+/// The options git takes for each subcommand saw reads, which saw reads too.
+const OPTIONS: &str = include_str!("../../../../../lib/data/git_subcommand_options.json");
+
+/// The options git takes for one subcommand, by the value each takes, with those whose value names
+/// a program to run and those that name a file git writes.
+#[derive(Default)]
+struct Options {
+    next_word: Vec<String>,
+    rest_of_word: Vec<String>,
+    no_word: Vec<String>,
+    long_names: Vec<String>,
+    runs_a_program: Vec<String>,
+    writes_a_file: Vec<String>,
+    /// Whether the table lists every option git takes without a value too: false where it gives
+    /// them as null.
+    lists_every_option: bool,
+    /// Whether git passes an option it does not take through as output.
+    echoes: bool,
+}
+
+/// The option table: each subcommand's options, and the options every subcommand takes.
+struct OptionTable {
+    subcommands: HashMap<String, Options>,
+    every_subcommand_takes: Vec<String>,
+}
+
+/// Return the option table built into the stand-in. Panics when it cannot be read.
+fn option_table() -> &'static OptionTable {
+    static READ: OnceLock<OptionTable> = OnceLock::new();
+    READ.get_or_init(|| {
+        let table: serde_json::Value = serde_json::from_str(OPTIONS).expect("saw's git option table");
+        let list = |entry: &serde_json::Value, key: &str| -> Vec<String> {
+            entry.get(key).and_then(serde_json::Value::as_array).into_iter().flatten()
+                .filter_map(|name| name.as_str().map(String::from)).collect()
+        };
+        let mut subcommands = HashMap::new();
+        for (sub, entry) in table["subcommands"].as_object().expect("saw's git option table lists subcommands") {
+            let mut options = Options {
+                next_word: list(entry, "takes_the_next_word"),
+                rest_of_word: list(entry, "takes_the_rest_of_its_word"),
+                no_word: list(entry, "takes_no_word"),
+                runs_a_program: list(entry, "runs_a_program"),
+                writes_a_file: list(entry, "writes_a_file"),
+                lists_every_option: !entry.get("takes_no_word").is_some_and(serde_json::Value::is_null),
+                echoes: entry.get("echoes_options_it_does_not_take").and_then(serde_json::Value::as_bool) == Some(true),
+                ..Options::default()
+            };
+            let own: Vec<String> = [&options.next_word, &options.rest_of_word, &options.no_word].into_iter().flatten().cloned().collect();
+            for group in list(entry, "with") {
+                let group = &table["option_groups"][group.as_str()];
+                let added = |key: &str| list(group, key).into_iter().filter(|name| !own.contains(name)).collect::<Vec<_>>();
+                options.next_word.extend(added("takes_the_next_word"));
+                options.rest_of_word.extend(added("takes_the_rest_of_its_word"));
+                options.no_word.extend(added("takes_no_word"));
+                options.runs_a_program.extend(list(group, "runs_a_program"));
+                options.writes_a_file.extend(list(group, "writes_a_file"));
+            }
+            let mut long_names: Vec<String> = [&options.next_word, &options.rest_of_word, &options.no_word].into_iter()
+                .flatten().filter(|name| name.starts_with("--")).cloned().collect();
+            long_names.sort();
+            long_names.dedup();
+            options.long_names = long_names;
+            subcommands.insert(sub.clone(), options);
+        }
+        OptionTable { subcommands, every_subcommand_takes: list(&table, "every_subcommand_takes") }
     })
+}
+
+/// Whether a subcommand's options send it to saw: any argument, a value, `--` and the words after
+/// it included, that is or begins an option that runs a program or writes a file, an option git
+/// does not take, a leading part naming several, or an option git reads that runs a program or
+/// writes a file. False for a subcommand with its own rule.
+fn options_send_it_to_saw(sub: &str, rest: &[&str]) -> bool {
+    if table("subcommands_read_by_their_own_rule").contains(&sub) {
+        return false;
+    }
+    let (programs, writes) = runs_or_writes(sub);
+    if rest.iter().any(|arg| may_name(arg, &programs) || may_name(arg, &writes)) {
+        return true;
+    }
+    options_given(sub, rest).is_none_or(|given| given.iter().any(|name| programs.contains(name) || writes.contains(name)))
+}
+
+/// The options of a subcommand, and of the words it takes, whose value names a program to run,
+/// and those that name a file git writes.
+fn runs_or_writes(sub: &str) -> (Vec<String>, Vec<String>) {
+    let (mut programs, mut writes) = (Vec::new(), Vec::new());
+    for (name, options) in &option_table().subcommands {
+        if name == sub || name.strip_prefix(sub).is_some_and(|word| word.starts_with(' ')) {
+            programs.extend(options.runs_a_program.iter().cloned());
+            writes.extend(options.writes_a_file.iter().cloned());
+        }
+    }
+    (programs, writes)
+}
+
+/// Whether an argument may name one of the options: a long option that is, or is the leading part
+/// of, one, or a bundle of short options holding one.
+fn may_name(arg: &str, names: &[String]) -> bool {
+    if arg.starts_with("--") {
+        let written = arg.split('=').next().unwrap_or("");
+        written.len() > 2 && names.iter().any(|name| name.starts_with("--") && name.starts_with(written))
+    } else {
+        arg.starts_with('-') && names.iter().any(|name| !name.starts_with("--") && arg[1..].contains(&name[1..]))
+    }
+}
+
+/// Read every option of a subcommand's arguments up to `--` or `--end-of-options` the way git does:
+/// in full from a unique leading part, its `--no-` form, a bundle of short options, and a value
+/// joined to it or in the next word. Returns each option's full name, None for an option git does
+/// not take or cannot tell apart.
+fn options_given(sub: &str, args: &[&str]) -> Option<Vec<String>> {
+    let table = option_table();
+    let mut options = table.subcommands.get(sub).filter(|options| options.lists_every_option)?;
+    let mut given = Vec::new();
+    let mut word_seen = false;
+    let mut index = 0;
+    while let Some(arg) = args.get(index).copied() {
+        index += 1;
+        if arg == "--" || arg == "--end-of-options" {
+            break;
+        }
+        if arg == "-" || !arg.starts_with('-') {
+            if !word_seen {
+                if let Some(word) = table.subcommands.get(&format!("{sub} {arg}")) {
+                    options = word;
+                }
+            }
+            word_seen = true;
+            continue;
+        }
+        if options.echoes || table.every_subcommand_takes.iter().any(|name| name == arg) {
+            given.push(arg.to_string());
+            continue;
+        }
+        if arg.starts_with("--") {
+            let (written, joined) = arg.split_once('=').map_or((arg, false), |(written, _)| (written, true));
+            let name = full_long_name(options, written)?;
+            if !joined && options.next_word.contains(&name) {
+                index += 1;
+            }
+            given.push(name);
+            continue;
+        }
+        let mut bundle = &arg[1..];
+        while let Some(first) = bundle.chars().next() {
+            if first.is_ascii_digit() && options.no_word.iter().any(|name| name == "-NUM") {
+                bundle = bundle.trim_start_matches(|c: char| c.is_ascii_digit());
+                given.push("-NUM".to_string());
+                continue;
+            }
+            let name = format!("-{first}");
+            bundle = &bundle[first.len_utf8()..];
+            if options.next_word.contains(&name) {
+                index += usize::from(bundle.is_empty());
+                given.push(name);
+                break;
+            }
+            if options.rest_of_word.contains(&name) {
+                given.push(name);
+                break;
+            }
+            if !options.no_word.contains(&name) {
+                return None;
+            }
+            given.push(name);
+        }
+    }
+    Some(given)
+}
+
+/// The long option git reads a written one for: itself, or the one option it begins. None for any
+/// other.
+fn full_long_name(options: &Options, written: &str) -> Option<String> {
+    if options.long_names.iter().any(|name| name == written) {
+        return Some(written.to_string());
+    }
+    let mut leading = options.long_names.iter().filter(|name| written.len() > 2 && name.starts_with(written));
+    match (leading.next(), leading.next()) {
+        (Some(only), None) => Some(only.clone()),
+        _ => None,
+    }
 }
 
 /// Whether a push or ls-remote may reach a repository on this machine: a target that is a path, or
 /// a remote whose configured or rewritten address is a path. Takes the options before `--` and the
-/// table of the options that take a value.
-fn reaches_this_machine(options: &[&str], with_a_value: &str, reader: &GitReader) -> bool {
+/// subcommand.
+fn reaches_this_machine(options: &[&str], sub: &str, reader: &GitReader) -> bool {
+    let with_a_value = option_table().subcommands.get(sub).map(|options| options.next_word.as_slice()).unwrap_or(&[]);
     let mut target = None;
     let mut index = 0;
     while let Some(arg) = options.get(index).copied() {
         index += 1;
         let name = arg.split('=').next().unwrap_or("");
-        if table(with_a_value).contains(&name) {
+        if with_a_value.iter().any(|option| option == name) {
             let value = if arg.contains('=') { arg.splitn(2, '=').nth(1) } else { index += 1; options.get(index - 1).copied() };
             if name == "--repo" {
                 target = value;
@@ -262,20 +435,6 @@ fn reaches_this_machine(options: &[&str], with_a_value: &str, reader: &GitReader
         Some(target) if target.contains(':') || target.contains('@') => false,
         _ => a_remote_is_local(reader),
     }
-}
-
-/// Whether any argument of a grep, `--` and the words after it included, may open the files it finds
-/// in a program: a bundle of short options holding a listed one, or a long option abbreviating one.
-fn opens_files_in_a_program(options: &[&str]) -> bool {
-    let listed = table("grep_program_options");
-    options.iter().any(|arg| {
-        let name = arg.split('=').next().unwrap_or("");
-        if name.starts_with("--") {
-            name.len() > 2 && listed.iter().any(|option| option.starts_with("--") && option.starts_with(name))
-        } else {
-            name.starts_with('-') && listed.iter().any(|option| !option.starts_with("--") && arg[1..].contains(&option[1..]))
-        }
-    })
 }
 
 /// Whether an address names a place on this machine: a `file:` address, a drive letter, no `:`, or a

@@ -15,6 +15,7 @@ from tests.support.gitrepo import GitSandbox
 
 _USAGE_LINE = re.compile(r"^(?:usage|\s*or):\s+git\s+\S+\s*(?P<rest>.*)$")
 _LEADING_OPTION = re.compile(r"\[-[\w-]+\]")
+_NUMBER_LINE = re.compile(r"^\s+-NUM\b")
 _OPTION_LINE = re.compile(r"^\s+(?P<short>-\w)?(?:, )?(?P<long>--(?:\[no-\])?\w[\w-]*)?"
                           r"(?P<optional>\[=?[^\]\s]*\])?"
                           r"(?: (?P<required>[<({\[]\S*|\S*[()<>\[\]|]\S*|\.\.\.))?")
@@ -43,6 +44,9 @@ def options_in_usage(text: str) -> dict[str, str]:
     long, mapped to required, optional or none for the value it takes."""
     found = {}
     for line in text.splitlines():
+        if _NUMBER_LINE.match(line):
+            found["-NUM"] = "none"
+            continue
         match = _OPTION_LINE.match(line)
         if not match or not (match.group("short") or match.group("long")):
             continue
@@ -71,6 +75,10 @@ def words_in_usage(text: str) -> tuple[set[str], set[str]]:
     return words, leading
 
 
+_GIT_VERSION = subprocess.run(["git", "--version"], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL).stdout.strip()
+
+
 def _help_all(repo, sub: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *sub.split(), "--help-all"], capture_output=True, text=True,
                           stdin=subprocess.DEVNULL).stdout
@@ -88,10 +96,12 @@ class TheOptionsGitTakesAValueFor(GitSandbox):
     def test_every_option_the_git_under_test_lists_is_read_as_it_reads_it(self):
         repo = self.new_repo()
         for sub, table in subcommand_options.LISTED.items():
+            if not table.lists_its_options or table.echoes_options_it_does_not_take:
+                continue
             listed = options_in_usage(_help_all(repo, sub))
             taking_a_word = table.takes_the_next_word
             required = {name for name, kind in listed.items() if kind == "required"}
-            with self.subTest(sub=sub):
+            with self.subTest(sub=sub, git=_GIT_VERSION):
                 self.assertTrue(listed, f"git {sub} listed no options")
                 self.assertEqual(sorted(required - taking_a_word), [])
                 self.assertEqual(sorted(name for name, kind in listed.items()
@@ -104,6 +114,8 @@ class TheOptionsGitTakesAValueFor(GitSandbox):
     def test_every_option_saw_lets_run_as_typed_is_one_git_lists_without_a_value(self):
         repo = self.new_repo()
         for sub, table in subcommand_options.LISTED.items():
+            if not table.lists_its_options or table.echoes_options_it_does_not_take:
+                continue
             if table.takes_no_word is None:
                 continue
             listed = options_in_usage(_help_all(repo, sub))
