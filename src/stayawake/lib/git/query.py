@@ -14,9 +14,9 @@ from pathlib import Path
 
 from stayawake.lib.git import remote as gitremote
 from stayawake.lib.git.history_tips import history_tips
-from stayawake.lib.git.objects import (batch_objects, blob_text, link_targets, own_env, own_view,
-                                       own_view_fed)
-from stayawake.lib.git.run import answer, run, stdout, stdout_bytes, stdout_bytes_fed
+from stayawake.lib.git.objects import (FILE_AND_LINK_MODES, batch_objects, blob_text, link_targets, own_env,
+                                       own_view, own_view_fed)
+from stayawake.lib.git.run import UNTRUSTED, answer, run, stdout, stdout_bytes, stdout_bytes_fed
 
 
 def composed_path(path: str, *, fold: bool) -> str:
@@ -103,6 +103,98 @@ def ancestry(repo: str | Path, ancestor: str, descendant: str) -> bool | None:
     if res is None or res.returncode not in (0, 1):
         return None
     return res.returncode == 0
+
+
+def hooks_folder(repo: str | Path) -> Path | None:
+    """Find the folder git runs `repo`'s hooks from: `core.hooksPath`, taken from the top of the
+    working tree when relative, else the git directory's `hooks`. Takes the repository. Returns the
+    folder, or None when git could not say."""
+    top = stdout(repo, ["rev-parse", "--show-toplevel"]).strip()
+    configured = stdout(repo, ["config", "--get", "core.hooksPath"]).strip()
+    gitdir = stdout(repo, ["rev-parse", "--path-format=absolute", "--git-dir"]).strip()
+    if not top or not gitdir:
+        return None
+    return Path(top) / (Path(os.path.expanduser(configured)) if configured else Path(gitdir) / "hooks")
+
+
+def hook_files(repo: str | Path, paths: tuple[str, ...], folds_case=None,
+               composes=None) -> tuple[str, ...] | None:
+    """Pick the paths that lie in the folder git runs `repo`'s hooks from: `core.hooksPath`, taken
+    from the top of the working tree when relative, else the git directory's `hooks`. Names compare
+    composed where that folder's filesystem composes them, and case-folded where it folds case.
+    Takes the repository, paths relative to its working tree, and the tests of whether a filesystem
+    folds case and composes names, `case_folds` and `composes_names` when none is given. Returns
+    those paths, or None when git could not say where its hooks run from."""
+    top = stdout(repo, ["rev-parse", "--show-toplevel"]).strip()
+    folder = hooks_folder(repo)
+    if not top or folder is None:
+        return None
+    fold = (folds_case or case_folds)(folder)
+    compose = (composes or composes_names)(folder)
+    hooks = _compared(os.path.realpath(folder), fold, compose)
+    picked = []
+    for rel in paths:
+        where = _compared(os.path.normpath(Path(top) / rel), fold, compose)
+        if where == hooks or where.startswith(hooks.rstrip(os.sep) + os.sep):
+            picked.append(rel)
+    return tuple(picked)
+
+
+def _compared(path: str, fold: bool, compose: bool) -> str:
+    """Spell a path the way a filesystem compares it. Takes the path and whether that filesystem folds
+    case and composes names. Returns the spelling."""
+    spelled = unicodedata.normalize("NFC", path) if compose else path
+    return spelled.casefold() if fold else spelled
+
+
+def composes_names(path: str | Path) -> bool:
+    """Tell whether the filesystem holding `path` reads a name and its other Unicode composition as
+    one: the nearest existing folder whose name has two compositions is the same folder spelled the
+    other way. Takes the path. Returns the answer, and True for a path with no such folder above it."""
+    probe = Path(path)
+    while probe.parent != probe:
+        other = unicodedata.normalize("NFD", probe.name)
+        if other == probe.name:
+            other = unicodedata.normalize("NFC", probe.name)
+        if other != probe.name and os.path.isdir(probe):
+            try:
+                return os.path.samefile(probe, probe.with_name(other))
+            except OSError:
+                return False
+        probe = probe.parent
+    return True
+
+
+def case_folds(path: str | Path) -> bool:
+    """Tell whether the filesystem holding `path` reads names without regard to letter case: the
+    nearest existing folder with a cased letter in its name is the same folder spelled with its case
+    swapped. Takes the path. Returns the answer, and True for a path with no such folder above it."""
+    probe = Path(path)
+    while probe.parent != probe:
+        if probe.name.swapcase() != probe.name and os.path.isdir(probe):
+            try:
+                return os.path.samefile(probe, probe.with_name(probe.name.swapcase()))
+            except OSError:
+                return False
+        probe = probe.parent
+    return True
+
+
+def files_brought(repo: str | Path, base: str, head: str, *, context=UNTRUSTED) -> tuple[str, ...] | None:
+    """List each file or link `head` records that differs from `base`. Takes the repository, both
+    commits and the context git runs in. Returns the paths, or None when git could not list them."""
+    if base == head:
+        return ()
+    listed = stdout_bytes(repo, ["diff", "--raw", "-z", "--no-renames", base, head], context=context)
+    if listed is None:
+        return None
+    names = []
+    fields = listed.split(b"\0")
+    for described, path in zip(fields[0::2], fields[1::2]):
+        modes = described.split(b" ")
+        if len(modes) >= 2 and modes[1] in FILE_AND_LINK_MODES:
+            names.append(os.fsdecode(path))
+    return tuple(names)
 
 
 def tracked_under(repo: str | Path, pathspec: str | Path) -> list[str]:

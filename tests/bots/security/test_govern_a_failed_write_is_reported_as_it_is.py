@@ -12,7 +12,7 @@ from unittest import mock
 
 from stayawake import cli
 from stayawake.lib.git import incoming
-from stayawake.lib.git.write import working_tree
+from stayawake.lib.git.write import replayed
 from tests.support.gitrepo import GitSandbox
 
 
@@ -55,13 +55,7 @@ class AFailedWriteIsReportedAsItIs(GitSandbox):
         self.assertEqual(self.rev(self.repo), self.base)
 
     def test_a_folder_that_cannot_be_put_back_is_said_to_have_changed(self):
-        real = working_tree._write_paths
-        calls = []
-
-        def write_then_refuse_the_way_back(*args, **kwargs):
-            calls.append(args[2])
-            return real(*args, **kwargs) if len(calls) == 1 else False
-        with mock.patch.object(working_tree, "_write_paths", side_effect=write_then_refuse_the_way_back):
+        with mock.patch.object(replayed._Backups, "put_back", return_value=False):
             applied = self._apply()
         self.assertFalse(applied["applied"])
         self.assertEqual(applied["reason"], incoming.WRITE_LEFT_PART_WAY)

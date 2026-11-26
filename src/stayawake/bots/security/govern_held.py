@@ -48,21 +48,24 @@ def decision(repo: str, into: str, commit: str, verdict: str) -> dict:
     return body
 
 
-def next_steps(verdict: str, findings: list[dict], already_there: list[dict], commit: str) -> list[str]:
-    """Write what the user should do about a held update. Takes the verdict, the update's findings,
-    the ones already in the folder and the checked commit. Returns the steps."""
+def next_steps(verdict: str, findings: list[dict], already_there: list[dict], commit: str, *,
+               can_let_in: bool = True) -> list[str]:
+    """Write what the user should do about a held update. Takes the verdict, the update's
+    findings, the ones already in the folder, the checked commit and whether saw can let it in.
+    Returns the steps."""
     steps: list[str] = []
     short = commit[:12]
     if verdict == INFECTED:
-        steps += [f"Do not merge, check out or run anything from {short}.",
-                  "Tell whoever pushed it: their account or machine may be compromised.",
+        steps += [f"Do not merge, check out or run anything from {short}."] if short else []
+        steps += ["Tell whoever pushed it: their account or machine may be compromised.",
                   "If it is already in your own branches, run `saw fix`, then `saw fix amend`.",
                   "Before you change any password, run `saw audit`."]
     elif verdict == SUSPICIOUS:
         for finding in findings:
             steps.append(f"Check {finding.get('path')}: {finding.get('description')}. "
                          "Make sure it is yours.")
-        steps.append(f"If it is, let {short} in; saw applies exactly the update it checked.")
+        if can_let_in:
+            steps.append(f"If it is, let {short} in; saw applies exactly the update it checked.")
     for finding in already_there:
         steps.append(f"The update changes {finding.get('path')}; this was already there before it: "
                      f"{finding.get('description')}")

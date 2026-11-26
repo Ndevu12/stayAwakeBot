@@ -98,16 +98,11 @@ jobs:
           printf 'hello\n' > "$dir/readme.txt"
           saw scan "$(cygpath -w "$dir")" --json --no-stream --no-advisories
 
-  windows-own-files:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-
-      - name: Set up toolchain
-        uses: ./.github/actions/setup
+      - name: Check every file an update brings on a case-insensitive disk
+        run: python -m unittest -v tests.bots.security.test_govern_checks_every_name
 
       - name: Save saw's own files and harden on Windows
+        if: ${{ !cancelled() }}
         run: >-
           python -m unittest -v
           tests.utils.test_saws_files_are_written_on_windows

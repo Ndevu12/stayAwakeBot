@@ -22,12 +22,14 @@ from pathlib import Path
 from stayawake.utils import atomicwrite, env, procsnap
 
 from stayawake.utils.pathsafe import is_safe_write_target
-from stayawake.utils import textsafe
+from stayawake.utils import pathsafe, textsafe
 from stayawake.utils.json_documents import versioned
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.contexts import empty_hooks_dir
 from stayawake.bots.security import checkout_writes, clean_contents, clean_ledger, hook_status, hookscript, outbound, push_record
+from stayawake.lib.git import blob_copies
+from stayawake.lib.git.query import files_brought
 from stayawake.lib.git.run import stdout_bytes
 from stayawake.lib.git.write.working_tree import uncommitted_paths
 from stayawake.bots.security.found import confirmed_first, left_out_line, what_it_is, where_it_is
@@ -41,7 +43,7 @@ from stayawake.bots.security.hook_outcome import (
     SETTLED as _SETTLED, STILL_IN_SETTINGS, UNREAD, UNVERIFIED, UPDATED, WRITTEN, YOUR_PUSH_HOOK_KEPT,
     YOURS_RUNS_AFTER, Action, lines as _outcome_lines)
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
-from stayawake.bots.security.scanner import scan_target
+from stayawake.bots.security.scanner import joined, scan_target, unreadable
 from stayawake.bots.security.config import resolve_config, usable as _config_usable
 
 _MARKER = hookscript.MARKER
@@ -1428,14 +1430,14 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
         if old == _NULL_REV or (_first_checkout_after_a_clone(root)
                                 and not _scanned_clean(root, _clean_key(old, config_path))):
             return None, "clone"
-        changed = _changed_files(root, old, new)
+        changed = files_brought(root, old, new)
         if changed is None:
             return None, "checkout"
         return (changed, "checkout") if changed else (False, None)
     if event == "post-merge":
         if not gitutil.run_ok(root, ["rev-parse", "--verify", "ORIG_HEAD"]):
             return None, "pull"
-        changed = _changed_files(root, "ORIG_HEAD", "HEAD")
+        changed = files_brought(root, "ORIG_HEAD", "HEAD")
         if changed is None:
             return None, "pull"
         return (changed, "pull") if changed else (False, None)
@@ -1447,7 +1449,7 @@ def _scan_scope(event: str, argv: list[str], root: Path, config_path: str | None
             return None, "rewrite"
         changed: set[str] = set()
         for old, new in ranges:
-            files = _changed_files(root, old, new)
+            files = files_brought(root, old, new)
             if files is None:
                 return None, "rewrite"
             changed.update(files)
@@ -1533,26 +1535,42 @@ def _first_checkout_after_a_clone(root: Path) -> bool:
         len(moves) == 2 and moves[1].startswith(_HEAD_MOVED_BY_A_CLONE))
 
 
-def _changed_files(root: Path, base: str, head: str) -> tuple[str, ...] | None:
-    """List the repo-relative paths that changed `base..head` and still exist as regular files.
-    Takes the root and the two commits. Returns them, or None when git could not list them."""
-    diff = stdout_bytes(root, ["diff", "--name-only", "-z", base, head])
-    if diff is None:
-        return None
-    names = (os.fsdecode(raw) for raw in diff.split(b"\0") if raw)
-    return tuple(name for name in names if (root / name).is_file())
-
-
 def _operator_scan(root: Path, include, config_path: str | None, display: str, merges=None):
     """Scan what just landed with the operator's policy: saw's signatures and the allowlist from the
     config named at install, never the repository's own config. Takes the root, the files to read or
     None for the whole tree, the operator config, the name to show and the merges the history check
-    reads, None for all of them. Returns the scan result."""
+    reads, None for all of them. Returns the scan result, joined with a scan of the written form of
+    each file HEAD records at those names where two of the names share one file on disk."""
     policy = operator_policy(config_path)
     with LocalRepoTarget(str(root), display, policy.opts, include_only=include) as target:
         if merges is not None:
             target.merge_scope = list(merges)
-        return scan_target(target, policy.signatures, policy.allowlist)
+        result = scan_target(target, policy.signatures, policy.allowlist)
+    if not isinstance(include, tuple) or not _names_share_a_file(root, include):
+        return result
+    head = gitutil.stdout(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).strip()
+    if not head:
+        result.error = result.error or unreadable(include)
+        return result
+    copies = blob_copies.copy_out_as_written(root, root, head, include, "the files git just wrote")
+    for folder, names in copies.folders:
+        with LocalRepoTarget(str(folder), display, policy.opts, include_only=names) as target:
+            result = joined(result, scan_target(target, policy.signatures, policy.allowlist))
+    if copies.not_copied:
+        result.error = result.error or unreadable(copies.not_copied)
+    return result
+
+
+def _names_share_a_file(root: Path, names: tuple[str, ...]) -> bool:
+    """Tell whether two of `names` lead to one file on disk. Takes the root and the names. Returns
+    the answer."""
+    seen = set()
+    for name in names:
+        entry = pathsafe.entry_id(root / name)
+        if entry is not None and entry in seen:
+            return True
+        seen.add(entry)
+    return False
 
 
 _TIMED_OUT = object()

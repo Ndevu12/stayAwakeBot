@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 from unittest import mock
 
-from stayawake.lib.git import incoming, owned
+from stayawake.lib.git import owned
 from stayawake.lib.git.borrowed import object_directory
-from stayawake.lib.git.write import transfer
+from stayawake.lib.git.write import replayed, transfer
 from stayawake.utils import scratch
 from tests.support.gitrepo import GitSandbox
 
@@ -84,8 +84,10 @@ class AnUpdateLandsWhereverTheHoldingFolderLives(GitSandbox):
         base = self.commit(operator, "base")
         into = self.root / "hold"
         into.mkdir()
-        arrived = incoming.Arrived(root=into, paths=(), mode="refs", commit="", base=base, head="",
-                                   refs=(("refs/heads/main", "0" * 40, base),))
-        with mock.patch.object(incoming, "adopt_objects", return_value="the new objects could not be packed"):
-            said = incoming.apply(operator, into, arrived)
+        result = replayed.Written(top=operator, git_dir=operator / ".git", holding=into, files_after=base, files=(),
+                                  before={}, digests={}, index=(), refs=(("refs/heads/main", "0" * 40, base),),
+                                  head_before="ref: refs/heads/main", head_after="ref: refs/heads/main",
+                                  state_removed=(), stash_log=None, base=base)
+        with mock.patch.object(replayed, "adopt_objects", return_value="the new objects could not be packed"):
+            said = replayed.write(result)
         self.assertEqual(said, "the update could not be copied into the open folder: the new objects could not be packed")

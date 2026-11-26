@@ -94,6 +94,27 @@ def run_matchers(target, matcher_names: list[str],
     return out
 
 
+def joined(first: ScanResult, second: ScanResult) -> ScanResult:
+    """Join a second scan of the same update into the first. Takes both results. Returns the first,
+    now holding each finding, advisory, note and error of both once."""
+    for kept, added in ((first.findings, second.findings), (first.advisories, second.advisories),
+                        (first.informational, second.informational)):
+        seen = [item.to_dict() for item in kept]
+        kept.extend(item for item in added if item.to_dict() not in seen)
+    first.notes.extend(note for note in second.notes if note not in first.notes)
+    first.error = first.error or second.error
+    first.stored_payload = first.stored_payload or second.stored_payload
+    return first
+
+
+def unreadable(names) -> str:
+    """Name the paths a scan could not read. Takes the paths. Returns the sentence a result carries
+    as its error."""
+    unique = sorted(set(names))
+    shown = ", ".join(unique[:5]) + (" …" if len(unique) > 5 else "")
+    return f"{len(unique)} path(s) unreadable: {shown}"
+
+
 def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
              matcher_order: list[str], read_errors: list[str], coverage_notes: list[str],
              opts, root, allowlist: list[dict[str, Any]] | None,
@@ -128,9 +149,7 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     # run fails CLOSED (service.scan turns any errored target into a non-zero exit). Findings from the
     # readable files are kept; the target is still marked errored.
     if read_errors and not result.error:
-        unique = sorted(set(read_errors))
-        shown = ", ".join(unique[:5]) + (" …" if len(unique) > 5 else "")
-        result.error = f"{len(unique)} path(s) unreadable: {shown}"
+        result.error = unreadable(read_errors)
     result.notes.extend(coverage_notes or [])
     note = _payload_merge_note(result.findings)
     if note:
