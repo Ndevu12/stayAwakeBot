@@ -152,6 +152,29 @@ class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
         self._kept_by_a_refusal(self.open, other / "pkg", ["fetch"], other)
         self.assertEqual((other / "pkg" / "work" / "keep.txt").read_text(encoding="utf-8"), "keep\n")
 
+    def test_a_folder_under_a_broken_git_pointer_inside_a_repository_is_refused_and_kept(self):
+        other = self._another_checkout()
+        self.write(other, "sub/hold/state.json", "{\"mine\": true}\n")
+        self.write(other, "sub/hold/work/a.txt", "a\n")
+        self.commit(other, "tracked hold")
+        (other / "sub" / ".git").write_text(f"gitdir: {self.root / 'gone' / 'repo.git'}\n", encoding="utf-8")
+        held = other / "sub" / "hold"
+        answer, code = govern.prepare(str(self.open), str(held), "git", ["fetch"])
+        self.assertEqual((answer.get("reason"), code),
+                         (holding_directory.OUTSIDE_EVERY_REPOSITORY, exitcodes.INCOMPLETE), answer)
+        self.assertEqual(sorted(os.listdir(held)), ["state.json", "work"])
+        self.assertEqual((held / "work" / "a.txt").read_text(encoding="utf-8"), "a\n")
+
+    def test_a_missing_folder_under_a_relative_broken_git_pointer_is_refused_and_not_made(self):
+        other = self._another_checkout()
+        (other / "sub").mkdir()
+        (other / "sub" / ".git").write_text("gitdir: ../nowhere\n", encoding="utf-8")
+        held = other / "sub" / "missing" / "held"
+        answer, code = govern.prepare(str(self.open), str(held), "git", ["fetch"])
+        self.assertEqual((answer.get("reason"), code),
+                         (holding_directory.OUTSIDE_EVERY_REPOSITORY, exitcodes.INCOMPLETE), answer)
+        self.assertFalse((other / "sub" / "missing").exists())
+
     def test_a_link_to_the_open_folder_is_refused(self):
         link = self.root / "link"
         try:

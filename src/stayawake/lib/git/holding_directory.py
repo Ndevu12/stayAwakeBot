@@ -17,7 +17,7 @@ STATE = "state.json"
 STATE_BEING_WRITTEN = STATE + ".tmp"
 _SAW_ENTRIES = (STATE, STATE_BEING_WRITTEN, REPOSITORY, WORK_TREE, NO_HOOKS)
 _KEPT_ENTRIES = (folderlock.LOCK_NAME,)
-_NOT_A_REPOSITORY = "not a git repository"
+_NOT_A_REPOSITORY = "not a git repository (or any of the parent directories)"
 _ACROSS_FILESYSTEMS = "GIT_DISCOVERY_ACROSS_FILESYSTEM"
 
 OVERLAPS_THE_FOLDER = "the holding directory must be outside the open folder"
@@ -32,14 +32,34 @@ def in_a_repository(into: Path) -> str:
     repository, asked from the holding directory or, when it does not exist yet, its nearest existing
     folder. Takes the holding directory. Returns the refusal, or "" when git finds it outside every
     repository."""
-    place = Path(os.path.abspath(into))
+    place = Path(os.path.realpath(into))
     while not place.is_dir() and place != place.parent:
         place = place.parent
+    if any(_marks_a_repository(folder) for folder in (place, *place.parents)):
+        return OUTSIDE_EVERY_REPOSITORY
     asked = run(place, ["rev-parse", "--is-inside-work-tree", "--is-inside-git-dir", "--is-bare-repository"],
                 env=_asking_from_anywhere(), context=UNTRUSTED)
     if asked is not None and asked.returncode != 0 and _NOT_A_REPOSITORY in (asked.stderr or ""):
         return ""
     return OUTSIDE_EVERY_REPOSITORY
+
+
+def _marks_a_repository(folder: Path) -> bool:
+    """Tell whether a folder holds a `.git` entry of any kind or is itself a git directory. Takes the
+    folder. Returns the answer, yes when an entry cannot be looked at."""
+    return _may_exist(folder / ".git") or all(_may_exist(folder / name) for name in ("HEAD", "objects", "refs"))
+
+
+def _may_exist(path: Path) -> bool:
+    """Tell whether an entry exists, without following a link. Takes its path. Returns the answer, yes
+    when it cannot be looked at."""
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def _asking_from_anywhere() -> dict:
