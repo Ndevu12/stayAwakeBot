@@ -14,16 +14,17 @@
 #   driver            the attribute that must select this entry before it runs:
 #                     filter | diff | merge (OPTIONAL)
 #   fires_on_its_own  git runs it during ordinary operations nobody asked it to run (OPTIONAL)
-#   override          how `saw govern guard` keeps a folder's own value from running (OPTIONAL;
-#                     without it the key is set again, to the operator's own value or to one that
-#                     runs nothing):
+#   override          how `saw govern classify` keeps a folder's own value from running, whatever
+#                     the value is (OPTIONAL; without it the key is set again, to the operator's own
+#                     value or to one that runs nothing):
 #                       setting, value      set this other key instead; `{subsection}` is this key's
 #                       environment, value  set this environment variable instead
 #                       reset               the key adds to a list that this key set empty clears:
 #                                           clear it, then add back the operator's own entries
-#                       leading_option      a value whose first word is a git option is set again too
 #                       refuse              it cannot be kept from running: a folder that sets it
 #                                           is not vouched for
+#
+# `always_set` lists settings every command saw does not check runs with, each with why.
 #
 # `runs_nothing` lists keys whose name looks like a program's but whose value git never runs from a
 # folder's settings, each with why. Every key git documents whose last part names a program is in
@@ -50,7 +51,6 @@ keys:
   - key: alias.*
     runs: after-bang
     bang: true
-    override: {leading_option: true}
   - key: credential.helper
     bang: true
     override: {reset: credential.helper}
@@ -152,6 +152,9 @@ keys:
   - key: svn.authorsprog
   - key: gc.recentobjectshook
     override: {refuse: true}
+
+always_set:
+  - {key: protocol.file.allow, value: never, why: "a repository on this machine runs its own programs for git's local transport"}
 
 runs_nothing:
   - {key: advice.*, why: "a message switch"}

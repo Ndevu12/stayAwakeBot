@@ -12,7 +12,7 @@ from typing import Mapping
 
 from stayawake.lib.git import command_line, exec_surface, operator_config, replay, typed_command
 from stayawake.lib.git.exec_keys import (ENABLES_TRANSPORT, HOOKS_DIRECTORY, UNLESS_BOOLEAN, ExecKey,
-                                         exec_keys, rule_for, subsection)
+                                         always_set, exec_keys, rule_for, subsection)
 from stayawake.lib.git.run import one_pass, stalls_recorded
 from stayawake.utils import env as saw_env
 
@@ -36,12 +36,10 @@ class Guard:
     environment: tuple[tuple[str, str], ...] = ()
     refusal: str = ""
 
-    def payload(self) -> dict:
-        """Describe the answer. Returns whether git may run with it, the folder, and the arguments,
-        settings and environment, or the reason when it may not."""
-        if self.refusal:
-            return {"guarded": False, "folder": str(self.folder), "reason": self.refusal}
-        return {"guarded": True, "folder": str(self.folder), "arguments": list(self.arguments),
+    def run_with(self) -> dict:
+        """Describe how to run the command: git's own options to put before its arguments, the
+        settings they give in order, and the environment variables to set."""
+        return {"arguments": list(self.arguments),
                 "settings": [{"key": key, "value": value} for key, value in self.settings],
                 "environment": dict(self.environment)}
 
@@ -176,9 +174,10 @@ def _overrides(commands: list[exec_surface.Command], operator: list[tuple[str, s
             settings.append((rule.key, _hooks_path(own.get(rule.key), hooks)))
         elif rule.runs == ENABLES_TRANSPORT:
             settings.append(_instead(rule, rule.key))
+    settings += always_set()
     for command in commands:
         rule, key, value = command.rule, command.entry.key, command.entry.value
-        if rule.runs in (HOOKS_DIRECTORY, ENABLES_TRANSPORT) or not _runs_a_program(command):
+        if rule.runs in (HOOKS_DIRECTORY, ENABLES_TRANSPORT):
             continue
         if _UNREADABLE in key:
             return [], {}, "a setting in this folder has a name that is not valid text"
@@ -203,18 +202,6 @@ def _overrides(commands: list[exec_surface.Command], operator: list[tuple[str, s
             settings.append((key, own.get(key, _runs_nothing(rule))))
     environment.update(_protocols_left(settings, environ))
     return _once(settings), environment, ""
-
-
-def _runs_a_program(command: exec_surface.Command) -> bool:
-    """Whether a folder's entry makes git start a program. Takes it."""
-    if command.command is not None:
-        return True
-    return command.rule.override.leading_option and _starts_with_an_option(command.entry.value)
-
-
-def _starts_with_an_option(value: str | None) -> bool:
-    """Whether a value's first word is a git option. Takes the value."""
-    return (value or "").lstrip(" \t\"'\\").startswith("-")
 
 
 def _operator_values(operator: list[tuple[str, str | None]]) -> dict[str, str]:

@@ -154,7 +154,7 @@ class TestCapabilities(unittest.TestCase):
                             "govern.progress.jsonl", "govern.decision", "govern.held.decision", "govern.passthrough",
                             "govern.conflicts", "govern.deadline",
                             "govern.apply.outcome", "govern.lock", "govern.apply.expect",
-                            "govern.classify", "govern.verdict", "govern.restore", "govern.guard",
+                            "govern.classify", "govern.classify.run_with", "govern.verdict", "govern.restore",
                             "serve", "mcp"])
         self.assertTrue({"scan.json", "fix.json"} <= set(printed["features"]))
         self.assertEqual(printed["version"], cli.__version__)

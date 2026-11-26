@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""`saw govern guard` says how to run the operator's git command in a folder without starting any
-program the folder's own settings name, while the operator's own identity, transports, signing, hooks
-and credential helpers keep working. Each case drives real git with the answer applied, in a folder armed
-with a program for one kind of setting, and requires that the program left no marker."""
+"""`saw govern classify` says, in `run_with`, how to run a git command it runs directly without
+starting any program the folder's own settings name, while the operator's own identity, transports,
+signing, hooks and credential helpers keep working. Each case drives real git with `run_with`
+applied, in a folder armed with a program for one kind of setting, and requires that the program left
+no marker."""
 from __future__ import annotations
 
 import io
@@ -12,11 +13,13 @@ import shutil
 import subprocess
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
 
 from stayawake import cli
-from stayawake.lib.git import folder_guard
+from stayawake.bots.security import govern
+from stayawake.lib.git import folder_guard, runs_directly
 from stayawake.utils import scratch
 from tests.support.hostile_repo import HostileRepo, HostileRepoSandbox
 
@@ -27,6 +30,9 @@ SOURCE = "@SOURCE@"
 OUTPUT = "@OUTPUT@"
 OPERATOR_PROGRAMS = ("vim", "vimdiff", "firefox", "man")
 """Programs on the operator's own path that a tool falls back to, each doing nothing."""
+SANDBOX_SETTINGS_VARIABLES = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM")
+"""The variables the sandbox names its own settings files with, which an operator's terminal does
+not set and which make saw check every command."""
 MAY_BE_MISSING = frozenset({"hook.planted", "alias.command", "imap.tunnel"})
 """Cases this git may not support. One whose program does not start unguarded is skipped."""
 
@@ -70,6 +76,26 @@ OPERATOR_COMMANDS = (
 )
 
 
+@dataclass(frozen=True)
+class Answer:
+    """What classify answers for a git command: whether saw checks it, the reason when the folder's
+    settings are why, and the settings, arguments and environment of its `run_with`."""
+
+    checked: bool
+    refusal: str = ""
+    settings: tuple = ()
+    arguments: tuple = ()
+    environment: tuple = ()
+
+
+def read_answer(body: dict) -> Answer:
+    run_with = body.get("run_with")
+    if run_with is None:
+        return Answer(body["checked"], body.get("reason", "") if body["readable"] else "")
+    return Answer(body["checked"], "", tuple((s["key"], s["value"]) for s in run_with["settings"]),
+                  tuple(run_with["arguments"]), tuple(run_with["environment"].items()))
+
+
 class GuardSandbox(HostileRepoSandbox):
     """A sandbox whose operator has an identity of their own, allowing the transports the cases use."""
 
@@ -89,15 +115,31 @@ class GuardSandbox(HostileRepoSandbox):
                                                 "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"})
         operator.start()
         self.addCleanup(operator.stop)
+        decide = runs_directly.decide
 
-    def answer(self, folder: Path, *args: str, environ: dict | None = None) -> folder_guard.Guard:
-        return folder_guard.guard(folder, list(args), dict(os.environ) if environ is None else environ)
+        def decide_as_the_operators_terminal(tool, args, folder, environ=None):
+            environ = os.environ if environ is None else environ
+            return decide(tool, args, folder, {key: value for key, value in environ.items()
+                                                if key not in SANDBOX_SETTINGS_VARIABLES})
+        decided = mock.patch.object(runs_directly, "decide", decide_as_the_operators_terminal)
+        decided.start()
+        self.addCleanup(decided.stop)
+
+    def answer(self, folder: Path, *args: str, environ: dict | None = None) -> Answer:
+        body, _ = govern.classify(str(folder), "git", list(args),
+                                  dict(os.environ) if environ is None else environ)
+        return read_answer(body)
 
     def guarded(self, folder: Path, *args: str, named: dict | None = None) -> subprocess.CompletedProcess:
-        """Run the operator's command in the folder with the guard's answer applied. Takes the
+        """Run the operator's command in the folder with `run_with` applied: the command's own, or
+        for a command saw checks, the one classify gives a status in the same folder. Takes the
         folder, the arguments and the variables naming the command's repository."""
-        answer = self.answer(folder, *args, environ={**os.environ, **(named or {})})
+        environ = {**os.environ, **(named or {})}
+        answer = self.answer(folder, *args, environ=environ)
+        if answer.checked and not answer.refusal:
+            answer = self.answer(folder, "status", environ=environ)
         self.assertEqual("", answer.refusal, args)
+        self.assertFalse(answer.checked, args)
         return self._git(folder, [*answer.arguments, *args], {**(named or {}), **dict(answer.environment)})
 
     def unguarded(self, folder: Path, *args: str, named: dict | None = None) -> subprocess.CompletedProcess:
@@ -162,6 +204,18 @@ class TestTheAnswerKeepsEveryKindOfSettingFromStartingAProgram(GuardSandbox):
                 self.assertEqual([], marks.fired(), RAN)
 
 
+class TestACommandSawChecksCarriesNoRunWith(GuardSandbox):
+    def test_a_command_that_may_bring_files_or_runs_an_alias_has_no_run_with(self):
+        folder = self.plain_folder("plain")
+        self.git(folder, "config", "alias.mine", "!true")
+        for command in (("fetch", "origin"), ("checkout", "main"), ("merge", "main"), ("stash", "pop"),
+                        ("archive", "HEAD"), ("difftool",), ("mine",)):
+            with self.subTest(command=command):
+                body, _ = govern.classify(str(folder), "git", list(command), dict(os.environ))
+                self.assertTrue(body["checked"])
+                self.assertNotIn("run_with", body)
+
+
 class TestTheHostileRepository(GuardSandbox):
     """The operator's everyday commands over a repository naming a program everywhere git runs one."""
 
@@ -184,7 +238,7 @@ class TestTheHostileRepository(GuardSandbox):
 
     def test_a_setting_whose_name_holds_an_equals_sign_is_given_through_the_environment(self):
         hostile = self.hostile_repo()
-        answer = self.answer(hostile.repo, "checkout", "-q", "conflict")
+        answer = self.answer(hostile.repo, "status")
         given = [arg for arg in answer.arguments if arg.startswith("--config-env=filter.a=b.smudge=")]
         self.assertEqual(1, len(given))
         variable = given[0].rsplit("=", 1)[1]
@@ -193,8 +247,8 @@ class TestTheHostileRepository(GuardSandbox):
 
     def test_the_environment_stops_allowing_the_transport_the_settings_turn_off(self):
         hostile = self.hostile_repo()
-        answer = self.answer(hostile.repo, "fetch", "origin")
-        self.assertEqual("file:ssh:git:https", dict(answer.environment)["GIT_ALLOW_PROTOCOL"])
+        answer = self.answer(hostile.repo, "status")
+        self.assertEqual("ssh:git:https", dict(answer.environment)["GIT_ALLOW_PROTOCOL"])
 
     def test_a_worktree_moved_elsewhere_keeps_its_filters_from_running(self):
         hostile = self.hostile_repo(redirect_worktree=True)
@@ -304,9 +358,8 @@ class TestTheRepositoryTheCommandActsOn(GuardSandbox):
                        stdin=subprocess.DEVNULL)
         marks = self.marks("bare")
         with (folder / "config").open("a", encoding="utf-8") as config:
-            config.write(f'[remote "origin"]\n\turl = {source}\n'
-                         f"\tuploadpack = {self._program(marks, 'remote.uploadpack')}\n")
-        self.assert_starts_only_unguarded(marks, folder, "--bare", "fetch", "-q", "origin")
+            config.write(f"[core]\n\tsshCommand = {self._program(marks, 'core.sshCommand')}\n")
+        self.assert_starts_only_unguarded(marks, folder, "--bare", "ls-remote", "ssh://127.0.0.1:1/x")
 
     def test_a_command_naming_another_repository_reads_that_repositorys_settings(self):
         folder = self.plain_folder("folder")
@@ -314,8 +367,7 @@ class TestTheRepositoryTheCommandActsOn(GuardSandbox):
         marks = self.marks("other")
         self.git(other, "config", "core.fsmonitor", self._program(marks, "core.fsmonitor"))
         self.write(other, "f.txt", "changed\n")
-        self.assert_starts_only_unguarded(marks, folder, "--git-dir", str(other / ".git"),
-                                          "--work-tree", str(other), "status")
+        self.assert_starts_only_unguarded(marks, folder, "--git-dir", str(other / ".git"), "status")
 
     def test_the_environment_naming_another_repository_reads_that_repositorys_settings(self):
         folder = self.plain_folder("folder")
@@ -323,8 +375,20 @@ class TestTheRepositoryTheCommandActsOn(GuardSandbox):
         marks = self.marks("other")
         self.git(other, "config", "core.fsmonitor", self._program(marks, "core.fsmonitor"))
         self.write(other, "f.txt", "changed\n")
-        self.assert_starts_only_unguarded(marks, folder, "status",
-                                          named={"GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other)})
+        self.assert_starts_only_unguarded(marks, folder, "status", named={"GIT_DIR": str(other / ".git")})
+
+    def test_a_repository_on_this_machine_runs_none_of_its_own_programs(self):
+        folder = self.plain_folder("folder")
+        nested = folder / ".nested.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(nested)], check=True, capture_output=True,
+                       stdin=subprocess.DEVNULL)
+        marks = self.marks("nested")
+        (nested / "hooks" / "pre-receive").symlink_to(self._program(marks, "pre-receive"))
+        self.git(folder, "remote", "add", "origin", str(nested))
+        self.assert_starts_only_unguarded(marks, folder, "push", "-q", "origin", "HEAD:refs/heads/pushed")
+        listed = self.guarded(folder, "ls-remote", str(nested))
+        self.assertIn("not allowed", listed.stderr)
+        self.assertEqual([], marks.fired(), RAN)
 
     def test_a_remote_helper_the_folder_names_is_not_started(self):
         folder = self.plain_folder("folder")
@@ -334,7 +398,7 @@ class TestTheRepositoryTheCommandActsOn(GuardSandbox):
         self.git(folder, "config", "remote.origin.vcs", "planted")
         with mock.patch.dict(os.environ, {"PATH": f"{marks.bin}{os.pathsep}{os.environ['PATH']}",
                                           "GIT_ALLOW_PROTOCOL": f"{self.PROTOCOLS}:planted"}):
-            self.assert_starts_only_unguarded(marks, folder, "fetch", "-q", "origin")
+            self.assert_starts_only_unguarded(marks, folder, "ls-remote", "origin")
 
 
 class TestTheAnswer(GuardSandbox):
@@ -344,11 +408,11 @@ class TestTheAnswer(GuardSandbox):
         folder = self.plain_folder("plain")
         answer = self.answer(folder, "status")
         hooks = Path(os.environ["XDG_STATE_HOME"]) / "saw" / "git-runs-no-hooks"
-        self.assertEqual((("core.hookspath", str(hooks)), ("protocol.ext.allow", "never")),
-                         answer.settings)
-        self.assertEqual(["-c", f"core.hookspath={hooks}", "-c", "protocol.ext.allow=never"],
-                         list(answer.arguments))
-        self.assertEqual((("GIT_ALLOW_PROTOCOL", "file:ssh:git:https"),), answer.environment)
+        self.assertEqual((("core.hookspath", str(hooks)), ("protocol.ext.allow", "never"),
+                          ("protocol.file.allow", "never")), answer.settings)
+        self.assertEqual(["-c", f"core.hookspath={hooks}", "-c", "protocol.ext.allow=never",
+                          "-c", "protocol.file.allow=never"], list(answer.arguments))
+        self.assertEqual((("GIT_ALLOW_PROTOCOL", "ssh:git:https"),), answer.environment)
 
     def test_the_empty_hooks_folder_outlives_the_run(self):
         folder = self.plain_folder("plain")
@@ -371,7 +435,7 @@ class TestTheAnswer(GuardSandbox):
         self.assertEqual((), self.answer(folder, "config", "--get", "core.sshCommand").settings)
         self.assertEqual("ssh -i folder-key\n",
                          self.guarded(folder, "config", "--get", "core.sshCommand").stdout)
-        self.assertNotEqual((), self.answer(folder, "config", "--edit").settings)
+        self.assertTrue(self.answer(folder, "config", "--edit").checked)
         unguarded = self.unguarded(folder, "rev-parse", "--git-path", "hooks").stdout
         self.assertEqual(unguarded, self.guarded(folder, "rev-parse", "--git-path", "hooks").stdout)
 
@@ -385,10 +449,31 @@ class TestTheAnswer(GuardSandbox):
         self.git(folder, "config", "gc.recentObjectsHook", str(self.root / "keeps-objects"))
         self.assertIn("gc.recentobjectshook", self.answer(folder, "gc").refusal)
 
+    def test_a_value_is_set_again_however_the_folder_spells_it(self):
+        for key, value, kept_from_running in (("core.fsmonitor", "true ", "false"), ("core.fsmonitor", " yes", "false"),
+                                              ("pager.log", "true ", "false"), ("alias.st", "status", "")):
+            with self.subTest(key=key, value=value):
+                folder = self.plain_folder(f"spelled-{key}-{value.strip()}-{len(value)}")
+                self.git(folder, "config", key, value)
+                self.assertIn((key, kept_from_running), self.answer(folder, "status").settings)
+
+    def test_a_monitor_spelled_like_a_switch_does_not_start(self):
+        folder = self.plain_folder("folder")
+        marks = self.marks("switch")
+        (marks.bin / "yes").symlink_to("mark")
+        self.git(folder, "config", "core.fsmonitor", " yes")
+        self.write(folder, "f.txt", "changed\n")
+        with mock.patch.dict(os.environ, {"PATH": f"{marks.bin}{os.pathsep}{os.environ['PATH']}"}):
+            self.unguarded(folder, "status")
+            self.assertEqual(["yes"], marks.fired(), "the case does not reach its program")
+            marks.clear()
+            self.guarded(folder, "status")
+        self.assertEqual([], marks.fired(), RAN)
+
     def test_a_merge_tool_path_the_folder_names_is_set_again(self):
         folder = self.plain_folder("plain")
         self.git(folder, "config", "mergetool.vimdiff.path", str(self.root / "planted"))
-        self.assertIn(("mergetool.vimdiff.path", ""), self.answer(folder, "mergetool").settings)
+        self.assertIn(("mergetool.vimdiff.path", ""), self.answer(folder, "status").settings)
 
     def test_settings_that_do_not_load_keep_the_command_from_running(self):
         folder = self.plain_folder("plain")
@@ -404,27 +489,37 @@ class TestTheAnswer(GuardSandbox):
     def test_a_proxy_command_named_by_both_the_operator_and_the_folder_is_not_vouched_for(self):
         folder = self.plain_folder("plain")
         self.git(folder, "config", "core.gitProxy", "folder-proxy")
-        self.assertEqual("", dict(self.answer(folder, "fetch").environment)["GIT_PROXY_COMMAND"])
+        listing = ("ls-remote", "git://127.0.0.1:1/x")
+        self.assertEqual("", dict(self.answer(folder, *listing).environment)["GIT_PROXY_COMMAND"])
         self.git(folder, "config", "--global", "core.gitProxy", "my-proxy")
-        self.assertTrue(self.answer(folder, "fetch").refusal)
+        self.assertTrue(self.answer(folder, *listing).refusal)
 
     def test_a_folder_outside_any_repository_gets_the_hooks_folder_and_the_closed_transport(self):
         outside = self.owned(self.root / "outside")
         outside.mkdir()
-        answer = self.answer(outside, "init")
+        answer = self.answer(outside, "status")
         self.assertEqual("", answer.refusal)
-        self.assertEqual(["core.hookspath", "protocol.ext.allow"], [key for key, _ in answer.settings])
+        self.assertEqual(["core.hookspath", "protocol.ext.allow", "protocol.file.allow"],
+                         [key for key, _ in answer.settings])
 
-    def test_saw_prints_it_as_the_govern_document(self):
+    def test_saw_prints_it_in_the_classify_answer(self):
         folder = self.plain_folder("plain")
         printed = io.StringIO()
         with redirect_stdout(printed):
-            cli.main(["govern", "guard", "--json", "--repo", str(folder), "--", "status"])
+            cli.main(["govern", "classify", "--json", "--tool", "git", "--repo", str(folder), "--", "status"])
         document = json.loads(printed.getvalue())
         self.assertEqual("schema_version", next(iter(document)))
-        self.assertTrue(document["guarded"])
-        self.assertEqual(["core.hookspath", "protocol.ext.allow"],
-                         [setting["key"] for setting in document["settings"]])
+        self.assertFalse(document["checked"])
+        self.assertEqual(["core.hookspath", "protocol.ext.allow", "protocol.file.allow"],
+                         [setting["key"] for setting in document["run_with"]["settings"]])
+
+    def test_a_refused_command_is_checked_with_the_reason(self):
+        folder = self.plain_folder("plain")
+        body, _ = govern.classify(str(folder), "git", ["--git-dir", str(self.root / "no-such"), "status"],
+                                  dict(os.environ))
+        self.assertTrue(body["checked"])
+        self.assertTrue(body["reason"])
+        self.assertNotIn("run_with", body)
 
 
 if __name__ == "__main__":

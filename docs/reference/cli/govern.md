@@ -172,31 +172,24 @@ fetched commit or an alias, answers `checked: true`. An unreadable line, such as
 unfamiliar option or an alias that runs a shell command, answers `readable: false` with the
 `reason`, and is checked. An editor uses it instead of reading git's options itself.
 
-## Running git in a folder you did not create
+For a git command saw does not check, the answer also carries `run_with`: how to run it so that no
+program the git settings of the repository it acts on name starts. Those are hooks, filters, diff and
+merge drivers, aliases, editors, pagers, credential helpers, signing, ssh and proxy commands, archive
+filters and the tools git hands work to. saw reads those settings, the worktrees' and submodules' and
+what they include, without running anything there. `run_with` holds:
 
-```text
-saw govern guard --json --repo <folder> -- <arguments>
-```
-
-`saw govern guard` says how to run a git command line in a folder so that no program the folder's
-own git settings name starts: hooks, filters, diff and merge drivers, aliases, editors, pagers,
-credential helpers, signing, ssh and proxy commands, archive filters and the tools git hands work
-to. It reads the settings of the repository the command acts on, its worktrees' and submodules' and
-what they include, without running anything there, and answers `guarded: true` with:
-
-- `arguments`: git's own options to put right after `git` and before your arguments;
+- `arguments`: git's own options to put right after `git` and before the command's arguments;
 - `environment`: variables to set for that command;
 - `settings`: each setting those options give, in order.
 
 Your own settings stay in force. A setting the folder replaces goes back to your value, or to one
 that runs nothing when you have none, so a folder that sets its own editor or signing program makes
 that command fail rather than run it. Hooks run from your own hooks folder, or from an empty one saw
-keeps. A command that only reads or writes settings, such as `git config --get`, gets no settings,
-so it reports what the folder says.
-
-A command that is not safe to run answers `guarded: false` with the `reason`, for example one that
-names a repository that cannot be read. Do not run it then. An editor uses this instead of keeping its own list of
-settings.
+keeps. A command that reaches another repository on this machine by its path fails rather than run
+that repository's programs. A command that only reads or writes settings, such as `git config --get`, gets no settings,
+so it reports what the folder says. A command that cannot be run safely this way, for example one
+naming a repository that cannot be read, is answered `checked: true` with the `reason` and no
+`run_with`.
 
 ## Asking whether a tree is one saw let in
 

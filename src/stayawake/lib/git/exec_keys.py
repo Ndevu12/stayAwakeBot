@@ -25,22 +25,20 @@ _RUNS = frozenset({COMMAND, AFTER_BANG, UNLESS_BOOLEAN, HOOKS_DIRECTORY, EXT_TRA
 _DRIVERS = frozenset({"filter", "diff", "merge"})
 _BOOLEAN_WORDS = frozenset({"true", "false", "yes", "no", "on", "off", "1", "0", ""})
 _EXT_PREFIX = "ext::"
-_OVERRIDE_FIELDS = frozenset({"setting", "environment", "value", "reset", "leading_option", "refuse"})
+_OVERRIDE_FIELDS = frozenset({"setting", "environment", "value", "reset", "refuse"})
 
 
 @dataclass(frozen=True)
 class Override:
     """How a folder's own value of a key is kept from running. `setting` or `environment` names
     what is set to `value` instead of the key, `reset` names the key whose empty value clears the
-    list this key adds to, `leading_option` says a value starting with a git option is set again
-    too, and `refuse` says nothing keeps it from running. With none of these, the key itself is set
-    again."""
+    list this key adds to, and `refuse` says nothing keeps it from running. With none of these, the
+    key itself is set again."""
 
     setting: str | None = None
     environment: str | None = None
     value: str = ""
     reset: str | None = None
-    leading_option: bool = False
     refuse: bool = False
 
 
@@ -116,7 +114,6 @@ def _override(key: str, raw: dict) -> Override:
         raise ValueError(f"git exec key {key}: `override` values are text")
     return Override(setting=texts["setting"], environment=texts["environment"],
                     value=texts["value"] or "", reset=texts["reset"],
-                    leading_option=bool(raw.get("leading_option", False)),
                     refuse=bool(raw.get("refuse", False)))
 
 
@@ -152,6 +149,20 @@ def runs_nothing(path: Path = KEYS_FILE) -> tuple[RunsNothing, ...]:
         if not isinstance(key, str) or key != key.lower() or not isinstance(why, str) or not why:
             raise ValueError(f"git runs-nothing entry needs a lowercase `key` and a `why`: {raw!r}")
         found.append(RunsNothing(key, why))
+    return tuple(found)
+
+
+@functools.lru_cache(maxsize=None)
+def always_set(path: Path = KEYS_FILE) -> tuple[tuple[str, str], ...]:
+    """Load the settings every command saw does not check runs with. Takes the file (default: the
+    shipped list). Returns each key with its value, or raises ValueError on a malformed file."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    found = []
+    for raw in data.get("always_set") or ():
+        key, value, why = (raw.get("key"), raw.get("value"), raw.get("why")) if isinstance(raw, dict) else (None,) * 3
+        if not isinstance(key, str) or not isinstance(value, str) or not isinstance(why, str) or not why:
+            raise ValueError(f"git always-set entry needs a `key`, a `value` and a `why`: {raw!r}")
+        found.append((key, value))
     return tuple(found)
 
 
