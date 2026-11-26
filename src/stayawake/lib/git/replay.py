@@ -312,6 +312,8 @@ def reproduce(location: Location, into: Path, command: TypedCommand, *, with_fil
         return cleared
     into.mkdir(parents=True, exist_ok=True)
     bare, work = into / holding_directory.REPOSITORY, into / holding_directory.WORK_TREE
+    work.mkdir()
+    (work / ".git").write_text(f"gitdir: {bare}\n", encoding="utf-8")
     made = run(None, ["init", "--bare", "--quiet", f"--object-format={location.object_format}", "--template=",
                       str(bare)], context=SAW_OWNED)
     if made is None or made.returncode != 0:
@@ -348,9 +350,7 @@ def reproduce(location: Location, into: Path, command: TypedCommand, *, with_fil
     if not _set_head(bare, head):
         return "a place to check the update could not be made"
     base = stdout(bare, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], context=SAW_OWNED).strip()
-    work.mkdir()
     (into / holding_directory.NO_HOOKS).mkdir()
-    (work / ".git").write_text(f"gitdir: {bare}\n", encoding="utf-8")
     owned.own(work)
     for key, value in (("core.bare", "false"), ("core.worktree", str(work)),
                        ("core.hooksPath", str(into / holding_directory.NO_HOOKS)), ("core.precomposeUnicode", "false")):

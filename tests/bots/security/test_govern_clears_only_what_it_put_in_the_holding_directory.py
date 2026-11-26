@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
-from unittest import TestCase
+from unittest import TestCase, mock
 
 from stayawake.bots.security import govern
-from stayawake.lib.git import holding_directory
+from stayawake.lib.git import holding_directory, replay
 from stayawake.utils import exitcodes
 from tests.bots.security.test_govern_replays_a_tracking_checkout import _TrackingCheckout
 
@@ -196,6 +197,23 @@ class AHoldingDirectoryIsNeverDeleted(_TrackingCheckout):
         self.assertEqual((into / "work" / "draft.txt").read_text(encoding="utf-8"), "draft\n")
         self.assertFalse(govern.apply(str(self.open), str(into))[0]["applied"])
 
+    def test_a_checkout_under_saws_name_for_its_working_tree_is_refused_and_kept(self):
+        into = self.root / "elsewhere"
+        checkout = self.owned(into / holding_directory.WORK_TREE)
+        self.git(self.root, "clone", "-q", str(self.upstream), str(checkout))
+        self._refused(into, holding_directory.HOLDS_OTHER_FILES)
+        self.assertEqual(os.listdir(into), [holding_directory.WORK_TREE])
+        self.assertTrue((checkout / ".git").is_dir())
+        self.assertEqual(self.git(checkout, "status", "--porcelain").strip(), "")
+        self.assertFalse(govern.apply(str(self.open), str(into))[0]["applied"])
+
+    def test_a_holding_directory_a_check_left_part_made_is_used_again(self):
+        with mock.patch.object(replay, "_refs", return_value=(None, {})):
+            answer, code = self._prepare(self.into)
+        self.assertEqual(code, exitcodes.INCOMPLETE, answer)
+        self.assertTrue((self.into / holding_directory.REPOSITORY / "HEAD").is_file())
+        self._checked_and_applied(self.into)
+
     def test_an_empty_holding_directory_is_used(self):
         self.into.mkdir()
         self._checked_and_applied(self.into)
@@ -246,6 +264,41 @@ class ClearingRemovesOnlySawsEntries(TestCase):
             self.skipTest("this system makes no symbolic links here")
         self.assertEqual(holding_directory.clear(self.into), "")
         self.assertEqual((target / "notes.txt").read_text(encoding="utf-8"), "notes\n")
+
+    def _git(self, *args: str) -> None:
+        subprocess.run(["git", *args], check=True, capture_output=True, stdin=subprocess.DEVNULL)
+
+    def _kept(self, *names: str) -> None:
+        self.assertEqual(holding_directory.holds_other_files(self.into), holding_directory.HOLDS_OTHER_FILES)
+        self.assertEqual(holding_directory.clear(self.into), holding_directory.HOLDS_OTHER_FILES)
+        self.assertEqual(sorted(os.listdir(self.into)), sorted(names))
+
+    def test_a_repository_under_one_of_saws_names_is_kept(self):
+        for name in (holding_directory.WORK_TREE, holding_directory.NO_HOOKS, holding_directory.STATE):
+            with self.subTest(name=name):
+                self._git("init", "-q", str(self.into / name))
+                self._kept(name)
+                shutil.rmtree(self.into)
+        self._git("init", "-q", "--bare", str(self.into / holding_directory.REPOSITORY))
+        self._kept(holding_directory.REPOSITORY)
+
+    def test_a_working_tree_pointing_git_elsewhere_keeps_every_entry(self):
+        self._git("init", "-q", "--bare", str(self.into / holding_directory.REPOSITORY))
+        self._git("init", "-q", "--bare", str(self.root / "other.git"))
+        (self.into / holding_directory.WORK_TREE).mkdir()
+        (self.into / holding_directory.WORK_TREE / ".git").write_text(f"gitdir: {self.root / 'other.git'}\n",
+                                                                       encoding="utf-8")
+        self._kept(holding_directory.REPOSITORY, holding_directory.WORK_TREE)
+
+    def test_the_repository_and_working_tree_saw_links_are_removed(self):
+        self._git("init", "-q", "--bare", str(self.into / holding_directory.REPOSITORY))
+        (self.into / holding_directory.WORK_TREE).mkdir()
+        (self.into / holding_directory.WORK_TREE / ".git").write_text(
+            f"gitdir: {self.into / holding_directory.REPOSITORY}\n", encoding="utf-8")
+        (self.into / holding_directory.NO_HOOKS).mkdir()
+        self.assertEqual(holding_directory.holds_other_files(self.into), "")
+        self.assertEqual(holding_directory.clear(self.into), "")
+        self.assertEqual(os.listdir(self.into), [])
 
     def test_a_file_named_as_the_holding_directory_is_kept(self):
         self.into.write_text("notes\n", encoding="utf-8")

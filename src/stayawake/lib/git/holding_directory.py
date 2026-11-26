@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 from stayawake.lib.git.run import UNTRUSTED, run
-from stayawake.utils import folderlock
+from stayawake.utils import folderlock, pathsafe
 
 REPOSITORY = "repo.git"
 WORK_TREE = "work"
@@ -17,6 +17,7 @@ STATE = "state.json"
 STATE_BEING_WRITTEN = STATE + ".tmp"
 _SAW_ENTRIES = (STATE, STATE_BEING_WRITTEN, REPOSITORY, WORK_TREE, NO_HOOKS)
 _KEPT_ENTRIES = (folderlock.LOCK_NAME,)
+_POINTS_AT = b"gitdir: "
 _NOT_A_REPOSITORY = "not a git repository (or any of the parent directories)"
 _ACROSS_FILESYSTEMS = "GIT_DISCOVERY_ACROSS_FILESYSTEM"
 
@@ -102,7 +103,7 @@ def clear(into: Path) -> str:
         names = set(os.listdir(holding))
     except OSError:
         return NOT_CLEARED
-    if names - set(_SAW_ENTRIES) - set(_KEPT_ENTRIES):
+    if _holds_what_saw_did_not_put(holding, names):
         return HOLDS_OTHER_FILES
     try:
         for name in _SAW_ENTRIES:
@@ -120,7 +121,37 @@ def holds_other_files(into: Path) -> str:
         names = set(os.listdir(into)) if Path(into).is_dir() else set()
     except OSError:
         return HOLDS_OTHER_FILES
-    return HOLDS_OTHER_FILES if names - set(_SAW_ENTRIES) - set(_KEPT_ENTRIES) else ""
+    return HOLDS_OTHER_FILES if _holds_what_saw_did_not_put(Path(into), names) else ""
+
+
+def _holds_what_saw_did_not_put(holding: Path, names: set[str]) -> bool:
+    """Tell whether a holding directory holds an entry under a name saw does not use, or a
+    repository under one of saw's names other than the repository and working tree saw links to
+    each other. Takes the holding directory and the names of its entries. Returns the answer."""
+    if names - set(_SAW_ENTRIES) - set(_KEPT_ENTRIES):
+        return True
+    linked = _links_its_working_tree(holding)
+    for name in names & set(_SAW_ENTRIES):
+        entry = holding / name
+        if os.path.islink(entry) or not _marks_a_repository(entry):
+            continue
+        if not (linked and name in (REPOSITORY, WORK_TREE)):
+            return True
+    return False
+
+
+def _links_its_working_tree(holding: Path) -> bool:
+    """Tell whether the working tree in a holding directory points git at the repository beside it,
+    as saw writes it. Takes the holding directory. Returns the answer."""
+    work = holding / WORK_TREE
+    if os.path.islink(work):
+        return False
+    pointer = pathsafe.read_regular_no_follow(work / ".git", 1 << 12)
+    if pointer is None or not pointer.startswith(_POINTS_AT):
+        return False
+    named = Path(os.fsdecode(pointer[len(_POINTS_AT):].rstrip(b"\r\n")))
+    named = named if named.is_absolute() else work / named
+    return _same_place(Path(os.path.realpath(named)), Path(os.path.realpath(holding / REPOSITORY)))
 
 
 def _remove(entry: Path) -> None:
