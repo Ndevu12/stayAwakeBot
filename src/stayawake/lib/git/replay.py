@@ -135,11 +135,11 @@ class Holding:
 
 @dataclass(frozen=True)
 class Replayed:
-    """What a replayed command changes. `files` holds each working-tree path whose bytes change as
-    (path, mode, blob), mode and blob empty for a removed file; `files_after` names the commit
-    holding the files as they will be written; `index` holds each changed index path with its
-    entries before and after as (mode, blob, stage); `refs` holds (ref, new, old); `state_left`
-    and `state_removed` name operation state files the command left or removed, `pseudo_refs` the
+    """What a replayed command changes. `files` lists (path, mode, blob) for each working-tree path
+    whose bytes change, with an empty mode and blob for a removed file. `files_after` names the
+    commit that holds the written files. `index` lists each changed index path with its entries
+    before and after, each a (mode, blob, stage). `refs` lists (ref, new, old). `state_left` and
+    `state_removed` name operation state files the command left or removed, and `pseudo_refs` the
     commits it pointed `ORIG_HEAD` and the like at. `finished` is whether git finished the command,
     `said` the end of what it said, `output` what it wrote to its output and to its errors, and
     `fetch_head` what a fetch wrote to `FETCH_HEAD`."""

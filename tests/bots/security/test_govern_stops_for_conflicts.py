@@ -211,7 +211,7 @@ class WhatTheCheckPins(_StopsForConflicts):
         todo.write_bytes(todo.read_bytes() + b"pick %s # added after the check\n" % self.incoming.encode())
         refused, _code = self._apply()
         self.assertFalse(refused["applied"], refused)
-        self.assertEqual(refused["reason"], "the checked update is no longer in the holding directory; check it again")
+        self.assertEqual(refused["reason"], "the holding directory no longer holds the checked update. Run the command again")
         self._untouched()
 
 

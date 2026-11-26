@@ -140,7 +140,7 @@ def _apply_conflicts(repo: Path, bare: Path, arrived: Arrived) -> str:
     else a sentence that also names a folder that may have changed."""
     stopped = conflicted.read(arrived.root, bare, arrived.base)
     if isinstance(stopped, str) or stopped != arrived.stopped:
-        return "the checked update is no longer in the holding directory; check it again"
+        return "the holding directory no longer holds the checked update. Run the command again"
     if stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip() != arrived.base:
         return "the open folder changed while the update was checked"
     gitdir = _git_dir(repo)
