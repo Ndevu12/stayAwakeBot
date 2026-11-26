@@ -22,6 +22,7 @@ from stayawake.lib.git.run import (LOCAL_TIMEOUT, OPERATOR_CONFIG, OPERATOR_PUSH
 from stayawake.lib.git.typed_command import TypedCommand
 from stayawake.lib.git.write.branch import update_refs
 from stayawake.lib.git.write.working_tree import uncommitted_paths
+from stayawake.lib.git.index_copy import copy_index
 from stayawake.utils import pathsafe
 
 NETWORK = frozenset({"pull", "fetch"})
@@ -539,7 +540,7 @@ def _load_index(location: Location, work: Path, bare: Path, files_index: Path, e
     index = bare / "index"
     try:
         if location.writable and files_index.exists():
-            shutil.copyfile(files_index, index)
+            copy_index(files_index, index)
             paths = [path for path, found in entries.items() if any(entry[2] != b"0" for entry in found)]
         else:
             paths = list(entries)
@@ -557,7 +558,7 @@ def _tree_of_files(work: Path, files_index: Path, copy: Path) -> "str | None":
     when git could not write it."""
     try:
         if files_index.exists():
-            shutil.copyfile(files_index, copy)
+            copy_index(files_index, copy)
         elif copy.exists():
             copy.unlink()
     except OSError:

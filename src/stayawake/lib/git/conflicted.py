@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, run, stdout, stdout_bytes, stdout_bytes_fed
+from stayawake.lib.git.index_copy import copy_index
 from stayawake.utils import atomicwrite, pathsafe, scratch
 
 MERGE = "merge"
@@ -398,7 +399,7 @@ def _landed_tree(work: Path, holding: Path, stages: dict) -> str:
     it could not be written."""
     private = scratch.new_file("the index a stopped update leaves in the folder")
     try:
-        shutil.copyfile(holding / "index", private)
+        copy_index(holding / "index", private)
         env = {"GIT_INDEX_FILE": str(private)}
         zero = b"0" * len(next(iter(stages.values()))[0][1])
         feed = []

@@ -24,8 +24,8 @@ from stayawake.bots.security.scanner import joined, scan_target, unreadable
 from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
-from stayawake.lib.git import (blob_copies, command_line, conflicted, holding_directory, incoming, query,
-                               replay, runs_directly, runs_from_the_folder, typed_command)
+from stayawake.lib.git import (blob_copies, command_line, conflicted, folder_guard, holding_directory, incoming,
+                               query, replay, runs_directly, runs_from_the_folder, typed_command)
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes
 from stayawake.lib.git.write import replayed as replayed_writer
 from stayawake.lib.git.write.working_tree import bytes_as_written, uncommitted_paths
@@ -53,13 +53,15 @@ TOOLS = ("gh", "git")
 LEAVE_UNCHANGED = "leave-unchanged"
 DECISION_CHOICES = ("run-as-typed", LEAVE_UNCHANGED)
 
-def classify(repo: str, tool: str, args: list[str]) -> tuple[dict, int]:
+def classify(repo: str, tool: str, args: list[str], environ: dict | None = None) -> tuple[dict, int]:
     """Read a git or gh command line and say what saw's stand-in does with it. Takes the folder it
-    runs in, the tool and the arguments without the program name. Returns whether it could be read,
-    the subcommand after aliases, the folder it acts on, whether it may bring files in and whether
-    saw checks it first."""
+    runs in, the tool, the arguments without the program name and the environment the command runs
+    in. Returns whether it could be read, the subcommand after aliases, the folder it acts on,
+    whether it may bring files in, whether saw checks it first, and for a git command saw does not
+    check, the settings and environment to run it with."""
+    environ = dict(os.environ) if environ is None else environ
     reading = command_line.read(tool, list(args), Path(repo))
-    decided = runs_directly.decide(tool, list(args), Path(repo))
+    decided = runs_directly.decide(tool, list(args), Path(repo), environ)
     body: dict = {"readable": reading.readable,
                   "subcommand": reading.subcommand,
                   "folder": str(reading.folder) if reading.folder is not None else None,
@@ -67,6 +69,13 @@ def classify(repo: str, tool: str, args: list[str]) -> tuple[dict, int]:
                   "checked": decided != runs_directly.RUNS_AS_TYPED}
     if not reading.readable:
         body["reason"] = reading.reason
+    elif tool == "git" and not body["checked"]:
+        overrides = folder_guard.guard(repo, list(args), environ)
+        if overrides.refusal:
+            body["checked"] = True
+            body["reason"] = overrides.refusal
+        else:
+            body["run_with"] = overrides.run_with()
     return body, exitcodes.CLEAN if reading.readable else exitcodes.INCOMPLETE
 
 

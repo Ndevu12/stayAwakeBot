@@ -863,7 +863,7 @@ class TestWhatGitStillHoldsIsNotCalledClean(_LiveRepo):
         self.git(self.repo, "add", "fonts/text.woff")
         self.write(self.repo, "other.js", "mine\n")
         raced = []
-        real = working_tree.shutil.copyfile
+        real = working_tree.copy_index
 
         def copy_then_race(src, dst):
             out = real(src, dst)
@@ -871,7 +871,7 @@ class TestWhatGitStillHoldsIsNotCalledClean(_LiveRepo):
                 raced.append(subprocess.run(["git", "-C", str(self.repo), "add", "other.js"],
                                             capture_output=True).returncode)
             return out
-        with mock.patch.object(working_tree.shutil, "copyfile", side_effect=copy_then_race):
+        with mock.patch.object(working_tree, "copy_index", side_effect=copy_then_race):
             self.run_fix()
         listed = self.git(self.repo, "ls-files", "--", "other.js")
         self.assertTrue(raced[0] != 0 or "other.js" in listed,
