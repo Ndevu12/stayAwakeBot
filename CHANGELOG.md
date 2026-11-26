@@ -31,6 +31,9 @@ reader, not the mechanism or the weakness it closed.
   file in your editor, which runs when it is clean. A `gh` command that names its repository with `-R` is
   checked too, and after a clone or a new worktree you chose to run unchecked, the folder it created
   is scanned.
+- In a terminal `saw govern` covers, a pull, merge or rebase that stops for conflicts is checked like
+  any other update. When it is clean, saw brings in exactly what it checked and leaves the conflicts
+  for you to resolve.
 
 ## [0.17.6] - 2026-11-25
 

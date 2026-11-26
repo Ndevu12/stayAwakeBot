@@ -39,7 +39,11 @@ impl Fixture {
                  if [ \"$2\" = prepare ]; then\n\
                  \tif [ -n \"$SAW_FAKE_PASSTHROUGH\" ]; then echo '{{\"passthrough\":true,\"reason\":\"the command brings no files in\"}}'; exit 0; fi\n\
                  \tif [ -n \"$SAW_FAKE_LET_IN\" ]; then echo '{{\"scan\":{{\"results\":[{{\"verdict\":\"suspicious\"}}]}},\"next_steps\":[\"Check .claude/settings.json\"],\"decision\":{{\"choices\":[\"let-in\",\"leave-unchanged\"],\"let_in\":[\"saw\",\"govern\",\"apply\",\"--accept\",\"c0ffee\"],\"confirm\":\"yes\"}}}}'; exit 0; fi\n\
-                 \tif [ -n \"$SAW_FAKE_UNCHECKED\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{}}}}'; exit 2; fi\n\
+                 \tif [ -n \"$SAW_FAKE_UNCHECKED\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{\"choices\":[\"run-as-typed\",\"leave-unchanged\"]}}}}'; exit 2; fi\n\
+                 \tif [ -n \"$SAW_FAKE_NO_CHOICES\" ]; then echo '{{\"reason\":\"the repository has no remote to fetch from\",\"decision\":{{}}}}'; exit 2; fi\n\
+                 \tif [ -n \"$SAW_FAKE_CHECKED_LEFT_OUT\" ]; then echo '{{\"scan\":{{\"any_error\":false,\"results\":[{{\"verdict\":\"clean\"}}]}},\"reason\":\"the update stops for conflicts that cannot be brought into the folder\",\"decision\":{{}}}}'; exit 2; fi\n\
+                 \tif [ -n \"$SAW_FAKE_UNFINISHED\" ]; then echo '{{\"scan\":{{\"any_error\":true,\"results\":[{{\"verdict\":\"clean\"}}]}},\"decision\":{{\"choices\":[\"run-as-typed\",\"leave-unchanged\"]}}}}'; exit 2; fi\n\
+                 \tif [ -n \"$SAW_FAKE_LEAVE_ONLY\" ]; then echo '{{\"scan\":{{\"any_error\":false,\"results\":[{{\"verdict\":\"clean\"}}]}},\"reason\":\"the update stops for conflicts that cannot be brought into the folder\",\"decision\":{{\"choices\":[\"leave-unchanged\"]}},\"next_steps\":[\"To bring in exactly the commit saw checked, run `git merge c0ffee`.\"]}}'; exit 2; fi\n\
                  \t[ -n \"$SAW_FAKE_HELD\" ] && exit 2\n\
                  \techo '{{\"schema_version\":1,\"scan\":{{}}}}'; exit 0\n\
                  fi\n\
@@ -228,6 +232,75 @@ fn an_update_saw_could_not_check_stays_out_when_the_user_decides_so() {
     assert_eq!(f.run_unchecked(Some("leave-unchanged")).status.code(), Some(2));
     assert!(!f.real_ran());
     assert!(!f.scanned());
+}
+
+#[test]
+fn a_checked_update_whose_conflicts_stay_out_says_it_was_checked() {
+    let f = Fixture::new("checked-left-out");
+    let out = Command::new(STANDIN)
+        .args(["rebase", "--apply", "main"])
+        .current_dir(&f.dir)
+        .env("SAW_STANDIN_TOOL", "git")
+        .env("SAW_REAL_GIT", &f.real_git)
+        .env("PATH", &f.dir)
+        .env("SAW_BIN", &f.saw)
+        .env("SAW_GOVERN_HOLDING", &f.holding)
+        .env("SAW_FAKE_CHECKED_LEFT_OUT", "1")
+        .env_remove("SAW_GOVERN_DECISION")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!f.real_ran(), "the command ran without the user deciding");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("checked this update: the update stops for conflicts"), "{said}");
+    assert!(!said.contains("cannot be checked"), "{said}");
+}
+
+fn run_with_answer(f: &Fixture, fake: &str, decision: Option<&str>) -> std::process::Output {
+    let mut c = Command::new(STANDIN);
+    c.args(["pull"])
+        .current_dir(&f.dir)
+        .env("SAW_STANDIN_TOOL", "git")
+        .env("SAW_REAL_GIT", &f.real_git)
+        .env("PATH", &f.dir)
+        .env("SAW_BIN", &f.saw)
+        .env("SAW_GOVERN_HOLDING", &f.holding)
+        .env(fake, "1")
+        .env_remove("SAW_GOVERN_DECISION")
+        .stdin(std::process::Stdio::null());
+    if let Some(choice) = decision {
+        c.env("SAW_GOVERN_DECISION", choice);
+    }
+    c.output().unwrap()
+}
+
+#[test]
+fn an_update_whose_check_did_not_finish_is_not_called_checked() {
+    let f = Fixture::new("unfinished");
+    let out = run_with_answer(&f, "SAW_FAKE_UNFINISHED", None);
+    assert_eq!(out.status.code(), Some(2));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("cannot be checked"), "{said}");
+    assert!(!said.contains("checked this update"), "{said}");
+}
+
+#[test]
+fn a_decision_that_names_no_choices_is_never_run_as_typed() {
+    let f = Fixture::new("no-choices");
+    let out = run_with_answer(&f, "SAW_FAKE_NO_CHOICES", Some("run-as-typed"));
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!f.real_ran(), "a decision that offered nothing ran the command as typed");
+}
+
+#[test]
+fn a_checked_pull_that_stays_out_is_never_run_as_typed() {
+    let f = Fixture::new("leave-only");
+    let out = run_with_answer(&f, "SAW_FAKE_LEAVE_ONLY", Some("run-as-typed"));
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!f.real_ran(), "the pull ran again although only leaving the folder was offered");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("run `git merge c0ffee`"), "{said}");
 }
 
 #[test]
