@@ -38,7 +38,7 @@ reader, not the mechanism or the weakness it closed.
   pre-commit hook, a file any of those names, a package.json script or Makefile a hook runs, or a
   file your git configuration has git run or include, is held until you let it in, even when nothing
   is found in it. A command that
-  points git at files in your folder to run, such as setting `core.hooksPath`, or that copies hooks
+  points git at files in a working tree to run, such as setting `core.hooksPath`, or that copies hooks
   from a folder in a working tree into a new repository, asks you first.
 - A git command that writes a file it names, such as `git diff --output`, that fetches through a
   remote it adds or updates or through `git maintenance`, or that pushes into a repository with files

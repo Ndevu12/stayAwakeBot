@@ -171,15 +171,30 @@ def _resolved(words: list[str], places: Places) -> set[str]:
     file's own folder. Takes the words and the places. Returns the paths from the top, leaving out
     the git directory."""
     found: set[str] = set()
+    for candidate in _candidates(words, places):
+        rel = _in_the_tree(places.top, candidate)
+        if rel is not None:
+            found.add(rel)
+    return found
+
+
+def _candidates(words: list[str], places: Places) -> set[Path]:
+    """Name each path the words may point to, from the top and from the file's own folder. Takes
+    the words and the places. Returns the paths."""
+    found: set[Path] = set()
     for word in words:
         if word.startswith("-") or "$" in word:
             continue
         path = Path(os.path.expanduser(word))
-        for candidate in ((path,) if path.is_absolute() else (places.beside / path, places.top / path)):
-            rel = _relative(places.top, candidate)
-            if rel not in (None, ".") and not (rel == ".git" or rel.startswith(".git" + os.sep)):
-                found.add(rel)
+        found.update((path,) if path.is_absolute() else (places.beside / path, places.top / path))
     return found
+
+
+def _in_the_tree(top: Path, path: Path) -> "str | None":
+    """Name a path from the top of a working tree when it lies there, outside the git directory.
+    Takes the top and the path. Returns the name, or None."""
+    rel = _relative(top, path)
+    return None if rel in (None, ".") or rel == ".git" or rel.startswith(".git" + os.sep) else rel
 
 
 def _scripts_run(words: list[str]) -> set[str]:
@@ -280,7 +295,8 @@ def configured_paths(repo: Path) -> "set[str] | None":
         beside = (Path(repo) / place).parent if place and not place.startswith(("command line:", "blob:")) else top
         settings.append((key, value, beside))
     git_dir = _git_dir(repo) or top / ".git"
-    return {rel for _text, rel, _named_program in _named_paths(top, git_dir, settings)}
+    named = (_in_the_tree(top, path) for _text, path, _named_program in _named_paths(top, git_dir, settings))
+    return {rel for rel in named if rel is not None}
 
 
 def _under(rel: str, folders: set[str]) -> bool:
@@ -297,8 +313,14 @@ def _tracked(repo: Path) -> "set[str] | None":
 def lies_in(top: Path, path: Path) -> bool:
     """Tell whether a path lies in a working tree, outside its git directory. Takes the top and the
     path. Returns the answer."""
-    rel = _relative(top, path)
-    return rel is not None and rel != "." and not (rel == ".git" or rel.startswith(".git" + os.sep))
+    return _in_the_tree(top, path) is not None
+
+
+def lies_in_any_working_tree(path: Path, top: "Path | None", where: Path) -> bool:
+    """Tell whether a path lies in the command's own working tree or in any other, outside its git
+    directory. Takes the path, the top of the command's working tree, None when it has none, and
+    where the command runs. Returns the answer."""
+    return (top is not None and lies_in(top, path)) or lies_in_a_working_tree(str(path), where)
 
 
 def _git_dir(repo: Path) -> "Path | None":
@@ -326,24 +348,27 @@ def _text(data: bytes) -> str:
     return data[:_LARGEST_CONFIG].decode("utf-8", errors="replace")
 
 
-def settings_running_folder_files(top: "Path | None", settings) -> tuple[str, ...]:
-    """Pick the settings that make git run a file or folder in a working tree: a hooks folder or
-    template, a command naming a file there in any of its words, or an included configuration file
-    there. Takes the top of the working tree, None when there is none, and the (key, value)
-    settings. Returns each picked one as `key=value`."""
-    if top is None:
-        return ()
-    git_dir = _git_dir(top) or top / ".git"
-    named = _named_paths(top, git_dir, [(key, value, top) for key, value in settings])
-    return tuple(dict.fromkeys(text for text, rel, named_program in named
-                               if named_program or os.path.lexists(top / rel)))
+def settings_running_working_tree_files(where: Path, top: "Path | None", settings,
+                                        beside: "Path | None" = None) -> tuple[str, ...]:
+    """Pick the settings that make git run a file or folder in a working tree, the command's own or
+    any other: a hooks folder or template, a command naming a file there in any of its words, or an
+    included configuration file there. Takes where the command runs, the top of its working tree,
+    None when it has none, the (key, value) settings and the folder their relative paths start
+    from, the top or else where the command runs when not given. Returns each picked one as
+    `key=value`."""
+    base = top or where
+    git_dir = _git_dir(base) or base / ".git"
+    named = _named_paths(base, git_dir, [(key, value, beside or base) for key, value in settings])
+    return tuple(dict.fromkeys(text for text, path, named_program in named
+                               if (named_program or os.path.lexists(path))
+                               and lies_in_any_working_tree(path, top, where)))
 
 
-def _named_paths(top: Path, git_dir: Path, settings) -> list[tuple[str, str, bool]]:
-    """Find the settings that name a file or folder in a working tree for git to run, copy hooks
-    from or include. Takes the top, the git directory and the (key, value, folder a relative path
-    starts from) settings. Returns each as (`key=value`, the path from the top, whether the path is
-    the setting's own program or folder, False for a word handed to it)."""
+def _named_paths(top: Path, git_dir: Path, settings) -> list[tuple[str, Path, bool]]:
+    """Find the settings that name a file or folder for git to run, copy hooks from or include.
+    Takes the top, the git directory and the (key, value, folder a relative path starts from)
+    settings. Returns each as (`key=value`, the path, whether the path is the setting's own program
+    or folder, False for a word handed to it)."""
     named = []
     for key, value, beside in settings:
         if value is None:
@@ -351,22 +376,22 @@ def _named_paths(top: Path, git_dir: Path, settings) -> list[tuple[str, str, boo
         lowered = key.lower()
         places = Places(top, git_dir, Path(beside))
         if lowered in _INCLUDES or (lowered.startswith("includeif.") and lowered.endswith(".path")):
-            paths = [(rel, True) for rel in _resolved(_words(value, places), places)]
+            paths = [(path, True) for path in _candidates(_words(value, places), places)]
         elif lowered in _FOLDER_KEYS:
-            paths = [(rel, True) for rel in _resolved(_words(value, places), Places(top, git_dir, top))]
+            paths = [(path, True) for path in _candidates(_words(value, places), Places(top, git_dir, top))]
         else:
             rule = exec_keys.rule_for(key)
             if rule is None:
                 continue
             if rule.runs == exec_keys.HOOKS_DIRECTORY:
-                paths = [(rel, True) for rel in _resolved(_words(value, places), Places(top, git_dir, top))]
+                paths = [(path, True) for path in _candidates(_words(value, places), Places(top, git_dir, top))]
             else:
                 command = rule.command(key, value)
                 words = _words(command, Places(top, git_dir, top)) if command else []
                 program = [words[0]] if words and "/" in words[0] else []
-                paths = [(rel, True) for rel in _resolved(program, Places(top, git_dir, top))]
-                paths += [(rel, False) for rel in _resolved(words[1:], Places(top, git_dir, top))]
-        named += [(f"{key}={value}", rel, named_program) for rel, named_program in paths]
+                paths = [(path, True) for path in _candidates(program, Places(top, git_dir, top))]
+                paths += [(path, False) for path in _candidates(words[1:], Places(top, git_dir, top))]
+        named += [(f"{key}={value}", path, named_program) for path, named_program in paths]
     return named
 
 
@@ -422,13 +447,22 @@ def template_named(rest: tuple[str, ...], template_variable: str, settings) -> s
 
 
 def lies_in_a_working_tree(folder: str, where: Path) -> bool:
-    """Tell whether a folder is inside some git working tree. Takes the folder, as named, and where
-    the command runs. Returns the answer."""
+    """Tell whether a folder is inside some git working tree, also through a repository with no
+    working tree that lies among its files. Takes the folder, as named, and where the command runs.
+    Returns the answer."""
     path = Path(os.path.expanduser(folder))
     path = path if path.is_absolute() else where / path
     probe = path if path.is_dir() else path.parent
     while not probe.is_dir() and probe != probe.parent:
         probe = probe.parent
-    return bool(stdout(probe, ["rev-parse", "--show-toplevel"], context=UNTRUSTED).strip())
+    probe = Path(os.path.realpath(probe))
+    while True:
+        if stdout(probe, ["rev-parse", "--show-toplevel"], context=UNTRUSTED).strip():
+            return True
+        found = stdout(probe, ["rev-parse", "--path-format=absolute", "--absolute-git-dir"], context=UNTRUSTED).strip()
+        above = Path(os.path.realpath(found)).parent if found else None
+        if above is None or Path(found).name == ".git" or above not in probe.parents:
+            return False
+        probe = above
 
 

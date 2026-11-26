@@ -103,8 +103,8 @@ folder, such as an alias, a mistyped command, `git clone` or `git worktree add`,
 same as an update that cannot be checked. So does a command that would also update submodules, one
 that writes a file it names, such as `git diff --output`, one that fetches through a remote it adds
 or updates, a `git maintenance` that fetches or schedules runs, and a push into a repository with
-files on this machine or one that names a program to run. A command that points git at files in your folder to run, such as setting
-`core.hooksPath`, that lets a push change your folder's files, or that copies hooks from a folder in
+files on this machine or one that names a program to run. A command that points git at files in a working tree to run, such as setting
+`core.hooksPath` on its command line or in a configuration file its environment names, that lets a push change your folder's files, or that copies hooks from a folder in
 a working tree into a new repository, asks you first too. A `gh` command that names its repository with `-R` is checked like any other. Open a new terminal, or
 source the file the command names, for it to take effect.
 

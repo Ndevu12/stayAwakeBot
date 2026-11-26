@@ -433,6 +433,34 @@ class AnUpdateLandsAsGitWouldLandIt(_Fetched):
         self.assertEqual(code, exitcodes.CLEAN, answer)
         self.assertNotIn("new.txt", scanned)
 
+    def test_content_let_in_before_is_judged_again_under_another_mode(self):
+        self._prepare("checkout", "origin/main")
+        self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+        self.git(self.open, "checkout", "-q", "main")
+        blob = self.git(self.upstream, "rev-parse", "main:new.txt").strip()
+        changed = {}
+        for name, entry in (("executable", f"100755,{blob},new.txt"), ("link", f"120000,{blob},new.txt")):
+            self.git(self.upstream, "checkout", "-q", "-f", "-B", name, "main")
+            self.git(self.upstream, "update-index", "--cacheinfo", entry)
+            self.git(self.upstream, "commit", "-qm", name)
+            changed[name] = self.rev(self.upstream)
+        self.git(self.upstream, "checkout", "-q", "-f", "main")
+        self.git(self.open, "fetch", "-q")
+        real = govern._scan_arrived
+        from unittest import mock
+        for name, args in (*((mode, ("checkout", commit)) for mode, commit in changed.items()),
+                           ("staged executable", ("update-index", "--add", "--cacheinfo", f"100755,{blob},new.txt"))):
+            with self.subTest(mode=name):
+                scanned = []
+
+                def counted(root, landing, paths, *rest, **kw):
+                    scanned.extend(paths)
+                    scanned.extend(rel for _copies, names in rest[3] for rel in names)
+                    return real(root, landing, paths, *rest, **kw)
+                with mock.patch.object(govern, "_scan_arrived", side_effect=counted):
+                    answer, _code = self._prepare(*args)
+                self.assertIn("new.txt", scanned, answer)
+
 
 class WhatMakesGitRunFolderFilesIsAskedAbout(_Fetched):
     """An update to a file a hook manager runs is held for review even when it is clean, and a

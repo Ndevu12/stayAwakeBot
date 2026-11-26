@@ -167,34 +167,41 @@ _MOST_LET_IN_BLOBS = 50000
 
 
 def let_in_blobs_path() -> Path:
-    """The record of file contents `saw govern` let into a repository, by path and blob id."""
+    """The record of file contents `saw govern` let into a repository, by path, mode and blob id."""
     return cache_path().with_name("govern-let-in-blobs.json")
 
 
-def remember_blobs(root: Path, blobs: dict[str, str], policy: str) -> None:
+def remember_blobs(root: Path, contents: list, policy: str) -> None:
     """Record the contents govern let into a repository, under the policy they were judged by.
-    Takes the root, each path with its blob id and the digest of the policy. A write that fails is
-    skipped."""
-    if not blobs or not policy:
+    Takes the root, each content as (path, mode, blob id), and the digest of the policy. A write
+    that fails is skipped."""
+    if not contents or not policy:
         return
     try:
         held = {r: k for r, k in _load_record(let_in_blobs_path()).items() if os.path.isdir(r) and isinstance(k, dict)}
         kept = held.get(os.path.realpath(root), {})
-        pairs = [pair for pair in (kept.get("blobs") or []) if isinstance(pair, list) and len(pair) == 2] \
+        entries = [entry for entry in (kept.get("blobs") or []) if _is_content(entry)] \
             if kept.get("policy") == policy else []
-        known = {tuple(pair) for pair in pairs}
-        pairs += [[rel, oid] for rel, oid in sorted(blobs.items()) if (rel, oid) not in known]
-        held[os.path.realpath(root)] = {"policy": policy, "blobs": pairs[-_MOST_LET_IN_BLOBS:]}
+        known = {tuple(entry) for entry in entries}
+        entries += [list(content) for content in sorted(tuple(content) for content in contents if _is_content(content))
+                    if content not in known]
+        held[os.path.realpath(root)] = {"policy": policy, "blobs": entries[-_MOST_LET_IN_BLOBS:]}
         atomicwrite.replace(let_in_blobs_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
                             at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
 
-def blobs_let_in(root: Path, config_path: str | None) -> set[tuple[str, str]]:
+def blobs_let_in(root: Path, config_path: str | None) -> set[tuple[str, str, str]]:
     """Read the contents govern let into a repository under the current policy. Takes the root and
-    the operator config. Returns each (path, blob id), none after a change of policy."""
+    the operator config. Returns each (path, mode, blob id), none after a change of policy."""
     kept = _load_record(let_in_blobs_path()).get(os.path.realpath(root))
     if not isinstance(kept, dict) or kept.get("policy") != policy_digest(config_path):
         return set()
-    return {tuple(pair) for pair in kept.get("blobs") or [] if isinstance(pair, list) and len(pair) == 2}
+    return {tuple(entry) for entry in kept.get("blobs") or [] if _is_content(entry)}
+
+
+def _is_content(entry) -> bool:
+    """Tell whether a recorded entry is a (path, mode, blob id) of text. Takes the entry. Returns
+    the answer."""
+    return isinstance(entry, (list, tuple)) and len(entry) == 3 and all(isinstance(part, str) for part in entry)

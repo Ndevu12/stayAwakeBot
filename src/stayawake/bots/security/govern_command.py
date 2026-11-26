@@ -72,7 +72,7 @@ def _answer_before_replay(folder: Path, command: TypedCommand, brings_no_files: 
     runs, the command and whether the stand-in reads it as one that brings no files. Returns the
     answer, or None for a command saw replays."""
     top = _top(folder)
-    runs = runs_from_the_folder.settings_running_folder_files(top, command.settings)
+    runs = runs_from_the_folder.settings_running_working_tree_files(folder, top, command.settings)
     if runs:
         return Answer(ASKS, _runs(runs))
     named_files = _setting_files_running_folder_files(folder, top, command.setting_files)
@@ -151,7 +151,7 @@ def _sent_for_what_it_names(folder: Path, top: "Path | None", command: TypedComm
         settings = runs_from_the_folder.config_settings(rest)
         if isinstance(settings, str):
             return Answer(ASKS, settings)
-        runs = runs_from_the_folder.settings_running_folder_files(top, settings)
+        runs = runs_from_the_folder.settings_running_working_tree_files(folder, top, settings)
         if runs:
             return Answer(ASKS, _runs(runs))
         if _lets_a_push_write(settings):
@@ -160,21 +160,20 @@ def _sent_for_what_it_names(folder: Path, top: "Path | None", command: TypedComm
 
 
 def _setting_files_running_folder_files(folder: Path, top: "Path | None", files: tuple[str, ...]) -> tuple[str, ...]:
-    """Pick the configuration files the environment names that lie in the working tree, or whose
-    settings make git run a file or folder there. Takes where the command runs, the top of the
-    working tree and the files. Returns each picked file or setting."""
-    if top is None:
-        return ()
+    """Pick the configuration files the environment names that lie in a working tree, the
+    command's own or any other, or whose settings make git run a file or folder there. Takes where
+    the command runs, the top of its working tree, None when it has none, and the files. Returns
+    each picked file or setting."""
     picked: list[str] = []
     for name in files:
         path = Path(os.path.expanduser(name))
         path = path if path.is_absolute() else folder / path
-        if runs_from_the_folder.lies_in(top, path):
+        if runs_from_the_folder.lies_in_any_working_tree(path, top, folder):
             picked.append(name)
             continue
         listed = stdout(folder, ["config", "--file", str(path), "--includes", "--list", "-z"], context=UNTRUSTED)
         settings = [(key, value) for key, _, value in (entry.partition("\n") for entry in listed.split("\0")) if key]
-        picked += runs_from_the_folder.settings_running_folder_files(top, settings)
+        picked += runs_from_the_folder.settings_running_working_tree_files(folder, top, settings, path.parent)
     return tuple(picked)
 
 

@@ -117,6 +117,34 @@ class ACommandThatCreatesOrWritesAWorkingTreeIsStillChecked(_Mirrored):
         self.assertIn("decision", self._governed(vendored, "fetch", "origin"))
         self.assertIn("decision", self._governed(checkout, "--git-dir=vendor/x.git", "fetch", "origin"))
 
+    def test_a_configuration_file_the_environment_names_is_judged_against_any_working_tree(self):
+        checkout = self.owned(self.root / "checkout")
+        self._raw("clone", "-q", str(self.upstream), str(checkout))
+        self._raw("clone", "-q", "--bare", str(self.upstream), str(checkout / "vendor" / "x.git"))
+        self.write(checkout, "hooks/reference-transaction", "#!/bin/sh\n")
+        self.write(checkout, "tool.sh", "#!/bin/sh\n")
+        self.write(checkout, "hooks.gitconfig", f"[core]\n\thooksPath = {checkout / 'hooks'}\n")
+        outside = self.root / "configs"
+        for name, text in (("hooks", f"[core]\n\thooksPath = {checkout / 'hooks'}\n"),
+                           ("embedded", f"[core]\n\thooksPath = {checkout / 'vendor' / 'x.git' / 'hooks'}\n"),
+                           ("pager", f"[core]\n\tpager = {checkout / 'tool.sh'}\n"),
+                           ("external", f"[diff]\n\texternal = {checkout / 'tool.sh'}\n"),
+                           ("plain", "[user]\n\tname = Operator\n")):
+            self.write(self.root, f"configs/{name}.gitconfig", text)
+        fetch = ("fetch", "origin", "+refs/heads/*:refs/remotes/up/*")
+        for variable, named, args, brings_no_files in (
+                ("GIT_CONFIG_GLOBAL", checkout / "hooks.gitconfig", fetch, False),
+                ("GIT_CONFIG_SYSTEM", outside / "hooks.gitconfig", fetch, False),
+                ("GIT_CONFIG", outside / "embedded.gitconfig", fetch, False),
+                ("GIT_CONFIG_GLOBAL", outside / "pager.gitconfig", ("log", "-1"), True),
+                ("GIT_CONFIG_GLOBAL", outside / "external.gitconfig", ("diff", "HEAD"), True)):
+            with self.subTest(variable=variable, named=named.name, args=args):
+                answer, _code = self._prepare(self.bare, *args, environment={variable: str(named)},
+                                              brings_no_files=brings_no_files)
+                self.assertTrue(answer.get("checked"), answer)
+                self.assertIn("decision", answer)
+        self._runs_as_typed(self.bare, *fetch, environment={"GIT_CONFIG_GLOBAL": str(outside / "plain.gitconfig")})
+
     def test_a_patch_applied_where_there_is_no_working_tree_is_checked(self):
         patch = self.root / "change.patch"
         patch.write_text("--- /dev/null\n+++ b/hooks/post-update\n@@ -0,0 +1 @@\n+echo\n", encoding="utf-8")
