@@ -28,8 +28,10 @@ reader, not the mechanism or the weakness it closed.
   `--open-files-in-pager`).
 - `saw govern classify` names the git command a line runs when an alias shares that command's name,
   as git ignores such an alias.
-- saw reads and keeps its record of what it checked and let in only outside every git repository.
-  When your cache folder lies inside one, saw checks each update afresh.
+- saw reads and keeps its records of what it checked, let in and showed only while its cache folder
+  lies outside every git repository. When the folder is inside one, saw keeps none and checks each
+  update afresh, says so once on a run that would have kept one, and `saw doctor` and `saw govern
+  status` name the folder to move.
 - `saw govern verdict` answers `let-in` only for a tree whose submodule links saw let in before, so
   an update that brings a new submodule link is not counted as one saw let in.
 - A governed `git fetch --append` adds to `FETCH_HEAD` as git does, instead of replacing what it held.

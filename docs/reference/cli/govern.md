@@ -147,7 +147,8 @@ folder name for an infected one. That is never decided ahead; where there is no 
 folder is left as it is and saw prints the command to let it in.
 
 `saw govern status` says whether your terminals are covered and whether the shell you are in is
-covered yet. `saw govern uninstall` takes it back out, and your editor is unaffected. saw always
+covered yet, and names saw's cache folder when it lies inside a git repository, where saw keeps no
+records. `saw govern uninstall` takes it back out, and your editor is unaffected. saw always
 falls back to your real git and gh.
 
 ## Asking how saw reads a command

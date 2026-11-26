@@ -13,25 +13,16 @@ import json
 import os
 from pathlib import Path
 
-from stayawake.bots.security import hookscript, push_record
+from stayawake.bots.security import hookscript, push_record, records
 from stayawake.bots.security.hook_policy import operator_policy
-from stayawake.lib.git.inside_a_repository import lies_inside_a_repository
 from stayawake.utils import atomicwrite
 
 cache_path = hookscript.cache_path
 
 
-def _kept_outside_every_repository() -> bool:
-    """Tell whether the folder holding saw's record lies outside every git repository. Returns the
-    answer."""
-    return not lies_inside_a_repository(cache_path().parent)
-
-
 def load_cache() -> dict:
-    if not _kept_outside_every_repository():
-        return {}
     try:
-        cache = json.loads(cache_path().read_text())
+        cache = json.loads(records.read_text(cache_path()))
     except (OSError, ValueError):
         return {}
     return cache if isinstance(cache, dict) else {}
@@ -56,12 +47,9 @@ def clean_key(head: str, config_path: str | None) -> str:
 
 
 def settings_scans() -> dict:
-    """Read the clean scans a run from git's settings remembers. Returns them by repository, none
-    when the record lies inside a git repository."""
-    if not _kept_outside_every_repository():
-        return {}
+    """Read the clean scans a run from git's settings remembers. Returns them by repository."""
     try:
-        held = json.loads(hookscript.settings_scan_path().read_text())
+        held = json.loads(records.read_text(hookscript.settings_scan_path()))
     except (OSError, ValueError):
         return {}
     return held if isinstance(held, dict) else {}
@@ -69,25 +57,19 @@ def settings_scans() -> dict:
 
 def remember_settings_scan(root: Path, key: str) -> None:
     """Remember a clean scan a run from git's settings made, apart from saw's list of repositories it
-    keeps current. Takes the root and the clean key. A write that fails, or one into a record inside a
-    git repository, is skipped."""
-    if not _kept_outside_every_repository():
-        return
+    keeps current. Takes the root and the clean key. A write that fails is skipped."""
     held = {r: k for r, k in settings_scans().items() if os.path.isdir(r)}
     held[os.path.realpath(root)] = key
-    atomicwrite.replace(hookscript.settings_scan_path(), json.dumps(held))
+    records.replace(hookscript.settings_scan_path(), json.dumps(held))
 
 
 def remember(root: Path, key: str) -> None:
     """Record a scanned repository, and the clean scan it may skip next time. Takes the root and
-    the clean key, or "" when the scan was not clean. A write that fails, or one into a record inside
-    a git repository, is skipped."""
-    if not _kept_outside_every_repository():
-        return
+    the clean key, or "" when the scan was not clean. A write that fails is skipped."""
     try:
         cache = {r: s for r, s in load_cache().items() if os.path.isdir(r)}
         cache[os.path.realpath(root)] = key
-        atomicwrite.replace(cache_path(), json.dumps(cache), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(cache_path(), json.dumps(cache), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
@@ -105,12 +87,9 @@ def applied_path() -> Path:
 
 
 def _load_record(path: Path) -> dict:
-    """Read a govern record kept outside every git repository. Takes its path. Returns it by
-    repository, or an empty one."""
-    if not _kept_outside_every_repository():
-        return {}
+    """Read a govern record. Takes its path. Returns it by repository, or an empty one."""
     try:
-        held = json.loads(path.read_text())
+        held = json.loads(records.read_text(path))
     except (OSError, ValueError):
         return {}
     return held if isinstance(held, dict) else {}
@@ -122,14 +101,12 @@ def load_applied() -> dict:
 
 def remember_applied(root: Path, key: str) -> None:
     """Record a tree govern let into a repository, clean or residue. Takes the root and the key.
-    A write that fails, or one into a record inside a git repository, is skipped."""
-    if not _kept_outside_every_repository():
-        return
+    A write that fails is skipped."""
     try:
         held = {r: k for r, k in load_applied().items() if os.path.isdir(r)}
         held[os.path.realpath(root)] = key
-        atomicwrite.replace(applied_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
-                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(applied_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                        at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
@@ -167,15 +144,12 @@ def accepted_path() -> Path:
 
 def remember_accepted(root: Path, commit: str, verdict: str) -> None:
     """Record that the user let a held tree into a repository. Takes the root, the commit and the
-    verdict saw gave it. A write that fails, or one into a record inside a git repository, is
-    skipped."""
-    if not _kept_outside_every_repository():
-        return
+    verdict saw gave it. A write that fails is skipped."""
     try:
         held = {r: v for r, v in _load_record(accepted_path()).items() if os.path.isdir(r)}
         held[os.path.realpath(root)] = {"commit": commit, "verdict": verdict}
-        atomicwrite.replace(accepted_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
-                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(accepted_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                        at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
@@ -200,8 +174,8 @@ def let_in_blobs_path() -> Path:
 def remember_blobs(root: Path, contents: list, policy: str) -> None:
     """Record the contents govern let into a repository, under the policy they were judged by.
     Takes the root, each content as (path, mode, blob id), and the digest of the policy. A write
-    that fails, or one into a record inside a git repository, is skipped."""
-    if not contents or not policy or not _kept_outside_every_repository():
+    that fails is skipped."""
+    if not contents or not policy:
         return
     try:
         held = {r: k for r, k in _load_record(let_in_blobs_path()).items() if os.path.isdir(r) and isinstance(k, dict)}
@@ -212,8 +186,8 @@ def remember_blobs(root: Path, contents: list, policy: str) -> None:
         entries += [list(content) for content in sorted(tuple(content) for content in contents if _is_content(content))
                     if content not in known]
         held[os.path.realpath(root)] = {"policy": policy, "blobs": entries[-_MOST_LET_IN_BLOBS:]}
-        atomicwrite.replace(let_in_blobs_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
-                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(let_in_blobs_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                        at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
