@@ -6,8 +6,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security import govern
@@ -22,6 +25,17 @@ _PAYLOAD = "var _0x=[String.%s(127)];eval(_0x.join(\"\"));\n" % samples.FROM_CHA
 _BENIGN = "module.exports = 1;\n"
 _TASKS = json.dumps({"version": "2.0.0", "tasks": [{"label": "dev", "type": "shell", "command": "npm run watch",
                                                     "runOptions": {"runOn": "folderOpen"}}]})
+
+def _short_names_are_made() -> bool:
+    """Tell whether this system's temporary folder gives a long file name a Windows short name.
+    Returns the answer."""
+    probe = tempfile.mkdtemp(prefix="saw-short-names-")
+    try:
+        (Path(probe) / "aaaaaaaaa.txt").write_bytes(b"")
+        return os.path.exists(Path(probe) / "AAAAAA~1.TXT")
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
 
 def _commit_of(repo, files: dict) -> str:
     """Make a commit holding each file, written straight into git's trees, whatever names the local
@@ -164,13 +178,29 @@ class CopyingOutByBlob(GitSandbox):
     def test_on_windows_a_name_windows_cannot_hold_is_not_copied_and_the_rest_is(self):
         repo = self.new_repo()
         refused = ("aux.js", "Com1.txt", "lpt\u00b9.js", "a:b.js", "a.js::$DATA", "trailing.", "folder /x.js",
-                   "back\\slash.js", "ask?.js", "nul", "PROGRA~1/x.js", "git~1/config", ".GIT/x.js", "dot./x.js")
-        kept = ("kept.js", "con-not-reserved.js", "tilde~word.js", "notes~1.text.js")
+                   "back\\slash.js", "ask?.js", "nul", "git~1/config", "GIT~1/hooks/x", ".GIT/x.js",
+                   ".git. /x.js", "dot./x.js")
+        kept = ("kept.js", "con-not-reserved.js", "backup~1.txt", "PROGRA~1/x.js", "gitx~1/x.js")
         commit = _commit_of(repo, {name: _BENIGN for name in (*refused, *kept)})
         with mock.patch.object(blob_copies, "ON_WINDOWS", True):
             copies = blob_copies.copy_out(repo, commit, (*refused, *kept), "names")
         self.assertEqual(sorted(copies.not_copied), sorted(refused))
         self.assertEqual(sorted(name for _folder, names in copies.folders for name in names), sorted(kept))
+
+    @unittest.skipUnless(_short_names_are_made(), "this disk gives files no Windows short names")
+    def test_a_name_that_is_another_files_short_name_is_copied_in_a_view_of_its_own(self):
+        repo = self.new_repo()
+        commit = _commit_of(repo, {"aaaaaaaaa.txt": "long name\n", "aaaaaa~1.txt": "short name\n",
+                                   "other.txt": "other\n"})
+        copies = blob_copies.copy_out(repo, commit, ("aaaaaaaaa.txt", "aaaaaa~1.txt", "other.txt"), "aliases")
+        self.assertEqual(copies.not_copied, ())
+        self.assertEqual(len(copies.folders), 2, copies.folders)
+        expected = {"aaaaaaaaa.txt": "long name\n", "aaaaaa~1.txt": "short name\n", "other.txt": "other\n"}
+        for folder, names in copies.folders:
+            self.assertIn("other.txt", names)
+            for name in names:
+                self.assertEqual((folder / name).read_text(encoding="utf-8"), expected[name], (folder, name))
+        self.assertEqual({name for _folder, names in copies.folders for name in names}, set(expected))
 
     def test_what_a_command_stages_is_copied_beside_what_it_writes_into_a_complete_view(self):
         repo = self.new_repo()

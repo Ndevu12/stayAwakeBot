@@ -25,8 +25,7 @@ _CANNOT_HOLD_A_FILE = "cannot hold a file"
 
 ON_WINDOWS = os.name == "nt"
 _CHARACTERS_WINDOWS_REFUSES = frozenset('<>:"|?*\\') | frozenset(chr(code) for code in range(32))
-_LONGEST_SHORT_STEM = 8
-_LONGEST_SHORT_EXTENSION = 3
+_NAMES_WINDOWS_READS_AS_GIT = frozenset({".git", "git~1"})
 _NAMES_WINDOWS_RESERVES = frozenset({"con", "prn", "aux", "nul", "conin$", "conout$",
                                      *(f"{port}{number}" for port in ("com", "lpt")
                                        for number in (*"123456789", "\u00b9", "\u00b2", "\u00b3"))})
@@ -169,23 +168,14 @@ def _place(folder: Path, rel: str, data: bytes) -> str:
 
 def _windows_can_hold(rel: str) -> bool:
     """Tell whether Windows holds a file under exactly this name, each part of it a name it neither
-    refuses, reserves for a device or a stream, reads as another file's short name, nor takes for
-    `.git`. Takes the name, its parts split by `/`. Returns the answer."""
+    refuses, reserves for a device or a stream, nor reads as `.git`. Takes the name, its parts split
+    by `/`. Returns the answer."""
     for part in rel.split("/"):
         if (not part or part in (".", "..") or part[-1] in ". " or set(part) & _CHARACTERS_WINDOWS_REFUSES
                 or part.split(".")[0].rstrip(" ").lower() in _NAMES_WINDOWS_RESERVES
-                or part.lower() == ".git" or _is_a_short_name(part)):
+                or part.lower() in _NAMES_WINDOWS_READS_AS_GIT):
             return False
     return True
-
-
-def _is_a_short_name(part: str) -> bool:
-    """Tell whether a name has the form of a Windows short name, such as `PROGRA~1` or `GIT~1`.
-    Takes the name. Returns the answer."""
-    stem, _, extension = part.partition(".")
-    base, tilde, number = stem.rpartition("~")
-    return (bool(tilde and base and number.isdigit()) and len(stem) <= _LONGEST_SHORT_STEM
-            and len(extension) <= _LONGEST_SHORT_EXTENSION and "." not in extension)
 
 
 def _free(destination: Path) -> str:
