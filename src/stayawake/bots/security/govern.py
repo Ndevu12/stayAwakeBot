@@ -22,7 +22,8 @@ from stayawake.bots.security.scanner import joined, scan_target, unreadable
 from stayawake.bots.security.found import described
 from stayawake.bots.security.sinks.json_sink import _in_plain_words
 from stayawake.bots.security.targets.local import LocalRepoTarget
-from stayawake.lib.git import blob_copies, conflicted, incoming, query, replay, runs_from_the_folder, typed_command
+from stayawake.lib.git import (blob_copies, conflicted, holding_directory, incoming, query, replay,
+                               runs_from_the_folder, typed_command)
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, stdout, stdout_bytes
 from stayawake.lib.git.write import replayed as replayed_writer
 from stayawake.lib.git.write.working_tree import bytes_as_written, uncommitted_paths
@@ -33,7 +34,7 @@ from stayawake.utils.progress_events import current
 from stayawake.utils.timeutil import now_iso
 
 SCHEMA = 1
-_STATE = "state.json"
+_STATE = holding_directory.STATE
 REPLAYED = "replayed"
 GIT_STOPPED = "git stopped when saw ran the command"
 _GITLINK = b"160000"
@@ -58,7 +59,9 @@ def prepare(repo: str, into: str, tool: str, args: list[str], config: str | None
     deadline, the command's environment and whether the stand-in reads the command as one that
     brings no files. Returns the answer and its exit: a passthrough, a scan, or a reason with a
     decision."""
-    _forget_state(Path(into))
+    refused = holding_directory.overlaps(Path(repo), Path(into)) or holding_directory.clear(Path(into))
+    if refused:
+        return _unchecked(repo, refused)
     command = typed_command.TypedCommand("", ())
     if tool == "gh":
         if not incoming.gh_brings_files(list(args)):
@@ -305,7 +308,7 @@ def _write_replayed_state(into: Path, result: "replay.Replayed", releasable: boo
             "base": holding.base, "pseudo_refs": [list(entry) for entry in result.pseudo_refs],
             "fetch_head": result.fetch_head.hex() if result.fetch_head is not None else None, **judged}
     path = Path(into) / _STATE
-    temporary = path.with_suffix(".json.tmp")
+    temporary = Path(into) / holding_directory.STATE_BEING_WRITTEN
     temporary.write_text(json.dumps(body), encoding="utf-8")
     temporary.replace(path)
 
@@ -418,6 +421,9 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
     """Make the open folder match the checked tree, without fetching again. Takes the open folder,
     the holding directory, the accepted commit and the typed confirmation. Returns whether it was
     applied, the reason when not, and the exit."""
+    refused = holding_directory.overlaps(Path(repo), Path(into))
+    if refused:
+        return _applied(False, refused)
     state = _read_state(Path(into))
     if state is None:
         return _applied(False, "there is no checked update to apply")
@@ -767,21 +773,9 @@ def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
             "clean_mark": clean_mark, "applied_mark": applied_mark, "verdict": verdict,
             "written": written or {}, "asks": asks}
     path = Path(into) / _STATE
-    temporary = path.with_suffix(".json.tmp")
+    temporary = Path(into) / holding_directory.STATE_BEING_WRITTEN
     temporary.write_text(json.dumps(body), encoding="utf-8")
     temporary.replace(path)
-
-
-def _forget_state(into: Path) -> None:
-    """Remove what an earlier check recorded in the holding directory. Takes the holding
-    directory. Returns nothing."""
-    try:
-        (Path(into) / _STATE).unlink()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        if (Path(into) / _STATE).exists():
-            raise
 
 
 def _read_state(into: Path) -> dict | None:

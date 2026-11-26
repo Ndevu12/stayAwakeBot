@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- `saw govern` never deletes a folder named as its holding directory: it refuses one that is your
+  open folder, inside it or contains it, and clears only what it put there.
+
 ## [0.17.7] - 2026-11-26
 
 ### Fixed

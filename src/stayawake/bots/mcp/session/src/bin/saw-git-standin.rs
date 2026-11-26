@@ -379,7 +379,8 @@ fn govern(tool: &str, args: &[String], real: &Path, for_what_it_names: bool) -> 
 
 /// The holding directory for this check, and whether the stand-in owns it. A placer's
 /// `SAW_GOVERN_HOLDING` is used as given and left in place. In system mode (`SAW_GOVERN_SYSTEM`)
-/// a fresh directory is made under the system temp directory and removed when the check is done.
+/// a new directory is made under the system temp directory and removed when the check is done;
+/// a name that already exists is never taken.
 fn holding_dir() -> Option<(PathBuf, bool)> {
     if let Some(given) = env::var_os("SAW_GOVERN_HOLDING") {
         return Some((PathBuf::from(given), false));
@@ -393,8 +394,10 @@ fn holding_dir() -> Option<(PathBuf, bool)> {
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     );
-    let dir = env::temp_dir().join(unique);
-    std::fs::create_dir_all(&dir).ok()?;
+    let temp = env::temp_dir();
+    std::fs::create_dir_all(&temp).ok()?;
+    let dir = temp.join(unique);
+    std::fs::create_dir(&dir).ok()?;
     Some((dir, true))
 }
 

@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git import conflicted, owned, subcommand_options
+from stayawake.lib.git import conflicted, holding_directory, owned, subcommand_options
 from stayawake.lib.git.query import files_brought
 from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, run_ok, stdout
 from stayawake.lib.git.typed_command import TypedCommand
@@ -85,7 +85,7 @@ def rebase_left(repo: Path) -> "tuple[str, tuple[str, ...], bool] | str | None":
 def claim(into: Path) -> None:
     """Mark the holding repository and its work tree as ones this process may write. Takes the
     holding directory. Returns nothing."""
-    for made in (Path(into) / "repo.git", Path(into) / "work"):
+    for made in (Path(into) / holding_directory.REPOSITORY, Path(into) / holding_directory.WORK_TREE):
         if made.is_dir():
             owned.own(made)
 
@@ -98,7 +98,7 @@ def apply(repo: Path, into: Path, arrived: Arrived) -> str:
     claim(into)
     if arrived.mode != "conflicts":
         return conflicted.CANNOT_CARRY
-    return _apply_conflicts(repo, Path(into) / "repo.git", arrived)
+    return _apply_conflicts(repo, Path(into) / holding_directory.REPOSITORY, arrived)
 
 
 def arrived_with_conflicts(work: Path, holding: Path, base: str, kind: str) -> "Arrived | str":
