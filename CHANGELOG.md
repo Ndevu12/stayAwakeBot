@@ -26,11 +26,19 @@ reader, not the mechanism or the weakness it closed.
   even when nothing is found in it.
 - In a terminal `saw govern` covers, every git command that can bring files into the folder is
   checked or asks you first, however it is spelled, including `git reset --hard` to a fetched commit.
-- Moving your branch or staging files from a commit your folder has not had, such as
-  `git reset --soft` to a fetched commit, is checked before it runs, and so is staging part of a
-  file in your editor, which runs when it is clean. A `gh` command that names its repository with `-R` is
-  checked too, and after a clone or a new worktree you chose to run unchecked, the folder it created
-  is scanned.
+- Staging files your folder has not had, such as `git reset` to a fetched commit, is checked before
+  the index changes, and so is staging part of a file in your editor. A `gh` command that names its
+  repository with `-R` is checked too, and after a clone or a new worktree you chose to run
+  unchecked, the folder it created is scanned.
+- `saw govern` judges a git command by what it would write into your folder and its index, whatever
+  repository, index or objects the command or its environment names. What saw holds stays out of
+  the folder, and a clean update is written exactly as it was checked.
+- An update that changes a file a hook manager runs or reads, such as a husky, lefthook or
+  pre-commit hook, is held until you let it in, even when nothing is found in it. A command that
+  points git at files in your folder to run, such as setting `core.hooksPath`, or that copies hooks
+  from a folder in a working tree into a new repository, asks you first.
+- A git command that writes a file it names, such as `git diff --output`, or that fetches through a
+  remote it adds or updates, asks you first.
 - In a terminal `saw govern` covers, a pull, merge or rebase that stops for conflicts is checked like
   any other update. When it is clean, saw brings in exactly what it checked and leaves the conflicts
   for you to resolve.

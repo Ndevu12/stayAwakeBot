@@ -9,38 +9,44 @@ saw govern prepare --repo <open-folder> --into <holding-directory> --tool git|gh
 saw govern apply   --repo <open-folder> --into <holding-directory>
 ```
 
-For the editor extension. When you pull, fetch, check out, switch, merge, rebase, reset to another
-commit, cherry-pick, revert, update a submodule, check out a pull request, sync a repository, or
-download a release or an Actions artifact, these commands check what arrives before your open
+For the editor extension. When you pull, fetch, check out, switch, merge, rebase, reset, restore,
+stash, cherry-pick, revert, stage files, check out a pull request, sync a repository, or download a
+release or an Actions artifact, these commands check what the command would write before your open
 folder changes.
 
-`saw govern prepare` carries the update out into a holding directory saw owns, scans what arrived,
-and prints the verdict as the same document `saw scan --json` prints. Your open folder is not
-changed, and nothing from the incoming repository runs.
+`saw govern prepare` works out, in a holding directory saw owns, every file the command would write
+into the folder and everything it would stage, whichever repository, index or objects the command
+or its environment names. It scans each of them exactly as it would be written and prints the
+verdict as the same document `saw scan --json` prints. Your open folder is not changed, and nothing
+from the incoming repository runs.
 
 `--deadline SECONDS` stops the check in time; an unfinished check is yours to decide, as below.
 
-`saw govern apply` makes your open folder match the tree that was checked, without fetching again.
-The extension calls it only when the verdict was clean or residue, and your uncommitted work is
-kept — or the folder is not changed and saw says why.
+`saw govern apply` writes exactly what was checked into your open folder, without fetching again.
+The extension calls it only when the verdict was clean or residue. When git would refuse the command
+in your folder, for example because it would overwrite uncommitted work, saw says what git says and
+the folder is not changed.
 
 saw judges what the update brings. A finding a changed file already had before the update is
 listed under `pre_existing` and does not hold the update, unless it is confirmed. An update that
 changes a file in the folder git runs your hooks from is held until you let it in, even when
-nothing is found in it.
+nothing is found in it, and so is an update that changes a file a hook manager runs or reads, such as
+a husky, lefthook or pre-commit hook.
 
 When the verdict is suspicious or infected, the update is held and your open folder stays as it
 was. The answer says what to do in `next_steps`, and its `decision` lets you let the update in after
 you review it: `saw govern apply --repo <folder> --into <dir> --accept <commit>` applies exactly the
 commit saw checked. For an infected update, saw recommends leaving the folder unchanged; to let it in
 anyway, add `--confirm <folder name>`. `saw govern verdict` then answers that you let that tree in.
-A command that brings nothing into the folder, such as creating a branch where the folder already is, answers `passthrough` and runs as typed.
+A command that writes nothing into the folder or its index, such as creating a branch where the
+folder already is, answers `passthrough` and runs as typed. A command that stages files your folder
+does not hold, such as `git reset` to a fetched commit or staging part of a file, is checked first:
+a clean result is staged exactly as checked, and a finding holds the command, with the folder and
+its index as they were.
 
-A command that moves your branch or stages files without changing the folder's files, such as
-`git reset --soft` or staging part of a file, runs as typed when what it stages is already in the
-folder's history. When it is not, saw checks what it stages first: a clean result answers
-`passthrough` with the scan, and a finding holds the command, with the folder and its index as they
-were.
+A command that names another repository, index or set of objects, on its command line or in its
+environment, is checked the same way. When what it would write is clean, running it is yours to
+decide, as below.
 
 When the update cannot be checked, you get the reason and the decision: run the command as
 typed, then scan the folder with `saw scan`, or leave the folder as it is. A command that has git
@@ -86,13 +92,15 @@ saw govern uninstall
 
 The editor extension checks updates for the folders you open in the editor. To check them in your
 terminals too, and in the shells coding agents run, run `saw govern install`. From then on, when a
-terminal pulls, fetches, checks out, switches, merges, rebases, resets to another commit,
-cherry-picks, reverts, or updates a submodule, saw checks what arrives before it reaches the folder
-you are working in, the same as in the editor. Any other git command that can bring files into the
-folder, such as an alias, a mistyped command, `git clone`, `git stash pop` or `git worktree add`,
-asks you first, the same as an update that cannot be checked. So does a command that would also
-update submodules, or one whose repository is named by `GIT_DIR` or a related setting. A `gh`
-command that names its repository with `-R` is checked like any other. Open a new terminal, or
+terminal pulls, fetches, checks out, switches, merges, rebases, resets, restores, stashes,
+cherry-picks, reverts or stages files, saw checks what the command would write before it reaches the
+folder you are working in, the same as in the editor. Any other git command that can bring files into the
+folder, such as an alias, a mistyped command, `git clone` or `git worktree add`, asks you first, the
+same as an update that cannot be checked. So does a command that would also update submodules, one
+that writes a file it names, such as `git diff --output`, and one that fetches through a remote it
+adds or updates. A command that points git at files in your folder to run, such as setting
+`core.hooksPath`, or that copies hooks from a folder in a working tree into a new repository, asks
+you first too. A `gh` command that names its repository with `-R` is checked like any other. Open a new terminal, or
 source the file the command names, for it to take effect.
 
 In a terminal, an update that cannot be checked brings a question: run the command as typed? Answer
