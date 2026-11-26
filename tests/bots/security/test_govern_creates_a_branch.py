@@ -23,7 +23,8 @@ class CreatingABranch(_TrackingCheckout):
                 answer, code = govern.prepare(str(self.open), str(self.into), "git", args)
                 self.assertEqual(code, exitcodes.CLEAN, answer)
                 self.assertNotIn("decision", answer)
-                self.assertEqual(govern.apply(str(self.open), str(self.into))[0], {"applied": True})
+                self.assertEqual(govern.apply(str(self.open), str(self.into))[0],
+                                 {"applied": True, "outcome": "brought_in"})
                 self.assertEqual(self._head(), before)
                 self.assertEqual(self.git(self.open, "branch", "--show-current").strip(), branch)
 

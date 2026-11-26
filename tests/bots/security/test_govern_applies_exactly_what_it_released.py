@@ -72,9 +72,10 @@ class GovernAppliesExactlyWhatItReleased(GitSandbox):
         with mock.patch(_SCAN, return_value=({"results": [{"verdict": "suspicious", "findings": []}]}, exitcodes.CLEAN, [])):
             self._prepare("next")
         self.assertEqual(self._apply()["outcome"], "held")
-        self.write(self.repo, "arrived.txt", "mine\n")
         self._prepare("next")
+        self.write(self.repo, "arrived.txt", "mine\n")
         self.assertEqual(self._apply()["outcome"], "not_brought_in")
+        self.assertEqual((self.repo / "arrived.txt").read_text(), "mine\n")
 
     def test_a_held_folder_makes_a_second_run_say_it_is_busy(self):
         self._prepare("next")
@@ -120,6 +121,13 @@ class GovernAppliesExactlyWhatItReleased(GitSandbox):
         started = time.monotonic()
         with folderlock.held(self.into, wait=5):
             self.assertLess(time.monotonic() - started, 1)
+
+    def test_an_apply_that_stops_part_way_is_reported_where_the_folder_is(self):
+        self._prepare("next")
+        with mock.patch.object(govern.replayed_writer, "write", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                govern.apply(str(self.repo), str(self.into))
+        self.assertEqual(govern.verdict(str(self.repo))[0]["interrupted"], {"matches": "base"})
 
     def test_an_interrupted_apply_is_reported_where_the_folder_is(self):
         released = self._prepare("next")

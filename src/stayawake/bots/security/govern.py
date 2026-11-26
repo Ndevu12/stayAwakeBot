@@ -14,6 +14,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import secrets
 from pathlib import Path
 
 from stayawake.bots.security import clean_ledger, govern_carried, govern_command, govern_held, govern_status
@@ -251,7 +252,7 @@ def _judge_replayed(repo: str, into: str, result: "replay.Replayed", config: str
     whole = scanned_clean and moved_to and _judged_whole(holding.bare, moved_to, judged_now | let_in, let_in_commit)
     applied_mark = clean_ledger.clean_key(moved_to, config) if whole else None
     blobs = [list(content) for content in dict.fromkeys([*written_files, *staged])]
-    _write_replayed_state(Path(into), result, releasable, verdict, asks, {
+    answer["state_id"] = _write_replayed_state(Path(into), result, releasable, verdict, asks, {
         "clean_mark": applied_mark if strictly_clean else None, "applied_mark": applied_mark,
         "written": {os.fsdecode(name): hashlib.sha256(data).hexdigest() for name, data in as_written.items()},
         "let_in": blobs, "policy": clean_ledger.policy_digest(config), "moved_to": moved_to})
@@ -317,16 +318,17 @@ def _judged_whole(bare: Path, commit: str, judged: set, let_in_commit: str) -> b
 
 
 def _write_replayed_state(into: Path, result: "replay.Replayed", releasable: bool, verdict: str, asks: bool,
-                          judged: dict) -> None:
+                          judged: dict) -> str:
     """Record a judged replay for `apply` to write. Takes the holding directory, what the replay
     changed, whether it may be written, the verdict, whether it asks first, and what the judgement
-    adds. Returns nothing."""
+    adds. Returns the id of the recorded state."""
+    state_id = secrets.token_hex(16)
     holding = result.holding
     top = holding.location.work_tree or holding.work
 
     def entries(found) -> list:
         return [[part.decode() for part in entry] for entry in found]
-    body = {"schema": SCHEMA, "mode": REPLAYED, "releasable": releasable,
+    body = {"schema": SCHEMA, "state_id": state_id, "mode": REPLAYED, "releasable": releasable,
             "commit": judged.get("moved_to") or result.files_after,
             "paths": [rel for rel, mode, _oid in result.files if mode],
             "verdict": verdict, "asks": asks, "top": str(top), "git_dir": str(holding.location.git_dir),
@@ -343,6 +345,7 @@ def _write_replayed_state(into: Path, result: "replay.Replayed", releasable: boo
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(body), encoding="utf-8")
     temporary.replace(path)
+    return state_id
 
 
 def _judge_arrived(repo: str, into: str, arrived: "incoming.Arrived | str", config: str | None,
@@ -388,8 +391,9 @@ def _judge_arrived(repo: str, into: str, arrived: "incoming.Arrived | str", conf
     else:
         govern_status.write(repo, "held", verdict=verdict,
                             reasons=["the update was not applied; the open folder is unchanged"])
-    _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict, dict(landing.digests), asks)
-    answer: dict = {"scan": payload}
+    state_id = _write_state(Path(into), arrived, releasable, clean_mark, applied_mark, verdict,
+                            dict(landing.digests), asks)
+    answer: dict = {"scan": payload, "state_id": state_id}
     if already_there:
         answer["pre_existing"] = already_there
     findings = (payload.get("results") or [{}])[0].get("findings") or []
@@ -489,7 +493,7 @@ def _apply_held(repo: str, into: str, accept: str | None, confirm: str | None,
         return _applied(False, "the checked update changed after it was released, so it was not "
                                "applied", STATE_CHANGED)
     if state.get("mode") == incoming.UNCARRIED_CONFLICTS:
-        return _applied(False, conflicted.CANNOT_CARRY)
+        return _applied(False, conflicted.CANNOT_CARRY, NOT_BROUGHT_IN)
     accepted_verdict = None
     if not state.get("releasable"):
         refused = _refuse_let_in(repo, state, accept, confirm)
@@ -566,10 +570,12 @@ def _apply_replayed(repo: str, into: str, state: dict, accepted_verdict: str | N
             pseudo_refs=tuple(tuple(entry) for entry in state.get("pseudo_refs") or ()),
             fetch_head=bytes.fromhex(state["fetch_head"]) if state.get("fetch_head") is not None else None)
     except (KeyError, TypeError, ValueError):
-        return _applied(False, "the checked update could not be read")
+        return _applied(False, "the checked update could not be read", NOT_BROUGHT_IN)
     incoming.claim(into)
     current().step("apply", "applying the checked update")
-    govern_status.write(repo, "checking", step="applying the checked update")
+    govern_status.write(repo, "checking", step="applying the checked update",
+                        applying={"base": state["base"], "commit": state["commit"],
+                                  "paths": list(state.get("paths") or [])})
     reason = replayed_writer.write(written)
     if reason:
         govern_status.write(repo, "finished", reasons=[reason])
@@ -584,7 +590,7 @@ def _apply_replayed(repo: str, into: str, state: dict, accepted_verdict: str | N
             clean_ledger.remember_applied(written.top, state["applied_mark"])
         clean_ledger.remember_blobs(written.top, state.get("let_in") or [], state.get("policy") or "")
         govern_status.write(repo, "applied", verdict=state.get("verdict"))
-    return _applied(not reason, reason)
+    return _applied(not reason, reason, NOT_BROUGHT_IN if reason else BROUGHT_IN)
 
 
 def _files_at(arrived: "incoming.Arrived") -> str:
@@ -607,7 +613,8 @@ def _left_to_resolve(repo: str, state: dict, stopped: "conflicted.Stopped",
         clean_ledger.remember_accepted(Path(repo), state["commit"], accepted_verdict)
         reasons.append(f"you let in an update saw found {accepted_verdict}")
     govern_status.write(repo, "applied", verdict=state.get("verdict"), reasons=reasons)
-    return {"applied": True, "conflicts": list(stopped.conflicts), "next_steps": [step]}, exitcodes.INCOMPLETE
+    return ({"applied": True, "outcome": BROUGHT_IN, "conflicts": list(stopped.conflicts), "next_steps": [step]},
+            exitcodes.INCOMPLETE)
 
 
 def _continuing_a_rebase(repo: str, config: str | None, deadline: float | None) -> tuple[dict, int]:
@@ -858,8 +865,12 @@ def _applied(done: bool, sentence: str, outcome: str) -> tuple[dict, int]:
 
 def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
                  clean_mark: str | None = None, applied_mark: str | None = None,
-                 verdict: str | None = None, written: dict | None = None, asks: bool = False) -> None:
-    body = {"schema": SCHEMA, "releasable": releasable, "root": str(arrived.root),
+                 verdict: str | None = None, written: dict | None = None, asks: bool = False) -> str:
+    """Record a checked update for `apply`. Takes the holding directory, what arrived, whether it
+    may be brought in, the clean and applied marks, the verdict, the sha256 each written file must
+    hold and whether it asks first. Returns the id of the recorded state."""
+    state_id = secrets.token_hex(16)
+    body = {"schema": SCHEMA, "state_id": state_id, "releasable": releasable, "root": str(arrived.root),
             "paths": list(arrived.paths), "mode": arrived.mode, "commit": arrived.commit,
             "base": arrived.base, "head": arrived.head, "refs": [list(i) for i in arrived.refs],
             "stopped": arrived.stopped.record() if arrived.stopped else None,
@@ -869,6 +880,7 @@ def _write_state(into: Path, arrived: "incoming.Arrived", releasable: bool,
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(body), encoding="utf-8")
     temporary.replace(path)
+    return state_id
 
 
 def _forget_state(into: Path) -> None:
