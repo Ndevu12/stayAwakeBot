@@ -72,9 +72,10 @@ class GovernAppliesExactlyWhatItReleased(GitSandbox):
         with mock.patch(_SCAN, return_value=({"results": [{"verdict": "suspicious", "findings": []}]}, exitcodes.CLEAN, [])):
             self._prepare("next")
         self.assertEqual(self._apply()["outcome"], "held")
-        self.write(self.repo, "arrived.txt", "mine\n")
         self._prepare("next")
+        self.write(self.repo, "arrived.txt", "mine\n")
         self.assertEqual(self._apply()["outcome"], "not_brought_in")
+        self.assertEqual((self.repo / "arrived.txt").read_text(), "mine\n")
 
     def test_a_held_folder_makes_a_second_run_say_it_is_busy(self):
         self._prepare("next")
@@ -107,6 +108,24 @@ class GovernAppliesExactlyWhatItReleased(GitSandbox):
         self.assertIn("run-as-typed", body["decision"]["choices"])
         self.assertEqual(self.rev(self.repo), self.base)
 
+    def test_a_holding_folder_that_cannot_be_held_has_its_own_code(self):
+        released = self._prepare("next")
+        hold = self.into / folderlock.LOCK_NAME
+        hold.unlink()
+        hold.symlink_to(self.root / "nowhere")
+        applied = self._apply("--expect", released["state_id"])
+        self.assertEqual((applied["applied"], applied["outcome"]), (False, "holding_unusable"))
+        self.assertEqual(self.rev(self.repo), self.base)
+
+    def test_a_replaced_update_is_said_to_be_replaced_before_the_holding_folder_is_used(self):
+        self._prepare("next")
+        hold = self.into / folderlock.LOCK_NAME
+        hold.unlink()
+        hold.symlink_to(self.root / "nowhere")
+        applied = self._apply("--expect", "deadbeefdeadbeef")
+        self.assertEqual((applied["applied"], applied["outcome"]), (False, "state_changed"))
+        self.assertEqual(self.rev(self.repo), self.base)
+
     def test_a_run_that_dies_leaves_no_hold_behind(self):
         self.into.mkdir()
         holder = subprocess.Popen([sys.executable, "-c",
@@ -120,6 +139,13 @@ class GovernAppliesExactlyWhatItReleased(GitSandbox):
         started = time.monotonic()
         with folderlock.held(self.into, wait=5):
             self.assertLess(time.monotonic() - started, 1)
+
+    def test_an_apply_that_stops_part_way_is_reported_where_the_folder_is(self):
+        self._prepare("next")
+        with mock.patch.object(govern.replayed_writer, "write", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                govern.apply(str(self.repo), str(self.into))
+        self.assertEqual(govern.verdict(str(self.repo))[0]["interrupted"], {"matches": "base"})
 
     def test_an_interrupted_apply_is_reported_where_the_folder_is(self):
         released = self._prepare("next")

@@ -18,7 +18,7 @@ from unittest import mock
 from stayawake.bots.security import harden
 from stayawake.bots.security.harden import approvals as agentapprovals, denial, hold_aside, remove_kit
 from stayawake.bots.security.harden import settings as editorsettings
-from stayawake.utils import hostdenial
+from stayawake.utils import folders_posix, hostdenial
 from tests.bots.security.test_harden import _hooks_already_there, locked
 
 _KIT_MANIFEST = json.dumps({"dependencies": {"axios": "^1.7.0", "socket.io-client": "^4.7.0"}})
@@ -213,7 +213,7 @@ class TestARenameNeverReplacesAnything(unittest.TestCase):
                 (folder / "a").write_text("A", encoding="utf-8")
                 (folder / "b").write_text("B", encoding="utf-8")
                 patch = (contextlib.nullcontext() if kernel else
-                         mock.patch.object(atomicwrite, "_kernel_rename_no_replace", return_value=False))
+                         mock.patch.object(folders_posix, "_kernel_rename_no_replace", return_value=False))
                 with patch, self.assertRaises(FileExistsError):
                     atomicwrite.rename_beside(folder, "a", "b")
                 self.assertEqual(((folder / "a").read_text(encoding="utf-8"), (folder / "b").read_text(encoding="utf-8")),
@@ -355,7 +355,7 @@ class TestAKnownStagingKitIsDeletedNotKept(_Place):
 
     def test_a_kit_another_account_owns_is_not_deleted(self):
         _a_kit_named(self.target)
-        with mock.patch.object(remove_kit.operator, "acting_uid", return_value=os.getuid() + 1):
+        with mock.patch.object(folders_posix.operator, "acting_uid", return_value=os.getuid() + 1):
             outcome = self._place()
         self.assertNotEqual(outcome.kit, denial.KIT_REMOVED)
         self.assertTrue(any((p / "package.json").is_file() for p in (self.target, *self._held())))

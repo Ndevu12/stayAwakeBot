@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from stayawake import cli
-from stayawake.lib.git import command_line
+from stayawake.lib.git import command_line, runs_directly
 from stayawake.utils import exitcodes
 from tests.support.gitrepo import GitSandbox
 
@@ -23,8 +23,7 @@ def _read(*args: str, aliases: dict[str, str] | None = None, tool: str = "git") 
 class TheGlobalOptionsAreReadAsGitReadsThem(GitSandbox):
 
     def test_every_option_that_takes_a_value_takes_one(self):
-        for option in ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--shallow-file",
-                       "--attr-source"):
+        for option in ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--shallow-file", "--attr-source"):
             with self.subTest(option=option):
                 subcommand = "status" if option in ("--git-dir", "--work-tree") else "pull"
                 reading = _read(option, "HEAD", subcommand)
@@ -32,23 +31,23 @@ class TheGlobalOptionsAreReadAsGitReadsThem(GitSandbox):
                 self.assertEqual(reading.subcommand, subcommand)
 
     def test_the_options_written_with_their_value_are_read(self):
-        for option in ("--namespace=n", "--config-env=a=B", "--attr-source=HEAD", "--exec-path=/x"):
+        for option in ("--namespace=n", "--attr-source=HEAD", "--git-dir=x", "--work-tree=y"):
             with self.subTest(option=option):
-                self.assertEqual((_read(option, "pull").subcommand, _read(option, "pull").kind), ("pull", "pull"))
+                self.assertEqual(_read(option, "pull").subcommand, "pull")
 
     def test_the_flags_take_no_value(self):
         for flag in ("-p", "--paginate", "-P", "--no-pager", "--no-replace-objects", "--no-lazy-fetch", "--bare",
                      "--literal-pathspecs", "--no-literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
                      "--icase-pathspecs", "--no-optional-locks", "--no-advice"):
             with self.subTest(flag=flag):
-                self.assertEqual(_read(flag, "pull").kind, "pull")
+                self.assertEqual(_read(flag, "pull").subcommand, "pull")
 
     def test_an_option_git_does_not_know_is_not_guessed(self):
-        for line in (("--super-prefix", "x", "pull"), ("--frobnicate", "pull"), ("-Cx", "pull"), ("--", "pull")):
+        for line in (("--super-prefix", "x", "status"), ("--frobnicate", "status"), ("-Cx", "status"), ("--", "status"),
+                     ("--config-env", "a=B", "status"), ("--exec-path=/x", "status")):
             with self.subTest(line=line):
-                reading = _read(*line)
-                self.assertFalse(reading.readable)
-                self.assertFalse(reading.brings_files)
+                self.assertFalse(_read(*line).readable)
+                self.assertEqual(runs_directly.decide("git", list(line), _HERE, {}), runs_directly.CHECKED)
 
     def test_a_missing_value_is_not_guessed(self):
         self.assertFalse(_read("--attr-source").readable)
@@ -56,30 +55,30 @@ class TheGlobalOptionsAreReadAsGitReadsThem(GitSandbox):
     def test_version_help_and_queries_bring_nothing(self):
         for line in (("--version",), ("-v",), ("--help", "pull"), ("--exec-path",), ("--html-path",), ("--list-cmds=main",)):
             with self.subTest(line=line):
-                reading = _read(*line)
-                self.assertTrue(reading.readable)
-                self.assertFalse(reading.brings_files)
+                self.assertTrue(_read(*line).readable)
+                self.assertEqual(runs_directly.decide("git", list(line), _HERE, {}), runs_directly.RUNS_AS_TYPED)
 
     def test_the_folder_follows_every_c(self):
         self.assertEqual(_read("-C", "a", "-C", "", "-C", "b", "pull").folder, _HERE / "a" / "b")
 
-    def test_a_command_naming_its_own_repository_is_unreadable(self):
-        self.assertFalse(_read("--git-dir", "/elsewhere/.git", "pull").readable)
-        self.assertFalse(_read("--work-tree=/elsewhere", "fetch").readable)
-        self.assertTrue(_read("--git-dir", "/elsewhere/.git", "status").readable)
+    def test_a_command_naming_its_own_working_tree_is_checked(self):
+        decide = lambda *line: runs_directly.decide("git", list(line), _HERE, {})
+        self.assertEqual(decide("--git-dir", "/elsewhere/.git", "pull"), runs_directly.CHECKED)
+        self.assertEqual(decide("--work-tree=/elsewhere", "status"), runs_directly.CHECKED)
+        self.assertEqual(decide("--git-dir", "/elsewhere/.git", "status"), runs_directly.RUNS_AS_TYPED)
 
 
 class AliasesAreExpandedAsGitExpandsThem(GitSandbox):
 
     def test_an_alias_for_a_pull_is_a_pull(self):
         reading = _read("p", "--rebase", aliases={"p": "pull origin"})
-        self.assertEqual((reading.subcommand, reading.kind, reading.rest), ("pull", "pull", ("origin", "--rebase")))
+        self.assertEqual((reading.subcommand, reading.rest), ("pull", ("origin", "--rebase")))
 
     def test_an_alias_through_an_alias_is_followed(self):
-        self.assertEqual(_read("up", aliases={"up": "sync", "sync": "fetch --all"}).kind, "fetch")
+        self.assertEqual(_read("up", aliases={"up": "sync", "sync": "fetch --all"}).subcommand, "fetch")
 
     def test_an_alias_never_hides_a_command_that_brings_files(self):
-        self.assertEqual(_read("pull", aliases={"pull": "status"}).kind, "pull")
+        self.assertEqual(_read("pull", aliases={"pull": "status"}).subcommand, "pull")
 
     def test_an_alias_that_cannot_be_read_is_not_guessed(self):
         for aliases in ({"x": "!git pull"}, {"x": "x"}, {"x": "y", "y": "x"}, {"x": "pull 'unclosed"}, {"x": "-c a=b pull"}):
@@ -87,8 +86,8 @@ class AliasesAreExpandedAsGitExpandsThem(GitSandbox):
                 self.assertFalse(_read("x", aliases=aliases).readable)
 
     def test_an_alias_set_on_the_command_line_is_followed(self):
-        self.assertEqual(_read("-c", "alias.x=pull origin", "x").kind, "pull")
-        self.assertEqual(_read("-c", "Alias.X=fetch", "x", aliases={"x": "status"}).kind, "fetch")
+        self.assertEqual(_read("-c", "alias.x=pull origin", "x").subcommand, "pull")
+        self.assertEqual(_read("-c", "Alias.X=fetch", "x", aliases={"x": "status"}).subcommand, "fetch")
 
     def test_configuration_that_could_change_aliases_is_not_guessed(self):
         for line in (("-c", "include.path=/elsewhere", "x"), ("-c", "includeIf.onbranch:main.path=f", "x"),
@@ -97,10 +96,20 @@ class AliasesAreExpandedAsGitExpandsThem(GitSandbox):
                 self.assertFalse(_read(*line).readable)
 
     def test_gh_commands_that_bring_files_are_known(self):
-        self.assertEqual(_read("pr", "checkout", "12", tool="gh").kind, "gh")
-        self.assertEqual(_read("pr", "-R", "owner/repo", "checkout", "12", tool="gh").kind, "gh")
-        self.assertEqual(_read("--repo", "owner/repo", "release", "download", tool="gh").kind, "gh")
-        self.assertIsNone(_read("pr", "list", tool="gh").kind)
+        self.assertTrue(runs_directly.gh_brings_files(["pr", "checkout", "12"]))
+        self.assertTrue(runs_directly.gh_brings_files(["pr", "-R", "owner/repo", "checkout", "12"]))
+        self.assertTrue(runs_directly.gh_brings_files(["--repo", "owner/repo", "release", "download"]))
+        self.assertFalse(runs_directly.gh_brings_files(["pr", "list"]))
+        self.assertEqual(_read("pr", "-R", "owner/repo", "checkout", "12", tool="gh").subcommand, "pr")
+
+
+class EverySpellingOfACommandThatBringsFilesIsChecked(GitSandbox):
+
+    def test_options_never_make_a_command_that_brings_files_run_as_typed(self):
+        for args in (["checkout", "-m", "origin/x"], ["checkout", "--recurse-submodules", "origin/x"],
+                     ["merge", "-m", "--abort", "origin/x"], ["merge", "--abort"], ["checkout", "--orphan", "fresh"]):
+            with self.subTest(args=args):
+                self.assertEqual(runs_directly.decide("git", args, _HERE, {}), runs_directly.CHECKED)
 
 
 class SawGovernClassifyAnswers(GitSandbox):
@@ -127,7 +136,7 @@ class SawGovernClassifyAnswers(GitSandbox):
     def test_an_unreadable_line_says_why(self):
         code, body = self._classify(self.new_repo(), "--frobnicate", "pull")
         self.assertEqual(code, exitcodes.INCOMPLETE)
-        self.assertEqual((body["readable"], body["checked"]), (False, False))
+        self.assertEqual((body["readable"], body["checked"]), (False, True))
         self.assertIn("--frobnicate", body["reason"])
 
 
@@ -144,15 +153,20 @@ class PrepareChecksWhatTheReaderReads(GitSandbox):
         self.git(self.repo, "checkout", "-q", "main")
         self.git(self.repo, "config", "alias.co", "checkout")
 
-    def test_every_spelling_of_a_checkout_is_checked_first(self):
-        for line in (("--attr-source", "HEAD", "checkout", "next"), ("co", "next"),
-                     ("-c", "alias.go=checkout", "go", "next"), ("--no-advice", "-P", "checkout", "next")):
+    def test_every_spelling_of_a_checkout_is_checked_first_or_asked_about(self):
+        for line, checked in ((("--attr-source", "HEAD", "checkout", "next"), False), (("co", "next"), False),
+                              (("-c", "alias.go=checkout", "go", "next"), False),
+                              (("--no-advice", "-P", "checkout", "next"), True)):
             with self.subTest(line=line):
                 out = io.StringIO()
                 with redirect_stdout(out):
                     code = cli.main(["govern", "prepare", "--json", "--repo", str(self.repo),
                                      "--into", str(self.root / "holding"), "--tool", "git", "--", *line])
                 body = json.loads(out.getvalue())
-                self.assertEqual(code, exitcodes.CLEAN, body)
-                self.assertIn("scan", body)
+                self.assertNotIn("passthrough", body)
+                if checked:
+                    self.assertEqual(code, exitcodes.CLEAN, body)
+                    self.assertIn("scan", body)
+                else:
+                    self.assertIn("run-as-typed", body["decision"]["choices"], body)
                 self.assertEqual(self.rev(self.repo), self.base)

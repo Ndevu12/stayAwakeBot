@@ -87,9 +87,9 @@ def _subcommands(parser: argparse.ArgumentParser) -> dict[str, argparse.Argument
 def govern_features(commands: dict[str, argparse.ArgumentParser]) -> list[str]:
     """Features a program asks about by name for `govern`'s subcommands. Takes the top-level
     commands. Returns `govern.progress.jsonl` when `prepare` or `apply` writes progress events,
-    `govern.decision` when `prepare` exists, `govern.apply.outcome`, `govern.lock` and
-    `govern.apply.expect` for `apply`, and `govern.classify`, `govern.verdict` and `govern.restore`
-    when those subcommands exist."""
+    `govern.decision` and `govern.conflicts` when `prepare` exists, `govern.apply.outcome`,
+    `govern.lock` and `govern.apply.expect` for `apply`, and `govern.classify`, `govern.verdict` and
+    `govern.restore` when those subcommands exist."""
     subs = _subcommands(commands["govern"]) if "govern" in commands else {}
     feats: list[str] = []
     if any(_takes_progress(subs[name]) for name in ("prepare", "apply") if name in subs):
@@ -98,6 +98,7 @@ def govern_features(commands: dict[str, argparse.ArgumentParser]) -> list[str]:
         feats.append("govern.decision")
         feats.append("govern.held.decision")
         feats.append("govern.passthrough")
+        feats.append("govern.conflicts")
     if "prepare" in subs and _takes(subs["prepare"], "--deadline"):
         feats.append("govern.deadline")
     if "apply" in subs:

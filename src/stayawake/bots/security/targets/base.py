@@ -172,7 +172,7 @@ class Target:
                 self.pruned_dirs.update(d for d in dirnames if d in self.opts.exclude_dirs)
                 dirnames[:] = [d for d in dirnames if d not in self.opts.exclude_dirs]
                 for fn in filenames:
-                    cache.append(str((Path(dirpath) / fn).relative_to(self.root)))
+                    cache.append((Path(dirpath) / fn).relative_to(self.root).as_posix())
             self._walk_cache = cache
         yield from self._walk_cache
 
@@ -184,7 +184,7 @@ class Target:
         """
         where = getattr(err, "filename", None) or "?"
         try:
-            where = str(Path(where).relative_to(self.root))
+            where = Path(where).relative_to(self.root).as_posix()
         except (ValueError, TypeError):
             where = str(where)
         self.read_errors.append(f"{where}/: {type(err).__name__}")

@@ -11,10 +11,31 @@ The `saw` and `stayawake` console scripts both resolve to `main` below.
 """
 from __future__ import annotations
 
+import _thread
 import importlib
 import os
 import signal
 import sys
+import time
+
+
+def _deliver_a_swallowed_ctrl_c_again(unraisable) -> None:
+    """Deliver a Ctrl-C again once the callback that swallowed it has returned, and pass anything
+    else on to Python's own report. Takes what Python could not raise."""
+    if unraisable.exc_type is KeyboardInterrupt:
+        _thread.start_new_thread(_interrupt_main_shortly, ())
+        return
+    _python_reports_unraisable(unraisable)
+
+
+def _interrupt_main_shortly() -> None:
+    """Interrupt the main thread with a Ctrl-C after a moment."""
+    time.sleep(0.001)
+    _thread.interrupt_main(signal.SIGINT)
+
+
+_python_reports_unraisable = sys.unraisablehook
+sys.unraisablehook = _deliver_a_swallowed_ctrl_c_again
 
 
 def _end_on_ctrl_c() -> None:

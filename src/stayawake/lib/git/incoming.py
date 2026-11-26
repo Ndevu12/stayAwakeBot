@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Run a bringing-files git or gh command in a directory saw owns, then match the open folder to it.
+"""Carry an update that stopped for conflicts in saw's holding copy into the open folder, and put the
+open folder back on a tree saw let in.
 
 The open folder is not written until `apply`. The git saw runs here uses the contexts that keep a
 repository's hooks, filters and configuration from deciding what runs.
@@ -7,31 +8,33 @@ repository's hooks, filters and configuration from deciding what runs.
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git import command_line, owned
-from stayawake.lib.git.borrowed import BorrowError, place
-from stayawake.lib.git.run import OPERATOR_CONFIG, OPERATOR_PUSH, SAW_OWNED, UNTRUSTED, run_ok, stdout, stdout_bytes
-from stayawake.lib.git.write.branch import refs_under, update_refs
+from stayawake.lib.git import conflicted, owned, subcommand_options
+from stayawake.lib.git.query import files_brought
+from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, run_ok, stdout
+from stayawake.lib.git.typed_command import TypedCommand
+from stayawake.lib.git.write.branch import update_refs
 from stayawake.lib.git.write.checkouts import Checkout
-from stayawake.lib.git.write.transfer import adopt_objects
-from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way
-from stayawake.lib.signing.commits.git_command import fix_commit_signing
-from stayawake.utils import folderlock
+from stayawake.lib.git.write.transfer import adopt_objects, missing_objects
+from stayawake.lib.git.write.working_tree import PreparedMove, changes_in_the_way, uncommitted_paths
+from stayawake.utils import pathsafe
 
-_RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
-_TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "prune"}),
-                  "branch": frozenset({"remote", "merge", "rebase"})}
-_PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
-_IDENTITY_KEYS = ("user.name", "user.email")
+
+WRITE_LEFT_PART_WAY = ("the update could not be written into the open folder, and the folder may have "
+                       "changed; check it with git status")
+PUT_BACK_LEFT_PART_WAY = "the folder could not be put back, and it may have changed; check it with git status"
+UNCARRIED_CONFLICTS = "uncarried-conflicts"
 
 
 @dataclass(frozen=True)
 class Arrived:
-    """What a command produced outside the open folder."""
+    """What a command produced outside the open folder. `written` holds the sha256 each file it
+    writes into the folder must hold, by path. `versions` names other versions of files the update
+    brings, as (commit, paths), and `stopped` the merge or rebase that stopped for conflicts, when
+    it did. `bring_in` is the git subcommand and commit that bring in exactly the checked commit,
+    for a pull that stopped for conflicts that cannot be carried."""
 
     root: Path
     paths: tuple[str, ...]
@@ -40,163 +43,143 @@ class Arrived:
     base: str
     head: str
     refs: tuple[tuple[str, str, str], ...]
+    written: tuple[tuple[str, str], ...] = ()
+    versions: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    stopped: "conflicted.Stopped | None" = None
+    bring_in: tuple[str, ...] = ()
 
 
-def _reading(repo: Path, tool: str, args: list[str]) -> "command_line.Reading":
-    """Read a command for the open folder. Takes the open folder, the tool and the arguments.
-    Returns the reading, with aliases from the open folder."""
-    return command_line.read(tool, list(args), Path(repo),
-                             lambda _folder, name: command_line.configured_alias(Path(repo), name))
+def continues_a_rebase(command: TypedCommand) -> bool:
+    """Tell whether a git command continues or skips ahead in a rebase in progress. Takes the
+    command. Returns the answer."""
+    return command.sub == "rebase" and bool(
+        {"--continue", "--skip"} & set(subcommand_options.read("rebase", list(command.rest)).names()))
 
 
-def brings_nothing(repo: Path, tool: str, args: list[str]) -> bool:
-    """Tell whether a command moves nothing into the open folder. Takes the open folder, the tool
-    and the arguments without the program name. Returns the answer."""
-    reading = _reading(Path(repo), tool, args)
-    if not reading.readable or tool != "git":
-        return False
-    rest = list(reading.rest)
-    return ((reading.subcommand == "checkout" and not command_line.checkout_brings(rest))
-            or (reading.subcommand == "switch" and not command_line.switch_brings(rest)))
-
-
-def refusal(repo: Path, into: Path, tool: str, args: list[str]) -> str:
-    """Say why a command cannot be prepared, before anything is written. Takes the open folder, the
-    holding directory, `git` or `gh`, and the arguments. Returns the sentence, or "" when it can."""
-    reading = _reading(Path(repo), tool, args)
-    if not reading.readable:
-        return f"the command line could not be read: {reading.reason}"
-    if reading.kind is None:
-        return "saw does not check that command"
-    repo, into = Path(repo).resolve(), Path(into).resolve()
-    if not (repo / ".git").exists() and _git_dir(repo) is None:
+def rebase_left(repo: Path) -> "tuple[str, tuple[str, ...], bool] | str | None":
+    """Read what a rebase in progress in `repo` has left to do. Takes the open folder. Returns the
+    commit it replays onto, the commits it has left and whether its todo holds nothing but picks;
+    None when no rebase is in progress, or a sentence when its state cannot be read."""
+    gitdir = _git_dir(Path(repo))
+    if gitdir is None:
         return "the open folder is not a git checkout"
-    if into == repo or repo in into.parents or into in repo.parents:
-        return "the holding directory must be outside the open folder"
-    return ""
-
-
-def prepare(repo: Path, into: Path, tool: str, args: list[str]) -> "Arrived | str":
-    """Produce `args` under `into`, leaving `repo` unchanged. Takes the open folder, the holding
-    directory, `git` or `gh`, and the arguments. Returns what arrived, or a sentence when it could
-    not."""
-    refused = refusal(repo, into, tool, args)
-    if refused:
-        return refused
-    reading = _reading(Path(repo), tool, args)
-    kind = reading.kind
-    repo, into = Path(repo).resolve(), Path(into).resolve()
-    base = stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
-    if not base:
-        return "the open folder has no commit to check from"
-    before = refs_under(repo, "refs/heads", "refs/remotes", "refs/tags")
-    _empty_keeping_the_hold(into)
-    try:
-        borrowed = place(repo, into / "repo.git")
-    except (BorrowError, OSError):
-        return "saw could not prepare a place to check the update"
-    if not update_refs(borrowed.path, [(ref, oid, "") for ref, oid in before.items()], context=SAW_OWNED):
-        return "saw could not copy the repository's refs"
-    head = _head_text(repo)
-    if head.startswith("ref: "):
-        if not run_ok(borrowed.path, ["symbolic-ref", "HEAD", head.removeprefix("ref: ").strip()],
-                      context=SAW_OWNED):
-            return "saw could not prepare a place to check the update"
-    elif not run_ok(borrowed.path, ["update-ref", "--no-deref", "HEAD", base], context=SAW_OWNED):
-        return "saw could not prepare a place to check the update"
-    work = into / "work"
-    work.mkdir()
-    (work / ".git").write_text(f"gitdir: {borrowed.path}\n", encoding="utf-8")
-    owned.own(work)
-    (into / "no-hooks").mkdir()
-    info = borrowed.path / "info" / "attributes"
-    info.parent.mkdir(exist_ok=True)
-    info.write_bytes(borrowed.attributes + _RAW)
-    for key, value in (("core.bare", "false"), ("core.worktree", str(work)),
-                       ("core.hooksPath", str(into / "no-hooks"))):
-        if not run_ok(borrowed.path, ["config", key, value], context=SAW_OWNED):
-            return "saw could not prepare a place to check the update"
-    if not _carry_tracking(repo, borrowed.path):
-        return "saw could not prepare a place to check the update"
-    if not run_ok(work, ["checkout", "-f", "--detach", base], context=SAW_OWNED):
-        return "saw could not prepare a place to check the update"
-    if head.startswith("ref: "):
-        run_ok(borrowed.path, ["symbolic-ref", "HEAD", head.removeprefix("ref: ").strip()], context=SAW_OWNED)
-    ran = _run_command(work, tool, args, reading, fix_commit_signing(repo))
-    if ran:
-        return ran
-    after = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
-    if not after:
-        return "the update did not produce a commit"
-    names = _changed_files(work, base, after)
-    if names is None:
-        return "saw could not list what the update brought in"
-    return Arrived(work, names, "refs" if kind == "fetch" else "tree", after, base,
-                   _head_text(borrowed.path), _moved_refs(work, before, kind))
+    if os.path.lexists(gitdir / "rebase-apply"):
+        return "the rest of this rebase cannot be checked"
+    if not os.path.lexists(gitdir / "rebase-merge"):
+        return None
+    onto = pathsafe.read_regular_no_follow(gitdir / "rebase-merge" / "onto", 4096)
+    todo = pathsafe.read_regular_no_follow(gitdir / "rebase-merge" / "git-rebase-todo", 64 << 20)
+    if onto is None or todo is None:
+        return "the rest of this rebase cannot be checked"
+    return onto.decode(errors="replace").strip(), conflicted.picks_in(todo), conflicted.only_picks(todo)
 
 
 def claim(into: Path) -> None:
-    """Mark the holding repository as one this process may write. Takes the holding directory.
-    Returns nothing."""
-    bare = Path(into) / "repo.git"
-    if bare.is_dir():
-        owned.own(bare)
+    """Mark the holding repository and its work tree as ones this process may write. Takes the
+    holding directory. Returns nothing."""
+    for made in (Path(into) / "repo.git", Path(into) / "work"):
+        if made.is_dir():
+            owned.own(made)
 
 
 def apply(repo: Path, into: Path, arrived: Arrived) -> str:
-    """Make `repo` match `arrived`. Takes the open folder, the holding directory and what prepare
-    stored. Returns "" when the folder matches it, else a sentence; leaves the folder as it was
-    when it returns a sentence."""
+    """Carry an update that stopped for conflicts into `repo`. Takes the open folder, the holding
+    directory and what prepare stored. Returns "" when the folder holds it, else a sentence that
+    also names a folder that may have changed."""
     repo = Path(repo).resolve()
     claim(into)
-    bare = Path(into) / "repo.git"
-    if arrived.mode == "refs":
-        if not arrived.refs:
-            return ""
-        why = adopt_objects(repo, bare, [new for _, new, _ in arrived.refs], [arrived.base])
-        if why:
-            return f"the update could not be copied into the open folder: {why}"
-        if not update_refs(repo, list(arrived.refs)):
-            return "the open folder's refs changed while the update was checked"
-        return ""
-    why = adopt_objects(repo, bare, [arrived.commit], [arrived.base])
-    if why:
-        return f"the update could not be copied into the open folder: {why}"
-    way = changes_in_the_way(repo, arrived.commit)
-    if way is None:
-        return "saw could not tell whether uncommitted work could be kept"
-    if way.blocking or way.carryable:
-        return "uncommitted work would be overwritten, so the folder was not changed"
+    if arrived.mode != "conflicts":
+        return conflicted.CANNOT_CARRY
+    return _apply_conflicts(repo, Path(into) / "repo.git", arrived)
+
+
+def arrived_with_conflicts(work: Path, holding: Path, base: str, kind: str) -> "Arrived | str":
+    """Describe what a merge or rebase stopped for conflicts in the holding copy brings. Takes the
+    holding work tree, its git directory, the open folder's commit and the command's kind. Returns
+    what arrived: the conflicts to carry into the folder, or an update to check that stays out of
+    it. Returns a sentence when neither can be described."""
+    stopped = conflicted.read(work, holding, base)
+    if isinstance(stopped, str):
+        return _arrived_uncarried(work, holding, base, kind)
+    changed = files_brought(work, base, stopped.landed, context=SAW_OWNED)
+    names = None if changed is None else tuple(dict.fromkeys((*changed, *stopped.conflicts)))
+    versions = conflicted.versions_brought(work, base, (stopped.incoming,), stopped.head, stopped.picks)
+    if names is None or versions is None:
+        return "the files the update brings could not be listed"
+    return Arrived(work, names, "conflicts", stopped.incoming, base, _head_text(holding), (),
+                   versions=versions, stopped=stopped)
+
+
+def _arrived_uncarried(work: Path, holding: Path, base: str, kind: str) -> "Arrived | str":
+    """Describe a stop whose conflicts cannot be carried into the folder: an update to check that
+    stays out of it. Takes the holding work tree, its git directory, the open folder's commit and
+    the command's kind. Returns what arrived, or a sentence when its incoming commits cannot be
+    read."""
+    incoming = conflicted.incoming_commits(holding)
+    head = stdout(work, ["rev-parse", "--verify", "--quiet", "HEAD"], context=SAW_OWNED).strip()
+    versions = conflicted.versions_brought(work, base, incoming, head) if incoming and head else None
+    if versions is None:
+        return conflicted.CANNOT_CARRY
+    bring_in = (conflicted.operation_in(holding), incoming[0]) if kind == "pull" else ()
+    return Arrived(work, (), UNCARRIED_CONFLICTS, incoming[0], base, _head_text(holding), (), versions=versions,
+                   bring_in=bring_in)
+
+
+def _apply_conflicts(repo: Path, bare: Path, arrived: Arrived) -> str:
+    """Carry a merge or rebase that stopped for conflicts into `repo`: the checked files, the
+    conflicted index entries and the operation's state. Takes the open folder, the holding
+    repository and what prepare stored. Returns "" when the folder holds it,
+    else a sentence that also names a folder that may have changed."""
+    stopped = conflicted.read(arrived.root, bare, arrived.base)
+    if isinstance(stopped, str) or stopped != arrived.stopped:
+        return "the holding directory no longer holds the checked update. Run the command again"
+    if stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip() != arrived.base:
+        return "the open folder changed while the update was checked"
     gitdir = _git_dir(repo)
     if gitdir is None:
         return "the open folder is not a git checkout"
-    move = PreparedMove(repo, Checkout(repo, gitdir), arrived.base, arrived.commit)
+    head = _head_text(repo)
+    if stopped.operation == conflicted.REBASE and conflicted.branch_named(stopped.files) != (
+            head.removeprefix("ref: ").strip() if head.startswith("ref: ") else "detached HEAD"):
+        return "the open folder changed while the update was checked"
+    why = adopt_objects(repo, bare, [stopped.incoming, stopped.landed, stopped.head], [arrived.base])
+    if why:
+        return f"the update could not be copied into the open folder: {why}"
+    if not conflicted.all_commits(repo, conflicted.commits_named(stopped.files) | {stopped.head}):
+        return "the update could not be copied into the open folder"
+    stages = stopped.entries_by_path()
+    if missing_objects(repo, [oid.decode() for entries in stages.values() for _, oid, _ in entries]) != []:
+        return "the update could not be copied into the open folder"
+    way = changes_in_the_way(repo, stopped.landed)
+    before = uncommitted_paths(repo)
+    if way is None or before is None:
+        return "the folder was not changed: its uncommitted work could not be read"
+    if way.blocking or way.carryable or set(before) & set(stages):
+        return "uncommitted work would be overwritten, so the folder was not changed"
+    move = PreparedMove(repo, Checkout(repo, gitdir), arrived.base, stopped.landed,
+                        conflict_stages=stages)
     if not move.prepare():
         move.release()
         return "the update could not be written into the open folder"
-    if arrived.refs and not update_refs(repo, list(arrived.refs)):
+    placed = conflicted.place(gitdir, stopped.files)
+    if placed is None:
         move.release()
-        return "the open folder changed while the update was checked"
-    if not move.apply():
-        move.release()
-        if arrived.refs:
-            update_refs(repo, [(ref, old, new) for ref, new, old in arrived.refs])
         return "the update could not be written into the open folder"
-    if not _write_head(gitdir, arrived.head):
-        move.restore_files()
+    expected = {os.fsencode(rel): digest for rel, digest in arrived.written}
+    if move.apply(expected) and (stopped.operation == conflicted.MERGE or _write_head(gitdir, stopped.head)):
         move.release()
-        if arrived.refs:
-            update_refs(repo, [(ref, old, new) for ref, new, old in arrived.refs])
-        return "the update could not be written into the open folder"
+        return ""
     move.release()
-    return ""
+    if placed.take_back() and move.undo(before):
+        return "the update could not be written into the open folder"
+    return WRITE_LEFT_PART_WAY
 
 
 def restore(repo: Path, commit: str) -> str:
     """Put the open folder back on `commit`, a tree saw let in, keeping uncommitted work. Takes the
     open folder and the commit, which must already be in the repository. Returns "" when the folder
-    is on it, else a sentence; leaves the folder as it was when it returns a sentence. The current
-    branch is moved to the commit, so HEAD stays attached and is not detached."""
+    is on it, else a sentence that also names a folder that may have changed. The current branch is
+    moved to the commit and HEAD stays attached."""
     repo = Path(repo).resolve()
     gitdir = _git_dir(repo)
     if gitdir is None:
@@ -214,6 +197,9 @@ def restore(repo: Path, commit: str) -> str:
     head = _head_text(repo)
     branch = head[len("ref: "):].strip() if head.startswith("ref: ") else None
     keep = frozenset(path.encode() for path in way.carryable)
+    before = uncommitted_paths(repo)
+    if before is None:
+        return "the folder was not changed: its uncommitted work could not be read"
     move = PreparedMove(repo, Checkout(repo, gitdir), base, commit, keep=keep)
     if not move.prepare():
         move.release()
@@ -221,159 +207,15 @@ def restore(repo: Path, commit: str) -> str:
     if branch and not update_refs(repo, [(branch, commit, base)]):
         move.release()
         return "the open folder changed while saw was putting it back"
-    if not move.apply():
+    if not (move.apply() and _write_head(gitdir, head if branch else commit)):
+        move.release()
         if branch:
             update_refs(repo, [(branch, base, commit)])
-        move.release()
-        return "the folder could not be put back"
-    if not _write_head(gitdir, head if branch else commit):
-        move.restore_files()
-        if branch:
-            update_refs(repo, [(branch, base, commit)])
-        move.release()
-        return "the folder could not be put back"
+        if move.undo(before):
+            return "the folder could not be put back"
+        return PUT_BACK_LEFT_PART_WAY
     move.release()
     return ""
-
-
-def _empty_keeping_the_hold(into: Path) -> None:
-    """Remove everything in the holding directory except a run's hold on it. Takes the directory."""
-    into.mkdir(parents=True, exist_ok=True)
-    for child in into.iterdir():
-        if child.name == folderlock.LOCK_NAME:
-            continue
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
-
-
-def _run_command(work: Path, tool: str, args: list[str], reading: "command_line.Reading",
-                 signing: tuple[str, ...] = ()) -> str:
-    if tool == "gh":
-        return _run_gh(work, args)
-    kind, sub, rest = reading.kind, reading.subcommand, list(reading.rest)
-    if kind in ("pull", "fetch") and not stdout(work, ["remote"], context=SAW_OWNED).strip():
-        return "the repository has no remote to fetch from"
-    if kind == "pull":
-        return _pull(work, rest, signing)
-    if kind == "fetch":
-        return "" if run_ok(work, ["fetch", *rest], context=OPERATOR_PUSH) else "the fetch did not finish"
-    return "" if run_ok(work, [*signing, sub, *rest], context=SAW_OWNED) else "the update did not finish cleanly"
-
-
-def _pull(work: Path, args: list[str], signing: tuple[str, ...] = ()) -> str:
-    positionals = command_line.positionals(args)
-    if not run_ok(work, ["fetch", *positionals[:1]], context=OPERATOR_PUSH):
-        return "the fetch did not finish"
-    onto = [f"{positionals[0]}/{positionals[1]}"] if len(positionals) >= 2 else ["@{upstream}"]
-    rebase = _pull_rebases(work, args)
-    if rebase:
-        command = ["rebase", *(["--rebase-merges"] if rebase == "merges" else []), *onto]
-    else:
-        command = ["merge", *_pull_ff(work, args), *onto]
-    return "" if run_ok(work, [*signing, *command], context=SAW_OWNED) else "the update did not finish cleanly"
-
-
-def _pull_rebases(work: Path, args: list[str]) -> str:
-    """Return how a pull rebases. Takes the holding checkout and the pull's arguments. Returns ""
-    when it merges, else the rebase mode."""
-    for arg in reversed(args):
-        if arg in ("--rebase", "-r"):
-            return "true"
-        if arg.startswith("--rebase="):
-            return _rebase_mode(arg.split("=", 1)[1])
-        if arg == "--no-rebase":
-            return ""
-    branch = stdout(work, ["symbolic-ref", "--quiet", "--short", "HEAD"], context=SAW_OWNED).strip()
-    for key in ([f"branch.{branch}.rebase"] if branch else []) + ["pull.rebase"]:
-        value = stdout(work, ["config", "--get", key], context=SAW_OWNED).strip()
-        if value:
-            return _rebase_mode(value)
-    return ""
-
-
-def _rebase_mode(value: str) -> str:
-    """Return the rebase mode a `pull.rebase`-style value names, or "" for no rebase."""
-    lowered = value.strip().lower()
-    return "" if lowered in ("false", "no", "off", "0") else ("true" if lowered in ("yes", "on", "1") else lowered)
-
-
-def _pull_ff(work: Path, args: list[str]) -> list[str]:
-    """Return the fast-forward option a pull's merge takes, or none."""
-    for arg in reversed(args):
-        if arg in ("--ff-only", "--no-ff", "--ff"):
-            return [arg]
-    value = stdout(work, ["config", "--get", "pull.ff"], context=SAW_OWNED).strip().lower()
-    return {"only": ["--ff-only"], "false": ["--no-ff"]}.get(value, [])
-
-
-def _carry_tracking(repo: Path, copy: Path) -> bool:
-    """Copy into the holding repository the remotes, branch tracking, pull settings and identity a
-    replay needs, read from the open folder. Takes the open folder and the holding repository.
-    Returns whether every value was written."""
-    listed = stdout(repo, ["config", "--local", "--null", "--get-regexp", r"^(remote|branch|pull|user)\."],
-                    context=UNTRUSTED)
-    carried: list[tuple[str, str]] = []
-    for entry in listed.split("\0"):
-        key, _, value = entry.partition("\n")
-        if key and _carried(key):
-            carried.append((key, value))
-    present = {key.lower() for key, _ in carried}
-    for key in _IDENTITY_KEYS:
-        if key not in present:
-            value = stdout(None, ["config", "--get", key], context=OPERATOR_CONFIG).strip()
-            if value:
-                carried.append((key, value))
-    return all(run_ok(copy, ["config", "--add", key, value], context=SAW_OWNED) for key, value in carried)
-
-
-def _carried(key: str) -> bool:
-    """Return whether a config key is one a replay needs and that names no program."""
-    lowered = key.lower()
-    if lowered in _PLAIN_KEYS or lowered in _IDENTITY_KEYS:
-        return True
-    section, _, rest = lowered.partition(".")
-    name = rest.rpartition(".")[2]
-    return section in _TRACKING_KEYS and "." in rest and name in _TRACKING_KEYS[section]
-
-
-def _run_gh(work: Path, args: list[str]) -> str:
-    program = shutil.which("gh")
-    if not program:
-        return "gh was not found"
-    try:
-        result = subprocess.run([program, *args], cwd=work, capture_output=True, text=True, timeout=180)
-    except (OSError, subprocess.TimeoutExpired):
-        return "the GitHub command did not finish"
-    return "" if result.returncode == 0 else "the GitHub command did not finish"
-
-
-def _changed_files(work: Path, base: str, head: str) -> "tuple[str, ...] | None":
-    if base == head:
-        return ()
-    listed = stdout_bytes(work, ["diff", "--name-only", "-z", base, head], context=SAW_OWNED)
-    if listed is None:
-        return None
-    names = []
-    for raw in listed.split(b"\0"):
-        if raw and (work / os.fsdecode(raw)).is_file():
-            names.append(os.fsdecode(raw))
-    return tuple(names)
-
-
-def _moved_refs(work: Path, before: dict, kind: str) -> tuple:
-    if kind == "fetch":
-        after = refs_under(work, "refs/remotes", context=SAW_OWNED)
-        return tuple((ref, new, before.get(ref, "")) for ref, new in after.items() if new != before.get(ref, ""))
-    gitdir = _git_dir(work)
-    text = _read(gitdir / "HEAD").strip() if gitdir else ""
-    if not text.startswith("ref: "):
-        return ()
-    ref = text.removeprefix("ref: ").strip()
-    new = stdout(work, ["rev-parse", "--verify", "--quiet", ref], context=SAW_OWNED).strip()
-    old = before.get(ref, "")
-    return ((ref, new, old),) if new and new != old else ()
 
 
 def _head_text(repo: Path) -> str:

@@ -1,12 +1,7 @@
-# Whitelist context: start by ignoring everything, then re-include only what the wheel build
-# needs. This guarantees reports/ (which quote malware payloads), tests/ fixtures, .git, CI
+# Whitelist context: start by ignoring everything, then re-include only the dependency lock and
+# the release's Linux wheels. This guarantees reports/ (which quote malware payloads), tests/ fixtures, .git, CI
 # config, and local state can never leak into the image — the same concern that shapes the
 # sdist allowlist in pyproject.toml.
 *
-!pyproject.toml
 !requirements.lock
-!README.md
-!LICENSE
-!NOTICE
-!CHANGELOG.md
-!src
+!dist/stayawakebot-*-manylinux_*.whl

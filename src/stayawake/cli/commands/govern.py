@@ -50,6 +50,8 @@ def register(sub) -> None:
     pp.add_argument("--into", required=True, help="the holding directory saw owns")
     pp.add_argument("--tool", required=True, choices=core.TOOLS, help="which tool the command is")
     pp.add_argument("-c", "--config", default=None, help="your config, never the repository's")
+    pp.add_argument("--brings-no-files", action="store_true",
+                    help="the stand-in reads the command as one that brings no files")
     add_progress_arg(pp)
     add_deadline_arg(pp, help="stop the check after SECONDS; an unfinished check is left to the user "
                               "to decide")
@@ -62,7 +64,8 @@ def register(sub) -> None:
         description=(
             "Make the open folder match the tree prepare scanned in the holding directory, without "
             "fetching again. Call this only after a clean or residue verdict; the operator's "
-            "uncommitted work is kept, or the open folder is not changed."),
+            "uncommitted work is kept, or the open folder is not changed. An update that stops for "
+            "conflicts is brought in with them left to resolve."),
         examples=[("saw govern apply --repo . --into D", "apply the checked tree")],
         stream=False)
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -82,9 +85,9 @@ def register(sub) -> None:
         help="say how saw reads a git or gh command line",
         description=(
             "Read a git or gh command line the way the program does and say whether it could be "
-            "read, its subcommand after aliases, the folder it acts on, and whether it brings files "
-            "in, which saw checks before they land. An unreadable command line answers "
-            "readable: false with the reason."),
+            "read, its subcommand after aliases, the folder it acts on, and whether saw checks it "
+            "before it runs, as saw's git stand-in decides. An unreadable command line answers "
+            "readable: false with the reason, and is checked."),
         examples=[("saw govern classify --json --tool git --repo . -- pull", "ask about a pull")],
         stream=False)
     cp.add_argument("--json", action="store_true", help="machine-readable output")
@@ -145,8 +148,10 @@ def run_prepare(a: argparse.Namespace) -> int:
 
 
 def _do_prepare(a: argparse.Namespace) -> int:
+    environment = core.take_command_environment()
     payload, code = core.prepare(a.repo, a.into, a.tool, _operator_args(a.args), a.config,
-                                 deadline=a.deadline)
+                                 deadline=a.deadline, environment=environment,
+                                 brings_no_files=a.brings_no_files)
     print(json.dumps(versioned("govern", payload)))
     return code
 
@@ -158,6 +163,8 @@ def run_apply(a: argparse.Namespace) -> int:
 
 def _do_apply(a: argparse.Namespace) -> int:
     payload, code = core.apply(a.repo, a.into, a.accept, a.confirm, a.expect)
+    for step in payload.get("next_steps") or []:
+        print(f"saw: {step}", file=sys.stderr)
     print(json.dumps(versioned("govern", payload)))
     return code
 

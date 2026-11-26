@@ -9,36 +9,6 @@
 # Refresh it in every release PR: the pin is fixed, the advisory feed is not. Multi-arch index digest.
 ARG PYTHON_IMAGE=python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 
-# ───────────────────────── builder: build the wheel from source ─────────────────────────
-FROM ${PYTHON_IMAGE} AS builder
-
-# Build as an unprivileged user so pip never runs as root (no root-owned caches, none of the
-# "running pip as the root user" hazard) even though this stage is discarded. The only root
-# steps are useradd + mkdir/chown of the work dirs — never pip.
-RUN useradd --create-home --uid 10001 builder \
- && mkdir /build /dist \
- && chown builder:builder /build /dist
-USER builder
-WORKDIR /build
-# `pip install --user` keeps build's deps in the user site; put its console scripts on PATH.
-ENV PATH=/home/builder/.local/bin:$PATH
-
-# hatch-vcs derives the version from git history, which is deliberately NOT in the build
-# context (.dockerignore). Feed the version in explicitly so the build is hermetic and needs
-# no .git. The release workflow passes the tag version; local builds get a dev placeholder.
-# NOTE: the generic PRETEND var is used, not the `_FOR_STAYAWAKEBOT` named one — hatch-vcs's
-# backend (vcs-versioning) doesn't receive the dist name, so the named variant is ignored
-# (verified). Safe here because this stage builds exactly one package.
-ARG VERSION=0.0.0.dev0+docker
-ENV SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION}
-
-# Copy only what the wheel build needs (matches the Dockerfile's whitelist .dockerignore).
-COPY --chown=builder:builder pyproject.toml README.md LICENSE NOTICE CHANGELOG.md ./
-COPY --chown=builder:builder src ./src
-
-RUN pip install --no-cache-dir --user build \
- && python -m build --wheel --outdir /dist
-
 # ───────────────────────── runtime: slim, non-root, package only ────────────────────────
 FROM ${PYTHON_IMAGE} AS runtime
 
@@ -72,15 +42,19 @@ ENV PATH=/opt/venv/bin:$PATH
 # poisoned release of any dependency enters the image unnoticed — the exact attack this tool exists
 # to detect. --require-hashes makes pip refuse anything whose SHA-256 does not match the lock.
 COPY --chown=sentinel:sentinel requirements.lock /tmp/
-COPY --from=builder --chown=sentinel:sentinel /dist/*.whl /tmp/
+# saw itself is the release's own Linux wheel, placed in dist/ by whoever builds the image: the
+# release pipeline passes the wheel it built and attested, the drift check the latest release.
+COPY --chown=sentinel:sentinel dist/ /tmp/wheels/
 
 USER sentinel
 # --no-deps on the wheel is load-bearing: dependencies are the lock's job, and the wheel must not be
 # able to pull in anything unpinned alongside it.
 RUN set -eux; \
     pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock; \
-    pip install --no-cache-dir --no-deps /tmp/*.whl; \
-    rm -f /tmp/*.whl /tmp/requirements.lock; \
+    wheel="$(ls /tmp/wheels/stayawakebot-*-manylinux_*_"$(uname -m)".whl)"; \
+    test "$(printf '%s\n' "$wheel" | wc -l)" -eq 1; \
+    pip install --no-cache-dir --no-deps "$wheel"; \
+    rm -rf /tmp/wheels /tmp/requirements.lock; \
     venv_site="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
     test -d "$venv_site/pip"; \
     rm -rf "$venv_site/pip" "$venv_site"/pip-*.dist-info \

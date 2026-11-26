@@ -101,7 +101,7 @@ def register(sub) -> None:
 
 def run_repair(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.repair(no_stream=no_stream_requested(a), as_json=getattr(a, "json", False))
+    return hook.repair(no_stream=no_stream_requested(a), as_json=getattr(a, "json", False), standing_in=True)
 
 
 def run_install(a: argparse.Namespace) -> int:
@@ -117,7 +117,7 @@ def run_uninstall(a: argparse.Namespace) -> int:
 
 def run_status(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.status(no_stream=no_stream_requested(a), as_json=getattr(a, "json", False))
+    return hook.status(no_stream=no_stream_requested(a), as_json=getattr(a, "json", False), standing_in=True)
 
 
 def run_run(a: argparse.Namespace) -> int:

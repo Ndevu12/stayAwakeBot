@@ -18,7 +18,59 @@ reader, not the mechanism or the weakness it closed.
   saw run at a time per holding directory, and `--json` names what happened in `outcome`. `saw govern
   verdict` says where a folder is after an apply that did not finish.
 - `saw govern classify --json` says how saw reads a git or gh command line: whether it could be
-  read, its subcommand after aliases, the folder it acts on and whether it brings files in.
+  read, its subcommand after aliases, the folder it acts on and whether saw checks it before it
+  runs, exactly as saw's git stand-in decides.
+
+## [0.17.7] - 2026-11-26
+
+### Fixed
+- On Windows, a scan of a folder finds an editor task that runs a package.json script carrying a
+  payload, as it does on macOS and Linux.
+- `saw govern` checks every file an update brings, including names that differ only in case and
+  paths too long to read the usual way.
+- After a pull, merge, checkout or rebase, saw's git hook checks every file it brought, including
+  names that differ only in case and paths too long to read the usual way.
+- `saw govern` checks each file exactly as it will be written into your folder. A command that has
+  git run other programs, such as `git rebase --exec`, is left for you to decide on.
+- `saw govern` checks a checkout, switch, merge or pull however its options are written, such as
+  `git checkout -m <branch>` or `git merge -m --abort <branch>`.
+- `saw govern` holds an update that changes the folder git runs your hooks from until you let it in,
+  even when nothing is found in it.
+- In a terminal `saw govern` covers, every git command that can bring files into the folder is
+  checked or asks you first, however it is spelled, including `git reset --hard` to a fetched commit.
+- Staging files your folder has not had, such as `git reset` to a fetched commit, is checked before
+  the index changes, and so is staging part of a file in your editor. A `gh` command that names its
+  repository with `-R` is checked too, and after a clone or a new worktree you chose to run
+  unchecked, the folder it created is scanned.
+- `saw govern` judges a git command by what it would write into your folder and its index, whatever
+  repository, index or objects the command or its environment names, against what saw let into the
+  folder before, never against where your branch points. What saw holds stays out of
+  the folder, and a clean update is written exactly as it was checked.
+- An update that changes a file a hook manager runs or reads, such as a husky, lefthook or
+  pre-commit hook, a file any of those names, a package.json script or Makefile a hook runs, or a
+  file your git configuration has git run or include, is held until you let it in, even when nothing
+  is found in it. A command that
+  points git at files in a working tree to run, such as setting `core.hooksPath`, or that copies hooks
+  from a folder in a working tree into a new repository, asks you first.
+- A git command that writes a file it names, such as `git diff --output`, that fetches through a
+  remote it adds or updates or through `git maintenance`, or that pushes into a repository with files
+  on this machine, asks you first.
+- In a terminal `saw govern` covers, a pull, merge or rebase that stops for conflicts is checked like
+  any other update. When it is clean, saw brings in exactly what it checked and leaves the conflicts
+  for you to resolve.
+- In a terminal `saw govern` covers, git runs as typed in a repository with no working tree, such as
+  a mirror clone, and saw never reports success for a command git did not run.
+- saw removes each temporary file it makes as soon as it is done with it, not only when the run ends.
+- On Windows, saw saves its own files, such as hook records, settings and what `saw govern` and
+  `saw watch` keep, refusing any link on the way as it does on macOS and Linux, and `saw harden`
+  places its controls, moves aside what is in their way and removes a known worm's staging kit
+  there too.
+- Each release publishes its container image to GHCR again, built from the same Linux wheel as the
+  release on PyPI.
+- A Ctrl-C that lands while saw is loading stops it with its one line, instead of sometimes printing a
+  traceback and carrying on.
+- `saw hook status` reports a repository whose saw hooks call a program that cannot run, and
+  `saw hook repair` rewrites them.
 
 ## [0.17.6] - 2026-11-25
 
@@ -34,8 +86,9 @@ reader, not the mechanism or the weakness it closed.
   written. saw gives the full path each time.
 
 ### Fixed
-- `saw govern prepare` checks an update however the command is written: with any of git's global
-  options, or through an alias. A command line it cannot read is left to your decision.
+- When an update `saw govern` checked cannot be written into the folder, saw puts back what it had
+  already changed before saying the folder was not changed, and tells you to check the folder when it
+  cannot put it back. Putting a folder back with `saw govern restore` does the same.
 - saw runs the real git even in a terminal where an editor's git stand-in comes first, so its own
   git work is not slowed down or given the stand-in's settings.
 - `saw govern` no longer lets an update in over uncommitted work on a file the update changes. It
@@ -2096,7 +2149,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.6...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.7...HEAD
+[0.17.7]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.6...v0.17.7
 [0.17.6]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.5...v0.17.6
 [0.17.5]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.4...v0.17.5
 [0.17.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.3...v0.17.4
