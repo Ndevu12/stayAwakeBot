@@ -1,12 +1,13 @@
-//! Whether a git command's repository plainly starts no program of its own, read from its files
-//! without running git: a `.git` folder at or above the folder, its own settings file naming no
-//! program and no other settings file, no hook file but the examples git writes and the hooks saw
-//! installs, and settings of the operator's that name no hooks folder and no other settings file.
-//! Anything it cannot read plainly is not vouched for.
+//! Whether a git command's repository plainly starts no program of its own, read from its files and
+//! one listing of the operator's own settings: a `.git` folder at or above the folder, its own
+//! settings file naming no program and no other settings file, no hook file but the examples git
+//! writes and the hooks saw installs, and settings of the operator's that name no hooks folder and
+//! no other settings file. Anything it cannot read plainly is not vouched for.
 
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use super::exec_keys::rule_for;
 use super::settings_fingerprint::{runs_a_program, saws_own_hook};
@@ -18,7 +19,7 @@ const SETTINGS_LIMIT: u64 = 1 << 16;
 const NAMES_A_REPOSITORY: [&str; 9] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS"];
 const GIVES_SETTINGS_PREFIXES: [&str; 3] = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
-const OPERATOR_WORDS: [&str; 2] = ["hookspath", "include"];
+const OPERATOR_SECTIONS: [&str; 2] = ["include.", "includeif."];
 
 /// Say whether a git command's repository plainly starts no program of its own. Takes the
 /// operator's git, the folder the command runs in, the arguments without the program name and the
@@ -58,31 +59,23 @@ fn git_folder(start: &Path) -> Option<Option<PathBuf>> {
     Some(None)
 }
 
-/// Whether the operator's own settings files name no hooks folder and no other settings file.
-/// Takes the operator's git and the environment.
+/// Whether the operator's own settings name no hooks folder and no other settings file, listed by
+/// git from outside every repository. Takes the operator's git and the environment. Returns false
+/// when git cannot list them.
 fn operator_names_nothing(git: &Path, environ: &Environment) -> bool {
-    let home = environ.get("HOME").map(PathBuf::from);
-    let config_home = environ.get("XDG_CONFIG_HOME").filter(|value| !value.is_empty()).map(PathBuf::from)
-        .or_else(|| home.as_ref().map(|home| home.join(".config")));
-    let mut files: Vec<PathBuf> = Vec::new();
-    match environ.get("GIT_CONFIG_GLOBAL") {
-        Some(global) => files.push(PathBuf::from(global)),
-        None => files.extend(home.map(|home| home.join(".gitconfig")).into_iter().chain(config_home.map(|config| config.join("git").join("config")))),
-    }
-    let no_system = environ.get("GIT_CONFIG_NOSYSTEM").is_some_and(|value| !matches!(value.to_lowercase().as_str(), "" | "0" | "false" | "no" | "off"));
-    match environ.get("GIT_CONFIG_SYSTEM") {
-        Some(system) => files.push(PathBuf::from(system)),
-        None if !no_system => {
-            files.push(PathBuf::from("/etc/gitconfig"));
-            if let Some(prefix) = paths::real_path(git).parent().and_then(Path::parent) {
-                files.push(prefix.join("etc").join("gitconfig"));
-            }
-        }
-        None => {}
-    }
-    files.iter().all(|file| match settings_text(file) {
-        Ok(text) => text.is_none_or(|text| !OPERATOR_WORDS.iter().any(|word| text.to_lowercase().contains(word))),
-        Err(()) => false,
+    let listed = Command::new(git)
+        .args(["-C", "/", "config", "--list", "--show-scope", "--name-only", "-z"])
+        .env_clear()
+        .envs(environ)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    let Some(listed) = listed.ok().filter(|listed| listed.status.success()) else { return false };
+    let text = String::from_utf8_lossy(&listed.stdout);
+    let fields: Vec<&str> = text.split('\0').collect();
+    fields.chunks_exact(2).all(|pair| {
+        let key = pair[1].to_lowercase();
+        !matches!(pair[0], "system" | "global") || !(key == HOOKS_KEY || OPERATOR_SECTIONS.iter().any(|section| key.starts_with(section)))
     })
 }
 
@@ -167,8 +160,8 @@ fn only_known_hooks(folder: &Path, environ: &Environment) -> bool {
             return true;
         }
         let path = child.path();
-        fs::metadata(&path).is_ok_and(|found| found.is_file())
-            && saws_own_hook(&name, environ).is_some_and(|own| fs::read(&path).is_ok_and(|bytes| bytes == own))
+        fs::symlink_metadata(&path).is_ok_and(|found| found.is_file())
+            && saws_own_hook(Path::new(&name), environ).is_some_and(|own| fs::read(&path).is_ok_and(|bytes| bytes == own))
     })
 }
 

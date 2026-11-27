@@ -70,13 +70,21 @@ fn every_shared_case_reads_the_same_fingerprint() {
         let expected: Vec<Vec<String>> = case["expected"].as_array().unwrap().iter()
             .map(|entry| entry.as_array().unwrap().iter().map(|part| part.as_str().unwrap().replace(ROOT, &shown)).collect())
             .collect();
-        assert_eq!(read.entries, expected, "{name}");
-        assert_eq!(read.is_empty(), expected.is_empty(), "{name}");
+        let covered: Vec<Vec<String>> = read.entries.iter().filter(|entry| entry[0] != "absent").cloned().collect();
+        assert_eq!(covered, expected, "{name}");
+        assert_eq!(read.is_empty(), case["starts_nothing"].as_bool().unwrap(), "{name}");
         let read_plainly = starts_no_program(&git, &root.join("repo"), &["status".to_string()], &environ);
-        assert!(!read_plainly || expected.is_empty(), "{name}: read plainly as starting no program");
+        assert!(!read_plainly || read.is_empty(), "{name}: read plainly as starting no program");
         assert_eq!(read_plainly, READ_PLAINLY.contains(&name), "{name}: read plainly");
         if let Some(digest) = case["digest"].as_str() {
             assert_eq!(read.digest(), digest, "{name}");
+        }
+        if let Some(changed) = case["changed"].as_object() {
+            for (path, contents) in changed {
+                fs::write(root.join(path), contents.as_str().unwrap()).unwrap();
+            }
+            let again = fingerprint(&git, &root.join("repo"), &["status".to_string()], &environ).unwrap().unwrap();
+            assert_ne!(again.digest(), read.digest(), "{name}: the change left the fingerprint as it was");
         }
         let _ = fs::remove_dir_all(&root);
     }

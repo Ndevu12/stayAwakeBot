@@ -55,10 +55,15 @@ class TheFingerprintMatchesTheStandIn(unittest.TestCase):
                 self.assertIsInstance(found, settings_fingerprint.Fingerprint, found)
                 shown = os.path.realpath(root)
                 expected = tuple(tuple(part.replace(ROOT, shown) for part in entry) for entry in case["expected"])
-                self.assertEqual(found.entries, expected)
-                self.assertEqual(found.empty, not expected)
+                self.assertEqual(tuple(entry for entry in found.entries if entry[0] != settings_fingerprint.ABSENT), expected)
+                self.assertEqual(found.empty, case["starts_nothing"])
                 if "digest" in case:
                     self.assertEqual(found.digest(), case["digest"])
+                for path, contents in case.get("changed", {}).items():
+                    (root / path).write_bytes(contents.encode("utf-8"))
+                if "changed" in case:
+                    with mock.patch.dict(os.environ, environment):
+                        self.assertNotEqual(settings_fingerprint.fingerprint(root / "repo").digest(), found.digest())
 
     def test_a_folder_in_no_repository_has_none(self):
         root = tempfile.mkdtemp(prefix="saw-fingerprint-")
