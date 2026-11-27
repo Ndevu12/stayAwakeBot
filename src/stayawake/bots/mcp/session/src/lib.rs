@@ -1,3 +1,4 @@
+pub mod editor_questions;
 pub mod folder_guard;
 pub mod git_tables;
 pub mod platform;

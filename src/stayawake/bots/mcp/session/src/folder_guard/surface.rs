@@ -619,6 +619,12 @@ pub fn common_dir_of(git_dir: &Path, environ: &Environment) -> PathBuf {
     }
 }
 
+/// Whether a folder, every link followed, lies inside a git repository: it or a folder above it
+/// holds a `.git` entry or is a git directory. Takes the folder.
+pub fn lies_inside_a_repository(folder: &Path) -> bool {
+    paths::real_path(folder).ancestors().any(|at| paths::lexists(&at.join(".git")) || is_git_directory(at))
+}
+
 /// Tell whether a path is a git directory: it holds a HEAD git accepts, and an objects and a refs
 /// directory.
 pub fn is_git_directory(path: &Path) -> bool {

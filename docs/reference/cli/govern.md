@@ -150,6 +150,45 @@ A held update prints what to do and asks whether to let it in: a yes for a suspi
 folder name for an infected one. That is never decided ahead; where there is no one to ask, such as
 a shell an agent runs, the folder is left as it is and saw says to run `saw govern let-in`.
 
+### Answering from an editor
+
+An editor that runs git with no terminal, such as a pull from its Git view, can answer these two
+questions itself. It sets `SAW_GOVERN_QUESTIONS` to a folder of its own for the git it starts: an
+absolute path to a folder, not a link, that you own, that only you can write to, and that lies
+outside every git repository. saw says why when it cannot use the folder, and answers as it would
+without it. A terminal still answers first, and `SAW_GOVERN_DECISION` still decides ahead for an
+update that cannot be checked.
+
+saw writes each question to the folder as `<id>.question.json`, written whole under that name:
+
+| Field | What it holds |
+| --- | --- |
+| `schema_version` | `1`. |
+| `id` | The question's id. |
+| `kind` | `cannot-check` for an update that cannot be checked, or `held` for an update saw held. |
+| `choices` | `run-as-typed` and `leave-unchanged`, or `let-in` and `leave-unchanged`. |
+| `argv` | The command as typed, the tool first. |
+| `folder` | The folder it ran in. |
+| `reason`, `checked` | For `cannot-check`: why, and whether saw checked it. |
+| `findings`, `next_steps` | For `held`: the findings, with the fields the status record gives them, and what to do. |
+| `accept` | For `held`: the commit saw checked. |
+| `confirm` | For `held`: true for an infected update. |
+
+The editor answers by writing `<id>.answer.json` whole, for example by writing it under another
+name and renaming it:
+
+```json
+{"id": "<id>", "answer": "let-in", "accept": "<commit>", "confirm": true}
+```
+
+`answer` is one of the question's `choices`. To let a held update in, `accept` is the question's
+`accept` exactly, and for an infected update `confirm` is true. saw lets in exactly the update it
+checked, as `saw govern apply --accept` does. saw waits 120 seconds for the answer;
+`SAW_GOVERN_QUESTIONS_WAIT` sets the seconds, at most 600. Any other answer, a link, a file you do
+not own, or no answer in time leaves the folder as it is, as with no one to ask. saw then removes
+both files. The question about keeping a folder's git settings, and the question when git cannot
+run without them, are still answered only by a person at a terminal.
+
 `saw govern let-in` runs the held command again in your terminal, in the folder it ran in: saw checks
 it again and asks you whether to let the update in. Nothing is let in without your answer, it
 needs a person at a terminal, and `SAW_GOVERN_DECISION` does not apply to it. saw keeps only the command, the folder it ran in and when, never the
