@@ -6,17 +6,25 @@ use std::sync::OnceLock;
 
 const KEYS_FILE: &str = include_str!("../../../../../lib/data/git_exec_keys.json");
 
-/// How a listed key's value is run, as far as keeping it from running depends on it.
+/// How a listed key's value is run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Runs {
-    /// The value names the directory hooks run from.
-    HooksDirectory,
-    /// The value switches a command-running transport on.
-    EnablesTransport,
+    /// The value is a command line.
+    Command,
+    /// Only a value starting with `!` is a command line.
+    AfterBang,
     /// A boolean value is a toggle, anything else a command line.
     UnlessBoolean,
-    /// Any other way of running the value.
-    Other,
+    /// The value names the directory hooks run from.
+    HooksDirectory,
+    /// The subsection after `ext::` is a command line.
+    ExtTransport,
+    /// A value starting `ext::` is a command line.
+    ExtAddress,
+    /// The value switches a command-running transport on.
+    EnablesTransport,
+    /// A value that is an absolute path is a program.
+    AbsolutePath,
 }
 
 /// How a folder's own value of a key is kept from running.
@@ -89,10 +97,15 @@ fn loaded() -> &'static Loaded {
             .into_iter()
             .map(|listed| ExecKey {
                 runs: match listed.runs.as_deref() {
-                    Some("hooks-directory") => Runs::HooksDirectory,
-                    Some("enables-transport") => Runs::EnablesTransport,
+                    None | Some("command") => Runs::Command,
+                    Some("after-bang") => Runs::AfterBang,
                     Some("unless-boolean") => Runs::UnlessBoolean,
-                    _ => Runs::Other,
+                    Some("hooks-directory") => Runs::HooksDirectory,
+                    Some("ext-transport") => Runs::ExtTransport,
+                    Some("ext-address") => Runs::ExtAddress,
+                    Some("enables-transport") => Runs::EnablesTransport,
+                    Some("absolute-path") => Runs::AbsolutePath,
+                    Some(other) => panic!("saw's git exec keys: {} runs in an unknown way: {other}", listed.key),
                 },
                 key: listed.key,
                 replaced_by: listed.replaced_by,

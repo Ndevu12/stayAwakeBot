@@ -1,6 +1,7 @@
 //! A command the stand-in would run directly, in a folder whose own settings name a program saw
-//! cannot keep from starting, never runs as typed on saw's word that it brings no files: the person
-//! at a terminal decides, and with no one to ask the folder is left unchanged.
+//! cannot keep from starting, never runs as typed on saw's word that it brings no files, nor on a
+//! decision set ahead in the environment: only the person at a terminal decides, and with no one to
+//! ask the folder is left unchanged.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -82,9 +83,10 @@ fn with_no_one_to_ask_git_does_not_run_and_the_folder_is_unchanged() {
 }
 
 #[test]
-fn the_operator_who_chooses_to_run_it_as_typed_runs_it() {
+fn a_decision_set_ahead_never_runs_a_command_the_guard_refused() {
     let folder = Folder::new("decided");
-    folder.run(Some("run-as-typed"));
-    assert!(folder.ran_the_command(), "git did not run after the operator chose to run it");
-    assert!(fs::read_to_string(&folder.saw_log).unwrap_or_default().contains("scan"), "the folder was not scanned after");
+    let done = folder.run(Some("run-as-typed"));
+    assert!(!folder.ran_the_command(), "git ran on a decision set ahead in the environment");
+    assert!(!done.status.success());
+    assert!(String::from_utf8_lossy(&done.stderr).contains("left the folder unchanged"), "{}", String::from_utf8_lossy(&done.stderr));
 }

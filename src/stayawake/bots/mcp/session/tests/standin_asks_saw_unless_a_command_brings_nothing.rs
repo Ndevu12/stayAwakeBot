@@ -127,10 +127,7 @@ fn a_command_that_brings_no_files_runs_without_asking_saw() {
         assert_eq!(terminal.took(&terminal.saw_log), None, "{spelling:?} asked saw");
         let ran = terminal.took(&terminal.real_log).unwrap_or_default();
         let last = ran.lines().last().unwrap_or_default();
-        assert!(last.ends_with(&spelling.join(" ")), "{spelling:?} did not run git: {ran}");
-        if !spelling.is_empty() && spelling[0] != "--version" && spelling[0] != "--list-cmds=main" {
-            assert!(last.contains("-c protocol.file.allow=never"), "{spelling:?} ran without saw's settings: {last}");
-        }
+        assert_eq!(last, spelling.join(" "), "{spelling:?} did not run as typed in a folder whose settings start no program: {ran}");
     }
 }
 

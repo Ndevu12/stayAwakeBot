@@ -114,6 +114,7 @@ saw govern install
 saw govern status
 saw govern uninstall
 saw govern let-in [--repo <folder>]
+saw govern trust [--repo <folder>] [--forget]
 ```
 
 The editor extension checks updates for the folders you open in the editor. To check them in your
@@ -152,6 +153,19 @@ it again and asks you whether to let the update in. Nothing is let in without yo
 needs a person at a terminal, and `SAW_GOVERN_DECISION` does not apply to it. saw keeps only the command, the folder it ran in and when, never the
 files, and only the latest one for each repository. Run it from any folder in that repository, or
 add `--repo <folder>` from outside it.
+
+Commands saw does not check, such as `git status`, `git commit` and `git push`, run as typed. When
+the repository's own git settings start programs, such as its hooks, a filter like git-crypt's or
+fsmonitor, those programs run only once you keep them. In a terminal saw names them and asks once
+whether to keep them for this folder: answer yes and they run until they change. Answer no, or where
+there is no one to ask, and git runs without them, and saw prints the command that keeps them,
+`saw govern trust`. `SAW_GOVERN_DECISION` never answers this question. An update saw checks and
+writes into the folder keeps kept settings kept. When git cannot run without one of those programs,
+saw asks whether to run the command as typed, and only a person answers that too.
+
+`saw govern trust` names the programs the repository's own settings start and asks whether to keep
+them; it needs a person at a terminal. `saw govern trust --forget` stops keeping them. Run it from
+any folder in the repository, or add `--repo <folder>` from outside it.
 
 `saw govern status` says whether your terminals are covered and whether the shell you are in is
 covered yet, and what to change when every check starts over. `saw govern uninstall` takes it back
@@ -198,8 +212,9 @@ so it reports what the folder says. A command that cannot be run safely this way
 naming a repository that cannot be read, is answered `checked: true` with the `reason` and no
 `run_with`.
 
-saw's git stand-in runs every command it does not check with these same settings, and sends one
-it cannot run this way to saw first.
+saw's git stand-in runs a command it does not check with these same settings in a repository
+whose own settings start programs you have not kept, and sends one it cannot run this way to saw
+first.
 
 ## Asking whether a tree is one saw let in
 

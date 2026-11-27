@@ -10,10 +10,11 @@ import subprocess
 import sys
 
 from stayawake.bots.security import govern as core, records
-from stayawake.bots.security import govern_held_commands
+from stayawake.bots.security import govern_held_commands, kept_settings
 from stayawake.bots.mcp.launch import standin_binary
 from stayawake.cli.argtypes import add_deadline_arg, add_progress_arg, progress_requested
 from stayawake.cli.helptext import add_command
+from stayawake.lib.git import settings_fingerprint
 from stayawake.utils import env, exitcodes
 from stayawake.utils.progress_events import covering
 from stayawake.utils.json_documents import versioned
@@ -143,6 +144,22 @@ def register(sub) -> None:
     lp.add_argument("--repo", default=".", help="any folder in the repository the update was held for")
     lp.set_defaults(func=run_let_in)
 
+    tp = add_command(
+        actions, "trust",
+        help="keep the git settings a repository sets for itself",
+        description=(
+            "Show the programs a repository's own git settings start, such as its hooks, filters "
+            "and fsmonitor, and ask whether to keep them. When saw runs git in that repository "
+            "itself, kept settings stay in force. Settings you have not kept do not start. saw asks "
+            "again when they change. `--forget` stops keeping them. Keeping them needs a person at a "
+            "terminal."),
+        examples=[("saw govern trust", "keep this repository's git settings"),
+                  ("saw govern trust --forget --repo ~/code/app", "stop keeping them")],
+        stream=False)
+    tp.add_argument("--repo", default=".", help="any folder in the repository")
+    tp.add_argument("--forget", action="store_true", help="stop keeping the repository's settings")
+    tp.set_defaults(func=run_trust)
+
     for name, helptext, description, example in _PLACEMENT:
         c = add_command(actions, name, help=helptext, description=description,
                         examples=[example], stream=False)
@@ -242,6 +259,48 @@ def run_let_in(a: argparse.Namespace) -> int:
         return exitcodes.DID_NOT_RUN
     govern_held_commands.clear(folder, record)
     return ran.returncode
+
+
+def run_trust(a: argparse.Namespace) -> int:
+    """Show the programs a repository's own git settings start and ask the person at a terminal
+    whether to keep them, or stop keeping them with `--forget`. Takes the parsed arguments. Returns
+    the exit code."""
+    found = settings_fingerprint.fingerprint(a.repo)
+    if found is None:
+        print(f"saw: {os.path.realpath(a.repo)} is not in a git repository. Nothing changed.", file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    if isinstance(found, str):
+        print(f"saw: {found}. Nothing changed.", file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    if a.forget:
+        forgotten = kept_settings.forget(found.repository)
+        print(f"saw: {'stopped keeping' if forgotten else 'saw was not keeping'} the git settings of "
+              f"{found.folder}. git runs there without the programs they start.", file=sys.stderr)
+        return exitcodes.CLEAN
+    if found.empty:
+        print(f"saw: the git settings of {found.folder} start no program. There is nothing to keep.",
+            file=sys.stderr)
+        return exitcodes.CLEAN
+    if kept_settings.is_kept(found):
+        print(f"saw: the git settings of {found.folder} are kept already.", file=sys.stderr)
+        return exitcodes.CLEAN
+    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+        print("saw: saw govern trust needs a person at a terminal. Nothing was kept.", file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    hooks = found.hooks_folder()
+    print(f"This folder's git settings run: {', '.join(found.named())}.", file=sys.stderr)
+    if hooks:
+        print(f"Its hooks are in {hooks}.", file=sys.stderr)
+    print("Keep them for this folder? [y/N] ", end="", file=sys.stderr, flush=True)
+    answer = sys.stdin.readline().strip().lower()
+    if answer not in ("y", "yes"):
+        print("saw: not kept. git runs here without them.", file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    if not kept_settings.keep(found):
+        print("saw: they could not be recorded. git runs here without them.", file=sys.stderr)
+        return exitcodes.DID_NOT_RUN
+    print("saw: kept. git runs here with them until they change.", file=sys.stderr)
+    return exitcodes.CLEAN
 
 
 def _standin_environment() -> dict:

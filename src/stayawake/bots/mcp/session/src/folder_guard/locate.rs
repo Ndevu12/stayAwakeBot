@@ -14,19 +14,41 @@ const NOT_A_REPOSITORY: &str = "the folder is not in a git repository saw can re
 /// command and its environment. Returns the git directory, None for no repository, or the reason
 /// the repository it acts on cannot be read.
 pub fn repository(git: &Git, place: &Path, command: &TypedCommand, environ: &Environment) -> Result<Option<PathBuf>, String> {
+    Ok(found(git, place, command, environ)?.map(|found| found.git_dir))
+}
+
+/// Where the repository a command acts on lies: its git directory, its common directory and the top
+/// of its working tree, None without one.
+#[derive(Debug, Clone)]
+pub struct Found {
+    pub git_dir: PathBuf,
+    pub common_dir: PathBuf,
+    pub top: Option<PathBuf>,
+}
+
+/// Find the repository a command acts on. Takes the git runner, the folder it runs in, the command
+/// and its environment. Returns where it lies, None for no repository, or the reason the repository
+/// it acts on cannot be read.
+pub fn found(git: &Git, place: &Path, command: &TypedCommand, environ: &Environment) -> Result<Option<Found>, String> {
     match locate(git, place, command) {
-        Ok((git_dir, common_dir)) => {
-            let shared = surface::common_dir_of(&git_dir, environ);
-            if paths::real_path(&shared) != paths::real_path(&common_dir) {
+        Ok(found) => {
+            let shared = surface::common_dir_of(&found.git_dir, environ);
+            if paths::real_path(&shared) != paths::real_path(&found.common_dir) {
                 return Err("the command names a common directory of its own".to_string());
             }
-            Ok(Some(git_dir))
+            Ok(Some(found))
         }
         Err(why) if command.names_its_repository() || looks_like_a_repository(place) => {
             Err(format!("{}: {why}", place.display()))
         }
         Err(_) => Ok(None),
     }
+}
+
+/// Build a read of settings in the command's repository, with the operator's own scopes. Takes the
+/// command, the folder it runs in and git's arguments.
+pub fn reading_settings(command: &TypedCommand, place: &Path, args: &[&str]) -> Call {
+    Call { kind: Kind::ReadsSettings, ..asking(command, place, args) }
 }
 
 fn asking(command: &TypedCommand, place: &Path, args: &[&str]) -> Call {
@@ -44,7 +66,7 @@ fn asking(command: &TypedCommand, place: &Path, args: &[&str]) -> Call {
 
 /// Ask git where the command's repository is. Returns its git directory and common directory, or
 /// why git cannot find one.
-fn locate(git: &Git, place: &Path, command: &TypedCommand) -> Result<(PathBuf, PathBuf), &'static str> {
+fn locate(git: &Git, place: &Path, command: &TypedCommand) -> Result<Found, &'static str> {
     let [inside_a_tree, found, placed] = reads(place, command);
     let together = git.answer(&inside_a_tree);
     let together_lines = split_lines(&together.text());
@@ -67,7 +89,8 @@ fn locate(git: &Git, place: &Path, command: &TypedCommand) -> Result<(PathBuf, P
     if alternates.split(':').filter(|entry| !entry.is_empty()).any(|entry| !Path::new(entry).is_absolute()) {
         return Err("the object directories the command names cannot be read");
     }
-    Ok((PathBuf::from(&lines[0]), PathBuf::from(&lines[1])))
+    let top = (lines[2] == "true").then(|| PathBuf::from(&top));
+    Ok(Found { git_dir: PathBuf::from(&lines[0]), common_dir: PathBuf::from(&lines[1]), top })
 }
 
 /// The reads that find the command's repository: one that answers all at once inside a working

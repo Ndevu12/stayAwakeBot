@@ -5,9 +5,11 @@
 mod command_line;
 mod exec_keys;
 mod git;
+pub mod kept_settings;
 mod locate;
 mod overrides;
 mod paths;
+mod settings_fingerprint;
 mod surface;
 mod typed_command;
 
@@ -15,6 +17,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub use command_line::shell_words;
+pub use settings_fingerprint::Fingerprint;
 
 /// The environment a command runs in, by variable name.
 pub type Environment = HashMap<String, String>;
@@ -104,6 +107,33 @@ fn guard_with(git: &git::Git, folder: &Path, args: &[String], environ: &Environm
         overrides::set(&mut environment, &name, &value);
     }
     Ok(RunWith { arguments, settings, environment })
+}
+
+/// Read the fingerprint of the programs the own settings of the repository a git command acts on
+/// start. Takes the operator's git, the folder the command runs in, the arguments without the
+/// program name and the environment the command runs in. Returns it, None when the command acts on
+/// no repository, or why it cannot be read.
+pub fn fingerprint(git: &Path, folder: &Path, args: &[String], environ: &Environment) -> Result<Option<Fingerprint>, String> {
+    let runner = git::Git::new(git, environ);
+    let read = fingerprint_with(&runner, folder, args, environ);
+    match runner.stalled() {
+        Some(stalled) => Err(format!("git did not answer: {stalled}")),
+        None => read,
+    }
+}
+
+fn fingerprint_with(git: &git::Git, folder: &Path, args: &[String], environ: &Environment) -> Result<Option<Fingerprint>, String> {
+    let located = command_line::read(args, folder, &|_, _| None);
+    if !located.readable {
+        return Err(format!("this command line cannot be read: {}", located.reason));
+    }
+    let place: PathBuf = located.folder.clone().unwrap_or_else(|| folder.to_path_buf());
+    let command = typed_command::read(args, environ).map_err(|why| format!("this command line cannot be read: {why}"))?;
+    git.use_no_hooks_folder(&paths::no_hooks_folder(environ)?);
+    let Some(found) = locate::found(git, &place, &command, environ)? else { return Ok(None) };
+    let listed = git.answer(&locate::reading_settings(&command, &place, &["config", "--list", "--show-scope", "-z"]));
+    let listing = listed.succeeded().ok_or_else(|| format!("the git settings of {} did not load", place.display()))?;
+    settings_fingerprint::from_listing(listing, &found, environ).map(Some)
 }
 
 /// Whether a command only reads or writes settings: it runs no program and reports what the
