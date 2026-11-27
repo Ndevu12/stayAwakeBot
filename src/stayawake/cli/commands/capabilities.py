@@ -89,8 +89,8 @@ def govern_features(commands: dict[str, argparse.ArgumentParser]) -> list[str]:
     commands. Returns `govern.progress.jsonl` when `prepare` or `apply` writes progress events,
     `govern.decision`, `govern.conflicts` and `govern.status.held_details` when `prepare` exists, `govern.apply.outcome`,
     `govern.lock` and `govern.apply.expect` for `apply`, `govern.classify` and
-    `govern.classify.run_with` for `classify`, and `govern.verdict` and `govern.restore` when those
-    subcommands exist."""
+    `govern.classify.run_with` for `classify`, and `govern.verdict`, `govern.restore` and
+    `govern.trust` when those subcommands exist."""
     subs = _subcommands(commands["govern"]) if "govern" in commands else {}
     feats: list[str] = []
     if any(_takes_progress(subs[name]) for name in ("prepare", "apply") if name in subs):
@@ -108,7 +108,7 @@ def govern_features(commands: dict[str, argparse.ArgumentParser]) -> list[str]:
         feats.append("govern.lock")
     if "apply" in subs and _takes(subs["apply"], "--expect"):
         feats.append("govern.apply.expect")
-    feats += [f"govern.{name}" for name in ("classify", "verdict", "restore") if name in subs]
+    feats += [f"govern.{name}" for name in ("classify", "verdict", "restore", "trust") if name in subs]
     if "classify" in subs:
         feats.insert(feats.index("govern.classify") + 1, "govern.classify.run_with")
     return feats

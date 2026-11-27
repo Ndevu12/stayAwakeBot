@@ -18,6 +18,26 @@ reader, not the mechanism or the weakness it closed.
   terminal shows: the findings, the command and the folder it ran in, the next steps, and whether
   `saw govern let-in` reviews it. `saw capabilities` lists `govern.status.held_details`.
 
+## [0.18.3] - 2026-11-27
+
+### Fixed
+- saw's Windows build compiles again: the guard that runs git without the folder's own programs is
+  built on the systems its stand-in runs on.
+
+## [0.18.2] - 2026-11-27
+
+### Added
+- `saw govern trust` keeps the programs a repository's own git settings start, such as its hooks or
+  a git-crypt filter, after asking you in a terminal; `--forget` stops keeping them.
+
+### Fixed
+- saw's git stand-in runs a git command it does not check, such as `git status` or `git commit`,
+  with the programs a repository's own git settings start only once you keep them, and without them
+  until then.
+- `saw govern classify` gives a `git config` command that reads its settings from a blob the same
+  settings as any other git command it does not check, so a fetch git makes for that blob starts none
+  of the folder's programs.
+
 ## [0.18.1] - 2026-11-27
 
 ### Fixed
@@ -2197,7 +2217,9 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.3...HEAD
+[0.18.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.2...v0.18.3
+[0.18.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.7...v0.18.0
 [0.17.7]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.6...v0.17.7

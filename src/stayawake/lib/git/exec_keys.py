@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""The configuration keys whose value git executes, read from `lib/data/git_exec_keys.yml`."""
+"""The configuration keys whose value git executes, read from `lib/data/git_exec_keys.json`."""
 from __future__ import annotations
 
 import functools
+import json
 import os
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
 
-import yaml
 
-KEYS_FILE = Path(__file__).resolve().parent.parent / "data" / "git_exec_keys.yml"
+KEYS_FILE = Path(__file__).resolve().parent.parent / "data" / "git_exec_keys.json"
 
 COMMAND = "command"
 AFTER_BANG = "after-bang"
@@ -117,11 +117,20 @@ def _override(key: str, raw: dict) -> Override:
                     refuse=bool(raw.get("refuse", False)))
 
 
+def _read(path: Path) -> dict:
+    """Read the key list file. Takes its path. Returns its contents, or raises ValueError on a file
+    that is not a JSON object."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} is not a JSON object")
+    return data
+
+
 @functools.lru_cache(maxsize=None)
 def exec_keys(path: Path = KEYS_FILE) -> tuple[ExecKey, ...]:
     """Load the key list. Takes the file (default: the shipped list). Returns its entries in file
     order; raises ValueError on a malformed file."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = _read(path)
     return tuple(_entry(raw) for raw in data.get("keys") or ())
 
 
@@ -142,7 +151,7 @@ class RunsNothing:
 def runs_nothing(path: Path = KEYS_FILE) -> tuple[RunsNothing, ...]:
     """Load the keys that run nothing. Takes the file (default: the shipped list). Returns its
     entries in file order, or raises ValueError on a malformed file."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = _read(path)
     found = []
     for raw in data.get("runs_nothing") or ():
         key, why = (raw.get("key"), raw.get("why")) if isinstance(raw, dict) else (None, None)
@@ -156,7 +165,7 @@ def runs_nothing(path: Path = KEYS_FILE) -> tuple[RunsNothing, ...]:
 def always_set(path: Path = KEYS_FILE) -> tuple[tuple[str, str], ...]:
     """Load the settings every command saw does not check runs with. Takes the file (default: the
     shipped list). Returns each key with its value, or raises ValueError on a malformed file."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = _read(path)
     found = []
     for raw in data.get("always_set") or ():
         key, value, why = (raw.get("key"), raw.get("value"), raw.get("why")) if isinstance(raw, dict) else (None,) * 3
