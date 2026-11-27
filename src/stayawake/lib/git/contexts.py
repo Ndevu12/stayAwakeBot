@@ -147,9 +147,10 @@ def _injects_config(key: str) -> bool:
 
 
 def child_env(context: Context, env: dict | None, *, operator_scopes: bool | None = None,
-              repository_less: bool = False) -> dict:
+              repository_less: bool = False, named: dict | None = None) -> dict:
     """The environment git runs in. Takes the context, the caller's environment (a whole environment,
-    as `os.environ` is) and whether the command reads the operator's configuration. Returns it.
+    as `os.environ` is), whether the command reads the operator's configuration, and the variables
+    the operator's own command names its repository with, kept as given. Returns it.
 
     A `GIT_*` variable the caller set or changed is kept; one merely inherited is kept only where the
     operator's scopes are, and never when it relocates the repository or injects configuration."""
@@ -165,6 +166,9 @@ def child_env(context: Context, env: dict | None, *, operator_scopes: bool | Non
         if explicit and not _injects_config(key) and key not in _ISOLATION_VARS:
             out[key] = value
         elif scopes and key not in GIT_LOCATION_VARS and not _injects_config(key):
+            out[key] = value
+    for key, value in (named or {}).items():
+        if not _injects_config(key) and key not in _ISOLATION_VARS:
             out[key] = value
     if not scopes:
         for key in _ISOLATION_VARS:

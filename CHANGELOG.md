@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- `saw govern classify` and `saw govern prepare` find the repository a command acts on when the
+  environment saw runs in names it, such as an inherited `GIT_DIR`.
+
 ## [0.18.0] - 2026-11-27
 
 ### Fixed

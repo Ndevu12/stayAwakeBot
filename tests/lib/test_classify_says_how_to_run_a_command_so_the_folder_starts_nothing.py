@@ -377,6 +377,17 @@ class TestTheRepositoryTheCommandActsOn(GuardSandbox):
         self.write(other, "f.txt", "changed\n")
         self.assert_starts_only_unguarded(marks, folder, "status", named={"GIT_DIR": str(other / ".git")})
 
+    def test_a_repository_the_inherited_environment_names_is_the_one_read(self):
+        folder = self.plain_folder("folder")
+        other = self.plain_folder("other")
+        marks = self.marks("inherited")
+        self.git(other, "config", "core.fsmonitor", self._program(marks, "core.fsmonitor"))
+        self.write(other, "f.txt", "changed\n")
+        inherited = mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")})
+        inherited.start()
+        self.addCleanup(inherited.stop)
+        self.assert_starts_only_unguarded(marks, folder, "status")
+
     def test_a_repository_on_this_machine_runs_none_of_its_own_programs(self):
         folder = self.plain_folder("folder")
         nested = folder / ".nested.git"
