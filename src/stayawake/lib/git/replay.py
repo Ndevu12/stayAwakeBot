@@ -251,7 +251,8 @@ def locate(folder: Path, command: TypedCommand) -> "Location | str":
     env, asking = _location_env(command), _asking(command)
 
     def answer(args: list[str]) -> "list[str] | None":
-        done = run(folder, [*asking, "rev-parse", *args], env=env, context=UNTRUSTED)
+        done = run(folder, [*asking, "rev-parse", *args], env=env, context=UNTRUSTED,
+                   named=dict(command.locations))
         return None if done is None or done.returncode != 0 else done.stdout.splitlines()
 
     found = answer(["--path-format=absolute", "--absolute-git-dir", "--git-common-dir",

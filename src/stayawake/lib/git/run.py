@@ -97,7 +97,7 @@ def _no_git() -> None:
 
 
 def _prepare(repo: str | Path | None, args: list[str], env: dict | None,
-             context: Context) -> tuple[list[str], dict, str | None] | None:
+             context: Context, named: dict | None = None) -> tuple[list[str], dict, str | None] | None:
     """Build the argv, environment and working directory for one command, or None when it is
     refused. Takes the repo, the arguments, the caller's environment and the context."""
     if context.repository == "none" and repo is not None:
@@ -127,7 +127,7 @@ def _prepare(repo: str | Path | None, args: list[str], env: dict | None,
     argv += callers_globals + [sub] + rest
     child = child_env(context, env,
                       operator_scopes=True if verdict.reads_configuration else None,
-                      repository_less=repo is None)
+                      repository_less=repo is None, named=named)
     return argv, child, (str(neutral_dir()) if repo is None else None)
 
 
@@ -211,8 +211,9 @@ def _stalled(args: list[str], timeout) -> None:
 
 def run(repo: str | Path | None, args: list[str], *, env: dict | None = None,
         timeout: int | None = LOCAL_TIMEOUT, context: Context = UNTRUSTED,
-        input_text: str | None = None) -> subprocess.CompletedProcess | None:
-    """Run a git command in `repo` under `context`, with `input_text` on its stdin; return the
+        input_text: str | None = None, named: dict | None = None) -> subprocess.CompletedProcess | None:
+    """Run a git command in `repo` under `context`, with `input_text` on its stdin and `named`, the
+    variables the operator's own command names its repository with, kept as given. Return the
     CompletedProcess, or None when git could not run or the command was refused. `repo=None` runs
     from a saw-owned empty directory, for commands that name their target explicitly (a URL, a
     destination, the global configuration).
@@ -220,7 +221,7 @@ def run(repo: str | Path | None, args: list[str], *, env: dict | None = None,
     The return code and stdout are exposed even on a non-zero exit (`merge-tree` exits 1 on a
     conflict yet prints the tree); output decodes with `errors="replace"`.
     """
-    prepared = _prepare(repo, args, env, context)
+    prepared = _prepare(repo, args, env, context, named)
     if prepared is None or _not_answering(repo, args):
         return None
     argv, child, cwd = prepared

@@ -4,7 +4,9 @@
     "the settings and environment that keep every one of those programs from starting, or a refusal.",
     "saw's Python tests and the stand-in's Rust tests both check every case. `@NO_HOOKS@` is saw's",
     "empty hooks folder under the case's XDG_STATE_HOME. `layout` is repo, bare, submodule (settings in",
-    ".git/modules/sub/config) or plain (no repository); `included` files sit beside the settings file."
+    ".git/modules/sub/config), elsewhere (the command runs in an empty folder beside the repository),",
+    "worktree (the command runs in a linked worktree; `worktree_settings` is its config.worktree) or",
+    "plain (no repository). `included` files sit beside the settings file."
   ],
   "operator_settings": "[user]\n\tname = Operator\n[core]\n\tpager = less\n[credential]\n\thelper = store\n[alias]\n\tst = status\n",
   "cases": [
@@ -69,6 +71,12 @@
     {"name": "command-line-saw-cannot-read", "layout": "repo", "settings": "", "args": ["--exec-path=/x", "status"],
      "expected": {"refused": true}},
     {"name": "setting-given-on-the-command-line", "layout": "repo", "settings": "[core]\n\tfsmonitor = /nonexistent/planted-program\n", "args": ["-c", "core.quotepath=false", "status"],
-     "expected": {"settings": [["core.hookspath", "@NO_HOOKS@"], ["protocol.ext.allow", "never"], ["protocol.file.allow", "never"], ["core.fsmonitor", "false"]], "arguments": ["-c", "core.hookspath=@NO_HOOKS@", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "core.fsmonitor=false"], "environment": {}}}
+     "expected": {"settings": [["core.hookspath", "@NO_HOOKS@"], ["protocol.ext.allow", "never"], ["protocol.file.allow", "never"], ["core.fsmonitor", "false"]], "arguments": ["-c", "core.hookspath=@NO_HOOKS@", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "core.fsmonitor=false"], "environment": {}}},
+    {"name": "repository-the-environment-names", "layout": "elsewhere", "settings": "[core]\n\tfsmonitor = /nonexistent/planted-program\n[diff]\n\texternal = /nonexistent/planted-program\n", "args": ["status"], "environment": {"GIT_DIR": "../repo/.git"},
+     "expected": {"settings": [["core.hookspath", "@NO_HOOKS@"], ["protocol.ext.allow", "never"], ["protocol.file.allow", "never"], ["core.fsmonitor", "false"], ["diff.external", ""]], "arguments": ["-c", "core.hookspath=@NO_HOOKS@", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "core.fsmonitor=false", "-c", "diff.external="], "environment": {}}},
+    {"name": "working-tree-the-environment-names", "layout": "elsewhere", "settings": "[core]\n\tfsmonitor = /nonexistent/planted-program\n[diff]\n\texternal = /nonexistent/planted-program\n", "args": ["status"], "environment": {"GIT_DIR": "../repo/.git", "GIT_WORK_TREE": "../repo"},
+     "expected": {"settings": [["core.hookspath", "@NO_HOOKS@"], ["protocol.ext.allow", "never"], ["protocol.file.allow", "never"], ["core.fsmonitor", "false"], ["diff.external", ""]], "arguments": ["-c", "core.hookspath=@NO_HOOKS@", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "core.fsmonitor=false", "-c", "diff.external="], "environment": {}}},
+    {"name": "repository-the-environment-names-that-is-missing", "layout": "plain", "settings": "", "args": ["status"], "environment": {"GIT_DIR": "missing"},
+     "expected": {"refused": true}}
   ]
 }

@@ -30,6 +30,10 @@ def build_folder(root: Path, case: dict, git: str) -> Path:
     def init(*args: str) -> None:
         subprocess.run([git, "init", "-q", *args], env=quiet, check=True, stdin=subprocess.DEVNULL)
 
+    def in_repo(*args: str) -> None:
+        subprocess.run([git, "-C", str(root / "repo"), "-c", "user.name=saw", "-c", "user.email=saw@example.invalid",
+                        *args], env=quiet, check=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+
     layout = case["layout"]
     if layout == "plain":
         (root / "folder").mkdir(parents=True)
@@ -43,6 +47,15 @@ def build_folder(root: Path, case: dict, git: str) -> Path:
         if layout == "submodule":
             init("--bare", str(settings / "modules" / "sub"))
             settings = settings / "modules" / "sub"
+        if layout == "elsewhere":
+            folder = root / "folder"
+            folder.mkdir()
+        if layout == "worktree":
+            in_repo("commit", "-q", "--allow-empty", "-m", "base")
+            in_repo("worktree", "add", "-q", "--detach", str(root / "wt"))
+            folder = root / "wt"
+            (settings / "worktrees" / "wt" / "config.worktree").write_text(case.get("worktree_settings", ""),
+                                                                            encoding="utf-8")
     with open(settings / "config", "a", encoding="utf-8") as handle:
         handle.write(case["settings"])
     for name, text in case.get("included", {}).items():

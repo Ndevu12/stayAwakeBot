@@ -30,6 +30,23 @@ fn init(git: &Path, home: &Path, args: &[&str]) {
     assert!(done.success(), "git init {args:?}");
 }
 
+fn in_repo(git: &Path, root: &Path, args: &[&str]) {
+    let done = Command::new(git)
+        .arg("-C")
+        .arg(root.join("repo"))
+        .args(["-c", "user.name=saw", "-c", "user.email=saw@example.invalid"])
+        .args(args)
+        .env_clear()
+        .env("HOME", root)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .status()
+        .unwrap();
+    assert!(done.success(), "git {args:?}");
+}
+
 /// Make the folder one case runs in. Returns the folder the command runs in.
 fn build_folder(root: &Path, case: &serde_json::Value, git: &Path) -> PathBuf {
     fs::create_dir_all(root).unwrap();
@@ -50,7 +67,19 @@ fn build_folder(root: &Path, case: &serde_json::Value, git: &Path) -> PathBuf {
                 init(git, root, &["--bare", &shown(&settings.join("modules").join("sub"))]);
                 settings = settings.join("modules").join("sub");
             }
-            (root.join("repo"), settings)
+            let mut folder = root.join("repo");
+            if layout == "elsewhere" {
+                folder = root.join("folder");
+                fs::create_dir_all(&folder).unwrap();
+            }
+            if layout == "worktree" {
+                in_repo(git, root, &["commit", "-q", "--allow-empty", "-m", "base"]);
+                in_repo(git, root, &["worktree", "add", "-q", "--detach", &shown(&root.join("wt"))]);
+                folder = root.join("wt");
+                let own = case["worktree_settings"].as_str().unwrap_or("");
+                fs::write(settings.join("worktrees").join("wt").join("config.worktree"), own).unwrap();
+            }
+            (folder, settings)
         }
     };
     let config = settings.join("config");
