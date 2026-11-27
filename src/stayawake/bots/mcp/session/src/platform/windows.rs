@@ -16,6 +16,7 @@ use std::ptr::null_mut;
 use windows_sys::core::BOOL;
 use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, ERROR_SUCCESS, HANDLE};
 use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+use windows_sys::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
 use windows_sys::Win32::Security::{
     EqualSid, GetTokenInformation, TokenOwner, TokenUser, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
     TOKEN_INFORMATION_CLASS, TOKEN_OWNER, TOKEN_QUERY, TOKEN_USER,
@@ -96,6 +97,23 @@ pub fn belongs_to_this_user(path: &Path, _found: &fs::Metadata) -> bool {
     let owned = !owner.is_null() && mine.iter().any(|&sid| unsafe { EqualSid(owner, sid) } != 0);
     unsafe { LocalFree(descriptor) };
     owned
+}
+
+/// Whether a file's mode lets its group or other users write to it: never on Windows, which has no
+/// such mode. Takes the file's own details.
+pub fn others_may_write(_found: &fs::Metadata) -> bool {
+    false
+}
+
+/// Fill a buffer with random bytes from the system. Takes the buffer. Returns why it could not.
+pub fn fill_random(buffer: &mut [u8]) -> io::Result<()> {
+    let size = u32::try_from(buffer.len()).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+    // SAFETY: the buffer is valid for `size` bytes, and the system's own generator needs no handle.
+    let status = unsafe { BCryptGenRandom(null_mut(), buffer.as_mut_ptr(), size, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
+    if status < 0 {
+        return Err(io::Error::other(format!("the system gave no random bytes ({status:#x})")));
+    }
+    Ok(())
 }
 
 /// Read one class of this process's token. Takes the class. Returns the buffer the token wrote,

@@ -23,6 +23,10 @@ reader, not the mechanism or the weakness it closed.
   `govern.classify.serve`.
 - saw's git stand-in, `saw-git-standin`, now ships on Windows, so an editor can put it in front of
   git there as on macOS and Linux. `saw govern install` does not cover Windows terminals yet.
+- An editor can answer saw's git stand-in when git runs with no terminal, such as a pull from its
+  Git view: it names a folder in `SAW_GOVERN_QUESTIONS`, and saw writes each question there and
+  waits a bounded time for the answer, to run a command that cannot be checked or to let in an
+  update saw held. With no answer the folder stays as it is. `saw capabilities` lists `govern.questions`.
 
 ## [0.18.3] - 2026-11-27
 

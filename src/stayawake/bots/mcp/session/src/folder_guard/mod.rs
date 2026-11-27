@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 pub use command_line::shell_words;
 pub use settings_fingerprint::Fingerprint;
 pub use starts_no_program::starts_no_program;
+pub use surface::lies_inside_a_repository;
 
 /// The environment a command runs in, by variable name.
 pub type Environment = HashMap<String, String>;

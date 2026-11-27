@@ -6,13 +6,14 @@ import os
 from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED, INFECTED, SUSPICIOUS, Finding, ScanResult
+from stayawake.lib.git import runs_directly
 
 LET_IN = "let-in"
 LET_IN_CHOICES = (LET_IN, "leave-unchanged")
 CONFIRM_YES = "yes"
 CONFIRM_TYPED = "typed"
 HELD_VERDICTS = (SUSPICIOUS, INFECTED)
-RECORDED_FINDING_FIELDS = ("signature_id", "severity", "path", "description")
+RECORDED_FINDING_FIELDS = runs_directly.tables()["held_finding_fields"]
 
 
 def _key(finding: Finding) -> tuple[str, str, str]:
