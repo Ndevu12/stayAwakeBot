@@ -12,6 +12,7 @@ LET_IN_CHOICES = (LET_IN, "leave-unchanged")
 CONFIRM_YES = "yes"
 CONFIRM_TYPED = "typed"
 HELD_VERDICTS = (SUSPICIOUS, INFECTED)
+RECORDED_FINDING_FIELDS = ("signature_id", "severity", "path", "description")
 
 
 def _key(finding: Finding) -> tuple[str, str, str]:
@@ -30,6 +31,19 @@ def set_aside_already_there(update: ScanResult, before: ScanResult) -> list[Find
             kept.append(finding)
     update.findings = kept
     return already
+
+
+def details(answer: dict, command: list[str], folder: str, let_in: bool) -> dict:
+    """Gather what the terminal shows about a held update, for the status record. Takes prepare's
+    answer, the command line with the tool first, the folder it ran in and whether `saw govern
+    let-in` reviews this update. Returns the findings with the scan document's field names, the
+    command, the next steps and `let_in`."""
+    findings = (((answer.get("scan") or {}).get("results") or [{}])[0] or {}).get("findings") or []
+    return {"findings": [{field: finding.get(field) for field in RECORDED_FINDING_FIELDS}
+                         for finding in findings if isinstance(finding, dict)],
+            "command": {"argv": list(command), "folder": folder},
+            "next_steps": [step for step in answer.get("next_steps") or [] if isinstance(step, str)],
+            "let_in": let_in}
 
 
 def folder_name(repo: str) -> str:

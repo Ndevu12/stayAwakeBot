@@ -154,6 +154,13 @@ needs a person at a terminal, and `SAW_GOVERN_DECISION` does not apply to it. sa
 files, and only the latest one for each repository. Run it from any folder in that repository, or
 add `--repo <folder>` from outside it.
 
+Your editor shows each check from the record saw keeps for the open folder. For a held update that
+record also carries what the terminal shows: `findings`, each with the `signature_id`, `severity`,
+`path` and `description` that `saw scan --json` gives it; `command`, the `argv` as typed and the
+`folder` it ran in; `next_steps`; and `let_in`, true when `saw govern let-in` reviews this update.
+An update that is not held carries none of them. `saw capabilities` lists
+`govern.status.held_details` when saw writes them.
+
 Commands saw does not check, such as `git status`, `git commit` and `git push`, run as typed. When
 the repository's own git settings start programs, such as its hooks, a filter like git-crypt's or
 fsmonitor, those programs run only once you keep them. In a terminal saw names them and asks once
