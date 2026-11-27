@@ -176,13 +176,20 @@ class TestCapabilities(unittest.TestCase):
         with self._registry(audit=1):
             self.assertEqual(capabilities.capabilities(_tree(scan=True))["features"], [])
 
+    def test_it_names_where_the_git_stand_in_is(self):
+        from stayawake.bots.mcp import launch
+        for found in ("/opt/saw/bin/saw-git-standin", None):
+            with self.subTest(found=found), mock.patch.object(launch, "standin_binary", return_value=found):
+                self.assertEqual(_printed(["capabilities", "--json"])["programs"], {"git_standin": found})
+
     def test_it_runs_without_the_network(self):
         with mock.patch.object(socket.socket, "connect", side_effect=AssertionError("network")):
             self.assertIn("features", _printed(["capabilities", "--json"]))
 
     def test_it_says_whether_saw_supports_the_platform(self):
         for platform, supported in (("linux", True), ("darwin", True), ("win32", True)):
-            with self.subTest(platform=platform), mock.patch("sys.platform", platform):
+            with self.subTest(platform=platform), mock.patch("sys.platform", platform), \
+                    mock.patch("stayawake.bots.mcp.launch.standin_binary", return_value=None):
                 self.assertEqual(capabilities.capabilities({})["platform"],
                                  {"os": platform, "supported": supported})
 

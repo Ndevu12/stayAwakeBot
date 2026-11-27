@@ -17,6 +17,7 @@ reader, not the mechanism or the weakness it closed.
 - The record your editor reads about a `saw govern` check now carries, for a held update, what the
   terminal shows: the findings, the command and the folder it ran in, the next steps, and whether
   `saw govern let-in` reviews it. `saw capabilities` lists `govern.status.held_details`.
+- `saw capabilities --json` names where `saw-git-standin` is installed, in `programs.git_standin`.
 
 ## [0.18.3] - 2026-11-27
 
