@@ -1,5 +1,6 @@
 //! The git stand-in sends to saw exactly the command lines `saw govern classify` answers as checked:
-//! both read the same table of command lines, which saw's Python tests read too.
+//! both read the same table of command lines, which saw's Python tests read too. A line the stand-in
+//! runs directly may be sent to saw instead when the repository it names cannot be read.
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -49,6 +50,10 @@ fn the_stand_in_sends_to_saw_exactly_the_lines_saw_answers_as_checked() {
         command.output().unwrap();
         let asked_saw = fs::remove_file(&saw_log).is_ok();
         let ran_git = fs::remove_file(&real_log).is_ok();
+        let names_its_repository = args.iter().any(|arg| arg.starts_with("--git-dir") || arg.starts_with("--work-tree") || *arg == "--bare");
+        if !checked && names_its_repository && asked_saw {
+            continue;
+        }
         assert_eq!((asked_saw, ran_git), (checked, !checked), "{tool} {args:?}");
     }
 }

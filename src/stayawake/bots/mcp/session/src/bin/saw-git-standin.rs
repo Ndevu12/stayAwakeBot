@@ -12,7 +12,6 @@
 //! checks to saw whatever the environment, and never falls back to the real program when saw
 //! cannot answer.
 
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, IsTerminal};
@@ -20,7 +19,9 @@ use std::os::unix::fs::symlink;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
-use std::sync::OnceLock;
+
+use saw_mcp::folder_guard::{self, RunWith};
+use saw_mcp::git_tables::table;
 
 fn main() {
     let argv: Vec<String> = env::args().collect();
@@ -47,13 +48,36 @@ fn main() {
     });
     if governing() || must_check {
         let sent = sent_to_saw(&tool, &args, &real);
-        if sent != Sent::No {
-            if let Some(code) = govern(&tool, &args, &real, sent == Sent::ForWhatItNames, must_check) {
+        let mut guarded = None;
+        if sent == Sent::No && tool == "git" {
+            let answer = folder_guard_for(&real, &args);
+            if let Ok(run_with) = &answer {
+                run_real_with(&real, &args, run_with);
+            }
+            guarded = Some(answer);                // saw cannot vouch for running it directly: ask saw
+        }
+        if sent != Sent::No || guarded.is_some() {
+            if let Some(code) = govern(&tool, &args, &real, sent != Sent::ToSaw, must_check) {
                 exit(code);                        // governed: saw applied it, held it or refused it
+            }
+        }
+        if tool == "git" {
+            if let Ok(run_with) = guarded.unwrap_or_else(|| folder_guard_for(&real, &args)) {
+                run_real_with(&real, &args, &run_with);
             }
         }
     }
     run_real(&real, &args);                        // not governed, or saw could not answer
+}
+
+/// Work out the settings and environment that keep a git command from starting a program the
+/// folder's own git settings name. Takes the real git and the arguments. Returns them, or why saw
+/// cannot vouch for running the command directly.
+fn folder_guard_for(real: &Path, args: &[String]) -> Result<RunWith, String> {
+    let folder = env::current_dir().map_err(|error| format!("the current folder cannot be read: {error}"))?;
+    let environ: folder_guard::Environment =
+        env::vars_os().map(|(name, value)| (name.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())).collect();
+    folder_guard::guard(real, &folder, args, &environ)
 }
 
 /// The tool this stand-in impersonates, from how it was invoked. A dev/test build falls back to
@@ -73,25 +97,6 @@ fn governing() -> bool {
 }
 
 
-
-/// The stand-in's tables, which saw reads too: the subcommands and global options it reads as
-/// bringing no files, what a command that brings none may still name, and gh's commands that bring
-/// files.
-const TABLES: &str = include_str!("../../../../../lib/data/git_runs_directly.json");
-
-/// Return one of the stand-in's tables. Takes its name. Panics when the tables built into the
-/// stand-in cannot be read.
-fn table(name: &str) -> &'static [&'static str] {
-    static READ: OnceLock<HashMap<String, Vec<&'static str>>> = OnceLock::new();
-    let tables = READ.get_or_init(|| {
-        let parsed: HashMap<String, Vec<String>> = serde_json::from_str(TABLES).expect("saw's git tables");
-        parsed
-            .into_iter()
-            .map(|(name, words)| (name, words.into_iter().map(|w| &*Box::leak(w.into_boxed_str())).collect()))
-            .collect()
-    });
-    tables.get(name).map(Vec::as_slice).unwrap_or_else(|| panic!("saw's git tables have no {name}"))
-}
 
 /// A git command line read through git's global options.
 struct GitLine<'a> {
@@ -724,6 +729,14 @@ fn which(program: &str, skip_dir: Option<&Path>) -> Option<PathBuf> {
         return Some(candidate);
     }
     None
+}
+
+/// Run git with the settings and environment that keep the folder's own programs from starting.
+/// Takes the real git, the arguments and how to run them. Replaces this process.
+fn run_real_with(real: &Path, args: &[String], run_with: &RunWith) -> ! {
+    let err = Command::new(real).args(&run_with.arguments).args(args).envs(run_with.environment.iter().cloned()).exec();
+    eprintln!("saw: could not run {}: {err}", real.display());
+    exit(127);
 }
 
 fn run_real(real: &Path, args: &[String]) -> ! {

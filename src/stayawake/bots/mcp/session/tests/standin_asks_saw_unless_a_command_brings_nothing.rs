@@ -118,7 +118,6 @@ fn a_command_that_brings_no_files_runs_without_asking_saw() {
         &["status"],
         &["-c", "core.quotepath=false", "status", "-z"],
         &["--no-pager", "-C", "sub", "log", "-1"],
-        &["--git-dir=.git", "rev-parse", "HEAD"],
         &["--version"],
         &["--list-cmds=main"],
         &[],
@@ -126,9 +125,22 @@ fn a_command_that_brings_no_files_runs_without_asking_saw() {
     for spelling in spellings {
         terminal.run(spelling);
         assert_eq!(terminal.took(&terminal.saw_log), None, "{spelling:?} asked saw");
-        let ran = terminal.took(&terminal.real_log);
-        assert_eq!(ran.as_deref().map(str::trim_end), Some(spelling.join(" ").as_str()), "{spelling:?} did not run git");
+        let ran = terminal.took(&terminal.real_log).unwrap_or_default();
+        let last = ran.lines().last().unwrap_or_default();
+        assert!(last.ends_with(&spelling.join(" ")), "{spelling:?} did not run git: {ran}");
+        if !spelling.is_empty() && spelling[0] != "--version" && spelling[0] != "--list-cmds=main" {
+            assert!(last.contains("-c protocol.file.allow=never"), "{spelling:?} ran without saw's settings: {last}");
+        }
     }
+}
+
+#[test]
+fn a_command_naming_a_repository_that_cannot_be_read_asks_saw() {
+    let terminal = Terminal::new("unreadable");
+    terminal.run(&["--git-dir=.git", "rev-parse", "HEAD"]);
+    assert!(terminal.took(&terminal.saw_log).unwrap_or_default().contains("govern prepare"), "saw was not asked");
+    let ran = terminal.took(&terminal.real_log).unwrap_or_default();
+    assert!(!ran.lines().any(|line| line.ends_with("--git-dir=.git rev-parse HEAD")), "git ran before saw answered: {ran}");
 }
 
 #[test]

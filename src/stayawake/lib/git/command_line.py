@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from stayawake.lib.git import runs_directly, subcommand_options
+from stayawake.lib.git import runs_directly
 from stayawake.lib.git.run import UNTRUSTED, stdout
 
 GIT_AS_COMMANDS = {"--help": "help", "-h": "help", "--version": "version", "-v": "version"}
@@ -72,7 +72,8 @@ def _alias_set_inline(pair: str) -> tuple[str, str] | None:
 
 def _git_own_subcommands() -> frozenset[str]:
     """Return the git subcommands listed in saw's tables."""
-    return frozenset(runs_directly.tables()["subcommands_that_bring_no_files"]) | frozenset(subcommand_options.LISTED)
+    known = runs_directly.tables()
+    return frozenset(known["subcommands_that_bring_no_files"]) | frozenset(known["subcommands_read_option_by_option"])
 
 
 def _read_git(args: list[str], folder: Path, alias_of: AliasReader) -> Reading:

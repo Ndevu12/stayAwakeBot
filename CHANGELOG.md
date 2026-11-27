@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- saw's git stand-in runs a git command it does not check, such as `git status`, without starting
+  any program the folder's own git settings name.
 - `saw govern` checks every file an update rewrites, also one rewritten with the same size in the
   same second it prepared the check.
 

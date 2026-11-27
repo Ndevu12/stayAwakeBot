@@ -9,6 +9,10 @@
     "show", "show-branch", "show-ref", "stage", "status", "symbolic-ref", "tag", "var", "verify-commit",
     "verify-tag", "version", "whatchanged", "write-tree"
   ],
+  "subcommands_read_option_by_option": [
+    "checkout", "cherry-pick", "clone", "fetch", "merge", "pull", "read-tree", "rebase",
+    "reset", "restore", "revert", "switch", "update-index", "update-ref", "worktree add"
+  ],
   "global_options_with_a_value": ["-C", "-c", "--shallow-file", "--git-dir", "--work-tree", "--namespace", "--attr-source"],
   "global_options_with_a_joined_value": ["--git-dir=", "--work-tree=", "--namespace=", "--attr-source="],
   "global_flags": [

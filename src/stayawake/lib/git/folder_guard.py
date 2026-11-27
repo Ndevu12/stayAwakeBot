@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The settings and environment that keep a folder's own git configuration from starting a program
 while the operator's git command runs there. Which keys run a program, and how each is kept from
-running, is read from `lib/data/git_exec_keys.yml`. Nothing in the folder is run."""
+running, is read from `lib/data/git_exec_keys.json`. Nothing in the folder is run."""
 from __future__ import annotations
 
 import os

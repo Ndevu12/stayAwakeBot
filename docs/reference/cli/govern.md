@@ -193,6 +193,9 @@ so it reports what the folder says. A command that cannot be run safely this way
 naming a repository that cannot be read, is answered `checked: true` with the `reason` and no
 `run_with`.
 
+saw's git stand-in runs every command it does not check with these same settings, and sends one
+it cannot run this way to saw first.
+
 ## Asking whether a tree is one saw let in
 
 ```text
