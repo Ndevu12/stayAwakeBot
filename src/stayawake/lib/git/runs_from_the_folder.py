@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Find what makes git run files from a working tree on its own: the folder git runs hooks from,
-the files a hook manager runs or reads (`lib/data/git_hook_managers.yml`), and settings whose value
+the files a hook manager runs or reads (`lib/data/git_hook_managers.json`), and settings whose value
 names a file or folder in the working tree."""
 from __future__ import annotations
 
@@ -14,13 +14,11 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Callable
 
-import yaml
-
 from stayawake.lib.git import exec_keys, query
 from stayawake.lib.git.run import UNTRUSTED, stdout, stdout_bytes
 from stayawake.utils import pathsafe
 
-MANAGERS_FILE = Path(__file__).resolve().parent.parent / "data" / "git_hook_managers.yml"
+MANAGERS_FILE = Path(__file__).resolve().parent.parent / "data" / "git_hook_managers.json"
 _LARGEST_CONFIG = 1 << 20
 _MOST_FOLLOWED = 500
 _SEPARATORS = str.maketrans({char: " " for char in "\"'`,;:=()[]{}|&<>\t\r\n"})
@@ -64,7 +62,7 @@ class HookManagers:
 def hook_managers(path: Path = MANAGERS_FILE) -> HookManagers:
     """Load what hook managers run or read. Takes the file (default: the shipped list). Returns it;
     raises ValueError on a malformed file."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = json.loads(path.read_text(encoding="utf-8")) or {}
     files = tuple(str(item) for item in data.get("files") or ())
     keys = tuple(str(key) for key in data.get("package_keys") or ())
     if not files or not keys:

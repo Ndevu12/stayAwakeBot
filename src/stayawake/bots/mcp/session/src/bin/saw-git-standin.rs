@@ -22,6 +22,9 @@ use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
 use std::sync::OnceLock;
 
+use saw_mcp::folder_guard::{self, kept_settings, Fingerprint, RunWith};
+use saw_mcp::git_tables::table;
+
 fn main() {
     let argv: Vec<String> = env::args().collect();
     let argv0 = argv.first().map(String::as_str).unwrap_or("");
@@ -47,13 +50,94 @@ fn main() {
     });
     if governing() || must_check {
         let sent = sent_to_saw(&tool, &args, &real);
-        if sent != Sent::No {
-            if let Some(code) = govern(&tool, &args, &real, sent == Sent::ForWhatItNames, must_check) {
+        let mut guarded = None;
+        if sent == Sent::No && tool == "git" {
+            let answer = run_with_for(&real, &args);
+            if let Ok(run_with) = &answer {
+                run_real_with(&real, &args, run_with);
+            }
+            guarded = Some(answer);                // saw cannot vouch for running it directly: ask saw
+        }
+        if sent != Sent::No || guarded.is_some() {
+            let refused = matches!(guarded, Some(Err(_)));
+            if let Some(code) = govern(&tool, &args, &real, sent != Sent::ToSaw, must_check || refused) {
                 exit(code);                        // governed: saw applied it, held it or refused it
+            }
+        }
+        if tool == "git" {
+            match guarded.unwrap_or_else(|| run_with_for(&real, &args)) {
+                Ok(run_with) => run_real_with(&real, &args, &run_with),
+                Err(why) => exit(match real_saw() {   // a refusal stays one whatever saw answered
+                    Some(saw) => run_or_leave_in_person(&tool, &args, &why, &real, &saw, &target_repo(&args)),
+                    None => {
+                        eprintln!("saw: this command could not be checked; the folder is unchanged; {tool} did not run.");
+                        2
+                    }
+                }),
             }
         }
     }
     run_real(&real, &args);                        // not governed, or saw could not answer
+}
+
+/// Decide how to run a git command directly: as typed when the repository's own settings start no
+/// program, which its files show without running git, or the operator kept them, else with the settings and environment that keep every
+/// program they name from starting. A person at a terminal is asked once whether to keep settings
+/// saw was not told to keep. Takes the real git and the arguments. Returns how to run it, or why saw
+/// cannot vouch for running the command directly.
+fn run_with_for(real: &Path, args: &[String]) -> Result<RunWith, String> {
+    let folder = env::current_dir().map_err(|error| format!("the current folder cannot be read: {error}"))?;
+    let environ: folder_guard::Environment =
+        env::vars_os().map(|(name, value)| (name.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())).collect();
+    if folder_guard::starts_no_program(real, &folder, args, &environ) {
+        return Ok(RunWith::default());
+    }
+    match folder_guard::fingerprint(real, &folder, args, &environ) {
+        Ok(None) => return Ok(RunWith::default()),
+        Ok(Some(found)) if found.is_empty() => return Ok(RunWith::default()),
+        Ok(Some(found)) => {
+            let digest = found.digest();
+            let recorded = kept_settings::read(&environ, &found.repository);
+            if recorded.keeps(&digest) || kept_when_asked(&found, &digest, !recorded.declined(&digest), &folder, &environ) {
+                return Ok(RunWith::default());
+            }
+        }
+        Err(_) => {}
+    }
+    folder_guard::guard(real, &folder, args, &environ)
+}
+
+/// Ask the person at a terminal, through `saw govern trust`, whether to keep the programs a
+/// repository's own settings start. Ask only a command whose input and both outputs are a terminal,
+/// and only about settings no one answered no to. Otherwise say how to keep them. Takes the
+/// fingerprint, its digest, whether to ask about it, the folder the command runs in and the
+/// environment. Returns whether the operator kept exactly these settings.
+fn kept_when_asked(found: &Fingerprint, digest: &str, may_ask: bool, folder: &Path, environ: &folder_guard::Environment) -> bool {
+    let trust = match fs::canonicalize(folder).ok().filter(|here| here.starts_with(&found.folder)) {
+        Some(_) => "saw govern trust".to_string(),
+        None => format!("saw govern trust --repo {}", shell_word(&found.folder.to_string_lossy())),
+    };
+    let Some(saw) = real_saw().filter(|_| may_ask && attended() && io::stdout().is_terminal()) else {
+        eprintln!("saw: this folder's git settings run {}. git ran without them. To keep them for this folder, run: {trust}",
+                  named_briefly(&found.named()));
+        return false;
+    };
+    let asked = Command::new(saw)
+        .args(["govern", "trust", "--repo"])
+        .arg(&found.folder)
+        .env_remove("SAW_GOVERN_DECISION")
+        .status();
+    asked.is_ok_and(|status| status.success()) && kept_settings::read(environ, &found.repository).keeps(digest)
+}
+
+/// Name a few of the programs a folder's settings start. Takes their names. Returns the text.
+fn named_briefly(names: &[String]) -> String {
+    const SHOWN: usize = 4;
+    let shown = names.iter().take(SHOWN).cloned().collect::<Vec<_>>().join(", ");
+    match names.len().saturating_sub(SHOWN) {
+        0 => shown,
+        more => format!("{shown} and {more} more"),
+    }
 }
 
 /// The tool this stand-in impersonates, from how it was invoked. A dev/test build falls back to
@@ -73,25 +157,6 @@ fn governing() -> bool {
 }
 
 
-
-/// The stand-in's tables, which saw reads too: the subcommands and global options it reads as
-/// bringing no files, what a command that brings none may still name, and gh's commands that bring
-/// files.
-const TABLES: &str = include_str!("../../../../../lib/data/git_runs_directly.json");
-
-/// Return one of the stand-in's tables. Takes its name. Panics when the tables built into the
-/// stand-in cannot be read.
-fn table(name: &str) -> &'static [&'static str] {
-    static READ: OnceLock<HashMap<String, Vec<&'static str>>> = OnceLock::new();
-    let tables = READ.get_or_init(|| {
-        let parsed: HashMap<String, Vec<String>> = serde_json::from_str(TABLES).expect("saw's git tables");
-        parsed
-            .into_iter()
-            .map(|(name, words)| (name, words.into_iter().map(|w| &*Box::leak(w.into_boxed_str())).collect()))
-            .collect()
-    });
-    tables.get(name).map(Vec::as_slice).unwrap_or_else(|| panic!("saw's git tables have no {name}"))
-}
 
 /// A git command line read through git's global options.
 struct GitLine<'a> {
@@ -665,14 +730,7 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, holding_
             eprintln!("saw: left the folder unchanged; {tool} did not run.");
             return Checked::Ended(2);
         }
-        return Checked::Ended(match decide(tool, args, &reason, checked) {
-            Decision::RunAsTyped => run_then_scan(real, saw, args, &scanned_after(&answer, &repo)),
-            Decision::LeaveUnchanged => {
-                eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
-                           answer yes in a terminal, or set SAW_GOVERN_DECISION=run-as-typed.");
-                2
-            }
-        });
+        return Checked::Ended(run_or_leave(tool, args, &reason, checked, real, saw, &scanned_after(&answer, &repo)));
     }
     if !prepared.success() {
         if answer.is_object() {
@@ -903,6 +961,38 @@ fn decide(tool: &str, args: &[String], reason: &str, checked: bool) -> Decision 
     }
 }
 
+/// Ask whether to run a command saw could not check, then run it as typed and scan the folder, or
+/// leave the folder unchanged. Takes the tool, its arguments, saw's reason, whether saw checked it,
+/// the real program, saw and the folder to scan. Returns the exit code.
+fn run_or_leave(tool: &str, args: &[String], reason: &str, checked: bool, real: &Path, saw: &Path, folder: &str) -> i32 {
+    match decide(tool, args, reason, checked) {
+        Decision::RunAsTyped => run_then_scan(real, saw, args, folder),
+        Decision::LeaveUnchanged => {
+            eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
+                       answer yes in a terminal, or set SAW_GOVERN_DECISION=run-as-typed.");
+            2
+        }
+    }
+}
+
+/// Ask the person at a terminal whether to run a command saw's folder guard refused, then run it as
+/// typed and scan the folder, or leave the folder unchanged. Only a person answers: a decision set
+/// ahead in the environment is not one. Takes the tool, its arguments, the guard's reason, the real
+/// program, saw and the folder to scan. Returns the exit code.
+fn run_or_leave_in_person(tool: &str, args: &[String], reason: &str, real: &Path, saw: &Path, folder: &str) -> i32 {
+    let said = said(reason, false);
+    if attended() {
+        eprint!("{said}\nRun `{tool} {}` as typed anyway? It will not be checked first. [y/N] ", args.join(" "));
+        if matches!(read_answer().to_lowercase().as_str(), "y" | "yes") {
+            return run_then_scan(real, saw, args, folder);
+        }
+    } else {
+        eprintln!("{said}");
+    }
+    eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, answer yes in a terminal.");
+    2
+}
+
 /// Run the command as typed with the real program, then scan the folder it changed or created.
 /// Returns the real program's exit code.
 fn run_then_scan(real: &Path, saw: &Path, args: &[String], folder: &str) -> i32 {
@@ -953,6 +1043,14 @@ fn which(program: &str, skip_dir: Option<&Path>) -> Option<PathBuf> {
         return Some(candidate);
     }
     None
+}
+
+/// Run git with the settings and environment that keep the folder's own programs from starting.
+/// Takes the real git, the arguments and how to run them. Replaces this process.
+fn run_real_with(real: &Path, args: &[String], run_with: &RunWith) -> ! {
+    let err = Command::new(real).args(&run_with.arguments).args(args).envs(run_with.environment.iter().cloned()).exec();
+    eprintln!("saw: could not run {}: {err}", real.display());
+    exit(127);
 }
 
 fn run_real(real: &Path, args: &[String]) -> ! {

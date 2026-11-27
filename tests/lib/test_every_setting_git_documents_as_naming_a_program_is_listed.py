@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Every setting the git on this machine documents whose last part names a program is in
-`lib/data/git_exec_keys.yml`: among the keys whose value git runs, or among those that run nothing,
+`lib/data/git_exec_keys.json`: among the keys whose value git runs, or among those that run nothing,
 with why. A setting a later git adds fails here until it is listed."""
 from __future__ import annotations
 

@@ -17,7 +17,7 @@ import os
 import secrets
 from pathlib import Path
 
-from stayawake.bots.security import clean_ledger, govern_carried, govern_command, govern_held, govern_status
+from stayawake.bots.security import clean_ledger, govern_carried, govern_command, govern_held, govern_status, kept_settings
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.models import CLEAN, INFECTED, RESIDUE_VERDICT, ScanReport, ScanResult
 from stayawake.bots.security.scanner import joined, scan_target, unreadable
@@ -507,11 +507,15 @@ def apply(repo: str, into: str, accept: str | None = None, confirm: str | None =
         except OSError as error:
             return _applied(False, f"the holding directory could not be used: {error.strerror or error}",
                             HOLDING_UNUSABLE)
+        kept_before = kept_settings.kept_before(repo)
         try:
-            return _apply_held(repo, into, accept, confirm, expect)
+            body, code = _apply_held(repo, into, accept, confirm, expect)
         except OSError as error:
             return _not_brought_in(repo, f"the update could not be written: {error.strerror or error}",
                                    may_have_changed=True)
+        if body.get("applied"):
+            kept_settings.keep_after_a_governed_change(repo, kept_before)
+        return body, code
 
 
 def _replaced() -> tuple[dict, int]:
