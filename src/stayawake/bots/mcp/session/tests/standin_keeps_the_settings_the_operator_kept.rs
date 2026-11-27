@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! A command the stand-in runs directly keeps the programs a repository's own settings start (its
 //! hooks, a git-crypt-style filter, fsmonitor) when the operator kept exactly those settings.
 //! Settings the operator did not keep, or that changed after that, do not start. With no one to ask,

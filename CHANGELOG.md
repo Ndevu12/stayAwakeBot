@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- saw's Windows build compiles again: the guard that runs git without the folder's own programs is
+  built on the systems its stand-in runs on.
+
 ## [0.18.2] - 2026-11-27
 
 ### Added

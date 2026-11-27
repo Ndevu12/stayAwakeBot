@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! The stand-in works out the settings and environment that keep a git command from starting a
 //! program the folder's own settings name, the same ones `saw govern classify` answers: both answer
 //! every case in `folder_guard_cases.json`, which saw's Python tests check too.

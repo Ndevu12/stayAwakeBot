@@ -89,6 +89,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Build saw's Rust programs as the Windows wheel does
+        working-directory: src/stayawake/bots/mcp/session
+        run: cargo build --locked --release --bin saw-mcp
+
       - name: Scan a folder
         shell: bash
         run: |
