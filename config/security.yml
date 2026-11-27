@@ -40,6 +40,8 @@ targets:
 #
 # The rules below cover this repository's own test material and are scoped to it.
 allowlist:
+  - {signature: evil-merge, commit: f75d2b92d102e73ecc38f9d0da3d2dbf6b857df8}
+  - {signature: evil-merge, commit: 0d63c24db636be8fa8289d4d9b0b1777cc8e0020}
   - {signature: fake-font-fa-solid-400, path_glob: "tests/**"}
   - {signature: fake-font-text-woff, path_glob: "tests/**"}
   - {signature: camouflage-blockchain-readme, path_glob: "tests/**"}
