@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::git_tables::table;
 
@@ -105,9 +106,16 @@ fn alias_set_inline(pair: &str) -> Option<(String, String)> {
     (section.to_lowercase() == "alias" && !name.is_empty()).then(|| (name.to_lowercase(), value.to_string()))
 }
 
-/// Whether a subcommand is one saw's tables list, which no alias replaces.
+const SUBCOMMAND_OPTIONS: &str = include_str!("../../../../../lib/data/git_subcommand_options.json");
+
+/// Whether a subcommand is one saw's tables list, or a command git has, which no alias replaces.
 fn is_own_subcommand(sub: &str) -> bool {
-    table("subcommands_that_bring_no_files").contains(&sub) || table("subcommands_read_option_by_option").contains(&sub)
+    static READ_OPTION_BY_OPTION: OnceLock<HashSet<String>> = OnceLock::new();
+    let listed = READ_OPTION_BY_OPTION.get_or_init(|| {
+        let table: serde_json::Value = serde_json::from_str(SUBCOMMAND_OPTIONS).expect("saw's git subcommand options");
+        table["subcommands"].as_object().map(|subcommands| subcommands.keys().cloned().collect()).unwrap_or_default()
+    });
+    table("subcommands_that_bring_no_files").contains(&sub) || table("git_commands").contains(&sub) || listed.contains(sub)
 }
 
 /// Split text into words the way a POSIX shell quotes them, with no comments. Takes the text.

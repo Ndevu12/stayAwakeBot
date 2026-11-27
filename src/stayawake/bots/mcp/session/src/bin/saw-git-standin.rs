@@ -12,6 +12,7 @@
 //! checks to saw whatever the environment, and never falls back to the real program when saw
 //! cannot answer.
 
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, IsTerminal};
@@ -19,6 +20,7 @@ use std::os::unix::fs::symlink;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
+use std::sync::OnceLock;
 
 use saw_mcp::folder_guard::{self, RunWith};
 use saw_mcp::git_tables::table;

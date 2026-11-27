@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.lib.git import folder_guard, runs_directly, subcommand_options
+from stayawake.lib.git import folder_guard
 from stayawake.lib.git.run import real_git
 
 CASES_FILE = (Path(__file__).resolve().parents[2] / "src" / "stayawake" / "bots" / "mcp" / "session" / "tests"
@@ -111,10 +111,6 @@ class TheStandInGuardsAFolderExactlyAsSawDoes(unittest.TestCase):
         self.assertTrue(any(each.get("refused") for each in expected))
         self.assertTrue(any(each.get("environment") for each in expected))
         self.assertTrue(any(arg.startswith("--config-env=") for each in expected for arg in each.get("arguments", ())))
-
-    def test_the_subcommands_no_alias_replaces_are_the_ones_saw_reads_option_by_option(self) -> None:
-        self.assertEqual(set(runs_directly.tables()["subcommands_read_option_by_option"]),
-                         set(subcommand_options.LISTED))
 
 
 if __name__ == "__main__":
