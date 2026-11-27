@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! The stand-in reads the same fingerprint of a repository's own program-running settings as saw's
 //! Python: both read every case in `settings_fingerprint_cases.json`.
 
