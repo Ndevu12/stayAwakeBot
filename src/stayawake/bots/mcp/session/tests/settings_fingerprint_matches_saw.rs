@@ -33,6 +33,11 @@ fn build(root: &Path, case: &serde_json::Value, operator: &str, git: &Path) -> E
         fs::create_dir_all(at.parent().unwrap()).unwrap();
         fs::write(at, contents.as_str().unwrap()).unwrap();
     }
+    for (path, target) in case["links"].as_object().into_iter().flatten() {
+        let at = root.join(path);
+        fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(target.as_str().unwrap(), at).unwrap();
+    }
     let mut environ = Environment::new();
     environ.insert("HOME".into(), shown.clone());
     environ.insert("PATH".into(), std::env::var("PATH").unwrap_or_default());

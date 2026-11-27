@@ -32,6 +32,7 @@ MANAGER_LINK = "manager-link"
 ABSENT = "absent"
 PACKAGE = "package.json"
 MOST_FILES = 2000
+NOT_A_FILE = "not-a-file"
 _RUN = frozenset({SETTING, HOOK, HOOK_LINK})
 _LOCATE = ["rev-parse", "--path-format=absolute", "--absolute-git-dir", "--git-common-dir",
            "--is-inside-work-tree"]
@@ -200,13 +201,15 @@ def _walk(folder: bytes, budget: _Budget) -> list[tuple[str, bool, str]]:
 
 
 def _read(path: bytes, rel: str, budget: _Budget) -> list[tuple[str, bool, str]]:
-    """Read one path: a link by its target, a folder by every file under it, a file by its sha256.
+    """Read one path: a link by its target and the sha256 of the file it points to, joined by a NUL,
+    a folder by every file under it, a file by its sha256.
     Takes the path, its name relative to where the reading started and the count of files read.
     Returns the entries, none for anything else."""
     try:
         if os.path.islink(path):
             budget.one_more(os.fsdecode(path))
-            return [(rel, True, os.fsencode(os.readlink(path)).decode("utf-8", "replace"))]
+            target = os.fsencode(os.readlink(path)).decode("utf-8", "replace")
+            return [(rel, True, f"{target}\0{_contents_through(path)}")]
         if os.path.isdir(path):
             return [(f"{rel}/{inner}", link, value) for inner, link, value in _walk(path, budget)]
         if not os.path.isfile(path):
@@ -218,6 +221,15 @@ def _read(path: bytes, rel: str, budget: _Budget) -> list[tuple[str, bool, str]]
         return []
     except OSError as error:
         raise _Unreadable(f"{os.fsdecode(path)} could not be read: {error.strerror or error}") from error
+
+
+def _contents_through(link: bytes) -> str:
+    """Read the file a link points to. Takes the link. Returns the sha256 of its bytes, or
+    `NOT_A_FILE` when it points to no file."""
+    if not os.path.isfile(link):
+        return NOT_A_FILE
+    with open(link, "rb") as file:
+        return hashlib.sha256(file.read()).hexdigest()
 
 
 def _hook_files(folder: str, budget: _Budget) -> list[tuple[str, ...]]:

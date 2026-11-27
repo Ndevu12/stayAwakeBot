@@ -38,6 +38,7 @@ const MANAGER_LINK: &str = "manager-link";
 const ABSENT: &str = "absent";
 const PACKAGE: &str = "package.json";
 const MOST_FILES: usize = 2000;
+const NOT_A_FILE: &str = "not-a-file";
 const RUN: [&str; 3] = [SETTING, HOOK, HOOK_LINK];
 const MANAGERS_FILE: &str = include_str!("../../../../../lib/data/git_hook_managers.json");
 
@@ -54,7 +55,7 @@ fn hook_managers() -> &'static HookManagers {
 }
 
 /// One file the fingerprint covers: its path relative to where the reading started, whether it is
-/// a link, and the sha256 of a file or the target of a link.
+/// a link, and the sha256 of a file or a link's target and the sha256 of what it points to.
 type Read = (String, bool, String);
 
 /// The programs one repository's own settings start, as sorted entries: `["setting", scope, key,
@@ -189,7 +190,8 @@ fn walk(folder: &Path, budget: &Cell<usize>) -> Result<Vec<Read>, String> {
     Ok(found)
 }
 
-/// Read one path: a link by its target, a folder by every file under it, a file by its sha256.
+/// Read one path: a link by its target and the sha256 of the file it points to, joined by a NUL, a
+/// folder by every file under it, a file by its sha256.
 /// Takes the path, its name relative to where the reading started and the count of files read.
 /// Returns what was read, none for anything else, or why it could not be read.
 fn read_path(path: &Path, rel: &str, budget: &Cell<usize>) -> Result<Vec<Read>, String> {
@@ -202,7 +204,11 @@ fn read_path(path: &Path, rel: &str, budget: &Cell<usize>) -> Result<Vec<Read>, 
     if found.file_type().is_symlink() {
         count_one(budget, path)?;
         let target = fs::read_link(path).map_err(unreadable)?;
-        return Ok(vec![(rel.to_string(), true, target.to_string_lossy().into_owned())]);
+        let contents = match fs::metadata(path) {
+            Ok(pointed) if pointed.is_file() => hex(&Sha256::digest(&fs::read(path).map_err(unreadable)?)),
+            _ => NOT_A_FILE.to_string(),
+        };
+        return Ok(vec![(rel.to_string(), true, format!("{}\0{contents}", target.to_string_lossy()))]);
     }
     if found.is_dir() {
         return Ok(walk(path, budget)?.into_iter().map(|(inner, link, value)| (format!("{rel}/{inner}"), link, value)).collect());

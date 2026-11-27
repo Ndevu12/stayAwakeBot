@@ -110,5 +110,47 @@ class TrustKeepsARepositorysSettings(unittest.TestCase):
         self.assertFalse(self.kept())
 
 
+STANDIN = (Path(__file__).resolve().parents[3] / "src" / "stayawake" / "bots" / "mcp" / "session" / "target"
+           / "release" / "saw-git-standin")
+
+
+@unittest.skipUnless(os.name != "nt" and STANDIN.is_file(), "needs the git stand-in built from this checkout")
+class AKeptRepositoryRunsItsOwnHookThroughTheStandIn(unittest.TestCase):
+    def test_a_commit_after_saw_govern_trust_runs_the_hook_without_asking_saw(self):
+        root = Path(os.path.realpath(tempfile.mkdtemp(prefix="saw-trust-end-")))
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / ".gitconfig").write_text("[user]\n\tname = Operator\n\temail = operator@example.invalid\n",
+                                         encoding="utf-8")
+        environment = {key: value for key, value in os.environ.items()
+                       if not key.startswith(("GIT_", "SAW_", "XDG_"))}
+        environment.update({"HOME": str(root), "XDG_CACHE_HOME": str(root / "cache"),
+                            "XDG_CONFIG_HOME": str(root / "config"), "XDG_STATE_HOME": str(root / "state")})
+        patched = mock.patch.dict(os.environ, environment, clear=True)
+        patched.start()
+        self.addCleanup(patched.stop)
+        repo, git = root / "repo", real_git()
+        subprocess.run([git, "init", "-q", str(repo)], check=True, stdin=subprocess.DEVNULL)
+        (repo / "notes.txt").write_text("one\n", encoding="utf-8")
+        subprocess.run([git, "-C", str(repo), "add", "."], check=True, stdin=subprocess.DEVNULL)
+        subprocess.run([git, "-C", str(repo), "commit", "-qm", "one"], check=True, stdin=subprocess.DEVNULL)
+        hook = repo / ".git" / "hooks" / "pre-commit"
+        hook.write_text(f"#!/bin/sh\necho hook >> '{root / 'hook.log'}'\n", encoding="utf-8")
+        hook.chmod(0o755)
+        saw = root / "fake-saw"
+        saw.write_text(f"#!/bin/sh\necho \"$@\" >> '{root / 'saw.log'}'\n"
+                       "printf '%s\\n' '{\"passthrough\":true}'\n", encoding="utf-8")
+        saw.chmod(0o755)
+        with mock.patch("sys.stdin", _Terminal("y\n")), mock.patch("sys.stderr", _Terminal()):
+            self.assertEqual(govern_cli.run_trust(argparse.Namespace(repo=str(repo), forget=False)), exitcodes.CLEAN)
+        (repo / "notes.txt").write_text("two\n", encoding="utf-8")
+        done = subprocess.run([str(STANDIN), "commit", "-qam", "two"], cwd=repo, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True,
+                              env={**environment, "SAW_STANDIN_TOOL": "git", "SAW_REAL_GIT": git,
+                                   "SAW_BIN": str(saw), "SAW_GOVERN_HOLDING": str(root / "holding")})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((root / "hook.log").is_file(), "the kept pre-commit hook did not run")
+        self.assertFalse((root / "saw.log").exists(), "saw was asked about a command in a kept repository")
+
+
 if __name__ == "__main__":
     unittest.main()
