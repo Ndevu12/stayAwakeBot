@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-11-27
+
 ### Fixed
 - saw's Windows build compiles again: the guard that runs git without the folder's own programs is
   built on the systems its stand-in runs on.
@@ -2210,7 +2212,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.3...HEAD
+[0.18.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.7...v0.18.0
