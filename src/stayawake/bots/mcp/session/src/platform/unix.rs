@@ -48,6 +48,17 @@ pub fn belongs_to_this_user(_path: &Path, found: &fs::Metadata) -> bool {
     found.uid() == fs::metadata("/proc/self").map(|own| own.uid()).unwrap_or_else(|_| current_uid())
 }
 
+/// Whether a file's mode lets its group or other users write to it. Takes the file's own details.
+pub fn others_may_write(found: &fs::Metadata) -> bool {
+    found.mode() & 0o022 != 0
+}
+
+/// Fill a buffer with random bytes from the system. Takes the buffer. Returns why it could not.
+pub fn fill_random(buffer: &mut [u8]) -> io::Result<()> {
+    use std::io::Read;
+    fs::File::open("/dev/urandom")?.read_exact(buffer)
+}
+
 /// The user this process runs as, read from a file it makes.
 fn current_uid() -> u32 {
     static PROBES: AtomicU64 = AtomicU64::new(0);

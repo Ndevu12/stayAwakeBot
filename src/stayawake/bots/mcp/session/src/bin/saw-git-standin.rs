@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
 use std::sync::OnceLock;
 
+use saw_mcp::editor_questions::{self, Asked, Question, QuestionsFolder};
 use saw_mcp::folder_guard::{self, kept_settings, Fingerprint, RunWith};
 use saw_mcp::git_tables::table;
 use saw_mcp::platform;
@@ -727,7 +728,7 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, holding_
     }
     if offers_let_in(&answer) {
         let held = prepared.code().filter(|code| *code != 0).unwrap_or(1);
-        return Checked::Ended(let_in_or_leave(saw, &answer, held, holding_is_temporary));
+        return Checked::Ended(let_in_or_leave(saw, tool, args, &answer, held, holding_is_temporary));
     }
     if let Some(reason) = unchecked_reason(&answer) {
         let checked = scan_finished(&answer);
@@ -830,19 +831,25 @@ fn offers_let_in(answer: &serde_json::Value) -> bool {
         .is_some_and(|choices| choices.iter().any(|c| c == "let-in"))
 }
 
-/// Say why saw held the update and what to do, then ask the user whether to let it in. Never read
-/// from the environment: letting in a finding is decided by a person, each time. Takes saw,
-/// prepare's answer, the exit code of a held update and whether the holding directory is removed
-/// with the check. Returns the exit code: the let-in command's, or `held` when the folder is left
-/// unchanged.
-fn let_in_or_leave(saw: &Path, answer: &serde_json::Value, held: i32, holding_is_temporary: bool) -> i32 {
+/// Say why saw held the update and what to do, then ask the user whether to let it in, or with no
+/// one at a terminal the editor that named a questions folder. Never read from the environment:
+/// letting in a finding is decided each time. Takes saw, the tool, its arguments, prepare's answer,
+/// the exit code of a held update and whether the holding directory is removed with the check.
+/// Returns the exit code: the let-in command's, or `held` when the folder is left unchanged.
+fn let_in_or_leave(saw: &Path, tool: &str, args: &[String], answer: &serde_json::Value, held: i32,
+                   holding_is_temporary: bool) -> i32 {
     say_why_held(answer);
     let command = command_at(answer, "/decision/let_in");
     if command.len() < 2 {
         return held;
     }
     let typed = answer.pointer("/decision/confirm").and_then(serde_json::Value::as_str) == Some("typed");
+    let type_to_confirm = answer.pointer("/decision/type_to_confirm").and_then(serde_json::Value::as_str).unwrap_or("");
     if !attended() {
+        if editor_lets_in(answer, &command, typed, question_about(tool, args)) {
+            let confirmation = if typed { vec!["--confirm".to_string(), type_to_confirm.to_string()] } else { Vec::new() };
+            return let_in(saw, &command, &confirmation, held);
+        }
         let later = command_at(answer, "/decision/let_in_later");
         if !later.is_empty() {
             let later: Vec<String> = later.iter().map(|word| shell_word(word)).collect();
@@ -856,9 +863,8 @@ fn let_in_or_leave(saw: &Path, answer: &serde_json::Value, held: i32, holding_is
     }
     let mut extra = Vec::new();
     if typed {
-        let name = answer.pointer("/decision/type_to_confirm").and_then(serde_json::Value::as_str).unwrap_or("");
         eprint!("saw recommends leaving the folder unchanged. To let it in anyway, type the folder name \
-                 ({name}); anything else leaves it unchanged: ");
+                 ({type_to_confirm}); anything else leaves it unchanged: ");
         extra.push("--confirm".to_string());
         extra.push(read_answer());
     } else {
@@ -868,7 +874,49 @@ fn let_in_or_leave(saw: &Path, answer: &serde_json::Value, held: i32, holding_is
             return held;
         }
     }
-    Command::new(saw).args(&command[1..]).args(&extra).status().ok().and_then(|s| s.code()).unwrap_or(held)
+    let_in(saw, &command, &extra, held)
+}
+
+/// Run the command saw names to let a held update in. Takes saw, the command, the confirmation
+/// words to add and the exit code of a held update. Returns the command's exit code, or `held` when
+/// it could not run.
+fn let_in(saw: &Path, command: &[String], confirmation: &[String], held: i32) -> i32 {
+    Command::new(saw).args(&command[1..]).args(confirmation).status().ok().and_then(|s| s.code()).unwrap_or(held)
+}
+
+/// Ask the editor that named a questions folder whether to let in an update saw held. Takes
+/// prepare's answer, the let-in command, whether the update is infected and the question for the
+/// command. Returns whether the editor's answer lets exactly the checked commit in.
+fn editor_lets_in(answer: &serde_json::Value, command: &[String], infected: bool,
+                  question: impl FnOnce(Asked) -> Question) -> bool {
+    let Some(accept) = command.iter().skip_while(|word| *word != "--accept").nth(1) else { return false };
+    let Some(folder) = QuestionsFolder::named() else { return false };
+    let asked = Asked::Held {
+        accept: accept.clone(),
+        confirm: infected,
+        findings: held_findings(answer),
+        next_steps: answer.get("next_steps").and_then(serde_json::Value::as_array).into_iter().flatten()
+            .filter_map(|step| step.as_str().map(str::to_string)).collect(),
+    };
+    folder.ask(&question(asked)) == Some(editor_questions::LET_IN)
+}
+
+/// Read the findings of a held update, each with the fields the status record gives it. Takes
+/// prepare's answer. Returns the findings.
+fn held_findings(answer: &serde_json::Value) -> Vec<serde_json::Value> {
+    let fields = table("held_finding_fields");
+    answer.pointer("/scan/results/0/findings").and_then(serde_json::Value::as_array).into_iter().flatten()
+        .filter_map(serde_json::Value::as_object)
+        .map(|finding| fields.iter().map(|field| (field.to_string(), finding.get(*field).cloned().unwrap_or_default())).collect())
+        .collect()
+}
+
+/// Start a question about a command run in the current folder. Takes the tool and its arguments.
+/// Returns what builds the question from what it asks.
+fn question_about(tool: &str, args: &[String]) -> impl FnOnce(Asked) -> Question {
+    let folder = env::current_dir().map(|here| fs::canonicalize(&here).unwrap_or(here)).unwrap_or_default();
+    let argv: Vec<String> = std::iter::once(tool.to_string()).chain(args.iter().cloned()).collect();
+    move |asked| Question { asked, argv, folder: folder.to_string_lossy().into_owned() }
 }
 
 /// Read a command saw's answer names. Takes the answer and where the command is in it. Returns its
@@ -959,7 +1007,12 @@ fn decide(tool: &str, args: &[String], reason: &str, checked: bool) -> Decision 
     let said = said(reason, checked);
     if !attended() {
         eprintln!("{said}");
-        return Decision::LeaveUnchanged;
+        let asked = Asked::CannotCheck { reason: reason.to_string(), checked };
+        let answered = QuestionsFolder::named().and_then(|folder| folder.ask(&question_about(tool, args)(asked)));
+        return match answered {
+            Some(editor_questions::RUN_AS_TYPED) => Decision::RunAsTyped,
+            _ => Decision::LeaveUnchanged,
+        };
     }
     let unchecked = if checked { "" } else { " It will not be checked first." };
     eprint!("{said}\nRun `{tool} {}` as typed anyway?{unchecked} [y/N] ", args.join(" "));

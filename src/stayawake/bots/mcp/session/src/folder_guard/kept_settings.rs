@@ -53,17 +53,11 @@ pub fn read(environ: &Environment, repository: &Path) -> Recorded {
 
 fn read_record(environ: &Environment) -> Option<serde_json::Value> {
     let record = record_path(environ)?;
-    if lies_inside_a_repository(&record) {
+    let resolved = paths::real_path(&record);
+    if surface::lies_inside_a_repository(resolved.parent().unwrap_or(&resolved)) {
         return None;
     }
     let mut text = String::new();
     fs::File::open(&record).ok()?.take(RECORD_LIMIT).read_to_string(&mut text).ok()?;
     serde_json::from_str(&text).ok()
-}
-
-/// Whether the folder a record lies in, every link followed, is inside a git repository.
-fn lies_inside_a_repository(record: &Path) -> bool {
-    let resolved = paths::real_path(record);
-    let folder = resolved.parent().unwrap_or(&resolved);
-    folder.ancestors().any(|at| paths::lexists(&at.join(".git")) || surface::is_git_directory(at))
 }

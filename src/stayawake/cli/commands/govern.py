@@ -12,6 +12,7 @@ import sys
 from stayawake.bots.security import govern as core, records
 from stayawake.bots.security import govern_held, govern_held_commands, govern_status, kept_settings
 from stayawake.bots.mcp.launch import standin_binary
+from stayawake.cli.commands import govern_classify_serve
 from stayawake.cli.argtypes import add_deadline_arg, add_progress_arg, progress_requested
 from stayawake.cli.helptext import add_command
 from stayawake.lib.git import settings_fingerprint
@@ -94,12 +95,18 @@ def register(sub) -> None:
             "Read a git or gh command line the way the program does and say whether it could be "
             "read, its subcommand after aliases, the folder it acts on, and whether saw checks it "
             "before it runs, as saw's git stand-in decides. An unreadable command line answers "
-            "readable: false with the reason, and is checked."),
-        examples=[("saw govern classify --json --tool git --repo . -- pull", "ask about a pull")],
+            "readable: false with the reason, and is checked. With --serve, saw reads one JSON "
+            "request per line on stdin, each with tool, repo, argv and environment, and writes "
+            "each answer on one line, until stdin ends."),
+        examples=[("saw govern classify --json --tool git --repo . -- pull", "ask about a pull"),
+                  ("saw govern classify --serve", "answer stdin lines")],
         stream=False)
     cp.add_argument("--json", action="store_true", help="machine-readable output")
-    cp.add_argument("--repo", default=".", help="the folder the command runs in")
-    cp.add_argument("--tool", required=True, choices=core.TOOLS, help="which tool the command is")
+    cp.add_argument("--repo", default=None, help="the folder the command runs in (default: .)")
+    asked = cp.add_mutually_exclusive_group(required=True)
+    asked.add_argument("--tool", choices=core.TOOLS, help="which tool the command is")
+    asked.add_argument("--serve", action="store_true",
+                       help="answer one JSON request per line on stdin until it ends")
     cp.add_argument("args", nargs=argparse.REMAINDER, help="the command's arguments, after --")
     cp.set_defaults(func=run_classify)
 
@@ -210,10 +217,25 @@ def _do_apply(a: argparse.Namespace) -> int:
 
 
 def run_classify(a: argparse.Namespace) -> int:
-    environment = core.take_command_environment()
-    payload, code = core.classify(a.repo, a.tool, _operator_args(a.args), {**os.environ, **environment})
-    print(json.dumps(versioned("govern", payload)))
+    if a.serve:
+        if a.repo is not None or _operator_args(a.args):
+            print(json.dumps(versioned("govern", {"reason": "--serve takes no --repo and no arguments: "
+                                                            "each request on stdin names them"})))
+            return exitcodes.DID_NOT_RUN
+        govern_classify_serve.run(lambda repo, tool, args: _classified(repo, tool, args)[0], core.TOOLS)
+        return exitcodes.CLEAN
+    document, code = _classified(a.repo or ".", a.tool, _operator_args(a.args))
+    print(json.dumps(document))
     return code
+
+
+def _classified(repo: str, tool: str, args: list[str]) -> tuple[dict, int]:
+    """Answer how saw reads one git or gh command line run in this process's environment. Takes the
+    folder it runs in, the tool and the arguments without the program name. Returns the document
+    `saw govern classify --json` prints and its exit."""
+    environment = core.take_command_environment()
+    payload, code = core.classify(repo, tool, args, {**os.environ, **environment})
+    return versioned("govern", payload), code
 
 
 def run_verdict(a: argparse.Namespace) -> int:

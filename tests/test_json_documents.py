@@ -152,9 +152,10 @@ class TestCapabilities(unittest.TestCase):
                          [".".join(command_of(d)) + ".json" for d in SCHEMA_VERSION_OF_EACH_DOCUMENT]
                          + ["progress.jsonl", "fix.ask.json", "stream", "scan.plan", "scan.deadline",
                             "govern.progress.jsonl", "govern.decision", "govern.held.decision", "govern.passthrough",
-                            "govern.conflicts", "govern.status.held_details", "govern.deadline",
+                            "govern.conflicts", "govern.status.held_details", "govern.questions", "govern.deadline",
                             "govern.apply.outcome", "govern.lock", "govern.apply.expect",
-                            "govern.classify", "govern.classify.run_with", "govern.verdict", "govern.restore",
+                            "govern.classify", "govern.classify.run_with",
+                            "govern.classify.serve", "govern.verdict", "govern.restore",
                             "govern.trust", "serve", "mcp"])
         self.assertTrue({"scan.json", "fix.json"} <= set(printed["features"]))
         self.assertEqual(printed["version"], cli.__version__)
