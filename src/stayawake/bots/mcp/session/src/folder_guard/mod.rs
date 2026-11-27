@@ -26,6 +26,9 @@ pub type Environment = HashMap<String, String>;
 
 const SUBCOMMANDS_THAT_REPORT_SETTINGS: [&str; 2] = ["config", "var"];
 const HOOKS_KEY: &str = "core.hookspath";
+const BLOB_OPTION: &str = "--blob";
+const SHORTEST_BLOB_SPELLING: usize = 3;
+const END_OF_OPTIONS: [&str; 2] = ["--", "--end-of-options"];
 
 /// How to run one command: git's own options to put before its arguments, the settings they give
 /// in order, and the environment variables to set.
@@ -139,12 +142,23 @@ fn fingerprint_with(git: &git::Git, folder: &Path, args: &[String], environ: &En
 }
 
 /// Whether a command only reads or writes settings: it runs no program and reports what the
-/// settings say.
+/// settings say, and names no blob to read them from.
 fn reports_settings(subcommand: Option<&str>, rest: &[String]) -> bool {
     let Some(subcommand) = subcommand.filter(|sub| SUBCOMMANDS_THAT_REPORT_SETTINGS.contains(sub)) else { return false };
     let edits = rest.iter().any(|arg| arg == "-e" || arg == "--edit");
     let first_word = rest.iter().find(|arg| !arg.starts_with('-'));
-    !(edits || (subcommand == "config" && first_word.is_some_and(|word| word == "edit")))
+    let config = subcommand == "config";
+    !(edits || (config && first_word.is_some_and(|word| word == "edit")) || (config && names_a_blob(rest)))
+}
+
+/// Whether a `git config` command line names a blob to read settings from: `--blob`, or a leading
+/// part of it longer than three characters, before `--` or `--end-of-options`. Takes the arguments
+/// after `config`.
+fn names_a_blob(rest: &[String]) -> bool {
+    rest.iter().take_while(|arg| !END_OF_OPTIONS.contains(&arg.as_str())).any(|arg| {
+        let name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
+        name.len() > SHORTEST_BLOB_SPELLING && BLOB_OPTION.starts_with(name)
+    })
 }
 
 /// List every entry of the operator's own configuration, system and global scopes and what they
