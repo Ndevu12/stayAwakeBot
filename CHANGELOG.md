@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- `saw govern classify` gives a `git config` command that reads its settings from a blob the same
+  settings as any other git command it does not check, so a fetch git makes for that blob starts none
+  of the folder's programs.
+
 ## [0.18.1] - 2026-11-27
 
 ### Fixed
