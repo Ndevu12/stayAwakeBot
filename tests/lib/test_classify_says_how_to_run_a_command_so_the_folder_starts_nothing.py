@@ -388,6 +388,20 @@ class TestTheRepositoryTheCommandActsOn(GuardSandbox):
         self.addCleanup(inherited.stop)
         self.assert_starts_only_unguarded(marks, folder, "status")
 
+    def test_a_setting_read_from_a_blob_fetches_with_none_of_the_folders_programs(self):
+        folder = self.plain_folder("partial")
+        origin = self.plain_folder("promisor")
+        marks = self.marks("blob")
+        for key, value in (("core.repositoryformatversion", "1"), ("extensions.partialClone", "origin"),
+                           ("remote.origin.url", str(origin)), ("remote.origin.promisor", "true"),
+                           ("remote.origin.uploadpack", self._program(marks, "remote.origin.uploadpack"))):
+            self.git(folder, "config", key, value)
+        missing = "0123456789abcdef0123456789abcdef01234567"
+        for written in ("--blob=" + missing, "--blo=" + missing):
+            with self.subTest(written=written):
+                marks.clear()
+                self.assert_starts_only_unguarded(marks, folder, "config", written, "--list")
+
     def test_a_repository_on_this_machine_runs_none_of_its_own_programs(self):
         folder = self.plain_folder("folder")
         nested = folder / ".nested.git"
