@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-11-27
+
 ### Added
 - `saw govern trust` keeps the programs a repository's own git settings start, such as its hooks or
   a git-crypt filter, after asking you in a terminal; `--forget` stops keeping them.
@@ -2204,7 +2206,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.7...v0.18.0
 [0.17.7]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.6...v0.17.7
