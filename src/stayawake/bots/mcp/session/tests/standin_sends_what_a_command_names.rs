@@ -11,8 +11,8 @@ const STANDIN: &str = env!("CARGO_BIN_EXE_saw-git-standin");
 /// answers them outside a repository, and leaves them out of the record of git running.
 const ANSWERS_LOOKUPS: &str = r#"case "$*" in
   "remote get-url --push --all "*) exit 2 ;;
-  "config --name-only --get-regexp ^remote"*|"config --get-regexp ^url"*) exit 1 ;;
-  "rev-parse --abbrev-ref --symbolic-full-name @{push}") exit 128 ;;
+  "config --get-regexp ^url"*) exit 1 ;;
+  "symbolic-ref --short -q HEAD") exit 1 ;;
   "ls-remote --get-url"*) [ -n "$3" ] && echo "$3"; exit 0 ;;
 esac
 "#;

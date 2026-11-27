@@ -432,14 +432,14 @@ fn full_long_name(options: &Options, written: &str) -> Option<String> {
     }
 }
 
-/// Whether a push or ls-remote may reach a repository on this machine: a word that is a folder, or
-/// any address git names for it that is not a network address. Takes the subcommand and its
+/// Whether a push or ls-remote may reach a repository on this machine or a program: a word that is
+/// a folder, or any address git names for it that is not a network address. Takes the subcommand and its
 /// reading.
 fn reaches_this_machine(sub: &str, resolved: &Resolved, reader: &GitReader) -> bool {
     if resolved.words.first().is_some_and(|word| Path::new(word).is_dir()) {
         return true;
     }
-    destinations(sub, resolved, reader).is_none_or(|addresses| addresses.iter().any(|address| is_local_address(address)))
+    destinations(sub, resolved, reader).is_none_or(|addresses| !addresses.iter().all(|address| is_network_address(address)))
 }
 
 /// The addresses a push or ls-remote reaches, asked of git: each repository the reading names, or
@@ -449,21 +449,10 @@ fn destinations(sub: &str, resolved: &Resolved, reader: &GitReader) -> Option<Ve
     let pushes = sub == "push";
     let repo_values = resolved.options.iter().filter(|(name, _)| pushes && name == "--repo").filter_map(|(_, value)| value.clone());
     let mut named: Vec<String> = repo_values.chain(resolved.words.first().cloned()).collect();
-    if named.is_empty() && !pushes {
-        return git_lines(reader, &["ls-remote", "--get-url"]);
-    }
     if named.is_empty() {
-        let tracking = git_lines(reader, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"])?;
-        let remotes = git_lines(reader, &["config", "--name-only", "--get-regexp", r"^remote\..*\.(push)?url$"])?;
-        for key in remotes {
-            let name = key.strip_prefix("remote.").and_then(|rest| rest.rsplit_once('.')).map(|(name, _)| name.to_string());
-            if let Some(name) = name.filter(|name| tracking[0].starts_with(&format!("{name}/")) && !named.contains(name)) {
-                named.push(name);
-            }
-        }
-        if named.is_empty() {
-            return None;
-        }
+        let branch = git_lines(reader, &["symbolic-ref", "--short", "-q", "HEAD"])?;
+        let asked = if pushes { "--format=%(push:remotename)" } else { "--format=%(upstream:remotename)" };
+        named = git_lines(reader, &["for-each-ref", asked, &format!("refs/heads/{}", branch[0])])?;
     }
     let mut addresses = Vec::new();
     for repository in named {
@@ -500,18 +489,19 @@ fn git_lines(reader: &GitReader, args: &[&str]) -> Option<Vec<String>> {
     (!lines.is_empty()).then_some(lines)
 }
 
-/// Whether an address names a place on this machine: a `file:` address, a drive letter, no `:`, or a
-/// `/` or `\\` before the first `:`.
-fn is_local_address(address: &str) -> bool {
-    let bytes = address.as_bytes();
-    let drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
-    let colon = address.find(':');
-    let slash = address.find(|c| c == '/' || c == '\\');
-    address.starts_with("file:") || drive || match (colon, slash) {
-        (None, _) => true,
-        (Some(colon), Some(slash)) => slash < colon,
-        (Some(_), None) => false,
+/// Whether git reaches an address over the network: an `http://`, `https://`, `ssh://` or `git://`
+/// address, or `[user@]host:path` with no `::` or `://`, no `/` or `\\` before the first `:` and no
+/// drive letter. Every other address, a remote helper's `<transport>::` form and `file://` among them, is
+/// not.
+fn is_network_address(address: &str) -> bool {
+    if ["http://", "https://", "ssh://", "git://"].iter().any(|scheme| address.starts_with(scheme)) {
+        return !address.contains("::");
     }
+    let Some(colon) = address.find(':') else { return false };
+    let host = &address[..colon];
+    let drive = host.len() == 1 && host.as_bytes()[0].is_ascii_alphabetic();
+    !address.contains("::") && !address.contains("://") && !host.is_empty() && !drive && !host.starts_with('-')
+        && !host.contains(['/', '\\'])
 }
 
 /// Whether a `git config` command only reads.

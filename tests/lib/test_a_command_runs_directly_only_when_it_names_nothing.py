@@ -180,6 +180,43 @@ class APushOrLsRemoteRunsDirectlyOnlyToANetworkAddressGitNames(GitSandbox):
         self.git(self.repo, "remote", "set-url", "--push", "origin", str(self.other))
         self.assertEqual(self._decided("push"), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
 
+    def test_a_push_remote_is_the_one_git_names_whatever_its_tracking_refs(self):
+        self.git(self.repo, "remote", "add", "net", "https://example.invalid/r")
+        self.git(self.repo, "update-ref", "refs/remotes/net/" + self.branch, "HEAD")
+        self.git(self.repo, "branch", "--set-upstream-to=net/" + self.branch)
+        self.assertEqual(self._decided("push"), runs_directly.RUNS_AS_TYPED)
+        self.git(self.repo, "remote", "add", "loc", str(self.other))
+        self.git(self.repo, "config", "remote.loc.fetch", "+refs/heads/*:refs/remotes/net/*")
+        self.git(self.repo, "config", f"branch.{self.branch}.pushRemote", "loc")
+        for args in (["push"], ["push", "--all"]):
+            with self.subTest(args=args):
+                self.assertEqual(self._decided(*args), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
+        self.git(self.repo, "config", "--unset", f"branch.{self.branch}.pushRemote")
+        self.git(self.repo, "remote", "add", "--mirror=push", "mirror", str(self.other))
+        self.git(self.repo, "config", "remote.pushDefault", "mirror")
+        self.assertEqual(self._decided("push"), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
+
+    def test_a_remote_helper_address_goes_to_saw(self):
+        self.git(self.repo, "remote", "add", "origin", "ext::sh -c touch% x")
+        self.git(self.repo, "update-ref", "refs/remotes/origin/" + self.branch, "HEAD")
+        self.git(self.repo, "branch", "--set-upstream-to=origin/" + self.branch)
+        for args in (["push"], ["ls-remote"], ["push", "ext::sh -c touch% x", "main"], ["ls-remote", "ext::sh -c x"],
+                     ["push", "other::https://example.invalid/r", "main"]):
+            with self.subTest(args=args):
+                self.assertEqual(self._decided(*args), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
+        for args in (["push", "https://example.invalid/r", "main"], ["push", "git@example.invalid:o/r.git", "main"],
+                     ["push", "ssh://example.invalid/r", "main"]):
+            with self.subTest(args=args):
+                self.assertEqual(self._decided(*args), runs_directly.RUNS_AS_TYPED)
+
+    def test_a_network_address_is_one_of_the_forms_git_reaches_over_the_network(self):
+        for address in ("https://example.invalid/r", "http://h/r", "ssh://git@h/r", "git://h/r", "git@h:o/r.git",
+                        "host:r"):
+            self.assertTrue(runs_directly.is_network_address(address), address)
+        for address in ("ext::sh -c x", "other::https://h/r", "file:///srv/r", "/srv/r", "../r", "./a:b", "C:/r",
+                        "c:r", "h:r", "", "ftp://h/r", "file://h/r", "x://h:r", "-oProxyCommand=x:r", "[::1]:r", "https://h::x"):
+            self.assertFalse(runs_directly.is_network_address(address), address)
+
     def test_a_shortened_recurse_option_is_read_in_full_with_its_value(self):
         for written, value in (("--recurse=yes", "yes"), ("--recurse=no", "no"), ("--recurse-sub=on-demand", "on-demand")):
             with self.subTest(written=written):

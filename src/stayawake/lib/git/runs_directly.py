@@ -202,13 +202,13 @@ def _may_name(arg: str, names: frozenset[str]) -> bool:
 
 
 def _reaches_this_machine(sub: str, resolved: subcommand_options.Resolved, here: Path, target: Path) -> bool:
-    """Tell whether a push or ls-remote may reach a repository on this machine: a word that is a
-    folder here, or any address git names for it that is not a network address. Takes the
+    """Tell whether a push or ls-remote may reach a repository on this machine or a program: a word
+    that is a folder here, or any address git names for it that is not a network address. Takes the
     subcommand, its reading, the folder it runs in and the folder it acts on."""
     if any((here / word).is_dir() for word in resolved.words[:1]):
         return True
     addresses = destinations(sub, resolved, target)
-    return addresses is None or any(is_local_address(address) for address in addresses)
+    return addresses is None or not all(is_network_address(address) for address in addresses)
 
 
 def destinations(sub: str, resolved: subcommand_options.Resolved, folder: Path) -> "list[str] | None":
@@ -218,11 +218,10 @@ def destinations(sub: str, resolved: subcommand_options.Resolved, folder: Path) 
     names none or cannot answer."""
     pushes = sub == "push"
     named = [*resolved.values("--repo"), *resolved.words[:1]] if pushes else list(resolved.words[:1])
-    if not named and not pushes:
-        return _git_lines(folder, ["ls-remote", "--get-url"])
     if not named:
-        tracking = _git_lines(folder, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"])
-        named = [name for name in remote_names(folder) if tracking and tracking[0].startswith(name + "/")]
+        branch = _git_lines(folder, ["symbolic-ref", "--short", "-q", "HEAD"])
+        asked = "--format=%(push:remotename)" if pushes else "--format=%(upstream:remotename)"
+        named = _git_lines(folder, ["for-each-ref", asked, f"refs/heads/{branch[0]}"]) if branch else None
         if not named:
             return None
     addresses: list[str] = []
@@ -241,13 +240,6 @@ def destinations(sub: str, resolved: subcommand_options.Resolved, folder: Path) 
     return addresses
 
 
-def remote_names(folder: Path) -> list[str]:
-    """List the remotes the folder's configuration gives an address. Takes the folder. Returns their
-    names."""
-    listed = _git_lines(folder, ["config", "--name-only", "--get-regexp", r"^remote\..*\.(push)?url$"]) or []
-    return list(dict.fromkeys(line.removeprefix("remote.").rpartition(".")[0] for line in listed))
-
-
 def _git_lines(folder: Path, args: list[str]) -> "list[str] | None":
     """Ask git a question in the folder and read its answer. Takes the folder and git's arguments.
     Returns the answer's lines, None for no answer."""
@@ -257,13 +249,17 @@ def _git_lines(folder: Path, args: list[str]) -> "list[str] | None":
     return [line for line in (done.stdout or "").splitlines() if line.strip()] or None
 
 
-def is_local_address(address: str) -> bool:
-    """Tell whether an address names a place on this machine: a `file:` address, a drive letter, no
-    `:`, or a `/` or `\\` before the first `:`. Takes the address."""
-    colon = address.find(":")
-    slashes = [found for found in (address.find("/"), address.find("\\")) if found >= 0]
-    drive = len(address) >= 2 and address[0].isascii() and address[0].isalpha() and address[1] == ":"
-    return address.startswith("file:") or drive or colon < 0 or (bool(slashes) and min(slashes) < colon)
+def is_network_address(address: str) -> bool:
+    """Tell whether git reaches an address over the network: an `http://`, `https://`, `ssh://` or
+    `git://` address, or `[user@]host:path` with no `::` or `://`, no `/` or `\\` before the first
+    `:` and no drive letter. Every other address, a remote helper's `<transport>::` form and `file://` among
+    them, is not. Takes the address."""
+    if address.startswith(("http://", "https://", "ssh://", "git://")):
+        return "::" not in address
+    host, colon, _path = address.partition(":")
+    drive = len(host) == 1 and host.isascii() and host.isalpha()
+    return (bool(colon) and "::" not in address and "://" not in address and bool(host) and not drive
+            and not host.startswith("-") and "/" not in host and "\\" not in host)
 
 
 def _config_only_reads(options: list[str], words: list[str]) -> bool:

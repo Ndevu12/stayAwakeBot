@@ -22,6 +22,8 @@ UPDATES_SUBMODULES = "a command that also updates submodules cannot be checked"
 PUSHES_INTO_A_FOLDER = "a push into a repository with files on this machine cannot be checked"
 RUNS_A_PROGRAM = "a command that runs a program it names cannot be checked"
 READS_A_REPOSITORY_HERE = "a command that reads a repository on this machine cannot be checked"
+REACHES_NEITHER_THE_NETWORK_NOR_A_FOLDER = ("a push or ls-remote to an address that is neither on the network nor a "
+                                            "folder here cannot be checked")
 REACHES_A_REPOSITORY_GIT_DOES_NOT_NAME = "a push or ls-remote whose repository git does not name cannot be checked"
 NAMES_AN_UNLISTED_OPTION = ("a command with an option git does not list, or a shortened one that could mean "
                             "several, cannot be checked")
@@ -200,9 +202,12 @@ def _push(folder: Path, rest: tuple[str, ...]) -> Answer:
     if addresses is None:
         return Answer(UNCHECKED, REACHES_A_REPOSITORY_GIT_DOES_NOT_NAME)
     for address in addresses:
+        if runs_directly.is_network_address(address):
+            continue
         place = _local_place(folder, address)
-        if place is not None and stdout(place, ["rev-parse", "--is-bare-repository"],
-                                        context=UNTRUSTED).strip() != "true":
+        if place is None:
+            return Answer(UNCHECKED, REACHES_NEITHER_THE_NETWORK_NOR_A_FOLDER)
+        if stdout(place, ["rev-parse", "--is-bare-repository"], context=UNTRUSTED).strip() != "true":
             return Answer(UNCHECKED, PUSHES_INTO_A_FOLDER)
     return Answer(PASSTHROUGH, "the command brings no files in")
 
@@ -216,7 +221,11 @@ def _ls_remote(folder: Path, rest: tuple[str, ...]) -> Answer:
     addresses = runs_directly.destinations("ls-remote", resolved, folder)
     if addresses is None:
         return Answer(UNCHECKED, REACHES_A_REPOSITORY_GIT_DOES_NOT_NAME)
-    if any(_local_place(folder, address) is not None for address in addresses):
+    for address in addresses:
+        if runs_directly.is_network_address(address):
+            continue
+        if _local_place(folder, address) is None:
+            return Answer(UNCHECKED, REACHES_NEITHER_THE_NETWORK_NOR_A_FOLDER)
         return Answer(UNCHECKED, READS_A_REPOSITORY_HERE)
     return Answer(PASSTHROUGH, "the command brings no files in")
 
@@ -228,7 +237,7 @@ def _local_place(folder: Path, address: str) -> "Path | None":
         address = address[len("file://"):]
     elif address.startswith("file:"):
         address = address[len("file:"):]
-    elif "://" in address or not runs_directly.is_local_address(address):
+    elif "::" in address or "://" in address or runs_directly.is_network_address(address):
         return None
     path = Path(os.path.expanduser(address))
     path = path if path.is_absolute() else folder / path
