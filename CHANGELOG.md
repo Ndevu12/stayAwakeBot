@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-27
+
 ### Added
 - The record your editor reads about a `saw govern` check now carries, for a held update, what the
   terminal shows: the findings, the command and the folder it ran in, the next steps, and whether
@@ -2231,7 +2233,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.3...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.3...v0.19.0
 [0.18.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.0...v0.18.1
