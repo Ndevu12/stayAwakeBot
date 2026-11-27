@@ -2,7 +2,9 @@
 """The one place stayawake reads the process environment."""
 from __future__ import annotations
 
+import contextlib
 import os
+from typing import Iterator, Mapping
 
 GH_SECURITY_TOKEN = "GH_SECURITY_TOKEN"
 GITHUB_TOKEN = "GITHUB_TOKEN"
@@ -44,6 +46,20 @@ def get(name: str, default: str | None = None) -> str | None:
         return default
     val = val.strip()
     return val or default
+
+
+@contextlib.contextmanager
+def running_in(environment: Mapping[str, str]) -> Iterator[None]:
+    """Within the block, make this process's environment exactly `environment`, and put the one it
+    had back when the block ends. Takes the environment."""
+    before = dict(os.environ)
+    try:
+        os.environ.clear()
+        os.environ.update(environment)
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(before)
 
 
 def any_set(names) -> bool:

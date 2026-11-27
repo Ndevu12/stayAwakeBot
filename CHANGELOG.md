@@ -18,6 +18,9 @@ reader, not the mechanism or the weakness it closed.
   terminal shows: the findings, the command and the folder it ran in, the next steps, and whether
   `saw govern let-in` reviews it. `saw capabilities` lists `govern.status.held_details`.
 - `saw capabilities --json` names where `saw-git-standin` is installed, in `programs.git_standin`.
+- `saw govern classify --serve` answers one command per line of JSON on stdin, each as `saw govern
+  classify --json` answers it, without starting saw for every command. `saw capabilities` lists
+  `govern.classify.serve`.
 - saw's git stand-in, `saw-git-standin`, now ships on Windows, so an editor can put it in front of
   git there as on macOS and Linux. `saw govern install` does not cover Windows terminals yet.
 

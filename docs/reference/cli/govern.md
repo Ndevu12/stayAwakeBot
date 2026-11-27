@@ -225,6 +225,32 @@ saw's git stand-in runs a command it does not check with these same settings in 
 whose own settings start programs you have not kept, and sends one it cannot run this way to saw
 first.
 
+### Asking about many commands from one process
+
+```text
+saw govern classify --serve
+```
+
+`saw govern classify --serve` answers command after command without starting saw for each one. It
+reads one JSON request per line on stdin and writes one line for each, in order, until stdin ends:
+
+```json
+{"tool": "git", "repo": "/home/you/project", "argv": ["pull"], "environment": {"HOME": "/home/you", "PATH": "/usr/bin:/bin"}, "id": 1}
+```
+
+- `tool`: `git` or `gh`;
+- `repo`: the folder the command runs in, by its full path;
+- `argv`: the command's arguments, without the program name;
+- `environment`: every variable the command runs with, as the terminal holds them;
+- `id`: optional; the answer carries it back unchanged.
+
+Each answer is the document `saw govern classify --json` prints for that command run in that
+environment, with `id` after `schema_version`. The repository's settings and yours are read again for
+every request, so a change made between two requests is in the next answer. A request that cannot
+be read, such as a line that is not JSON or one without an `environment`, is answered with only the
+`reason`, and the next line is still answered. `saw capabilities` lists `govern.classify.serve` when
+this saw offers it; an editor without it asks one command at a time.
+
 ## Asking whether a tree is one saw let in
 
 ```text
