@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """The fingerprint of the programs a repository's own git settings start: every setting in its own
 configuration that `lib/data/git_exec_keys.json` lists as running a program, and every hook file in
-the hooks folder git runs hooks from when that folder is the repository's own. The git stand-in reads
-the same fingerprint. Nothing in the folder is run."""
+the hooks folder git runs hooks from when that folder is the repository's own, except a hook whose
+bytes match the one saw installs. The git stand-in reads the same fingerprint. Nothing in the folder
+is run."""
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git.exec_keys import ABSOLUTE_PATH, ENABLES_TRANSPORT, HOOKS_DIRECTORY, ExecKey, rule_for
+from stayawake.lib.git import runs_directly
 from stayawake.lib.git.run import run
+from stayawake.utils import env
 
 OWN_SCOPES = ("local", "worktree")
 HOOKS_KEY = "core.hookspath"
@@ -150,8 +153,8 @@ def _own_hooks_folder(setting: tuple[str, str] | None, git_dir: str, common_dir:
 
 def _hook_files(folder: str) -> list[tuple[str, ...]] | str:
     """List every file in a hooks folder git may run or a hook may read: each name with the sha256
-    of its contents, links followed, the example files git writes left out. Takes the folder.
-    Returns the entries, or why a file could not be read."""
+    of its contents, links followed, the example files git writes and the hooks saw installs left
+    out. Takes the folder. Returns the entries, or why a file could not be read."""
     try:
         names = os.listdir(os.fsencode(folder))
     except (FileNotFoundError, NotADirectoryError):
@@ -166,7 +169,23 @@ def _hook_files(folder: str) -> list[tuple[str, ...]] | str:
             continue
         try:
             with open(path, "rb") as hook:
-                found.append((HOOK, name, hashlib.sha256(hook.read()).hexdigest()))
+                contents = hook.read()
         except OSError as error:
             return f"the hook {os.fsdecode(path)} could not be read: {error.strerror or error}"
+        if contents != _saws_own_hook(raw):
+            found.append((HOOK, name, hashlib.sha256(contents).hexdigest()))
     return found
+
+
+def _saws_own_hook(name: bytes) -> bytes | None:
+    """Read the hook saw installs under a name, from saw's own template. Takes the name. Returns its
+    bytes, or None."""
+    folder = os.path.join(env.xdg_config_home(), *runs_directly.tables()["saws_own_hooks_folder"])
+    path = os.path.join(os.fsencode(folder), name)
+    try:
+        if not os.path.isfile(path):
+            return None
+        with open(path, "rb") as hook:
+            return hook.read()
+    except OSError:
+        return None

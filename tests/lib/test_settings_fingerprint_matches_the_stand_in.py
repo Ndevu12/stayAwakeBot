@@ -35,7 +35,8 @@ def build(root: Path, case: dict, operator: str, git: str) -> dict:
     for path, contents in case["files"].items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_bytes(contents.encode("utf-8"))
-    return {"HOME": shown, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(global_config)}
+    return {"HOME": shown, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(global_config),
+            "XDG_CONFIG_HOME": os.path.join(shown, "config")}
 
 
 @unittest.skipIf(os.name == "nt", "the git stand-in runs on Linux and macOS")

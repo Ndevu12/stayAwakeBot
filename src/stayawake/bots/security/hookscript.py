@@ -18,6 +18,7 @@ from typing import Callable
 from stayawake.bots.security import records
 from stayawake.utils import atomicwrite, env, pathsafe
 from stayawake.lib import git as gitutil
+from stayawake.lib.git import runs_directly
 from stayawake.lib.git.exec_surface import HOOK_NAMES  # noqa: F401  (re-export)
 
 
@@ -28,12 +29,13 @@ LOCATION = "git-hook"
 
 def template_dir() -> Path:
     """Return saw's managed git template directory."""
-    return Path(env.xdg_config_home()) / "saw" / "git-template"
+    return hooks_dir().parent
 
 
 def hooks_dir() -> Path:
-    """Return the hooks directory inside saw's template directory."""
-    return template_dir() / "hooks"
+    """Return the hooks directory inside saw's template directory, named in the table the git
+    stand-in reads too."""
+    return Path(env.xdg_config_home()).joinpath(*runs_directly.tables()["saws_own_hooks_folder"])
 
 
 def history_checked_path() -> Path:

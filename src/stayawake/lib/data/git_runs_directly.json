@@ -56,5 +56,6 @@
     "GIT_CONFIG", "GIT_CONFIG_NOSYSTEM"],
   "gh_repository_options": ["-R", "--repo"],
   "gh_commands_that_bring_files": ["pr checkout", "repo sync", "release download", "run download"],
-  "kept_settings_record": ["govern", "kept-settings.json"]
+  "kept_settings_record": ["govern", "kept-settings.json"],
+  "saws_own_hooks_folder": ["saw", "git-template", "hooks"]
 }

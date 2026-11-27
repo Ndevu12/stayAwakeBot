@@ -38,6 +38,7 @@ fn build(root: &Path, case: &serde_json::Value, operator: &str, git: &Path) -> E
     environ.insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
     environ.insert("GIT_CONFIG_GLOBAL".into(), global.display().to_string());
     environ.insert("XDG_STATE_HOME".into(), root.join("state").display().to_string());
+    environ.insert("XDG_CONFIG_HOME".into(), root.join("config").display().to_string());
     environ
 }
 

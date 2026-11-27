@@ -1,6 +1,7 @@
 //! The fingerprint of the programs a repository's own git settings start: every setting in its own
 //! configuration that `lib/data/git_exec_keys.json` lists as running a program, and every hook file
-//! in the hooks folder git runs hooks from when that folder is the repository's own. saw's Python
+//! in the hooks folder git runs hooks from when that folder is the repository's own, except a hook
+//! whose bytes match the one saw installs. saw's Python
 //! `lib/git/settings_fingerprint.py` reads the same fingerprint. Nothing in the folder is run.
 
 use std::fs;
@@ -13,6 +14,7 @@ use super::exec_keys::{rule_for, ExecKey, Runs};
 use super::locate::Found;
 use super::paths;
 use super::Environment;
+use crate::git_tables::table;
 
 const OWN_SCOPES: [&str; 2] = ["local", "worktree"];
 const HOOKS_KEY: &str = "core.hookspath";
@@ -84,7 +86,7 @@ pub fn from_listing(listing: &[u8], found: &Found, environ: &Environment) -> Res
         }
     }
     if let Some(folder) = own_hooks_folder(hooks_setting, found, environ) {
-        let hooks = hook_files(&folder)?;
+        let hooks = hook_files(&folder, environ)?;
         if !hooks.is_empty() {
             entries.push(vec![HOOKS_FOLDER.into(), paths::real_path(&folder).display().to_string()]);
             entries.extend(hooks);
@@ -127,9 +129,9 @@ fn own_hooks_folder(setting: Option<(String, String)>, found: &Found, environ: &
 }
 
 /// List every file in a hooks folder git may run or a hook may read: each name with the sha256 of
-/// its contents, links followed, the example files git writes left out. Takes the folder. Returns
-/// the entries, or why a file could not be read.
-fn hook_files(folder: &Path) -> Result<Vec<Vec<String>>, String> {
+/// its contents, links followed, the example files git writes and the hooks saw installs left out.
+/// Takes the folder and the environment. Returns the entries, or why a file could not be read.
+fn hook_files(folder: &Path, environ: &Environment) -> Result<Vec<Vec<String>>, String> {
     let listing = match fs::read_dir(folder) {
         Ok(listing) => listing,
         Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => return Ok(Vec::new()),
@@ -144,9 +146,24 @@ fn hook_files(folder: &Path) -> Result<Vec<Vec<String>>, String> {
             continue;
         }
         let bytes = fs::read(&path).map_err(|error| format!("the hook {} could not be read: {error}", path.display()))?;
+        if saws_own_hook(&child.file_name(), environ).is_some_and(|own| own == bytes) {
+            continue;
+        }
         found.push(vec![HOOK.into(), name, hex(&Sha256::digest(&bytes))]);
     }
     Ok(found)
+}
+
+/// Read the hook saw installs under a name, from saw's own template. Takes the name and the
+/// environment. Returns its bytes, or None.
+pub fn saws_own_hook(name: &std::ffi::OsStr, environ: &Environment) -> Option<Vec<u8>> {
+    let config = match environ.get("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
+        Some(config) => PathBuf::from(config),
+        None => Path::new(environ.get("HOME")?).join(".config"),
+    };
+    let folder = table("saws_own_hooks_folder").iter().fold(config, |path, part| path.join(part));
+    let path = folder.join(name);
+    fs::metadata(&path).is_ok_and(|meta| meta.is_file()).then(|| fs::read(&path).ok()).flatten()
 }
 
 fn hex(bytes: &[u8]) -> String {
