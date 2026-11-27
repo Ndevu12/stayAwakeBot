@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from stayawake.bots.security import records
 from stayawake.bots.security.dependencies import db
-from stayawake.utils import atomicwrite, env
 
 MAX_VERIFIED = 200_000
 MAX_PENDING = 200_000
@@ -58,7 +58,7 @@ class PushRecord:
         """Write the record. Returns True only when it was written and read back."""
         body = {"policy": self.policy, "verified": sorted(self.verified), "pending": self.pending,
                 "unlisted": self.unlisted}
-        return atomicwrite.replace(self.where, json.dumps(body))
+        return records.replace(self.where, json.dumps(body))
 
 
 def record_path(git_dir: str | Path) -> Path:
@@ -68,7 +68,7 @@ def record_path(git_dir: str | Path) -> Path:
     except (OSError, ValueError):
         key = str(git_dir)
     name = hashlib.sha256(key.encode("utf-8", "surrogateescape")).hexdigest()[:32]
-    return Path(env.xdg_cache_home()) / "saw" / "push-record" / f"{name}.json"
+    return records.path("push-record", f"{name}.json")
 
 
 def load(git_dir: str | Path, policy: str) -> PushRecord:
@@ -80,7 +80,7 @@ def load(git_dir: str | Path, policy: str) -> PushRecord:
     try:
         if where.is_symlink():
             return record
-        body = json.loads(where.read_text(encoding="utf-8"))
+        body = json.loads(records.read_text(where))
     except (OSError, ValueError):
         return record
     if not isinstance(body, dict):

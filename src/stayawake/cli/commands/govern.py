@@ -9,7 +9,7 @@ import shlex
 import subprocess
 import sys
 
-from stayawake.bots.security import govern as core
+from stayawake.bots.security import govern as core, records
 from stayawake.bots.security import govern_held_commands
 from stayawake.bots.mcp.launch import standin_binary
 from stayawake.cli.argtypes import add_deadline_arg, add_progress_arg, progress_requested
@@ -17,6 +17,7 @@ from stayawake.cli.helptext import add_command
 from stayawake.utils import env, exitcodes
 from stayawake.utils.progress_events import covering
 from stayawake.utils.json_documents import versioned
+from stayawake.utils.streaming import say
 
 
 def register(sub) -> None:
@@ -274,7 +275,11 @@ _PLACEMENT = (
 
 
 def _run_placement(action: str) -> int:
-    """Run the placement action in saw's stand-in. Takes the action. Returns its exit code."""
+    """Run the placement action in saw's stand-in, saying first, for status, when saw keeps no
+    records. Takes the action. Returns its exit code."""
+    not_kept = records.not_kept() if action == "status" else ""
+    if not_kept:
+        say(not_kept, no_stream=True)
     binary = standin_binary()
     if not binary:
         print("saw govern: the stand-in is not available on this machine yet.", file=sys.stderr)

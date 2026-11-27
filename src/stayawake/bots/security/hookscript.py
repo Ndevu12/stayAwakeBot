@@ -15,6 +15,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Callable
 
+from stayawake.bots.security import records
 from stayawake.utils import atomicwrite, env, pathsafe
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.exec_surface import HOOK_NAMES  # noqa: F401  (re-export)
@@ -37,33 +38,33 @@ def hooks_dir() -> Path:
 
 def history_checked_path() -> Path:
     """Return the file of the commit, by repository, whose merges saw's hooks last found clean."""
-    return Path(env.xdg_cache_home()) / "saw" / "hook-history-checked.json"
+    return records.path("hook-history-checked.json")
 
 
 def settings_scan_path() -> Path:
     """Return the file of clean scans saw's hook in git's settings made, by repository."""
-    return Path(env.xdg_cache_home()) / "saw" / "hook-settings-scans.json"
+    return records.path("hook-settings-scans.json")
 
 
 def warnings_shown_path() -> Path:
     """Return the file of the infected warnings saw's hooks showed, by repository and git operation."""
-    return Path(env.xdg_cache_home()) / "saw" / "hook-warnings-shown.json"
+    return records.path("hook-warnings-shown.json")
 
 
 def checks_made_path() -> Path:
     """Return the file of the checks saw's hooks completed, by repository and git operation, with their
     outcomes."""
-    return Path(env.xdg_cache_home()) / "saw" / "hook-checks-made.json"
+    return records.path("hook-checks-made.json")
 
 
 def cache_path() -> Path:
     """Return the per-repository last-scanned-SHA cache file."""
-    return Path(env.xdg_cache_home()) / "saw" / "hook-scan-cache.json"
+    return records.path("hook-scan-cache.json")
 
 
 def clean_contents_dir() -> Path:
     """Return the folder of the contents saw's hook scanned clean in each working tree."""
-    return Path(env.xdg_cache_home()) / "saw" / "hook-clean-contents"
+    return records.path("hook-clean-contents")
 
 
 def declaration_path() -> Path:
@@ -174,13 +175,11 @@ def remember_hooks_written(folders: list[Path]) -> bool:
 
 def forget() -> None:
     """Remove the record of what was installed and the list of seeded repositories."""
-    for path in (declaration_path(), cache_path()):
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError:
-            continue
+    try:
+        declaration_path().unlink()
+    except OSError:
+        pass
+    records.remove(cache_path())
 
 
 def global_template_dir() -> str | None:
@@ -382,7 +381,7 @@ def saw_command(text: str) -> list[str] | None:
 def seeded_repositories() -> list[Path]:
     """Return the repositories saw's hooks have scanned, from the hook cache."""
     try:
-        cache = json.loads(cache_path().read_text())
+        cache = json.loads(records.read_text(cache_path()))
     except (OSError, ValueError):
         return []
     if not isinstance(cache, dict):

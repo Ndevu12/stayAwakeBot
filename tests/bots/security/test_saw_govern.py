@@ -10,6 +10,8 @@ did not produce a clean result prints schema 1 and does not release the update.
 from __future__ import annotations
 
 import json
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -45,10 +47,25 @@ class TestGovernRecognisedCommands(unittest.TestCase):
                 self.assertEqual(runs_directly.decide(tool, args, Path('.'), {}), runs_directly.CHECKED)
 
     def test_a_command_that_brings_nothing_in_is_not_governed(self):
-        for tool, args in [("git", ["status"]), ("git", ["commit"]), ("git", ["push"]),
+        for tool, args in [("git", ["status"]), ("git", ["commit"]),
                            ("gh", ["pr", "view"]), ("git", [])]:
             with self.subTest(tool=tool, args=args):
                 self.assertEqual(runs_directly.decide(tool, args, Path('.'), {}), runs_directly.RUNS_AS_TYPED)
+
+    def test_a_bare_push_runs_as_typed_only_to_a_push_remote_on_the_network(self):
+        with tempfile.TemporaryDirectory() as made:
+            repo = Path(made)
+
+            def git(*args: str) -> None:
+                subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True,
+                               stdin=subprocess.DEVNULL)
+            git("init", "-q", "-b", "main")
+            git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "x")
+            self.assertEqual(runs_directly.decide("git", ["push"], repo, {}), runs_directly.CHECKED_FOR_WHAT_IT_NAMES)
+            git("remote", "add", "origin", "https://example.invalid/r")
+            git("config", "branch.main.remote", "origin")
+            git("config", "branch.main.merge", "refs/heads/main")
+            self.assertEqual(runs_directly.decide("git", ["push"], repo, {}), runs_directly.RUNS_AS_TYPED)
 
 
 class TestGovernFailsClosed(unittest.TestCase):

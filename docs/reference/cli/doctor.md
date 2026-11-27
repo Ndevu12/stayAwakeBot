@@ -11,4 +11,6 @@ saw doctor [--json] [-q] [--no-stream]
 Checks that `saw` runs this copy, which GitHub credential it uses and whether that credential can
 open fix and guard pull requests, whether a saw GitHub App is set up, and that saw's CI health tools
 are installed. When the credential is missing or cannot open pull requests, it names the command to
-run. `saw auth status` shows everything the credential can do. `-q` prints only problems.
+run. When every check starts over, `saw doctor` says what to change (`records_kept` is false in
+`--json`).
+`saw auth status` shows everything the credential can do. `-q` prints only problems.

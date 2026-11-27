@@ -1,165 +1,69 @@
 #!/usr/bin/env python3
-"""The options and words git lists for the subcommands saw reads, and a reader that splits a
-subcommand's arguments the way git does."""
+"""The options and words git lists for the subcommands saw reads, read from
+`lib/data/git_subcommand_options.json`, which is built into saw's git stand-in too, and readers that
+split a subcommand's arguments the way git does."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
 class Listed:
     """The options git lists for one subcommand, by the value each takes: the next word, only what
-    is joined to a short option, or none. `takes_no_word` is None where saw does not list them."""
+    is joined to a short option, or none. `takes_no_word` is None where saw does not list them.
+    Also the options whose value names a program to run, those that name a file git writes and
+    those that fetch,
+    whether `git <subcommand> --help-all` lists its options, and whether git passes an option it
+    does not take through as output."""
 
     takes_the_next_word: frozenset[str]
     takes_the_rest_of_its_word: frozenset[str] = frozenset()
     takes_no_word: "frozenset[str] | None" = None
+    runs_a_program: frozenset[str] = frozenset()
+    writes_a_file: frozenset[str] = frozenset()
+    fetches: frozenset[str] = frozenset()
+    lists_its_options: bool = True
+    echoes_options_it_does_not_take: bool = False
+
+    def long_names(self) -> frozenset[str]:
+        """Return every long option listed, with or without a value."""
+        every = self.takes_the_next_word | self.takes_the_rest_of_its_word | (self.takes_no_word or frozenset())
+        return frozenset(name for name in every if name.startswith("--"))
 
 
-@dataclass(frozen=True)
-class Reading:
-    """A subcommand's arguments read by git's rules: its options as written with their values, its
-    words, the paths after `--`, and whether every option is one git lists, spelled in full."""
-
-    options: tuple[tuple[str, "str | None"], ...]
-    words: tuple[str, ...]
-    paths: tuple[str, ...]
-    known: bool
-
-    def names(self) -> list[str]:
-        """List the options as written, without their values."""
-        return [name for name, _value in self.options]
-
-    def last(self, *names: str) -> "str | None":
-        """Return which of `names` was given last, or None when none was."""
-        for name, _value in reversed(self.options):
-            if name in names:
-                return name
-        return None
-
-    def values(self, *names: str) -> list[str]:
-        """List the values given to any of `names`, in order."""
-        return [value for name, value in self.options if name in names and value is not None]
+_VALUE_KINDS = ("takes_the_next_word", "takes_the_rest_of_its_word", "takes_no_word")
 
 
-def _negations(*names: str) -> frozenset[str]:
-    """Return the `--no-` form of each long name."""
-    return frozenset("--no-" + name[2:] for name in names if name.startswith("--") and not name.startswith("--no-"))
+def _listed(entry: dict, groups: dict) -> Listed:
+    """Build one subcommand's options from its entry in the table and the groups it takes, each
+    option the entry lists keeping the entry's reading. Takes the entry and the table's groups.
+    Returns the options."""
+    own = frozenset(name for key in _VALUE_KINDS for name in entry.get(key) or ())
+    parts = [entry, *(groups[name] for name in entry.get("with", ()))]
+
+    def joined(key: str) -> frozenset[str]:
+        return frozenset(name for part in parts for name in part.get(key) or ()
+                         if part is entry or key not in _VALUE_KINDS or name not in own)
+    no_word = None if entry.get("takes_no_word", ()) is None else joined("takes_no_word")
+    return Listed(joined("takes_the_next_word"), joined("takes_the_rest_of_its_word"), no_word,
+                  joined("runs_a_program"), joined("writes_a_file"), joined("fetches"),
+                  entry.get("lists_its_options", True),
+                  entry.get("echoes_options_it_does_not_take", False))
 
 
-def _with_negations(*names: str) -> frozenset[str]:
-    """Return the names with the `--no-` form of each long one."""
-    return frozenset(names) | _negations(*names)
+def _load(path: Path) -> tuple[dict[str, Listed], frozenset[str]]:
+    """Read the table of the options git takes. Takes its file. Returns each subcommand's options and
+    the options every subcommand takes."""
+    table = json.loads(path.read_text(encoding="utf-8"))
+    groups = table["option_groups"]
+    listed = {sub: _listed(entry, groups) for sub, entry in table["subcommands"].items()}
+    return listed, frozenset(table["every_subcommand_takes"])
 
 
-LISTED = {
-    "checkout": Listed(
-        frozenset({"-b", "-B", "--orphan", "--conflict", "--pathspec-from-file", "-U", "--unified",
-                   "--inter-hunk-context"}),
-        frozenset({"-t"}),
-        _with_negations("--auto-advance", "--detach", "--force", "--guess", "--ignore-other-worktrees",
-                        "--ignore-skip-worktree-bits", "--merge", "--ours", "--overlay", "--overwrite-ignore",
-                        "--patch", "--pathspec-file-nul", "--progress", "--quiet", "--recurse-submodules",
-                        "--theirs", "--track", "-2", "-3", "-d", "-f", "-l", "-m", "-p", "-q")
-        | _negations("--orphan", "--conflict", "--pathspec-from-file")),
-    "switch": Listed(
-        frozenset({"-c", "-C", "--create", "--force-create", "--orphan", "--conflict"}),
-        frozenset({"-t"}),
-        _with_negations("--detach", "--discard-changes", "--force", "--guess", "--ignore-other-worktrees",
-                        "--merge", "--overwrite-ignore", "--progress", "--quiet", "--recurse-submodules",
-                        "--track", "-d", "-f", "-m", "-q")
-        | _negations("--create", "--force-create", "--orphan", "--conflict")),
-    "pull": Listed(
-        frozenset({"-s", "--strategy", "-X", "--strategy-option", "--depth", "--deepen", "--shallow-since",
-                   "--shallow-exclude", "-o", "--server-option", "--upload-pack", "--negotiation-tip",
-                   "--negotiation-include", "--negotiation-restrict", "--cleanup", "--refmap"}),
-        frozenset({"-S", "-j", "-r"})),
-    "merge": Listed(
-        frozenset({"-m", "--message", "-F", "--file", "-s", "--strategy", "-X", "--strategy-option",
-                   "--into-name", "--cleanup"}),
-        frozenset({"-S"})),
-    "rebase": Listed(
-        frozenset({"--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec", "-C",
-                   "--whitespace", "--empty", "--trailer"}),
-        frozenset({"-S", "-r"})),
-    "fetch": Listed(
-        frozenset({"-o", "--server-option", "--depth", "--deepen", "--shallow-since", "--shallow-exclude",
-                   "-j", "--jobs", "--upload-pack", "--negotiation-tip", "--negotiation-include",
-                   "--negotiation-restrict", "--refmap", "--filter", "--recurse-submodules-default",
-                   "--submodule-prefix"})),
-    "reset": Listed(
-        frozenset({"-U", "--unified", "--inter-hunk-context", "--pathspec-from-file"}),
-        frozenset(),
-        _with_negations("--auto-advance", "--intent-to-add", "--patch", "--pathspec-file-nul", "--quiet",
-                        "--recurse-submodules", "-N", "-p", "-q")
-        | _negations("--pathspec-from-file")
-        | {"--hard", "--keep", "--merge", "--mixed", "--soft", "--no-refresh", "--refresh"}),
-    "restore": Listed(
-        frozenset({"-s", "--source", "--conflict", "-U", "--unified", "--inter-hunk-context",
-                   "--pathspec-from-file"}),
-        frozenset(),
-        _with_negations("--ignore-skip-worktree-bits", "--ignore-unmerged", "--merge", "--ours", "--overlay",
-                        "--patch", "--pathspec-file-nul", "--progress", "--quiet", "--recurse-submodules",
-                        "--staged", "--theirs", "--worktree", "-2", "-3", "-S", "-W", "-m", "-p", "-q")
-        | _negations("--source", "--conflict", "--pathspec-from-file")),
-    "read-tree": Listed(
-        frozenset({"--index-output", "--prefix", "--exclude-per-directory", "--super-prefix"}),
-        frozenset(),
-        _with_negations("--aggressive", "--debug-unpack", "--dry-run", "--empty", "--quiet",
-                        "--recurse-submodules", "--reset", "--sparse-checkout", "--trivial", "--verbose",
-                        "-i", "-m", "-n", "-q", "-u", "-v")
-        | _negations("--super-prefix")),
-    "cherry-pick": Listed(
-        frozenset({"--cleanup", "-m", "--mainline", "--strategy", "-X", "--strategy-option", "--empty"}),
-        frozenset({"-S"}),
-        _with_negations("--abort", "--allow-empty", "--allow-empty-message", "--commit", "--continue",
-                        "--edit", "--ff", "--gpg-sign", "--keep-redundant-commits", "--quit",
-                        "--rerere-autoupdate", "--signoff", "--skip", "-e", "-n", "-r", "-s", "-x")
-        | _negations("--cleanup", "--mainline", "--strategy", "--strategy-option")),
-    "revert": Listed(
-        frozenset({"--cleanup", "-m", "--mainline", "--strategy", "-X", "--strategy-option"}),
-        frozenset({"-S"}),
-        _with_negations("--abort", "--commit", "--continue", "--edit", "--gpg-sign", "--quit", "--reference",
-                        "--rerere-autoupdate", "--signoff", "--skip", "-e", "-n", "-r", "-s")
-        | _negations("--cleanup", "--mainline", "--strategy", "--strategy-option")),
-    "clone": Listed(
-        frozenset({"-b", "--branch", "-c", "--config", "--depth", "--filter", "-j", "--jobs", "-o", "--origin",
-                   "--ref-format", "--reference", "--reference-if-able", "--revision", "--separate-git-dir",
-                   "--server-option", "--shallow-exclude", "--shallow-since", "--template", "-u",
-                   "--upload-pack", "--bundle-uri"}),
-        frozenset(),
-        _with_negations("--also-filter-submodules", "--bare", "--checkout", "--dissociate", "--hardlinks",
-                        "--ipv4", "--ipv6", "--local", "--mirror", "--naked", "--progress", "--quiet",
-                        "--recurse-submodules", "--recursive", "--reject-shallow", "--remote-submodules",
-                        "--shallow-submodules", "--shared", "--single-branch", "--sparse", "--tags",
-                        "--verbose", "-4", "-6", "-l", "-n", "-q", "-s", "-v")
-        | _negations("--branch", "--config", "--depth", "--filter", "--jobs", "--origin", "--ref-format",
-                     "--reference", "--reference-if-able", "--revision", "--separate-git-dir", "--server-option",
-                     "--shallow-exclude", "--shallow-since", "--template", "--upload-pack", "--bundle-uri")),
-    "worktree add": Listed(
-        frozenset({"-b", "-B", "--reason"}),
-        frozenset(),
-        _with_negations("--checkout", "--detach", "--force", "--guess-remote", "--lock", "--orphan", "--quiet",
-                        "--relative-paths", "--track", "-d", "-f", "-q")
-        | _negations("--reason")),
-    "update-index": Listed(
-        frozenset({"--cacheinfo", "--chmod", "--index-version"}),
-        frozenset(),
-        _with_negations("--add", "--again", "--force-remove", "--force-untracked-cache", "--force-write-index",
-                        "--fsmonitor", "--ignore-missing", "--ignore-skip-worktree-entries",
-                        "--ignore-submodules", "--info-only", "--remove", "--replace", "--show-index-version",
-                        "--split-index", "--test-untracked-cache", "--untracked-cache", "--unmerged",
-                        "--verbose")
-        | _negations("--index-version")
-        | {"--assume-unchanged", "--no-assume-unchanged", "--clear-resolve-undo", "--fsmonitor-valid",
-           "--no-fsmonitor-valid", "--index-info", "--really-refresh", "--refresh", "--skip-worktree",
-           "--no-skip-worktree", "--stdin", "--unresolve", "-g", "-q", "-z"}),
-    "update-ref": Listed(
-        frozenset({"-m"}),
-        frozenset(),
-        _with_negations("--batch-updates", "--create-reflog", "--stdin", "-0")
-        | {"--deref", "--no-deref", "-d", "-z"}),
-}
+TABLE_FILE = Path(__file__).resolve().parent.parent / "data" / "git_subcommand_options.json"
+LISTED, EVERY_SUBCOMMAND_TAKES = _load(TABLE_FILE)
 
 STASH_WORDS_THAT_BRING_NOTHING = frozenset({"push", "save", "list", "show", "drop", "clear", "create", "store",
                                             "import", "export"})
@@ -172,61 +76,115 @@ SUBMODULE_WORDS_SAW_LEAVES_TO_YOU = frozenset({"add", "foreach"})
 SUBMODULE_WORDS_SAW_CHECKS = frozenset({"update"})
 
 
-def read(sub: str, args: list[str]) -> Reading:
-    """Split a subcommand's arguments the way git does. Takes the subcommand, as `LISTED` names it,
-    and the arguments after it. Returns the reading: an option saw does not list is read without a
-    value, unless it is the leading part of a long option that takes the next word."""
-    listed = LISTED.get(sub, Listed(frozenset()))
-    next_word = listed.takes_the_next_word
-    rest_of_word = listed.takes_the_rest_of_its_word
-    no_word = listed.takes_no_word
-    known = no_word is not None
-    options: list[tuple[str, str | None]] = []
+@dataclass(frozen=True)
+class Given:
+    """An option git reads: how it is written, its full name, its value and whether that value is
+    the next word."""
+
+    written: str
+    name: str
+    value: "str | None"
+    value_is_the_next_word: bool = False
+
+
+def full_long_name(listed: Listed, written: str) -> "str | None":
+    """Name the long option git reads a written one for: itself, or the one option it begins. Takes
+    the subcommand's options and the written name. Returns None for any other."""
+    names = listed.long_names()
+    if written in names:
+        return written
+    leading = [name for name in names if name.startswith(written)] if len(written) > 2 else []
+    return leading[0] if len(leading) == 1 else None
+
+
+@dataclass(frozen=True)
+class Resolved:
+    """A subcommand's arguments read the way git reads them: its options, and its words, those after
+    `--` or `--end-of-options` included."""
+
+    options: tuple[Given, ...]
+    words: tuple[str, ...]
+
+    def last(self, *names: str) -> "str | None":
+        """Return which of the full `names` was given last, or None when none was."""
+        for option in reversed(self.options):
+            if option.name in names:
+                return option.name
+        return None
+
+    def values(self, name: str) -> list[str]:
+        """List the values given to the option with this full name, in order."""
+        return [option.value for option in self.options if option.name == name and option.value is not None]
+
+
+def resolve(sub: str, args: list[str]) -> "Resolved | None":
+    """Read a subcommand's arguments the way git does: each option up to `--` or `--end-of-options`
+    in full from a unique leading part, its `--no-` form, a bundle of short options, and a value
+    joined to it or in the next word. Each other argument is a word. Takes the subcommand and its
+    arguments. Returns its options and words, None for an option git does not take or cannot tell
+    apart."""
+    listed = LISTED.get(sub)
+    if listed is None or listed.takes_no_word is None:
+        return None
+    given: list[Given] = []
     words: list[str] = []
+    word_seen = False
     index = 0
-    options_end = False
     while index < len(args):
         arg = args[index]
         index += 1
-        if arg == "--":
-            return Reading(tuple(options), tuple(words), tuple(args[index:]), known)
-        if options_end or arg == "-" or not arg.startswith("-"):
+        if arg in ("--", "--end-of-options"):
+            words += args[index:]
+            break
+        if arg == "-" or not arg.startswith("-"):
+            if not word_seen and f"{sub} {arg}" in LISTED:
+                listed = LISTED[f"{sub} {arg}"]
+            word_seen = True
             words.append(arg)
             continue
-        if arg == "--end-of-options":
-            options_end = True
+        if arg in EVERY_SUBCOMMAND_TAKES or listed.echoes_options_it_does_not_take:
+            given.append(Given(arg, arg, None))
             continue
         if arg.startswith("--"):
-            name, joined, value = arg.partition("=")
-            if joined:
-                options.append((name, value))
-                known = known and (name in next_word or name in no_word)
-            elif name in next_word:
-                options.append((name, args[index] if index < len(args) else None))
-                known = known and index < len(args)
-                index += 1
-            elif no_word is not None and name in no_word:
-                options.append((name, None))
-            elif len(name) > 2 and any(option.startswith(name) for option in next_word if option.startswith("--")):
-                options.append((name, args[index] if index < len(args) else None))
-                known = False
+            written, joined, value = arg.partition("=")
+            name = full_long_name(listed, written)
+            if name is None:
+                return None
+            if not joined and name in listed.takes_the_next_word:
+                given.append(Given(written, name, args[index] if index < len(args) else None, True))
                 index += 1
             else:
-                options.append((name, None))
-                known = False
+                given.append(Given(written, name, value if joined else None))
             continue
         bundle = arg[1:]
         while bundle:
+            if bundle[0].isdigit() and "-NUM" in (listed.takes_no_word or ()):
+                digits = len(bundle) - len(bundle.lstrip("0123456789"))
+                given.append(Given("-" + bundle[:digits], "-NUM", None))
+                bundle = bundle[digits:]
+                continue
             name, bundle = "-" + bundle[0], bundle[1:]
-            if name in next_word:
-                value = bundle or (args[index] if index < len(args) else None)
-                known = known and value is not None
-                index += 0 if bundle else 1
-                options.append((name, value))
+            if name in listed.takes_the_next_word:
+                if bundle:
+                    given.append(Given(name, name, bundle))
+                else:
+                    given.append(Given(name, name, args[index] if index < len(args) else None, True))
+                    index += 1
                 break
-            if name in rest_of_word:
-                options.append((name, bundle or None))
+            if name in listed.takes_the_rest_of_its_word:
+                given.append(Given(name, name, bundle or None))
                 break
-            options.append((name, None))
-            known = known and no_word is not None and name in no_word
-    return Reading(tuple(options), tuple(words), (), known)
+            if name not in (listed.takes_no_word or ()):
+                return None
+            given.append(Given(name, name, None))
+    return Resolved(tuple(given), tuple(words))
+
+
+def options_saw_checks(sub: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """List the options of a subcommand, and of the words it takes, whose value names a program to
+    run, those that name a file git writes, and those that fetch. Takes the subcommand. Returns all
+    three."""
+    parts = [listed for name, listed in LISTED.items() if name == sub or name.startswith(sub + " ")]
+    return (frozenset(name for listed in parts for name in listed.runs_a_program),
+            frozenset(name for listed in parts for name in listed.writes_a_file),
+            frozenset(name for listed in parts for name in listed.fetches))

@@ -9,8 +9,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.bots.security import hookscript
-from stayawake.utils import atomicwrite
+from stayawake.bots.security import hookscript, records
 
 _VERSION = 1
 _LARGEST_STORE = 64 * 1024 * 1024
@@ -41,7 +40,7 @@ def held(root: Path, policy: str) -> dict[str, str]:
     """Read the contents scanned clean in a working tree. Takes the root and the digest of the policy
     in force. Returns them by path, or nothing when they were judged under another policy or the
     store cannot be read."""
-    raw = atomicwrite.read_back(store_path(root), _LARGEST_STORE)
+    raw = records.read_back(store_path(root), _LARGEST_STORE)
     if raw is None:
         return {}
     try:
@@ -96,8 +95,7 @@ def remember(root: Path, checked: Checked, policy: str) -> bool:
         if content is not None and before is not None and _status(root / rel) == before:
             clean[rel] = content
     try:
-        atomicwrite.make_folder(store_path(root).parent)
+        records.make_folder(store_path(root).parent)
     except OSError:
         return False
-    return atomicwrite.replace(store_path(root), json.dumps({"version": _VERSION, "policy": policy,
-                                                             "clean": clean}))
+    return records.replace(store_path(root), json.dumps({"version": _VERSION, "policy": policy, "clean": clean}))

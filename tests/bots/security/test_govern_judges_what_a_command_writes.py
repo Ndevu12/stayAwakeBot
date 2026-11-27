@@ -685,16 +685,29 @@ class ACommandThatWritesAFileItNamesIsAsked(_Fetched):
                      ["push", f"file://{other}", "HEAD:refs/heads/x"], ["push", "origin", "HEAD:refs/heads/x"],
                      ["push"], ["push", "--receive-pack=git receive-pack", "https://example.invalid/r"],
                      ["push", "--exec", "git receive-pack", "https://example.invalid/r"],
-                     ["-c", "receive.denyCurrentBranch=updateInstead", "push", ".", "HEAD:main"]):
+                     ["-c", "receive.denyCurrentBranch=updateInstead", "push", ".", "HEAD:main"],
+                     ["push", "--e=touch x", "./dst:x"], ["push", "--e=touch x", f"{self.root}/nodir:y"],
+                     ["push", "--recurse-submodules", "--", "--exec=touch x", "origin"]):
             with self.subTest(args=args):
                 self._asked(*args, brings_no_files=True)
+
+    def test_an_ls_remote_that_runs_a_program_or_reads_a_repository_here_is_asked(self):
+        for args, reason in ((["ls-remote", "--upload-pack=touch x", str(self.upstream)], govern_command.RUNS_A_PROGRAM),
+                             (["ls-remote", "--exec=touch x", "https://example.invalid/r"], govern_command.RUNS_A_PROGRAM),
+                             (["ls-remote", "--u=touch x", "https://example.invalid/r"], govern_command.RUNS_A_PROGRAM),
+                             (["ls-remote", str(self.upstream)], govern_command.READS_A_REPOSITORY_HERE),
+                             (["ls-remote"], govern_command.READS_A_REPOSITORY_HERE)):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], reason)
+        self.assertFalse((self.open / "x").exists())
 
     def test_a_push_elsewhere_or_into_a_repository_without_files_runs_as_typed(self):
         bare = self.root / "bare.git"
         self._raw("clone", "-q", "--bare", str(self.upstream), str(bare))
         self.git(self.open, "remote", "set-url", "origin", "https://example.invalid/team/r")
         for args in (["push", str(bare), "HEAD:refs/heads/x"], ["push", "https://example.invalid/r", "main"],
-                     ["push", "git@example.invalid:team/r", "main"], ["push", "origin", "main"], ["push"]):
+                     ["push", "git@example.invalid:team/r", "main"], ["push", "origin", "main"], ["push"],
+                     ["ls-remote", "--sort", "refname", "https://example.invalid/r"], ["ls-remote"]):
             with self.subTest(args=args):
                 self._passes(*args, brings_no_files=True)
 
@@ -723,9 +736,38 @@ class ACommandThatWritesAFileItNamesIsAsked(_Fetched):
                 self._asked(*args, brings_no_files=True)
                 self.assertFalse((self.open / "x.sh").exists())
 
+    def test_a_grep_opening_the_files_it_finds_in_a_program_is_asked(self):
+        for args in (["grep", "-Otouch", "new"], ["grep", "-iO", "new"], ["grep", "--open-files-in-pager=touch", "new"],
+                     ["grep", "--open", "new"], ["grep", "-e", "new", "-O"], ["grep", "-e", "--", "-Otouch x; true"],
+                     ["grep", "-e", "--", "--open-files-in-pager=touch"], ["grep", "-e", "--", "--open-files=touch"]):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], govern_command.RUNS_A_PROGRAM)
+
+    def test_an_unlisted_option_or_one_that_writes_a_file_is_asked(self):
+        for args, reason in ((["status", "--bogus"], govern_command.NAMES_AN_UNLISTED_OPTION),
+                             (["log", "--o", "-1"], govern_command.WRITES_A_FILE),
+                             (["log", "--out=x.sh", "-1"], govern_command.WRITES_A_FILE),
+                             (["repack", "--filter-to=../x"], govern_command.WRITES_A_FILE),
+                             (["checkout", "origin/evil"], govern_command.NAMES_AN_UNLISTED_OPTION)):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], reason)
+        self.assertFalse((self.open / "x.sh").exists())
+        self._untouched()
+
+    def test_a_shortened_push_target_a_shortened_fetch_or_a_named_socket_is_asked(self):
+        for args, reason in ((["push", f"--rep={self.upstream}", "--all"], govern_command.PUSHES_INTO_A_FOLDER),
+                             (["remote", "add", "--fe", "other", str(self.upstream)], govern_command.FETCHES),
+                             (["remote", "add", "-ft", "main", "other", str(self.upstream)], govern_command.FETCHES),
+                             (["credential-cache", "--socket=../s", "get"], govern_command.WRITES_A_FILE)):
+            with self.subTest(args=args):
+                self.assertEqual(self._asked(*args, brings_no_files=True)["reason"], reason)
+        self._untouched()
+
     def test_the_same_commands_without_them_run_as_typed(self):
         for args in (["diff", "HEAD", "origin/evil~1"], ["remote", "add", "other", str(self.upstream)],
-                     ["log", "-1", "--", "--output=x"]):
+                     ["log", "-1", "--", "--output=x"], ["grep", "-n", "new"], ["grep", "-eO", "new"],
+                     ["grep", "-n", "new", "--", "-O"], ["log", "--show-signature", "-1"],
+                     ["diff", "--ext-diff", "HEAD", "origin/evil~1"], ["status", "-sb"], ["commit", "-S", "-m", "x"]):
             with self.subTest(args=args):
                 self._passes(*args, brings_no_files=True)
 

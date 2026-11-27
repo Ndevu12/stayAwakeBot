@@ -4,6 +4,7 @@ git takes a value for is one saw skips the value of, and the hooks folder compar
 filesystem's own rules."""
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import unicodedata
@@ -15,6 +16,8 @@ from tests.support.gitrepo import GitSandbox
 
 _USAGE_LINE = re.compile(r"^(?:usage|\s*or):\s+git\s+\S+\s*(?P<rest>.*)$")
 _LEADING_OPTION = re.compile(r"\[-[\w-]+\]")
+_NUMBER_LINE = re.compile(r"^\s+-NUM\b")
+_NEGATABLE = re.compile(r"--\[no-\]([\w-]+)")
 _OPTION_LINE = re.compile(r"^\s+(?P<short>-\w)?(?:, )?(?P<long>--(?:\[no-\])?\w[\w-]*)?"
                           r"(?P<optional>\[=?[^\]\s]*\])?"
                           r"(?: (?P<required>[<({\[]\S*|\S*[()<>\[\]|]\S*|\.\.\.))?")
@@ -43,6 +46,9 @@ def options_in_usage(text: str) -> dict[str, str]:
     long, mapped to required, optional or none for the value it takes."""
     found = {}
     for line in text.splitlines():
+        if _NUMBER_LINE.match(line):
+            found["-NUM"] = "none"
+            continue
         match = _OPTION_LINE.match(line)
         if not match or not (match.group("short") or match.group("long")):
             continue
@@ -71,6 +77,10 @@ def words_in_usage(text: str) -> tuple[set[str], set[str]]:
     return words, leading
 
 
+_GIT_VERSION = subprocess.run(["git", "--version"], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL).stdout.strip()
+
+
 def _help_all(repo, sub: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *sub.split(), "--help-all"], capture_output=True, text=True,
                           stdin=subprocess.DEVNULL).stdout
@@ -88,10 +98,12 @@ class TheOptionsGitTakesAValueFor(GitSandbox):
     def test_every_option_the_git_under_test_lists_is_read_as_it_reads_it(self):
         repo = self.new_repo()
         for sub, table in subcommand_options.LISTED.items():
+            if not table.lists_its_options or table.echoes_options_it_does_not_take:
+                continue
             listed = options_in_usage(_help_all(repo, sub))
             taking_a_word = table.takes_the_next_word
             required = {name for name, kind in listed.items() if kind == "required"}
-            with self.subTest(sub=sub):
+            with self.subTest(sub=sub, git=_GIT_VERSION):
                 self.assertTrue(listed, f"git {sub} listed no options")
                 self.assertEqual(sorted(required - taking_a_word), [])
                 self.assertEqual(sorted(name for name, kind in listed.items()
@@ -104,6 +116,8 @@ class TheOptionsGitTakesAValueFor(GitSandbox):
     def test_every_option_saw_lets_run_as_typed_is_one_git_lists_without_a_value(self):
         repo = self.new_repo()
         for sub, table in subcommand_options.LISTED.items():
+            if not table.lists_its_options or table.echoes_options_it_does_not_take:
+                continue
             if table.takes_no_word is None:
                 continue
             listed = options_in_usage(_help_all(repo, sub))
@@ -113,6 +127,19 @@ class TheOptionsGitTakesAValueFor(GitSandbox):
                 self.assertEqual(sorted(name for name, kind in listed.items() if kind != "required"
                                         and name not in table.takes_no_word | table.takes_the_rest_of_its_word),
                                  [])
+
+    def test_every_option_the_table_took_from_the_git_under_test_is_one_it_lists(self):
+        repo = self.new_repo()
+        running = "v" + _GIT_VERSION.split()[-1]
+        entries = json.loads(subcommand_options.TABLE_FILE.read_text(encoding="utf-8"))["subcommands"]
+        for sub, entry in entries.items():
+            taken = entry.get("captured_at", {}).get(running)
+            if not taken or not subcommand_options.LISTED[sub].lists_its_options:
+                continue
+            usage = _help_all(repo, sub)
+            negatable = {"--no-" + name for name in _NEGATABLE.findall(usage)}
+            with self.subTest(sub=sub, git=_GIT_VERSION):
+                self.assertEqual(sorted(set(taken) - set(options_in_usage(usage)) - negatable), [])
 
     def test_every_word_a_command_starts_with_is_one_saw_decides(self):
         repo = self.new_repo()

@@ -13,7 +13,7 @@ import json
 import os
 from pathlib import Path
 
-from stayawake.bots.security import hookscript, push_record
+from stayawake.bots.security import hookscript, push_record, records
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.utils import atomicwrite
 
@@ -22,7 +22,7 @@ cache_path = hookscript.cache_path
 
 def load_cache() -> dict:
     try:
-        cache = json.loads(cache_path().read_text())
+        cache = json.loads(records.read_text(cache_path()))
     except (OSError, ValueError):
         return {}
     return cache if isinstance(cache, dict) else {}
@@ -49,7 +49,7 @@ def clean_key(head: str, config_path: str | None) -> str:
 def settings_scans() -> dict:
     """Read the clean scans a run from git's settings remembers. Returns them by repository."""
     try:
-        held = json.loads(hookscript.settings_scan_path().read_text())
+        held = json.loads(records.read_text(hookscript.settings_scan_path()))
     except (OSError, ValueError):
         return {}
     return held if isinstance(held, dict) else {}
@@ -60,7 +60,7 @@ def remember_settings_scan(root: Path, key: str) -> None:
     keeps current. Takes the root and the clean key. A write that fails is skipped."""
     held = {r: k for r, k in settings_scans().items() if os.path.isdir(r)}
     held[os.path.realpath(root)] = key
-    atomicwrite.replace(hookscript.settings_scan_path(), json.dumps(held))
+    records.replace(hookscript.settings_scan_path(), json.dumps(held))
 
 
 def remember(root: Path, key: str) -> None:
@@ -69,7 +69,7 @@ def remember(root: Path, key: str) -> None:
     try:
         cache = {r: s for r, s in load_cache().items() if os.path.isdir(r)}
         cache[os.path.realpath(root)] = key
-        atomicwrite.replace(cache_path(), json.dumps(cache), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(cache_path(), json.dumps(cache), mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
@@ -87,9 +87,9 @@ def applied_path() -> Path:
 
 
 def _load_record(path: Path) -> dict:
-    """Return a govern record by repository, or an empty one when it is missing or unreadable."""
+    """Read a govern record. Takes its path. Returns it by repository, or an empty one."""
     try:
-        held = json.loads(path.read_text())
+        held = json.loads(records.read_text(path))
     except (OSError, ValueError):
         return {}
     return held if isinstance(held, dict) else {}
@@ -105,8 +105,8 @@ def remember_applied(root: Path, key: str) -> None:
     try:
         held = {r: k for r, k in load_applied().items() if os.path.isdir(r)}
         held[os.path.realpath(root)] = key
-        atomicwrite.replace(applied_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
-                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(applied_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                        at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
@@ -148,8 +148,8 @@ def remember_accepted(root: Path, commit: str, verdict: str) -> None:
     try:
         held = {r: v for r, v in _load_record(accepted_path()).items() if os.path.isdir(r)}
         held[os.path.realpath(root)] = {"commit": commit, "verdict": verdict}
-        atomicwrite.replace(accepted_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
-                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(accepted_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                        at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
@@ -186,8 +186,8 @@ def remember_blobs(root: Path, contents: list, policy: str) -> None:
         entries += [list(content) for content in sorted(tuple(content) for content in contents if _is_content(content))
                     if content not in known]
         held[os.path.realpath(root)] = {"policy": policy, "blobs": entries[-_MOST_LET_IN_BLOBS:]}
-        atomicwrite.replace(let_in_blobs_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
-                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(let_in_blobs_path(), json.dumps(held), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                        at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 

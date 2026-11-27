@@ -36,6 +36,24 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - `saw govern` never deletes a folder named as its holding directory: it refuses one inside any git
   repository or holding files it did not put there, and clears only what it put there.
+- `saw govern` asks before a `git grep` that opens the files it finds in a program (`-O` or
+  `--open-files-in-pager`).
+- `saw govern` asks before a `git push` or `git ls-remote` that names a program to run, however the
+  option is shortened, or that reaches a repository on this machine.
+- saw's git stand-in runs a command directly only when its options, read as git reads them, name no
+  program to run, no file to write, no fetch and no repository on this machine, however they are
+  shortened. A `git push` or `git ls-remote` runs directly only when every address git names for it,
+  from the command or from the remote it would use, is a network address. A command with an option git does not take, or a shortened option that could mean more
+  than one, goes to saw first. Options that start a program you set up,
+  such as signing or your diff tool, still run directly.
+- `saw govern classify` names the git command a line runs when an alias shares that command's name,
+  as git ignores such an alias.
+- saw keeps its records of what it checked and let in only outside every git repository. When it
+  cannot, every check starts over: saw says so once on such a run, and `saw doctor` and `saw govern
+  status` say what to change.
+- `saw govern verdict` answers `let-in` only for a tree whose submodule links saw let in before, so
+  an update that brings a new submodule link is not counted as one saw let in.
+- A governed `git fetch --append` adds to `FETCH_HEAD` as git does, instead of replacing what it held.
 - In a terminal `saw govern install` covers, an update saw holds where there is no one to ask, such
   as in a shell an agent runs, can now be let in: run `saw govern let-in` in a terminal, and saw
   checks the same command again and asks you. The command it printed before could not let it in.
