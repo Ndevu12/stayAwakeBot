@@ -28,6 +28,10 @@ reader, not the mechanism or the weakness it closed.
   waits a bounded time for the answer, to run a command that cannot be checked or to let in an
   update saw held. With no answer the folder stays as it is. `saw capabilities` lists `govern.questions`.
 
+### Changed
+- `saw govern classify` answers faster, most of all in a repository with many worktrees. Its
+  answers are the same.
+
 ## [0.18.3] - 2026-11-27
 
 ### Fixed

@@ -3,6 +3,8 @@
 and attributes that decide which of them apply. Reads configuration as data and never runs it."""
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import dataclasses
 import os
 import stat
@@ -79,6 +81,33 @@ class ExecSurface:
 
 
 
+_LISTED: contextvars.ContextVar[dict | None] = contextvars.ContextVar("saw_config_files_listed", default=None)
+
+
+@contextlib.contextmanager
+def each_file_listed_once():
+    """Within the block, list each configuration file with git once, however its path is spelled,
+    and again after it changes. A block inside another shares the outer one's listings."""
+    if _LISTED.get() is not None:
+        yield
+        return
+    token = _LISTED.set({})
+    try:
+        yield
+    finally:
+        _LISTED.reset(token)
+
+
+def _unchanged_file(path: Path) -> tuple | None:
+    """Name a file and its state: its device and inode with its size and change times. Takes the
+    path. Returns them, or None when the file cannot be looked at."""
+    try:
+        found = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return found.st_dev, found.st_ino, found.st_size, found.st_mtime_ns, found.st_ctime_ns
+
+
 def list_config_file(path: Path) -> tuple[list[tuple[str, str | None]], str | None]:
     """Read one configuration file as data, without following its includes. Takes the file.
     Returns its `(key, value)` pairs in file order and None, or no pairs and why it was not read;
@@ -92,6 +121,21 @@ def list_config_file(path: Path) -> tuple[list[tuple[str, str | None]], str | No
             return [], "too large to read"
     except OSError as exc:
         return [], type(exc).__name__
+    listed = _LISTED.get()
+    state = _unchanged_file(path) if listed is not None else None
+    if state is not None and state in listed:
+        pairs, why = listed[state]
+        return list(pairs), why
+    pairs, why = _listed_by_git(path)
+    if why is None and state is not None and state == _unchanged_file(path):
+        listed[state] = (tuple(pairs), why)
+    return pairs, why
+
+
+def _listed_by_git(path: Path) -> tuple[list[tuple[str, str | None]], str | None]:
+    """List one configuration file with git, without following its includes. Takes the file.
+    Returns its `(key, value)` pairs in file order and None, or no pairs and why git did not read
+    it."""
     res = run(None, ["config", "--file", str(path), "--no-includes", "--list", "-z"],
               timeout=LOCAL_TIMEOUT)
     if res is None:

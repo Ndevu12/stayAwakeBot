@@ -258,12 +258,13 @@ def locate(folder: Path, command: TypedCommand) -> "Location | str":
                    named=dict(command.locations))
         return None if done is None or done.returncode != 0 else done.stdout.splitlines()
 
-    found = answer(["--path-format=absolute", "--absolute-git-dir", "--git-common-dir",
-                    "--is-inside-work-tree", "--show-object-format"])
+    repository = ["--path-format=absolute", "--absolute-git-dir", "--git-common-dir", "--is-inside-work-tree",
+                  "--show-object-format"]
+    both = answer(["--show-toplevel", "--show-prefix", *repository])
+    placed, found = (both[:2], both[2:]) if both and len(both) == 6 else (None, answer(repository))
     if not found or len(found) != 4:
         return "the folder is not in a git repository saw can read"
     git_dir, common_dir, inside, object_format = found
-    placed = answer(["--show-toplevel", "--show-prefix"])
     top = placed[0] if placed else ""
     prefix = placed[1] if placed and len(placed) > 1 and inside == "true" else ""
     if inside == "true" and not top:
@@ -276,28 +277,29 @@ def locate(folder: Path, command: TypedCommand) -> "Location | str":
     if any(not entry.is_absolute() for entry in alternates):
         return "the object directories the command names cannot be read"
     work_tree = Path(top) if top else None
-    folder_repository = _own_repository(work_tree)
+    folder_repository, own_git_dir = _own_repository(work_tree)
     writable = folder_repository is not None and not alternates and _same(
-        Path(paths[1]), Path(common_dir) / "objects") and _is_default(folder_repository, Path(git_dir),
-                                                                       Path(paths[0]))
+        Path(paths[1]), Path(common_dir) / "objects") and _is_default(own_git_dir, Path(git_dir), Path(paths[0]))
     return Location(folder, Path(git_dir), Path(common_dir), work_tree, Path(paths[0]), Path(paths[1]), alternates,
                     prefix, object_format or "sha1", folder_repository, writable)
 
 
-def _own_repository(work_tree: "Path | None") -> "Path | None":
+def _own_repository(work_tree: "Path | None") -> "tuple[Path | None, str]":
     """Tell whether a working tree is the top of the repository git finds there by itself. Takes
-    the working tree. Returns it when it is, else None."""
+    the working tree. Returns it when it is, else None, with the git directory git finds there, ""
+    when it finds none."""
     if work_tree is None:
-        return None
-    top = stdout(work_tree, ["rev-parse", "--show-toplevel"], context=UNTRUSTED).strip()
-    return work_tree if top and _same(Path(top), work_tree) else None
+        return None, ""
+    found = stdout(work_tree, ["rev-parse", "--show-toplevel", "--path-format=absolute", "--absolute-git-dir"],
+                   context=UNTRUSTED).splitlines()
+    top, git_dir = (found[0].strip(), found[1].strip()) if len(found) == 2 else ("", "")
+    return (work_tree if top and _same(Path(top), work_tree) else None), git_dir
 
 
-def _is_default(repository: Path, git_dir: Path, index_file: Path) -> bool:
+def _is_default(found: str, git_dir: Path, index_file: Path) -> bool:
     """Tell whether a git directory and index are the ones git finds for a repository by itself.
-    Takes the repository top, the git directory and the index file. Returns the answer."""
-    found = stdout(repository, ["rev-parse", "--path-format=absolute", "--absolute-git-dir"],
-                   context=UNTRUSTED).strip()
+    Takes the git directory git finds there, the git directory and the index file. Returns the
+    answer."""
     return bool(found) and _same(Path(found), git_dir) and _same(index_file, Path(found) / "index")
 
 
