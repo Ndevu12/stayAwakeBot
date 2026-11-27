@@ -10,6 +10,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use super::Environment;
+use crate::platform;
 
 const LOCAL_TIMEOUT: Duration = Duration::from_secs(60);
 const LOCATION_VARIABLES: [&str; 9] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
@@ -17,7 +18,8 @@ const LOCATION_VARIABLES: [&str; 9] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_D
 const ISOLATION_VARIABLES: [&str; 3] = ["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"];
 const INJECTION_PREFIXES: [&str; 4] = ["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
 const ACTIVATION_VARIABLES: [&str; 2] = ["SAW_GOVERN_SYSTEM", "SAW_GOVERN_HOLDING"];
-const STORED_VIEW: [(&str, &str); 3] = [("GIT_NO_REPLACE_OBJECTS", "1"), ("GIT_GRAFT_FILE", "/dev/null/grafts"), ("GIT_NO_LAZY_FETCH", "1")];
+const STORED_VIEW: [(&str, &str); 2] = [("GIT_NO_REPLACE_OBJECTS", "1"), ("GIT_NO_LAZY_FETCH", "1")];
+const NO_GRAFTS_FILE: &str = "grafts";
 const RUNS_NOTHING: [(&str, &str); 9] = [("core.fsmonitor", "false"), ("diff.external", ""), ("core.pager", "cat"),
     ("core.editor", "false"), ("protocol.allow", "never"), ("gc.auto", "0"), ("maintenance.auto", "false"),
     ("submodule.recurse", "false"), ("credential.helper", "")];
@@ -174,7 +176,7 @@ impl<'a> Git<'a> {
                 out.remove(key);
             }
             out.insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
-            out.insert("GIT_CONFIG_GLOBAL".into(), "/dev/null".into());
+            out.insert("GIT_CONFIG_GLOBAL".into(), platform::NULL_DEVICE.into());
         }
         out.insert("GIT_TERMINAL_PROMPT".into(), "0".into());
         out.insert("SAW_HOOK_DISABLED".into(), "1".into());
@@ -185,6 +187,7 @@ impl<'a> Git<'a> {
         for (key, value) in STORED_VIEW {
             out.insert(key.into(), value.into());
         }
+        out.insert("GIT_GRAFT_FILE".into(), Path::new(platform::NULL_DEVICE).join(NO_GRAFTS_FILE).display().to_string());
         if call.place.is_none() {
             if let Some(parent) = no_hooks.parent() {
                 out.insert("GIT_CEILING_DIRECTORIES".into(), parent.display().to_string());

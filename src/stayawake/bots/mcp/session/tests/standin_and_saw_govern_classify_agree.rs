@@ -1,3 +1,5 @@
+// Unix only: POSIX shell scripts stand in for saw.
+#![cfg(unix)]
 //! The git stand-in sends to saw exactly the command lines `saw govern classify` answers as checked:
 //! both read the same table of command lines, which saw's Python tests read too. A line the stand-in
 //! runs directly may be sent to saw instead when the repository it names cannot be read.

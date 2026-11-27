@@ -86,7 +86,7 @@ fn locate(git: &Git, place: &Path, command: &TypedCommand) -> Result<Found, &'st
         return Err(NOT_A_REPOSITORY);
     }
     let alternates = command.locations.iter().find(|(name, _)| name == "GIT_ALTERNATE_OBJECT_DIRECTORIES").map(|(_, value)| value.as_str()).unwrap_or("");
-    if alternates.split(':').filter(|entry| !entry.is_empty()).any(|entry| !Path::new(entry).is_absolute()) {
+    if alternates.split(crate::platform::PATH_LIST_SEPARATOR).filter(|entry| !entry.is_empty()).any(|entry| !Path::new(entry).is_absolute()) {
         return Err("the object directories the command names cannot be read");
     }
     let top = (lines[2] == "true").then(|| PathBuf::from(&top));

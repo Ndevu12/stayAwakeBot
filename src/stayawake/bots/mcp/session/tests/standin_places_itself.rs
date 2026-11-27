@@ -1,3 +1,5 @@
+// Unix only: the stand-in turns itself on for terminals through POSIX shell startup files.
+#![cfg(unix)]
 //! `saw govern install` / `status` / `uninstall` run the stand-in by its own name with a
 //! subcommand. It places itself as git/gh ahead of the real tools, turns itself on for new shells,
 //! and takes it all back — never touching anything but its own block in a shell file.

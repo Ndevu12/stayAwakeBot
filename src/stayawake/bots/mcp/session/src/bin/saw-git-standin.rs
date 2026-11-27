@@ -16,23 +16,22 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, IsTerminal};
-use std::os::unix::fs::symlink;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
 use std::sync::OnceLock;
 
 use saw_mcp::folder_guard::{self, kept_settings, Fingerprint, RunWith};
 use saw_mcp::git_tables::table;
+use saw_mcp::platform;
 
 fn main() {
     let argv: Vec<String> = env::args().collect();
     let argv0 = argv.first().map(String::as_str).unwrap_or("");
-    let base = Path::new(argv0).file_name().and_then(|s| s.to_str()).unwrap_or("");
-    let base = base.strip_suffix(".exe").unwrap_or(base);
+    let base = invoked_name(argv0);
     // Invoked by its own name (not git/gh) and not asked to impersonate a tool: an admin
     // subcommand managing the placement, or a git or gh command saw must check.
-    let by_its_own_name = base != "git" && base != "gh" && env::var_os("SAW_STANDIN_TOOL").is_none();
+    let by_its_own_name = !platform::same_file_name(&base, "git") && !platform::same_file_name(&base, "gh")
+        && env::var_os("SAW_STANDIN_TOOL").is_none();
     let rest = argv.get(1..).unwrap_or(&[]);
     let (tool, args, must_check) = match rest.first().map(String::as_str) {
         Some(sub) if by_its_own_name && matches!(sub, "install" | "status" | "uninstall") => {
@@ -87,8 +86,9 @@ fn main() {
 /// cannot vouch for running the command directly.
 fn run_with_for(real: &Path, args: &[String]) -> Result<RunWith, String> {
     let folder = env::current_dir().map_err(|error| format!("the current folder cannot be read: {error}"))?;
-    let environ: folder_guard::Environment =
-        env::vars_os().map(|(name, value)| (name.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())).collect();
+    let environ: folder_guard::Environment = env::vars_os()
+        .map(|(name, value)| (platform::environment_key(&name.to_string_lossy()), value.to_string_lossy().into_owned()))
+        .collect();
     if folder_guard::starts_no_program(real, &folder, args, &environ) {
         return Ok(RunWith::default());
     }
@@ -143,14 +143,25 @@ fn named_briefly(names: &[String]) -> String {
 /// The tool this stand-in impersonates, from how it was invoked. A dev/test build falls back to
 /// `SAW_STANDIN_TOOL`.
 fn tool_name(argv0: &str) -> Option<String> {
-    let base = Path::new(argv0).file_name().and_then(|s| s.to_str()).unwrap_or("");
-    let base = base.strip_suffix(".exe").unwrap_or(base);
-    match base {
-        "git" => Some("git".into()),
-        "gh" => Some("gh".into()),
-        _ => env::var("SAW_STANDIN_TOOL").ok().filter(|t| t == "git" || t == "gh"),
+    let base = invoked_name(argv0);
+    match ["git", "gh"].into_iter().find(|tool| platform::same_file_name(&base, tool)) {
+        Some(tool) => Some(tool.into()),
+        None => env::var("SAW_STANDIN_TOOL").ok().filter(|t| t == "git" || t == "gh"),
     }
 }
+
+/// The name a program was invoked by, without its folder or a `.exe` ending. Takes how it was
+/// invoked.
+fn invoked_name(argv0: &str) -> String {
+    let base = Path::new(argv0).file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let stem = base.len().checked_sub(EXE_ENDING.len()).filter(|&at| base.is_char_boundary(at));
+    match stem.filter(|&at| platform::same_file_name(&base[at..], EXE_ENDING)) {
+        Some(at) => base[..at].to_string(),
+        None => base.to_string(),
+    }
+}
+
+const EXE_ENDING: &str = ".exe";
 
 fn governing() -> bool {
     env::var_os("SAW_GOVERN_HOLDING").is_some() || env::var_os("SAW_GOVERN_SYSTEM").is_some()
@@ -1025,22 +1036,24 @@ fn real_tool(tool: &str) -> Option<PathBuf> {
     which(tool, me.as_deref().and_then(|p| p.parent()))
 }
 
+/// Find a program on PATH, never this stand-in. Takes its name and a folder to pass over. Returns
+/// the first file of a name the program can have there that is not this stand-in under any name.
 fn which(program: &str, skip_dir: Option<&Path>) -> Option<PathBuf> {
-    let me = env::current_exe().ok().and_then(|p| fs::canonicalize(p).ok());
+    let me = env::current_exe().ok().and_then(|p| platform::file_id(&p).ok());
+    let skipped = skip_dir.and_then(|dir| platform::file_id(dir).ok());
+    let names = platform::program_file_names(program);
     for dir in env::split_paths(&env::var_os("PATH").unwrap_or_default()) {
-        if Some(dir.as_path()) == skip_dir {
+        if skipped.is_some() && platform::file_id(&dir).ok() == skipped {
             continue;
         }
-        let candidate = dir.join(program);
-        if !candidate.is_file() {
-            continue;
+        for candidate in names.iter().map(|name| dir.join(name)).filter(|candidate| candidate.is_file()) {
+            // Never run this stand-in itself, even reached through a link or a second name for it
+            // that a system placement put first on PATH — that would loop forever.
+            match platform::file_id(&candidate) {
+                Ok(found) if Some(found) != me => return Some(candidate),
+                _ => continue,
+            }
         }
-        // Never run this stand-in itself, even reached through a symlink named `git` or `gh`
-        // that a system placement put first on PATH — that would loop forever.
-        if fs::canonicalize(&candidate).ok().as_ref() == me.as_ref() {
-            continue;
-        }
-        return Some(candidate);
     }
     None
 }
@@ -1048,13 +1061,15 @@ fn which(program: &str, skip_dir: Option<&Path>) -> Option<PathBuf> {
 /// Run git with the settings and environment that keep the folder's own programs from starting.
 /// Takes the real git, the arguments and how to run them. Replaces this process.
 fn run_real_with(real: &Path, args: &[String], run_with: &RunWith) -> ! {
-    let err = Command::new(real).args(&run_with.arguments).args(args).envs(run_with.environment.iter().cloned()).exec();
+    let err = platform::run_in_place_of_this_process(
+        Command::new(real).args(&run_with.arguments).args(args).envs(run_with.environment.iter().cloned()),
+    );
     eprintln!("saw: could not run {}: {err}", real.display());
     exit(127);
 }
 
 fn run_real(real: &Path, args: &[String]) -> ! {
-    let err = Command::new(real).args(args).exec(); // replaces this process on success
+    let err = platform::run_in_place_of_this_process(Command::new(real).args(args));
     eprintln!("saw: could not run {}: {err}", real.display());
     exit(127);
 }
@@ -1174,6 +1189,10 @@ fn admin(sub: &str, args: &[String]) -> i32 {
 }
 
 fn admin_install(saw: Option<String>) -> i32 {
+    if !platform::SHELL_FILES_TURN_ON_TERMINALS {
+        eprintln!("saw govern: turning the check on for every terminal is not available on this system yet; nothing changed.");
+        return 1;
+    }
     let me = match env::current_exe() {
         Ok(p) => p,
         Err(_) => {
@@ -1193,7 +1212,7 @@ fn admin_install(saw: Option<String>) -> i32 {
     for name in SHIM_NAMES {
         let link = shim.join(name);
         let _ = fs::remove_file(&link);
-        if which(name, Some(&shim)).is_some() && symlink(&me, &link).is_ok() {
+        if which(name, Some(&shim)).is_some() && platform::place_link(&me, &link).is_ok() {
             placed.push(name);
         }
     }

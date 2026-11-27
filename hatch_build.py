@@ -16,8 +16,6 @@ from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
-# saw-mcp builds everywhere; saw-git-standin is Unix-only (it uses std::os::unix), so it is left
-# out on Windows, where the editor extension supplies the terminal stand-in instead.
 _BINARIES = ("saw-mcp", "saw-git-standin")
 
 
@@ -32,7 +30,6 @@ class CustomBuildHook(BuildHookInterface):
                        "unavailable until saw is installed where its binaries can be built.")
             return
         manifest = Path(self.root) / "src" / "stayawake" / "bots" / "mcp" / "session" / "Cargo.toml"
-        wanted = [b for b in _BINARIES if b != "saw-git-standin" or sys.platform != "win32"]
         # A release can cross-build the wheel for another CPU on whichever runner is free:
         # the Intel-mac wheel builds on an arm runner, since GitHub no longer provisions
         # Intel ones. SAW_WHEEL_TARGET names the Rust target to cross-compile for, and
@@ -41,7 +38,7 @@ class CustomBuildHook(BuildHookInterface):
         build = ["cargo", "build", "--release", "--manifest-path", str(manifest)]
         if cross_target:
             build += ["--target", cross_target]
-        for name in wanted:
+        for name in _BINARIES:
             build += ["--bin", name]
         try:
             subprocess.run(build, check=True)
@@ -52,11 +49,11 @@ class CustomBuildHook(BuildHookInterface):
         release = release / cross_target / "release" if cross_target else release / "release"
         suffix = ".exe" if sys.platform == "win32" else ""
         include = build_data.setdefault("force_include", {})
-        for name in wanted:
+        for name in _BINARIES:
             built = release / f"{name}{suffix}"
             if built.is_file():
                 include[str(built)] = f"stayawake/bots/mcp/bin/{name}{suffix}"
-        if any(f"stayawake/bots/mcp/bin/{n}" in v for n in wanted for v in include.values()):
+        if any(f"stayawake/bots/mcp/bin/{n}" in v for n in _BINARIES for v in include.values()):
             import sysconfig
             # The bundled binaries are standalone (no Python ABI), so the wheel is platform-specific
             # but works on any Python 3: py3-none-<platform>, not a CPython-ABI tag.
