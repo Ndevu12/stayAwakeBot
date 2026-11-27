@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 from stayawake.bots.security import govern as core, records
-from stayawake.bots.security import govern_held_commands, kept_settings
+from stayawake.bots.security import govern_held, govern_held_commands, govern_status, kept_settings
 from stayawake.bots.mcp.launch import standin_binary
 from stayawake.cli.argtypes import add_deadline_arg, add_progress_arg, progress_requested
 from stayawake.cli.helptext import add_command
@@ -188,8 +188,10 @@ def _do_prepare(a: argparse.Namespace) -> int:
     payload, code = core.prepare(a.repo, a.into, a.tool, _operator_args(a.args), a.config,
                                  deadline=a.deadline, environment=environment,
                                  brings_no_files=a.brings_no_files)
-    if a.no_one_to_ask:
-        govern_held_commands.keep_for_let_in(a.repo, [a.tool, *_operator_args(a.args)], payload)
+    command = [a.tool, *_operator_args(a.args)]
+    kept = a.no_one_to_ask and govern_held_commands.keep_for_let_in(a.repo, command, payload)
+    govern_status.add_held_details(a.repo, govern_held.details(payload, command, os.path.realpath(os.getcwd()),
+                                                               let_in=kept))
     print(json.dumps(versioned("govern", payload)))
     return code
 

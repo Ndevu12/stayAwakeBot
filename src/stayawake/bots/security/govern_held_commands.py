@@ -40,28 +40,29 @@ def let_in_command(repository: str) -> list[str]:
     return ["saw", "govern", "let-in"] + ([] if here == repository else ["--repo", repository])
 
 
-def keep_for_let_in(repo: str, command: list[str], answer: dict) -> None:
+def keep_for_let_in(repo: str, command: list[str], answer: dict) -> bool:
     """Keep the command of an update saw held and offers to let in, replacing the repository's
     earlier one, and add the command that lets it in to the answer's decision. Takes the open folder, the
-    command line with the tool first and prepare's answer. Returns nothing, leaving the answer as
-    it was when the update is not held for a let-in or the command cannot be kept."""
+    command line with the tool first and prepare's answer. Returns whether it was kept. An update
+    not held for a let-in, or a command that cannot be kept, leaves the answer unchanged."""
     decision = answer.get("decision")
     if not (isinstance(decision, dict) and govern_held.LET_IN in (decision.get("choices") or [])):
-        return
+        return False
     if holding_directory.in_a_repository(store()):
-        return
+        return False
     repository = repository_of(repo)
     body = {"version": VERSION, "repository": repository, "ran_in": os.path.realpath(os.getcwd()),
             "command": list(command), "at": now_iso()}
     if refusal_to_run(body):
-        return
+        return False
     try:
         store().mkdir(parents=True, exist_ok=True, mode=0o700)
         kept = atomicwrite.replace(_record_path(repository), json.dumps(body))
     except OSError:
-        return
+        return False
     if kept:
         decision["let_in_later"] = let_in_command(repository)
+    return kept
 
 
 def read(folder: str) -> dict | None:

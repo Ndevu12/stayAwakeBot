@@ -87,7 +87,7 @@ def _subcommands(parser: argparse.ArgumentParser) -> dict[str, argparse.Argument
 def govern_features(commands: dict[str, argparse.ArgumentParser]) -> list[str]:
     """Features a program asks about by name for `govern`'s subcommands. Takes the top-level
     commands. Returns `govern.progress.jsonl` when `prepare` or `apply` writes progress events,
-    `govern.decision` and `govern.conflicts` when `prepare` exists, `govern.apply.outcome`,
+    `govern.decision`, `govern.conflicts` and `govern.status.held_details` when `prepare` exists, `govern.apply.outcome`,
     `govern.lock` and `govern.apply.expect` for `apply`, `govern.classify` and
     `govern.classify.run_with` for `classify`, and `govern.verdict`, `govern.restore` and
     `govern.trust` when those subcommands exist."""
@@ -100,6 +100,7 @@ def govern_features(commands: dict[str, argparse.ArgumentParser]) -> list[str]:
         feats.append("govern.held.decision")
         feats.append("govern.passthrough")
         feats.append("govern.conflicts")
+        feats.append("govern.status.held_details")
     if "prepare" in subs and _takes(subs["prepare"], "--deadline"):
         feats.append("govern.deadline")
     if "apply" in subs:
