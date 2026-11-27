@@ -13,7 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- `saw govern trust` keeps the programs a repository's own git settings start, such as its hooks or
+  a git-crypt filter, after asking you in a terminal; `--forget` stops keeping them.
+
 ### Fixed
+- saw's git stand-in runs a git command it does not check, such as `git status` or `git commit`,
+  with the programs a repository's own git settings start only once you keep them, and without them
+  until then.
 - `saw govern classify` gives a `git config` command that reads its settings from a blob the same
   settings as any other git command it does not check, so a fetch git makes for that blob starts none
   of the folder's programs.
