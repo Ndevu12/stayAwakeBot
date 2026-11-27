@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 
+from stayawake.bots.mcp import launch
 from stayawake.cli._meta import __version__
 from stayawake.cli.argtypes import no_stream_requested
 from stayawake.cli.helptext import add_command
@@ -128,7 +129,8 @@ def prints_json(commands: dict[str, argparse.ArgumentParser], document: str) -> 
 
 def capabilities(commands: dict[str, argparse.ArgumentParser]) -> dict:
     """Describe what this saw supports. Takes the top-level commands by name. Returns the version,
-    each JSON document's schema version, the features and the platform."""
+    each JSON document's schema version, the features, the platform and where saw's git stand-in
+    is installed."""
     documents = {document: version for document, version in SCHEMA_VERSION_OF_EACH_DOCUMENT.items()
                  if prints_json(commands, document)}
     features = [".".join(command_of(document)) + ".json" for document in documents]
@@ -150,6 +152,7 @@ def capabilities(commands: dict[str, argparse.ArgumentParser]) -> dict:
         "schema_versions": documents,
         "features": features,
         "platform": {"os": sys.platform, "supported": saw_runs_here()},
+        "programs": {"git_standin": launch.standin_binary()},
     })
 
 
@@ -163,5 +166,6 @@ def run(a: argparse.Namespace, commands: dict[str, argparse.ArgumentParser]) -> 
              "JSON documents and their schema versions:"]
     lines += [f"  {document:<14}{version}" for document, version in held["schema_versions"].items()]
     lines.append("Features: " + ", ".join(held["features"]))
+    lines.append("Git stand-in: " + (held["programs"]["git_standin"] or "not installed"))
     say("\n".join(lines), no_stream=no_stream_requested(a))
     return exitcodes.CLEAN

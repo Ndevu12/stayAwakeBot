@@ -13,6 +13,9 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- `saw capabilities --json` names where `saw-git-standin` is installed, in `programs.git_standin`.
+
 ## [0.18.3] - 2026-11-27
 
 ### Fixed
