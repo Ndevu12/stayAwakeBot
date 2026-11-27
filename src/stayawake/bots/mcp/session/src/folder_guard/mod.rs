@@ -77,6 +77,11 @@ fn guard_with(git: &git::Git, folder: &Path, args: &[String], environ: &Environm
     };
     let hooks = paths::no_hooks_folder(environ)?;
     git.use_no_hooks_folder(&hooks);
+    let mut first: Vec<git::Call> = locate::reads(&place, &command)[..1].to_vec();
+    if let Some(likely) = surface::likely_git_dir(&place, environ) {
+        first.extend(surface::first_reads(&likely, environ));
+    }
+    git.run_all(&first);
     let git_dir = locate::repository(git, &place, &command, environ)?;
     let listed_at = git_dir.clone().unwrap_or_else(|| place.clone());
     let operator = operator_entries(git, &listed_at).ok_or_else(|| format!("your own git settings did not load in {}", place.display()))?;

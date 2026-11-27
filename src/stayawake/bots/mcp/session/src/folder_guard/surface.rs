@@ -123,15 +123,7 @@ impl<'a> Surface<'a> {
 
     /// Start reading the files a repository's settings live in, all at once.
     fn read_ahead(&self, files: &[PathBuf]) {
-        let calls: Vec<Call> = files
-            .iter()
-            .filter(|path| paths::is_regular_file(path))
-            .map(|path| {
-                let shown = path.display().to_string();
-                Call::settings(None, &["config", "--file", &shown, "--no-includes", "--list", "-z"])
-            })
-            .collect();
-        self.git.run_all(&calls);
+        self.git.run_all(&file_reads(files));
     }
 
     /// Read a configuration file and every file it includes, each conditional include taken.
@@ -213,20 +205,12 @@ impl<'a> Surface<'a> {
         let state = Call::repository(place, &["rev-parse", "--is-bare-repository", "--show-toplevel"]);
         let bare = Call::repository(place, &["rev-parse", "--is-bare-repository"]);
         let listing = Call::settings(Some(place), &["config", "--list", "--show-origin", "--show-scope", "-z"]);
-        self.git.run_all(&[state.clone(), bare.clone(), listing.clone()]);
-        let state = self.git.answer(&state);
-        let toplevel = match state.succeeded() {
-            Some(out) => out.split(|byte| *byte == b'\n').nth(1).filter(|line| !line.is_empty())
-                .map(|line| PathBuf::from(String::from_utf8_lossy(line).into_owned())),
-            None => {
-                let bare = self.git.answer(&bare);
-                match bare.code {
-                    None => return None,
-                    Some(0) => None,
-                    Some(_) => return Some(Reported { files: Vec::new(), hooks_paths: Vec::new(), toplevel: None, git_runs_here: false }),
-                }
-            }
-        };
+        self.git.run_all(&[bare.clone(), listing.clone()]);
+        match self.git.answer(&bare).code {
+            None => return None,
+            Some(0) => {}
+            Some(_) => return Some(Reported { files: Vec::new(), hooks_paths: Vec::new(), toplevel: None, git_runs_here: false }),
+        }
         let listed = self.git.answer(&listing);
         let listed = listed.succeeded()?;
         let fields: Vec<&[u8]> = listed.split(|byte| *byte == 0).collect();
@@ -246,7 +230,12 @@ impl<'a> Surface<'a> {
             sets_hooks_path = sets_hooks_path || String::from_utf8_lossy(key).to_lowercase() == "core.hookspath";
         }
         let mut hooks_paths = Vec::new();
+        let mut toplevel = None;
         if sets_hooks_path {
+            toplevel = self.git.answer(&state).succeeded().and_then(|out| {
+                out.split(|byte| *byte == b'\n').nth(1).filter(|line| !line.is_empty())
+                    .map(|line| PathBuf::from(String::from_utf8_lossy(line).into_owned()))
+            });
             let expanded = self.git.answer(&Call::settings(Some(place), &["config", "--type=path", "--show-scope", "-z", "--get-all", "core.hookspath"]));
             let expanded = match expanded.succeeded() {
                 Some(out) => out.to_vec(),
@@ -552,6 +541,32 @@ impl<'a> Surface<'a> {
             })
             .collect()
     }
+}
+
+fn file_reads(files: &[PathBuf]) -> Vec<Call> {
+    files
+        .iter()
+        .filter(|path| paths::is_regular_file(path))
+        .map(|path| {
+            let shown = path.display().to_string();
+            Call::settings(None, &["config", "--file", &shown, "--no-includes", "--list", "-z"])
+        })
+        .collect()
+}
+
+/// The reads the reading of a repository starts with. Takes the git directory and the environment.
+pub fn first_reads(git_dir: &Path, environ: &Environment) -> Vec<Call> {
+    let common_dir = common_dir_of(git_dir, environ);
+    let mut reads = file_reads(&[common_dir.join("config"), common_dir.join("config.worktree"), git_dir.join("config.worktree")]);
+    reads.push(Call::repository(git_dir, &["rev-parse", "--is-bare-repository"]));
+    reads.push(Call::settings(Some(git_dir), &["config", "--list", "--show-origin", "--show-scope", "-z"]));
+    reads
+}
+
+/// The git directory git most likely finds for a folder: the first `.git` at or above it. Returns
+/// it, or None when there is none.
+pub fn likely_git_dir(place: &Path, environ: &Environment) -> Option<PathBuf> {
+    paths::real_path(place).ancestors().find_map(|at| git_dir_of(at, environ))
 }
 
 /// Split `git config --list -z` output into keys and values, None for a bare key.

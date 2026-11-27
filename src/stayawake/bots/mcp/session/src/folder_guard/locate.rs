@@ -45,17 +45,21 @@ fn asking(command: &TypedCommand, place: &Path, args: &[&str]) -> Call {
 /// Ask git where the command's repository is. Returns its git directory and common directory, or
 /// why git cannot find one.
 fn locate(git: &Git, place: &Path, command: &TypedCommand) -> Result<(PathBuf, PathBuf), &'static str> {
-    let found = asking(command, place, &["rev-parse", "--path-format=absolute", "--absolute-git-dir", "--git-common-dir",
-        "--is-inside-work-tree", "--show-object-format", "--git-path", "index", "--git-path", "objects"]);
-    let placed = asking(command, place, &["rev-parse", "--show-toplevel", "--show-prefix"]);
-    git.run_all(&[found.clone(), placed.clone()]);
-    let found = git.answer(&found);
-    let lines = split_lines(&found.text());
-    if found.succeeded().is_none() || lines.len() != 6 {
-        return Err(NOT_A_REPOSITORY);
-    }
-    let placed = git.answer(&placed);
-    let top = if placed.succeeded().is_some() { split_lines(&placed.text()).into_iter().next().unwrap_or_default() } else { String::new() };
+    let [inside_a_tree, found, placed] = reads(place, command);
+    let together = git.answer(&inside_a_tree);
+    let together_lines = split_lines(&together.text());
+    let (lines, top) = if together.succeeded().is_some() && together_lines.len() >= 7 {
+        (together_lines[..6].to_vec(), together_lines[6].clone())
+    } else {
+        git.run_all(&[found.clone(), placed.clone()]);
+        let found = git.answer(&found);
+        let lines = split_lines(&found.text());
+        if found.succeeded().is_none() || lines.len() != 6 {
+            return Err(NOT_A_REPOSITORY);
+        }
+        let placed = git.answer(&placed);
+        (lines, if placed.succeeded().is_some() { split_lines(&placed.text()).into_iter().next().unwrap_or_default() } else { String::new() })
+    };
     if lines[2] == "true" && top.is_empty() {
         return Err(NOT_A_REPOSITORY);
     }
@@ -64,6 +68,15 @@ fn locate(git: &Git, place: &Path, command: &TypedCommand) -> Result<(PathBuf, P
         return Err("the object directories the command names cannot be read");
     }
     Ok((PathBuf::from(&lines[0]), PathBuf::from(&lines[1])))
+}
+
+/// The reads that find the command's repository: one that answers all at once inside a working
+/// tree, and the two that answer outside one. Takes the folder it runs in and the command.
+pub fn reads(place: &Path, command: &TypedCommand) -> [Call; 3] {
+    const FOUND: [&str; 10] = ["rev-parse", "--path-format=absolute", "--absolute-git-dir", "--git-common-dir",
+        "--is-inside-work-tree", "--show-object-format", "--git-path", "index", "--git-path", "objects"];
+    let together: Vec<&str> = FOUND.iter().copied().chain(["--show-toplevel", "--show-prefix"]).collect();
+    [asking(command, place, &together), asking(command, place, &FOUND), asking(command, place, &["rev-parse", "--show-toplevel", "--show-prefix"])]
 }
 
 /// Split text into lines the way Python's `str.splitlines` does for `\n`, `\r\n` and `\r`.
