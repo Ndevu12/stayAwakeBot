@@ -130,8 +130,8 @@ files on this machine or one that names a program to run. A command that points 
 `core.hooksPath` on its command line or in a configuration file its environment names, that lets a push change your folder's files, or that copies hooks from a folder in
 a working tree into a new repository, asks you first too. A `gh` command that names its repository with `-R` is checked like any other. Open a new terminal, or
 source the file the command names, for it to take effect.
-On Windows, saw checks the terminals the editor extension opens; `saw govern install` does not cover
-other Windows terminals yet.
+On Windows, `saw govern install` does not cover terminals yet. An editor that puts saw's git
+stand-in in front of git gets the same checks there as on macOS and Linux.
 
 In a repository with no working tree, such as a bare repository or a mirror clone, git runs as
 typed: a fetch, `git fetch --prune`, `git remote update` or `git gc` there runs as it would without
@@ -155,6 +155,13 @@ it again and asks you whether to let the update in. Nothing is let in without yo
 needs a person at a terminal, and `SAW_GOVERN_DECISION` does not apply to it. saw keeps only the command, the folder it ran in and when, never the
 files, and only the latest one for each repository. Run it from any folder in that repository, or
 add `--repo <folder>` from outside it.
+
+Your editor shows each check from the record saw keeps for the open folder. For a held update that
+record also carries what the terminal shows: `findings`, each with the `signature_id`, `severity`,
+`path` and `description` that `saw scan --json` gives it; `command`, the `argv` as typed and the
+`folder` it ran in; `next_steps`; and `let_in`, true when `saw govern let-in` reviews this update.
+An update that is not held carries none of them. `saw capabilities` lists
+`govern.status.held_details` when saw writes them.
 
 Commands saw does not check, such as `git status`, `git commit` and `git push`, run as typed. When
 the repository's own git settings start programs, such as its hooks, a filter like git-crypt's or

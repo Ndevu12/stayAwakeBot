@@ -14,8 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
-- saw's git stand-in now ships on Windows, so the editor extension checks an incoming update in its
-  Windows terminals as it does on macOS and Linux.
+- The record your editor reads about a `saw govern` check now carries, for a held update, what the
+  terminal shows: the findings, the command and the folder it ran in, the next steps, and whether
+  `saw govern let-in` reviews it. `saw capabilities` lists `govern.status.held_details`.
+- saw's git stand-in, `saw-git-standin`, now ships on Windows, so an editor can put it in front of
+  git there as on macOS and Linux. `saw govern install` does not cover Windows terminals yet.
 
 ## [0.18.3] - 2026-11-27
 
