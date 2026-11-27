@@ -13,6 +13,15 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- `saw govern trust` keeps the programs a repository's own git settings start, such as its hooks or
+  a git-crypt filter, after asking you in a terminal; `--forget` stops keeping them.
+
+### Fixed
+- saw's git stand-in runs a git command it does not check, such as `git status` or `git commit`,
+  with the programs a repository's own git settings start only once you keep them, and without them
+  until then.
+
 ## [0.18.1] - 2026-11-27
 
 ### Fixed
