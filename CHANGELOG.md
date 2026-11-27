@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-27
+
 ### Fixed
 - `saw govern` checks every file an update rewrites, also one rewritten with the same size in the
   same second it prepared the check.
@@ -2184,7 +2186,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.7...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.7...v0.18.0
 [0.17.7]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.6...v0.17.7
 [0.17.6]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.5...v0.17.6
 [0.17.5]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.4...v0.17.5
