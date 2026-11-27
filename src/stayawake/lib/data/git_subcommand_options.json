@@ -1,0 +1,571 @@
+{
+  "read_from": "git version 2.55.0 --help-all, the options git's source adds by v2.56.1 (each entry's captured_at), and git's Documentation at v2.34.0 and v2.56.1",
+  "every_subcommand_takes": ["-h", "--help", "--help-all", "--git-completion-helper", "--git-completion-helper-all"],
+  "option_groups": {
+    "revisions_and_diffs": {
+      "takes_the_next_word": ["--after", "--anchored", "--author", "--before", "--color-moved-ws", "--committer", "--date", "--diff-algorithm", "--diff-filter", "--diff-merges", "--dst-prefix", "--encoding", "--exclude", "--exclude-hidden", "--filter", "--find-object", "--format", "--glob", "--graph-lane-limit", "--grep", "--grep-reflog", "--ignore-matching-lines", "--inter-hunk-context", "--line-prefix", "--max-age", "--max-count", "--max-count-oldest", "--max-depth", "--max-memory", "--max-parents", "--min-age", "--min-parents", "--missing", "--output", "--output-indicator-context", "--output-indicator-new", "--output-indicator-old", "--progress", "--rotate-to", "--since", "--since-as-filter", "--skip", "--skip-to", "--src-prefix", "--stat-count", "--stat-graph-width", "--stat-name-width", "--stat-width", "--until", "--word-diff-regex", "--ws-error-highlight", "-G", "-I", "-O", "-S", "-l", "-n"],
+      "takes_the_rest_of_its_word": ["-B", "-C", "-M", "-U", "-X"],
+      "takes_no_word": ["--abbrev", "--abbrev-commit", "--all", "--all-match", "--alternate-refs", "--always", "--ancestry-path", "--author-date-order", "--base", "--basic-regexp", "--binary", "--bisect", "--bisect-all", "--bisect-vars", "--boundary", "--branches", "--break-rewrites", "--cached", "--cc", "--check", "--cherry", "--cherry-mark", "--cherry-pick", "--children", "--color", "--color-moved", "--color-words", "--combined-all-paths", "--commit-header", "--compact-summary", "--count", "--cumulative", "--date-order", "--dd", "--default-prefix", "--dense", "--dirstat", "--dirstat-by-file", "--disk-usage", "--do-walk", "--exclude-first-parent-only", "--exclude-promisor-objects", "--exit-code", "--expand-tabs", "--ext-diff", "--extended-regexp", "--filter-print-omitted", "--filter-provided-objects", "--find-copies", "--find-copies-harder", "--find-renames", "--first-parent", "--fixed-strings", "--follow", "--full-history", "--full-index", "--function-context", "--graph", "--graph-indent", "--header", "--histogram", "--ignore-all-space", "--ignore-blank-lines", "--ignore-cr-at-eol", "--ignore-missing", "--ignore-space-at-eol", "--ignore-space-change", "--ignore-submodules", "--in-commit-order", "--indent-heuristic", "--indexed-objects", "--invert-grep", "--irreversible-delete", "--ita-invisible-in-index", "--ita-visible-in-index", "--left-only", "--left-right", "--maximal-only", "--merge", "--merge-base", "--merges", "--minimal", "--missing-only", "--name-only", "--name-status", "--no-abbrev", "--no-abbrev-commit", "--no-color", "--no-color-moved", "--no-color-moved-ws", "--no-commit-header", "--no-commit-id", "--no-compact-summary", "--no-diff-merges", "--no-exit-code", "--no-expand-tabs", "--no-ext-diff", "--no-filter", "--no-find-copies-harder", "--no-follow", "--no-full-index", "--no-function-context", "--no-graph-indent", "--no-ignore-matching-lines", "--no-indent-heuristic", "--no-index", "--no-max-memory", "--no-max-parents", "--no-merges", "--no-min-parents", "--no-notes", "--no-object-names", "--no-patch", "--no-prefix", "--no-quiet", "--no-relative", "--no-remerge-diff", "--no-rename-empty", "--no-renames", "--no-standard-notes", "--no-stat", "--no-text", "--no-textconv", "--no-walk", "--not", "--notes", "--numstat", "--object-names", "--objects", "--objects-edge", "--objects-edge-aggressive", "--oneline", "--ours", "--parents", "--patch", "--patch-with-raw", "--patch-with-stat", "--patience", "--perl-regexp", "--pickaxe-all", "--pickaxe-regex", "--pretty", "--quiet", "--raw", "--reflog", "--regexp-ignore-case", "--relative", "--relative-date", "--remerge-diff", "--remotes", "--remove-empty", "--rename-empty", "--reverse", "--right-only", "--root", "--shortstat", "--show-linear-break", "--show-notes", "--show-notes-by-default", "--show-pulls", "--show-signature", "--simplify-by-decoration", "--simplify-merges", "--single-worktree", "--sparse", "--staged", "--standard-notes", "--stat", "--stdin", "--submodule", "--summary", "--tags", "--text", "--textconv", "--theirs", "--timestamp", "--topo-order", "--unified", "--unpacked", "--use-bitmap-index", "--walk-reflogs", "--word-diff", "-0", "-1", "-2", "-3", "-D", "-E", "-F", "-NUM", "-P", "-R", "-W", "-a", "-b", "-c", "-g", "-i", "-m", "-p", "-q", "-r", "-s", "-t", "-u", "-v", "-w", "-z"],
+      "writes_a_file": ["--output"]
+    }
+  },
+  "subcommands": {
+    "add": {
+      "takes_the_next_word": ["--chmod", "--inter-hunk-context", "--pathspec-from-file", "--unified", "-U"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--auto-advance", "--dry-run", "--edit", "--force", "--ignore-errors", "--ignore-missing", "--ignore-removal", "--intent-to-add", "--interactive", "--no-all", "--no-auto-advance", "--no-chmod", "--no-dry-run", "--no-edit", "--no-force", "--no-ignore-errors", "--no-ignore-missing", "--no-ignore-removal", "--no-intent-to-add", "--no-interactive", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-refresh", "--no-renormalize", "--no-resolved", "--no-sparse", "--no-update", "--no-verbose", "--no-warn-embedded-repo", "--patch", "--pathspec-file-nul", "--refresh", "--renormalize", "--resolved", "--sparse", "--update", "--verbose", "--warn-embedded-repo", "-A", "-N", "-e", "-f", "-i", "-n", "-p", "-u", "-v"],
+      "captured_at": {"v2.56.1": ["--no-resolved", "--resolved"]}
+    },
+    "annotate": {
+      "takes_the_next_word": ["--contents", "--diff-algorithm", "--ignore-rev", "--ignore-revs-file", "-L", "-S"],
+      "takes_the_rest_of_its_word": ["-C", "-M"],
+      "takes_no_word": ["--abbrev", "--color-by-age", "--color-lines", "--incremental", "--line-porcelain", "--minimal", "--no-abbrev", "--no-color-by-age", "--no-color-lines", "--no-contents", "--no-ignore-rev", "--no-ignore-revs-file", "--no-incremental", "--no-line-porcelain", "--no-minimal", "--no-porcelain", "--no-progress", "--no-root", "--no-score-debug", "--no-show-email", "--no-show-name", "--no-show-number", "--no-show-stats", "--porcelain", "--progress", "--root", "--score-debug", "--show-email", "--show-name", "--show-number", "--show-stats", "-b", "-c", "-e", "-f", "-l", "-n", "-p", "-s", "-t", "-w"],
+      "with": ["revisions_and_diffs"]
+    },
+    "blame": {
+      "takes_the_next_word": ["--contents", "--diff-algorithm", "--ignore-rev", "--ignore-revs-file", "-L", "-S"],
+      "takes_the_rest_of_its_word": ["-C", "-M"],
+      "takes_no_word": ["--abbrev", "--color-by-age", "--color-lines", "--incremental", "--line-porcelain", "--minimal", "--no-abbrev", "--no-color-by-age", "--no-color-lines", "--no-contents", "--no-ignore-rev", "--no-ignore-revs-file", "--no-incremental", "--no-line-porcelain", "--no-minimal", "--no-porcelain", "--no-progress", "--no-root", "--no-score-debug", "--no-show-email", "--no-show-name", "--no-show-number", "--no-show-stats", "--porcelain", "--progress", "--root", "--score-debug", "--show-email", "--show-name", "--show-number", "--show-stats", "-b", "-c", "-e", "-f", "-l", "-n", "-p", "-s", "-t", "-w"],
+      "with": ["revisions_and_diffs"]
+    },
+    "branch": {
+      "takes_the_next_word": ["--contains", "--delete-merged", "--forked", "--format", "--merged", "--no-contains", "--no-merged", "--points-at", "--set-upstream-to", "--sort", "--with", "--without", "-u"],
+      "takes_the_rest_of_its_word": ["-t"],
+      "takes_no_word": ["--abbrev", "--all", "--color", "--column", "--copy", "--create-reflog", "--delete", "--dry-run", "--edit-description", "--force", "--ignore-case", "--list", "--move", "--no-abbrev", "--no-color", "--no-column", "--no-copy", "--no-create-reflog", "--no-delete", "--no-dry-run", "--no-edit-description", "--no-force", "--no-format", "--no-ignore-case", "--no-list", "--no-move", "--no-omit-empty", "--no-points-at", "--no-quiet", "--no-recurse-submodules", "--no-set-upstream", "--no-set-upstream-to", "--no-show-current", "--no-sort", "--no-track", "--no-unset-upstream", "--no-verbose", "--omit-empty", "--quiet", "--recurse-submodules", "--remotes", "--set-upstream", "--show-current", "--track", "--unset-upstream", "--verbose", "-C", "-D", "-M", "-a", "-c", "-d", "-f", "-i", "-l", "-m", "-q", "-r", "-v"],
+      "captured_at": {"v2.56.1": ["--delete-merged", "--dry-run", "--forked", "--no-dry-run"]}
+    },
+    "cat-file": {
+      "takes_the_next_word": ["--filter", "--path"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--allow-unknown-type", "--batch", "--batch-all-objects", "--batch-check", "--batch-command", "--buffer", "--filters", "--follow-symlinks", "--mailmap", "--no-allow-unknown-type", "--no-buffer", "--no-filter", "--no-follow-symlinks", "--no-mailmap", "--no-path", "--no-unordered", "--no-use-mailmap", "--textconv", "--unordered", "--use-mailmap", "-Z", "-e", "-p", "-s", "-t", "-z"]
+    },
+    "check-attr": {
+      "takes_the_next_word": ["--source"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--cached", "--no-all", "--no-cached", "--no-source", "--no-stdin", "--stdin", "-a", "-z"]
+    },
+    "check-ignore": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--index", "--no-index", "--no-non-matching", "--no-quiet", "--no-stdin", "--no-verbose", "--non-matching", "--quiet", "--stdin", "--verbose", "-n", "-q", "-v", "-z"]
+    },
+    "check-mailmap": {
+      "takes_the_next_word": ["--mailmap-blob", "--mailmap-file"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--no-mailmap-blob", "--no-mailmap-file", "--no-stdin", "--stdin"]
+    },
+    "check-ref-format": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--allow-onelevel", "--branch", "--no-allow-onelevel", "--normalize", "--print", "--refspec-pattern"],
+      "lists_its_options": false
+    },
+    "checkout": {
+      "takes_the_next_word": ["--conflict", "--inter-hunk-context", "--orphan", "--pathspec-from-file", "--unified", "-B", "-U", "-b"],
+      "takes_the_rest_of_its_word": ["-t"],
+      "takes_no_word": ["--auto-advance", "--detach", "--force", "--guess", "--ignore-other-worktrees", "--ignore-skip-worktree-bits", "--merge", "--no-auto-advance", "--no-conflict", "--no-detach", "--no-force", "--no-guess", "--no-ignore-other-worktrees", "--no-ignore-skip-worktree-bits", "--no-merge", "--no-orphan", "--no-ours", "--no-overlay", "--no-overwrite-ignore", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-progress", "--no-quiet", "--no-recurse-submodules", "--no-theirs", "--no-track", "--ours", "--overlay", "--overwrite-ignore", "--patch", "--pathspec-file-nul", "--progress", "--quiet", "--recurse-submodules", "--theirs", "--track", "-2", "-3", "-d", "-f", "-l", "-m", "-p", "-q"]
+    },
+    "cherry": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--abbrev", "--no-abbrev", "--no-verbose", "--verbose", "-v"]
+    },
+    "cherry-pick": {
+      "takes_the_next_word": ["--cleanup", "--empty", "--mainline", "--strategy", "--strategy-option", "-X", "-m"],
+      "takes_the_rest_of_its_word": ["-S"],
+      "takes_no_word": ["--abort", "--allow-empty", "--allow-empty-message", "--commit", "--continue", "--edit", "--ff", "--gpg-sign", "--keep-redundant-commits", "--no-abort", "--no-allow-empty", "--no-allow-empty-message", "--no-cleanup", "--no-commit", "--no-continue", "--no-edit", "--no-ff", "--no-gpg-sign", "--no-keep-redundant-commits", "--no-mainline", "--no-quit", "--no-rerere-autoupdate", "--no-signoff", "--no-skip", "--no-strategy", "--no-strategy-option", "--quit", "--rerere-autoupdate", "--signoff", "--skip", "-e", "-n", "-r", "-s", "-x"]
+    },
+    "clean": {
+      "takes_the_next_word": ["--exclude", "-e"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--dry-run", "--force", "--interactive", "--no-dry-run", "--no-force", "--no-interactive", "--no-quiet", "--quiet", "-X", "-d", "-f", "-i", "-n", "-q", "-x"]
+    },
+    "clone": {
+      "takes_the_next_word": ["--branch", "--bundle-uri", "--config", "--depth", "--filter", "--jobs", "--origin", "--ref-format", "--reference", "--reference-if-able", "--revision", "--separate-git-dir", "--server-option", "--shallow-exclude", "--shallow-since", "--template", "--upload-pack", "-b", "-c", "-j", "-o", "-u"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--also-filter-submodules", "--bare", "--checkout", "--dissociate", "--hardlinks", "--ipv4", "--ipv6", "--local", "--mirror", "--naked", "--no-also-filter-submodules", "--no-bare", "--no-branch", "--no-bundle-uri", "--no-checkout", "--no-config", "--no-depth", "--no-dissociate", "--no-filter", "--no-hardlinks", "--no-ipv4", "--no-ipv6", "--no-jobs", "--no-local", "--no-mirror", "--no-naked", "--no-origin", "--no-progress", "--no-quiet", "--no-recurse-submodules", "--no-recursive", "--no-ref-format", "--no-reference", "--no-reference-if-able", "--no-reject-shallow", "--no-remote-submodules", "--no-revision", "--no-separate-git-dir", "--no-server-option", "--no-shallow-exclude", "--no-shallow-since", "--no-shallow-submodules", "--no-shared", "--no-single-branch", "--no-sparse", "--no-tags", "--no-template", "--no-upload-pack", "--no-verbose", "--progress", "--quiet", "--recurse-submodules", "--recursive", "--reject-shallow", "--remote-submodules", "--shallow-submodules", "--shared", "--single-branch", "--sparse", "--tags", "--verbose", "-4", "-6", "-l", "-n", "-q", "-s", "-v"]
+    },
+    "commit": {
+      "takes_the_next_word": ["--author", "--cleanup", "--date", "--file", "--fixup", "--inter-hunk-context", "--message", "--pathspec-from-file", "--reedit-message", "--reuse-message", "--squash", "--template", "--trailer", "--unified", "-C", "-F", "-U", "-c", "-m", "-t"],
+      "takes_the_rest_of_its_word": ["-S", "-u"],
+      "takes_no_word": ["--ahead-behind", "--all", "--allow-empty", "--allow-empty-message", "--amend", "--branch", "--dry-run", "--edit", "--gpg-sign", "--include", "--interactive", "--long", "--no-ahead-behind", "--no-all", "--no-allow-empty", "--no-allow-empty-message", "--no-amend", "--no-author", "--no-branch", "--no-cleanup", "--no-date", "--no-dry-run", "--no-edit", "--no-file", "--no-fixup", "--no-gpg-sign", "--no-include", "--no-interactive", "--no-long", "--no-message", "--no-null", "--no-only", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-porcelain", "--no-post-rewrite", "--no-quiet", "--no-reedit-message", "--no-reset-author", "--no-reuse-message", "--no-short", "--no-signoff", "--no-squash", "--no-status", "--no-template", "--no-trailer", "--no-untracked-files", "--no-verbose", "--no-verify", "--null", "--only", "--patch", "--pathspec-file-nul", "--porcelain", "--post-rewrite", "--quiet", "--reset-author", "--short", "--signoff", "--status", "--untracked-files", "--verbose", "--verify", "-a", "-e", "-i", "-n", "-o", "-p", "-q", "-s", "-v", "-z"]
+    },
+    "commit-tree": {
+      "takes_the_next_word": ["-F", "-m", "-p"],
+      "takes_the_rest_of_its_word": ["-S"],
+      "takes_no_word": ["--gpg-sign", "--no-gpg-sign"]
+    },
+    "count-objects": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--human-readable", "--no-human-readable", "--no-verbose", "--verbose", "-H", "-v"]
+    },
+    "credential": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "lists_its_options": false
+    },
+    "credential-cache": {
+      "takes_the_next_word": ["--socket", "--timeout"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--no-socket", "--no-timeout"],
+      "writes_a_file": ["--socket"]
+    },
+    "credential-store": {
+      "takes_the_next_word": ["--file"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--no-file"],
+      "writes_a_file": ["--file"]
+    },
+    "describe": {
+      "takes_the_next_word": ["--candidates", "--exclude", "--match"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--abbrev", "--all", "--always", "--broken", "--contains", "--debug", "--dirty", "--exact-match", "--first-parent", "--long", "--no-abbrev", "--no-all", "--no-always", "--no-broken", "--no-candidates", "--no-contains", "--no-debug", "--no-dirty", "--no-exact-match", "--no-exclude", "--no-first-parent", "--no-long", "--no-match", "--no-tags", "--tags"]
+    },
+    "diff": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "with": ["revisions_and_diffs"],
+      "lists_its_options": false
+    },
+    "diff-files": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "with": ["revisions_and_diffs"],
+      "lists_its_options": false
+    },
+    "diff-index": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "with": ["revisions_and_diffs"],
+      "lists_its_options": false
+    },
+    "diff-tree": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "with": ["revisions_and_diffs"],
+      "lists_its_options": false
+    },
+    "fetch": {
+      "takes_the_next_word": ["--deepen", "--depth", "--filter", "--jobs", "--negotiation-include", "--negotiation-restrict", "--negotiation-tip", "--recurse-submodules-default", "--refmap", "--server-option", "--shallow-exclude", "--shallow-since", "--submodule-prefix", "--upload-pack", "-j", "-o"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--append", "--atomic", "--auto-gc", "--auto-maintenance", "--dry-run", "--force", "--ipv4", "--ipv6", "--keep", "--multiple", "--negotiate-only", "--no-all", "--no-append", "--no-atomic", "--no-auto-gc", "--no-auto-maintenance", "--no-deepen", "--no-depth", "--no-dry-run", "--no-filter", "--no-force", "--no-jobs", "--no-keep", "--no-multiple", "--no-negotiate-only", "--no-negotiation-include", "--no-negotiation-restrict", "--no-negotiation-tip", "--no-porcelain", "--no-prefetch", "--no-progress", "--no-prune", "--no-prune-tags", "--no-quiet", "--no-recurse-submodules", "--no-recurse-submodules-default", "--no-server-option", "--no-set-upstream", "--no-shallow-exclude", "--no-shallow-since", "--no-show-forced-updates", "--no-stdin", "--no-submodule-prefix", "--no-tags", "--no-update-head-ok", "--no-update-shallow", "--no-upload-pack", "--no-verbose", "--no-write-commit-graph", "--no-write-fetch-head", "--porcelain", "--prefetch", "--progress", "--prune", "--prune-tags", "--quiet", "--recurse-submodules", "--refetch", "--set-upstream", "--show-forced-updates", "--stdin", "--tags", "--unshallow", "--update-head-ok", "--update-shallow", "--verbose", "--write-commit-graph", "--write-fetch-head", "-4", "-6", "-P", "-a", "-f", "-k", "-m", "-n", "-p", "-q", "-t", "-u", "-v"]
+    },
+    "for-each-ref": {
+      "takes_the_next_word": ["--contains", "--count", "--exclude", "--format", "--merged", "--no-contains", "--no-merged", "--points-at", "--sort", "--start-after"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--color", "--ignore-case", "--include-root-refs", "--no-color", "--no-count", "--no-exclude", "--no-format", "--no-ignore-case", "--no-include-root-refs", "--no-omit-empty", "--no-perl", "--no-points-at", "--no-python", "--no-shell", "--no-sort", "--no-start-after", "--no-stdin", "--no-tcl", "--omit-empty", "--perl", "--python", "--shell", "--stdin", "--tcl", "-p", "-s"]
+    },
+    "fsck": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--cache", "--connectivity-only", "--dangling", "--full", "--lost-found", "--name-objects", "--no-cache", "--no-connectivity-only", "--no-dangling", "--no-full", "--no-lost-found", "--no-name-objects", "--no-progress", "--no-references", "--no-reflogs", "--no-root", "--no-strict", "--no-tags", "--no-unreachable", "--no-verbose", "--progress", "--references", "--reflogs", "--root", "--strict", "--tags", "--unreachable", "--verbose", "-v"]
+    },
+    "gc": {
+      "takes_the_next_word": ["--expire-to", "--max-cruft-size"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--aggressive", "--auto", "--cruft", "--detach", "--force", "--keep-largest-pack", "--no-aggressive", "--no-auto", "--no-cruft", "--no-detach", "--no-expire-to", "--no-force", "--no-keep-largest-pack", "--no-prune", "--no-quiet", "--no-skip-foreground-tasks", "--prune", "--quiet", "--skip-foreground-tasks", "-q"],
+      "writes_a_file": ["--expire-to"]
+    },
+    "grep": {
+      "takes_the_next_word": ["--after-context", "--before-context", "--context", "--max-count", "--max-depth", "--threads", "-A", "-B", "-C", "-e", "-f", "-m"],
+      "takes_the_rest_of_its_word": ["-O"],
+      "takes_no_word": ["--all-match", "--and", "--basic-regexp", "--break", "--cached", "--color", "--column", "--count", "--exclude-standard", "--ext-grep", "--extended-regexp", "--files-with-matches", "--files-without-match", "--fixed-strings", "--full-name", "--function-context", "--heading", "--ignore-case", "--index", "--invert-match", "--line-number", "--name-only", "--no-all-match", "--no-basic-regexp", "--no-break", "--no-cached", "--no-color", "--no-column", "--no-context", "--no-count", "--no-exclude-standard", "--no-ext-grep", "--no-extended-regexp", "--no-files-with-matches", "--no-files-without-match", "--no-fixed-strings", "--no-full-name", "--no-function-context", "--no-heading", "--no-ignore-case", "--no-index", "--no-invert-match", "--no-line-number", "--no-max-count", "--no-name-only", "--no-null", "--no-only-matching", "--no-open-files-in-pager", "--no-perl-regexp", "--no-quiet", "--no-recurse-submodules", "--no-recursive", "--no-show-function", "--no-text", "--no-textconv", "--no-threads", "--no-untracked", "--no-word-regexp", "--not", "--null", "--only-matching", "--open-files-in-pager", "--or", "--perl-regexp", "--quiet", "--recurse-submodules", "--recursive", "--show-function", "--text", "--textconv", "--untracked", "--word-regexp", "-E", "-F", "-G", "-H", "-I", "-L", "-NUM", "-P", "-W", "-a", "-c", "-h", "-i", "-l", "-n", "-o", "-p", "-q", "-r", "-v", "-w", "-z"],
+      "runs_a_program": ["-O", "--open-files-in-pager"]
+    },
+    "hash-object": {
+      "takes_the_next_word": ["--path", "-t"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--filters", "--literally", "--no-filters", "--no-literally", "--no-path", "--no-stdin", "--no-stdin-paths", "--stdin", "--stdin-paths", "-w"]
+    },
+    "help": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--aliases", "--aliases-for-completion", "--all", "--config", "--config-for-completion", "--config-sections-for-completion", "--developer-interfaces", "--exclude-guides", "--external-commands", "--guides", "--info", "--man", "--no-aliases", "--no-exclude-guides", "--no-external-commands", "--no-info", "--no-man", "--no-verbose", "--no-web", "--user-interfaces", "--verbose", "--web", "-a", "-c", "-g", "-i", "-m", "-v", "-w"]
+    },
+    "log": {
+      "takes_the_next_word": ["--decorate-refs", "--decorate-refs-exclude", "-L"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--clear-decorations", "--decorate", "--i-still-use-this", "--mailmap", "--no-decorate", "--no-decorate-refs", "--no-decorate-refs-exclude", "--no-i-still-use-this", "--no-mailmap", "--no-quiet", "--no-source", "--no-use-mailmap", "--quiet", "--source", "--use-mailmap", "-q"],
+      "with": ["revisions_and_diffs"]
+    },
+    "ls-files": {
+      "takes_the_next_word": ["--exclude", "--exclude-from", "--exclude-per-directory", "--format", "--with-tree", "-X", "-x"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--abbrev", "--cached", "--debug", "--deduplicate", "--deleted", "--directory", "--empty-directory", "--eol", "--error-unmatch", "--exclude-standard", "--full-name", "--ignored", "--killed", "--modified", "--no-abbrev", "--no-cached", "--no-debug", "--no-deduplicate", "--no-deleted", "--no-directory", "--no-empty-directory", "--no-eol", "--no-error-unmatch", "--no-exclude-per-directory", "--no-ignored", "--no-killed", "--no-modified", "--no-others", "--no-recurse-submodules", "--no-resolve-undo", "--no-sparse", "--no-stage", "--no-unmerged", "--no-with-tree", "--others", "--recurse-submodules", "--resolve-undo", "--sparse", "--stage", "--unmerged", "-c", "-d", "-f", "-i", "-k", "-m", "-o", "-s", "-t", "-u", "-v", "-z"]
+    },
+    "ls-remote": {
+      "takes_the_next_word": ["--exec", "--server-option", "--sort", "--upload-pack", "-o"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--branches", "--exit-code", "--get-url", "--heads", "--no-branches", "--no-exec", "--no-exit-code", "--no-get-url", "--no-heads", "--no-quiet", "--no-refs", "--no-server-option", "--no-sort", "--no-symref", "--no-tags", "--no-upload-pack", "--quiet", "--refs", "--symref", "--tags", "-b", "-h", "-q", "-t"],
+      "runs_a_program": ["--upload-pack", "--exec"]
+    },
+    "ls-tree": {
+      "takes_the_next_word": ["--format"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--abbrev", "--full-name", "--full-tree", "--long", "--name-only", "--name-status", "--no-abbrev", "--no-full-name", "--no-full-tree", "--object-only", "-d", "-l", "-r", "-t", "-z"]
+    },
+    "merge": {
+      "takes_the_next_word": ["--cleanup", "--file", "--into-name", "--message", "--strategy", "--strategy-option", "-F", "-X", "-m", "-s"],
+      "takes_the_rest_of_its_word": ["-S"],
+      "takes_no_word": ["--abort", "--allow-unrelated-histories", "--autostash", "--commit", "--compact-summary", "--continue", "--edit", "--ff", "--ff-only", "--gpg-sign", "--log", "--no-abort", "--no-allow-unrelated-histories", "--no-autostash", "--no-cleanup", "--no-commit", "--no-compact-summary", "--no-continue", "--no-edit", "--no-ff", "--no-gpg-sign", "--no-into-name", "--no-log", "--no-message", "--no-overwrite-ignore", "--no-progress", "--no-quiet", "--no-quit", "--no-rerere-autoupdate", "--no-signoff", "--no-squash", "--no-stat", "--no-strategy", "--no-strategy-option", "--no-summary", "--no-verbose", "--no-verify", "--no-verify-signatures", "--overwrite-ignore", "--progress", "--quiet", "--quit", "--rerere-autoupdate", "--signoff", "--squash", "--stat", "--summary", "--verbose", "--verify", "--verify-signatures", "-e", "-n", "-q", "-v"]
+    },
+    "merge-base": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--fork-point", "--independent", "--is-ancestor", "--no-all", "--octopus", "-a"]
+    },
+    "mktag": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--no-strict", "--strict"]
+    },
+    "mktree": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--batch", "--missing", "--no-batch", "--no-missing", "-z"]
+    },
+    "mv": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--dry-run", "--force", "--no-dry-run", "--no-force", "--no-sparse", "--no-verbose", "--sparse", "--verbose", "-f", "-k", "-n", "-v"]
+    },
+    "name-rev": {
+      "takes_the_next_word": ["--exclude", "--refs"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--always", "--annotate-stdin", "--name-only", "--no-all", "--no-always", "--no-annotate-stdin", "--no-exclude", "--no-name-only", "--no-peel-tag", "--no-refs", "--no-stdin", "--no-tags", "--no-undefined", "--peel-tag", "--stdin", "--tags", "--undefined"]
+    },
+    "notes": {
+      "takes_the_next_word": ["--ref"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--no-ref"]
+    },
+    "notes add": {
+      "takes_the_next_word": ["--file", "--message", "--reedit-message", "--reuse-message", "-C", "-F", "-c", "-m"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--allow-empty", "--edit", "--force", "--no-allow-empty", "--no-edit", "--no-force", "--no-separator", "--no-stripspace", "--separator", "--stripspace", "-e", "-f"]
+    },
+    "notes append": {
+      "takes_the_next_word": ["--file", "--message", "--reedit-message", "--reuse-message", "-C", "-F", "-c", "-m"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--allow-empty", "--edit", "--no-allow-empty", "--no-edit", "--no-separator", "--no-stripspace", "--separator", "--stripspace", "-e"]
+    },
+    "notes copy": {
+      "takes_the_next_word": ["--for-rewrite"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--force", "--no-for-rewrite", "--no-force", "--no-stdin", "--stdin", "-f"]
+    },
+    "notes edit": {
+      "takes_the_next_word": ["--file", "--message", "--reedit-message", "--reuse-message", "-C", "-F", "-c", "-m"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--allow-empty", "--edit", "--no-allow-empty", "--no-edit", "--no-separator", "--no-stripspace", "--separator", "--stripspace", "-e"]
+    },
+    "notes get-ref": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "lists_its_options": false
+    },
+    "notes list": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "lists_its_options": false
+    },
+    "notes merge": {
+      "takes_the_next_word": ["--strategy", "-s"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--abort", "--commit", "--no-quiet", "--no-strategy", "--no-verbose", "--quiet", "--verbose", "-q", "-v"]
+    },
+    "notes prune": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--dry-run", "--no-dry-run", "--no-verbose", "--verbose", "-n", "-v"]
+    },
+    "notes remove": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--ignore-missing", "--no-ignore-missing", "--no-stdin", "--stdin"]
+    },
+    "notes show": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "lists_its_options": false
+    },
+    "pack-refs": {
+      "takes_the_next_word": ["--exclude", "--include"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--auto", "--no-all", "--no-auto", "--no-exclude", "--no-include", "--no-prune", "--prune"]
+    },
+    "prune": {
+      "takes_the_next_word": ["--expire"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--dry-run", "--exclude-promisor-objects", "--no-dry-run", "--no-exclude-promisor-objects", "--no-expire", "--no-progress", "--no-verbose", "--progress", "--verbose", "-n", "-v"]
+    },
+    "pull": {
+      "takes_the_next_word": ["--cleanup", "--deepen", "--depth", "--negotiation-include", "--negotiation-restrict", "--negotiation-tip", "--refmap", "--server-option", "--shallow-exclude", "--shallow-since", "--strategy", "--strategy-option", "--upload-pack", "-X", "-o", "-s"],
+      "takes_the_rest_of_its_word": ["-S", "-j", "-r"],
+      "takes_no_word": ["--all", "--allow-unrelated-histories", "--append", "--autostash", "--commit", "--compact-summary", "--dry-run", "--edit", "--ff", "--ff-only", "--force", "--gpg-sign", "--ipv4", "--ipv6", "--jobs", "--keep", "--log", "--no-all", "--no-allow-unrelated-histories", "--no-append", "--no-autostash", "--no-cleanup", "--no-commit", "--no-compact-summary", "--no-deepen", "--no-depth", "--no-dry-run", "--no-edit", "--no-ff", "--no-force", "--no-gpg-sign", "--no-ipv4", "--no-ipv6", "--no-jobs", "--no-keep", "--no-log", "--no-negotiation-include", "--no-negotiation-restrict", "--no-negotiation-tip", "--no-progress", "--no-prune", "--no-quiet", "--no-rebase", "--no-recurse-submodules", "--no-server-option", "--no-set-upstream", "--no-shallow-exclude", "--no-shallow-since", "--no-show-forced-updates", "--no-signoff", "--no-squash", "--no-stat", "--no-strategy", "--no-strategy-option", "--no-summary", "--no-tags", "--no-update-shallow", "--no-upload-pack", "--no-verbose", "--no-verify", "--no-verify-signatures", "--progress", "--prune", "--quiet", "--rebase", "--recurse-submodules", "--set-upstream", "--show-forced-updates", "--signoff", "--squash", "--stat", "--summary", "--tags", "--unshallow", "--update-shallow", "--verbose", "--verify", "--verify-signatures", "-4", "-6", "-a", "-f", "-k", "-n", "-p", "-q", "-t", "-v"]
+    },
+    "push": {
+      "takes_the_next_word": ["--exec", "--push-option", "--receive-pack", "--recurse-submodules", "--repo", "-o"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--atomic", "--branches", "--delete", "--dry-run", "--follow-tags", "--force", "--force-if-includes", "--force-with-lease", "--ipv4", "--ipv6", "--mirror", "--no-all", "--no-atomic", "--no-branches", "--no-delete", "--no-dry-run", "--no-exec", "--no-follow-tags", "--no-force", "--no-force-if-includes", "--no-force-with-lease", "--no-mirror", "--no-porcelain", "--no-progress", "--no-prune", "--no-push-option", "--no-quiet", "--no-receive-pack", "--no-recurse-submodules", "--no-repo", "--no-set-upstream", "--no-signed", "--no-tags", "--no-thin", "--no-verbose", "--no-verify", "--porcelain", "--progress", "--prune", "--quiet", "--set-upstream", "--signed", "--tags", "--thin", "--verbose", "--verify", "-4", "-6", "-d", "-f", "-n", "-q", "-u", "-v"],
+      "runs_a_program": ["--receive-pack", "--exec"]
+    },
+    "range-diff": {
+      "takes_the_next_word": ["--anchored", "--color-moved-ws", "--creation-factor", "--diff-algorithm", "--diff-filter", "--diff-merges", "--dst-prefix", "--find-object", "--ignore-matching-lines", "--inter-hunk-context", "--line-prefix", "--max-depth", "--max-memory", "--output", "--output-indicator-context", "--output-indicator-new", "--output-indicator-old", "--rotate-to", "--skip-to", "--src-prefix", "--stat-count", "--stat-graph-width", "--stat-name-width", "--stat-width", "--word-diff-regex", "--ws-error-highlight", "-G", "-I", "-O", "-S", "-l"],
+      "takes_the_rest_of_its_word": ["-B", "-C", "-M", "-U", "-X"],
+      "takes_no_word": ["--abbrev", "--binary", "--break-rewrites", "--check", "--color", "--color-moved", "--color-words", "--compact-summary", "--cumulative", "--default-prefix", "--dirstat", "--dirstat-by-file", "--dual-color", "--exit-code", "--ext-diff", "--find-copies", "--find-copies-harder", "--find-renames", "--follow", "--full-index", "--function-context", "--histogram", "--ignore-all-space", "--ignore-blank-lines", "--ignore-cr-at-eol", "--ignore-space-at-eol", "--ignore-space-change", "--ignore-submodules", "--indent-heuristic", "--irreversible-delete", "--ita-invisible-in-index", "--ita-visible-in-index", "--left-only", "--minimal", "--name-only", "--name-status", "--no-abbrev", "--no-color", "--no-color-moved", "--no-color-moved-ws", "--no-compact-summary", "--no-creation-factor", "--no-diff-merges", "--no-dual-color", "--no-exit-code", "--no-ext-diff", "--no-find-copies-harder", "--no-follow", "--no-full-index", "--no-function-context", "--no-ignore-matching-lines", "--no-indent-heuristic", "--no-left-only", "--no-max-memory", "--no-notes", "--no-patch", "--no-prefix", "--no-quiet", "--no-relative", "--no-remerge-diff", "--no-rename-empty", "--no-renames", "--no-right-only", "--no-text", "--no-textconv", "--notes", "--numstat", "--patch", "--patch-with-raw", "--patch-with-stat", "--patience", "--pickaxe-all", "--pickaxe-regex", "--quiet", "--raw", "--relative", "--remerge-diff", "--rename-empty", "--right-only", "--shortstat", "--stat", "--submodule", "--summary", "--text", "--textconv", "--unified", "--word-diff", "-D", "-R", "-W", "-a", "-b", "-p", "-s", "-u", "-w", "-z"],
+      "writes_a_file": ["--output"]
+    },
+    "read-tree": {
+      "takes_the_next_word": ["--exclude-per-directory", "--index-output", "--prefix", "--super-prefix"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--aggressive", "--debug-unpack", "--dry-run", "--empty", "--no-aggressive", "--no-debug-unpack", "--no-dry-run", "--no-empty", "--no-quiet", "--no-recurse-submodules", "--no-reset", "--no-sparse-checkout", "--no-super-prefix", "--no-trivial", "--no-verbose", "--quiet", "--recurse-submodules", "--reset", "--sparse-checkout", "--trivial", "--verbose", "-i", "-m", "-n", "-q", "-u", "-v"]
+    },
+    "rebase": {
+      "takes_the_next_word": ["--empty", "--exec", "--onto", "--strategy", "--strategy-option", "--trailer", "--whitespace", "-C", "-X", "-s", "-x"],
+      "takes_the_rest_of_its_word": ["-S", "-r"],
+      "takes_no_word": ["--abort", "--allow-empty-message", "--apply", "--autosquash", "--autostash", "--committer-date-is-author-date", "--continue", "--edit-todo", "--ff", "--force-rebase", "--fork-point", "--gpg-sign", "--ignore-date", "--ignore-whitespace", "--interactive", "--keep-base", "--keep-empty", "--merge", "--no-allow-empty-message", "--no-autosquash", "--no-autostash", "--no-committer-date-is-author-date", "--no-exec", "--no-ff", "--no-force-rebase", "--no-fork-point", "--no-gpg-sign", "--no-ignore-date", "--no-ignore-whitespace", "--no-keep-base", "--no-keep-empty", "--no-onto", "--no-preserve-merges", "--no-quiet", "--no-reapply-cherry-picks", "--no-rebase-merges", "--no-rerere-autoupdate", "--no-reschedule-failed-exec", "--no-reset-author-date", "--no-root", "--no-signoff", "--no-stat", "--no-strategy", "--no-strategy-option", "--no-trailer", "--no-update-refs", "--no-verbose", "--no-verify", "--no-whitespace", "--preserve-merges", "--quiet", "--quit", "--reapply-cherry-picks", "--rebase-merges", "--rerere-autoupdate", "--reschedule-failed-exec", "--reset-author-date", "--root", "--show-current-patch", "--signoff", "--skip", "--stat", "--update-refs", "--verbose", "--verify", "-f", "-i", "-k", "-m", "-n", "-p", "-q", "-v"]
+    },
+    "reflog": {
+      "takes_the_next_word": ["--decorate-refs", "--decorate-refs-exclude", "-L"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--clear-decorations", "--decorate", "--i-still-use-this", "--mailmap", "--no-decorate", "--no-decorate-refs", "--no-decorate-refs-exclude", "--no-i-still-use-this", "--no-mailmap", "--no-quiet", "--no-source", "--no-use-mailmap", "--quiet", "--source", "--use-mailmap", "-q"],
+      "with": ["revisions_and_diffs"],
+      "lists_its_options": false
+    },
+    "reflog delete": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--dry-run", "--no-dry-run", "--no-rewrite", "--no-updateref", "--no-verbose", "--rewrite", "--updateref", "--verbose", "-n"]
+    },
+    "reflog drop": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--no-all", "--no-single-worktree", "--single-worktree"]
+    },
+    "reflog exists": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "lists_its_options": false
+    },
+    "reflog expire": {
+      "takes_the_next_word": ["--expire", "--expire-unreachable"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--dry-run", "--no-all", "--no-dry-run", "--no-rewrite", "--no-single-worktree", "--no-stale-fix", "--no-updateref", "--no-verbose", "--rewrite", "--single-worktree", "--stale-fix", "--updateref", "--verbose", "-n"]
+    },
+    "reflog list": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "lists_its_options": false
+    },
+    "reflog show": {
+      "takes_the_next_word": ["--decorate-refs", "--decorate-refs-exclude", "-L"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--clear-decorations", "--decorate", "--i-still-use-this", "--mailmap", "--no-decorate", "--no-decorate-refs", "--no-decorate-refs-exclude", "--no-i-still-use-this", "--no-mailmap", "--no-quiet", "--no-source", "--no-use-mailmap", "--quiet", "--source", "--use-mailmap", "-q"],
+      "with": ["revisions_and_diffs"],
+      "lists_its_options": false
+    },
+    "reflog write": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "lists_its_options": false
+    },
+    "remote": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--no-verbose", "--verbose", "-v"]
+    },
+    "remote add": {
+      "takes_the_next_word": ["--master", "--track", "-m", "-t"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--fetch", "--mirror", "--no-fetch", "--no-master", "--no-mirror", "--no-tags", "--no-track", "--tags", "-f"],
+      "fetches": ["--fetch", "-f"]
+    },
+    "remote get-url": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--no-all", "--no-push", "--push"]
+    },
+    "remote prune": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--dry-run", "--no-dry-run", "-n"]
+    },
+    "remote remove": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "lists_its_options": false
+    },
+    "remote rename": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--no-progress", "--progress"]
+    },
+    "remote rm": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "lists_its_options": false
+    },
+    "remote set-branches": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--add", "--no-add"]
+    },
+    "remote set-head": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--auto", "--delete", "--no-auto", "--no-delete", "-a", "-d"]
+    },
+    "remote set-url": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--add", "--delete", "--no-add", "--no-delete", "--no-push", "--push"]
+    },
+    "repack": {
+      "takes_the_next_word": ["--combine-cruft-below-size", "--cruft-expiration", "--depth", "--expire-to", "--filter", "--filter-to", "--geometric", "--keep-pack", "--max-cruft-size", "--max-pack-size", "--name-hash-version", "--threads", "--unpack-unreachable", "--window", "--window-memory", "-g"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--cruft", "--delta-islands", "--drop-filtered", "--dry-run", "--keep-unreachable", "--local", "--no-cruft", "--no-cruft-expiration", "--no-delta-islands", "--no-depth", "--no-drop-filtered", "--no-dry-run", "--no-expire-to", "--no-filter", "--no-filter-to", "--no-geometric", "--no-keep-pack", "--no-keep-unreachable", "--no-local", "--no-name-hash-version", "--no-pack-kept-objects", "--no-path-walk", "--no-quiet", "--no-threads", "--no-unpack-unreachable", "--no-window", "--no-window-memory", "--no-write-bitmap-index", "--no-write-midx", "--pack-kept-objects", "--path-walk", "--quiet", "--write-bitmap-index", "--write-midx", "-A", "-F", "-a", "-b", "-d", "-f", "-i", "-k", "-l", "-m", "-n", "-q"],
+      "writes_a_file": ["--filter-to", "--expire-to"],
+      "captured_at": {"v2.56.1": ["--drop-filtered", "--dry-run", "--no-drop-filtered", "--no-dry-run"]}
+    },
+    "reset": {
+      "takes_the_next_word": ["--inter-hunk-context", "--pathspec-from-file", "--unified", "-U"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--auto-advance", "--hard", "--intent-to-add", "--keep", "--merge", "--mixed", "--no-auto-advance", "--no-intent-to-add", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-quiet", "--no-recurse-submodules", "--no-refresh", "--patch", "--pathspec-file-nul", "--quiet", "--recurse-submodules", "--refresh", "--soft", "-N", "-p", "-q"]
+    },
+    "restore": {
+      "takes_the_next_word": ["--conflict", "--inter-hunk-context", "--pathspec-from-file", "--source", "--unified", "-U", "-s"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--ignore-skip-worktree-bits", "--ignore-unmerged", "--merge", "--no-conflict", "--no-ignore-skip-worktree-bits", "--no-ignore-unmerged", "--no-merge", "--no-ours", "--no-overlay", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-progress", "--no-quiet", "--no-recurse-submodules", "--no-source", "--no-staged", "--no-theirs", "--no-worktree", "--ours", "--overlay", "--patch", "--pathspec-file-nul", "--progress", "--quiet", "--recurse-submodules", "--staged", "--theirs", "--worktree", "-2", "-3", "-S", "-W", "-m", "-p", "-q"]
+    },
+    "rev-list": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": [],
+      "with": ["revisions_and_diffs"],
+      "lists_its_options": false
+    },
+    "rev-parse": {
+      "echoes_options_it_does_not_take": true
+    },
+    "revert": {
+      "takes_the_next_word": ["--cleanup", "--mainline", "--strategy", "--strategy-option", "-X", "-m"],
+      "takes_the_rest_of_its_word": ["-S"],
+      "takes_no_word": ["--abort", "--commit", "--continue", "--edit", "--gpg-sign", "--no-abort", "--no-cleanup", "--no-commit", "--no-continue", "--no-edit", "--no-gpg-sign", "--no-mainline", "--no-quit", "--no-reference", "--no-rerere-autoupdate", "--no-signoff", "--no-skip", "--no-strategy", "--no-strategy-option", "--quit", "--reference", "--rerere-autoupdate", "--signoff", "--skip", "-e", "-n", "-r", "-s"]
+    },
+    "rm": {
+      "takes_the_next_word": ["--pathspec-from-file"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--cached", "--dry-run", "--force", "--ignore-unmatch", "--no-cached", "--no-dry-run", "--no-force", "--no-ignore-unmatch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-quiet", "--no-sparse", "--pathspec-file-nul", "--quiet", "--sparse", "-f", "-n", "-q", "-r"]
+    },
+    "shortlog": {
+      "takes_the_next_word": ["--group"],
+      "takes_the_rest_of_its_word": ["-w"],
+      "takes_no_word": ["--committer", "--email", "--no-committer", "--no-email", "--no-group", "--no-numbered", "--no-summary", "--numbered", "--summary", "-c", "-e", "-n", "-s"],
+      "with": ["revisions_and_diffs"]
+    },
+    "show": {
+      "takes_the_next_word": ["--decorate-refs", "--decorate-refs-exclude", "-L"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--clear-decorations", "--decorate", "--i-still-use-this", "--mailmap", "--no-decorate", "--no-decorate-refs", "--no-decorate-refs-exclude", "--no-i-still-use-this", "--no-mailmap", "--no-quiet", "--no-source", "--no-use-mailmap", "--quiet", "--source", "--use-mailmap", "-q"],
+      "with": ["revisions_and_diffs"]
+    },
+    "show-branch": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": ["-g"],
+      "takes_no_word": ["--all", "--color", "--current", "--date-order", "--independent", "--list", "--merge-base", "--more", "--name", "--no-all", "--no-color", "--no-current", "--no-independent", "--no-list", "--no-merge-base", "--no-more", "--no-name", "--no-remotes", "--no-sha1-name", "--no-sparse", "--no-topics", "--reflog", "--remotes", "--sha1-name", "--sparse", "--topics", "--topo-order", "-a", "-r"]
+    },
+    "show-ref": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": ["-s"],
+      "takes_no_word": ["--abbrev", "--branches", "--dereference", "--exclude-existing", "--exists", "--hash", "--head", "--heads", "--no-abbrev", "--no-branches", "--no-dereference", "--no-exists", "--no-hash", "--no-head", "--no-heads", "--no-quiet", "--no-tags", "--no-verify", "--quiet", "--tags", "--verify", "-d", "-h", "-q"]
+    },
+    "stage": {
+      "takes_the_next_word": ["--chmod", "--inter-hunk-context", "--pathspec-from-file", "--unified", "-U"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--all", "--auto-advance", "--dry-run", "--edit", "--force", "--ignore-errors", "--ignore-missing", "--ignore-removal", "--intent-to-add", "--interactive", "--no-all", "--no-auto-advance", "--no-chmod", "--no-dry-run", "--no-edit", "--no-force", "--no-ignore-errors", "--no-ignore-missing", "--no-ignore-removal", "--no-intent-to-add", "--no-interactive", "--no-patch", "--no-pathspec-file-nul", "--no-pathspec-from-file", "--no-refresh", "--no-renormalize", "--no-resolved", "--no-sparse", "--no-update", "--no-verbose", "--no-warn-embedded-repo", "--patch", "--pathspec-file-nul", "--refresh", "--renormalize", "--resolved", "--sparse", "--update", "--verbose", "--warn-embedded-repo", "-A", "-N", "-e", "-f", "-i", "-n", "-p", "-u", "-v"],
+      "captured_at": {"v2.56.1": ["--no-resolved", "--resolved"]}
+    },
+    "status": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": ["-M", "-u"],
+      "takes_no_word": ["--ahead-behind", "--branch", "--column", "--find-renames", "--ignore-submodules", "--ignored", "--long", "--no-ahead-behind", "--no-branch", "--no-column", "--no-ignore-submodules", "--no-ignored", "--no-long", "--no-null", "--no-porcelain", "--no-renames", "--no-short", "--no-show-stash", "--no-untracked-files", "--no-verbose", "--null", "--porcelain", "--renames", "--short", "--show-stash", "--untracked-files", "--verbose", "-b", "-s", "-v", "-z"]
+    },
+    "switch": {
+      "takes_the_next_word": ["--conflict", "--create", "--force-create", "--orphan", "-C", "-c"],
+      "takes_the_rest_of_its_word": ["-t"],
+      "takes_no_word": ["--detach", "--discard-changes", "--force", "--guess", "--ignore-other-worktrees", "--merge", "--no-conflict", "--no-create", "--no-detach", "--no-discard-changes", "--no-force", "--no-force-create", "--no-guess", "--no-ignore-other-worktrees", "--no-merge", "--no-orphan", "--no-overwrite-ignore", "--no-progress", "--no-quiet", "--no-recurse-submodules", "--no-track", "--overwrite-ignore", "--progress", "--quiet", "--recurse-submodules", "--track", "-d", "-f", "-m", "-q"]
+    },
+    "symbolic-ref": {
+      "takes_the_next_word": ["-m"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--delete", "--no-delete", "--no-quiet", "--no-recurse", "--no-short", "--quiet", "--recurse", "--short", "-d", "-q"]
+    },
+    "tag": {
+      "takes_the_next_word": ["--cleanup", "--contains", "--file", "--format", "--local-user", "--merged", "--message", "--no-contains", "--no-merged", "--points-at", "--sort", "--trailer", "--with", "--without", "-F", "-m", "-u"],
+      "takes_the_rest_of_its_word": ["-n"],
+      "takes_no_word": ["--annotate", "--color", "--column", "--create-reflog", "--delete", "--edit", "--force", "--ignore-case", "--list", "--no-annotate", "--no-cleanup", "--no-color", "--no-column", "--no-create-reflog", "--no-edit", "--no-file", "--no-force", "--no-format", "--no-ignore-case", "--no-local-user", "--no-omit-empty", "--no-points-at", "--no-sign", "--no-sort", "--no-trailer", "--omit-empty", "--sign", "--verify", "-a", "-d", "-e", "-f", "-i", "-l", "-s", "-v"]
+    },
+    "update-index": {
+      "takes_the_next_word": ["--cacheinfo", "--chmod", "--index-version"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--add", "--again", "--assume-unchanged", "--clear-resolve-undo", "--force-remove", "--force-untracked-cache", "--force-write-index", "--fsmonitor", "--fsmonitor-valid", "--ignore-missing", "--ignore-skip-worktree-entries", "--ignore-submodules", "--index-info", "--info-only", "--no-add", "--no-again", "--no-assume-unchanged", "--no-force-remove", "--no-force-untracked-cache", "--no-force-write-index", "--no-fsmonitor", "--no-fsmonitor-valid", "--no-ignore-missing", "--no-ignore-skip-worktree-entries", "--no-ignore-submodules", "--no-index-version", "--no-info-only", "--no-remove", "--no-replace", "--no-show-index-version", "--no-skip-worktree", "--no-split-index", "--no-test-untracked-cache", "--no-unmerged", "--no-untracked-cache", "--no-verbose", "--really-refresh", "--refresh", "--remove", "--replace", "--show-index-version", "--skip-worktree", "--split-index", "--stdin", "--test-untracked-cache", "--unmerged", "--unresolve", "--untracked-cache", "--verbose", "-g", "-q", "-z"]
+    },
+    "update-ref": {
+      "takes_the_next_word": ["-m"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--batch-updates", "--create-reflog", "--deref", "--no-batch-updates", "--no-create-reflog", "--no-deref", "--no-stdin", "--stdin", "-0", "-d", "-z"]
+    },
+    "var": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["-l"],
+      "lists_its_options": false
+    },
+    "verify-commit": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--no-raw", "--no-verbose", "--raw", "--verbose", "-v"]
+    },
+    "verify-tag": {
+      "takes_the_next_word": ["--format"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--no-format", "--no-raw", "--no-verbose", "--raw", "--verbose", "-v"]
+    },
+    "version": {
+      "takes_the_next_word": [],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--build-options", "--no-build-options"]
+    },
+    "whatchanged": {
+      "takes_the_next_word": ["--decorate-refs", "--decorate-refs-exclude", "-L"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--clear-decorations", "--decorate", "--i-still-use-this", "--mailmap", "--no-decorate", "--no-decorate-refs", "--no-decorate-refs-exclude", "--no-i-still-use-this", "--no-mailmap", "--no-quiet", "--no-source", "--no-use-mailmap", "--quiet", "--source", "--use-mailmap", "-q"],
+      "with": ["revisions_and_diffs"]
+    },
+    "worktree add": {
+      "takes_the_next_word": ["--reason", "-B", "-b"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--checkout", "--detach", "--force", "--guess-remote", "--lock", "--no-checkout", "--no-detach", "--no-force", "--no-guess-remote", "--no-lock", "--no-orphan", "--no-quiet", "--no-reason", "--no-relative-paths", "--no-track", "--orphan", "--quiet", "--relative-paths", "--track", "-d", "-f", "-q"]
+    },
+    "write-tree": {
+      "takes_the_next_word": ["--prefix"],
+      "takes_the_rest_of_its_word": [],
+      "takes_no_word": ["--ignore-cache-tree", "--missing-ok", "--no-ignore-cache-tree", "--no-missing-ok", "--no-prefix"]
+    }
+  }
+}

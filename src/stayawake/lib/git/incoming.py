@@ -52,8 +52,8 @@ class Arrived:
 def continues_a_rebase(command: TypedCommand) -> bool:
     """Tell whether a git command continues or skips ahead in a rebase in progress. Takes the
     command. Returns the answer."""
-    return command.sub == "rebase" and bool(
-        {"--continue", "--skip"} & set(subcommand_options.read("rebase", list(command.rest)).names()))
+    reading = subcommand_options.resolve("rebase", list(command.rest)) if command.sub == "rebase" else None
+    return reading is not None and reading.last("--continue", "--skip") is not None
 
 
 def rebase_left(repo: Path) -> "tuple[str, tuple[str, ...], bool] | str | None":

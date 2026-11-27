@@ -6,6 +6,7 @@ import argparse
 import json
 import shutil
 
+from stayawake.bots.security import records
 from stayawake.cli._meta import __version__
 from stayawake.cli.helptext import add_command
 from stayawake.core.identity import Intent, require, resolve_session
@@ -23,8 +24,8 @@ def register(sub) -> None:
         description=(
             "Check this install: that `saw` runs this copy, which GitHub credential it uses and "
             "whether that credential can open fix and guard pull requests, whether a saw GitHub "
-            "App is set up, and that saw's CI health tools are installed. `saw auth status` shows "
-            "everything the credential can do."),
+            "App is set up, that saw's CI health tools are installed, and that saw can keep its "
+            "records. `saw auth status` shows everything the credential can do."),
         examples=[
             ("saw doctor", "the full self-check"),
             ("saw doctor -q", "print only the problems"),
@@ -43,6 +44,7 @@ def run(a: argparse.Namespace) -> int:
         health = shutil.which("stayawake-health-check")
         guard = require(Intent.OPEN_GUARD_PR, session=sess)
         fix = require(Intent.OPEN_FIX_PR, session=sess)
+        records_not_kept = records.not_kept()
 
     if a.json:
         print(json.dumps(versioned("doctor", {
@@ -57,6 +59,7 @@ def run(a: argparse.Namespace) -> int:
             "open_fix_pr": fix.allowed,
             "open_guard_pr": guard.allowed,
             "health_scripts_installed": bool(health),
+            "records_kept": not records_not_kept,
             "version": __version__,
         }), indent=2))
         return exitcodes.CLEAN
@@ -66,6 +69,8 @@ def run(a: argparse.Namespace) -> int:
     lines = [
         f"{mark(bool(saw_path))} saw resolves to: {saw_path or 'NOT FOUND on PATH'}",
     ]
+    if records_not_kept:
+        lines.append(f"{mark(False)} {records_not_kept}")
     if not sess.token:
         lines.append("• No GitHub credential. Scans of public repositories and `saw audit` work "
                      "without one; private repositories and fix or guard pull requests need one.")

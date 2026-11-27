@@ -31,6 +31,8 @@ WRITES_ELSEWHERE = "a command that writes outside the folder's repository cannot
 RUNS_OTHER_COMMANDS = "a command that runs other commands cannot be checked"
 NOT_REPLAYED = "that command cannot be checked"
 NO_REMOTE = "the repository has no remote to fetch from"
+FETCH_HEAD_NOT_COPIED = "the repository's FETCH_HEAD could not be copied for the check"
+FETCH_HEAD_UNREAD = "a fetch whose FETCH_HEAD cannot be read cannot be checked"
 RECURSION_KEYS = frozenset({"submodule.recurse", "fetch.recursesubmodules"})
 _RAW = b"* -text -eol -ident -filter -working-tree-encoding\n"
 _STATE_FILES = ("MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD")
@@ -49,6 +51,8 @@ _W_IDENTITY = {"GIT_AUTHOR_NAME": "saw", "GIT_AUTHOR_EMAIL": "saw@localhost", "G
 _TRACKING_KEYS = {"remote": frozenset({"url", "pushurl", "fetch", "tagopt", "prune"}),
                   "branch": frozenset({"remote", "merge", "rebase"})}
 _PLAIN_KEYS = frozenset({"pull.rebase", "pull.ff"})
+_FETCH_HEAD = "FETCH_HEAD"
+_IN_PLACE_OF_AN_UNREAD_FETCH_HEAD = b"0" * 40 + b"\tnot-for-merge\t\n"
 _IDENTITY_KEYS = ("user.name", "user.email")
 _LONG_OPTIONS_THAT_RUN_A_PROGRAM = {
     "rebase": ("--exec", "--interactive", "--edit-todo"),
@@ -214,20 +218,19 @@ def runs_other_commands(sub: str, args: list[str]) -> bool:
     with. Takes the subcommand and its arguments. Returns the answer."""
     long_options = _LONG_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, ())
     short_options = _SHORT_OPTIONS_THAT_RUN_A_PROGRAM.get(sub, "")
-    for name, value in subcommand_options.read(sub, args).options:
+    if not long_options and not short_options and sub not in _TAKES_A_STRATEGY:
+        return False
+    reading = subcommand_options.resolve(sub, args)
+    if reading is None:
+        return True
+    for option in reading.options:
+        name, value = option.name, option.value
         interactive = (value or "").lower().startswith("i")
-        if name.startswith("--"):
-            if len(name) <= 2:
-                continue
-            if any(option.startswith(name) for option in long_options):
-                return True
-            if sub == "pull" and "--rebase".startswith(name) and interactive:
-                return True
-            if sub in _TAKES_A_STRATEGY and "--strategy".startswith(name) and value not in _BUILT_IN_STRATEGIES:
-                return True
-        elif name[1] in short_options or (sub == "pull" and name == "-r" and interactive):
+        if name in long_options or (len(name) == 2 and name[1] in short_options):
             return True
-        elif name == "-s" and sub in _TAKES_A_STRATEGY and value not in _BUILT_IN_STRATEGIES:
+        if sub == "pull" and name in ("--rebase", "-r") and interactive:
+            return True
+        if sub in _TAKES_A_STRATEGY and name in ("--strategy", "-s") and value not in _BUILT_IN_STRATEGIES:
             return True
     return False
 
@@ -313,6 +316,8 @@ def reproduce(location: Location, into: Path, command: TypedCommand, *, with_fil
         return cleared
     into.mkdir(parents=True, exist_ok=True)
     bare, work = into / holding_directory.REPOSITORY, into / holding_directory.WORK_TREE
+    work.mkdir()
+    (work / ".git").write_text(f"gitdir: {bare}\n", encoding="utf-8")
     made = run(None, ["init", "--bare", "--quiet", f"--object-format={location.object_format}", "--template=",
                       str(bare)], context=SAW_OWNED)
     if made is None or made.returncode != 0:
@@ -349,9 +354,7 @@ def reproduce(location: Location, into: Path, command: TypedCommand, *, with_fil
     if not _set_head(bare, head):
         return "a place to check the update could not be made"
     base = stdout(bare, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], context=SAW_OWNED).strip()
-    work.mkdir()
     (into / holding_directory.NO_HOOKS).mkdir()
-    (work / ".git").write_text(f"gitdir: {bare}\n", encoding="utf-8")
     owned.own(work)
     for key, value in (("core.bare", "false"), ("core.worktree", str(work)),
                        ("core.hooksPath", str(into / holding_directory.NO_HOOKS)), ("core.precomposeUnicode", "false")):
@@ -677,9 +680,10 @@ def _carried(key: str) -> bool:
 
 
 def replay(holding: Holding, command: TypedCommand, signing: tuple[str, ...], gh_args: "list[str] | None" = None
-           ) -> Replayed:
+           ) -> "Replayed | str":
     """Run a command in its holding copy and read what it changed. Takes the copy, the command, the
-    signing settings for commits it makes and, for a gh command, its arguments. Returns what changed."""
+    signing settings for commits it makes and, for a gh command, its arguments. Returns what changed,
+    or a sentence for a fetch whose `FETCH_HEAD` could not be read."""
     where = holding.work / holding.location.prefix if holding.location.work_tree else holding.work
     if gh_args is not None:
         finished, output = _run_gh(holding.work, gh_args)
@@ -688,9 +692,22 @@ def replay(holding: Holding, command: TypedCommand, signing: tuple[str, ...], gh
     elif command.sub == "fetch":
         if not stdout(holding.work, ["remote"], context=SAW_OWNED).strip():
             return _read_result(holding, False, ("", NO_REMOTE))
+        held = holding.location.git_dir / _FETCH_HEAD
+        before = pathsafe.read_regular_no_follow(held, _LARGEST_STATE_FILE)
+        unread = before is None and os.path.lexists(held)
+        before = _IN_PLACE_OF_AN_UNREAD_FETCH_HEAD if unread else before
+        try:
+            if before is not None:
+                (holding.bare / _FETCH_HEAD).write_bytes(before)
+        except OSError:
+            return _read_result(holding, False, ("", FETCH_HEAD_NOT_COPIED))
         finished, output = _ran(run(holding.work, ["fetch", *command.rest], context=OPERATOR_PUSH))
-        return _read_result(holding, finished, output,
-                            pathsafe.read_regular_no_follow(holding.bare / "FETCH_HEAD", _LARGEST_STATE_FILE))
+        after = pathsafe.read_regular_no_follow(holding.bare / _FETCH_HEAD, _LARGEST_STATE_FILE)
+        if after is None and os.path.lexists(holding.bare / _FETCH_HEAD):
+            return FETCH_HEAD_UNREAD
+        if unread and after is not None and after != before and after.startswith(before):
+            return FETCH_HEAD_UNREAD
+        return _read_result(holding, finished, output, after if after != before else None)
     else:
         settings = [arg for key, value in command.settings if key.lower() not in RECURSION_KEYS
                     for arg in ("-c", key if value is None else f"{key}={value}")]
@@ -785,7 +802,10 @@ def _pull(work: Path, args: list[str], signing: tuple[str, ...] = ()) -> tuple[b
     the pull's arguments and the signing settings. Returns whether it finished and what git wrote."""
     if not stdout(work, ["remote"], context=SAW_OWNED).strip():
         return False, ("", NO_REMOTE)
-    positionals = list(subcommand_options.read("pull", args).words)
+    reading = subcommand_options.resolve("pull", args)
+    if reading is None:
+        return False, ("", "the pull gives an option git does not list")
+    positionals = list(reading.words)
     fetched = run(work, ["fetch", *positionals[:1]], context=OPERATOR_PUSH)
     if fetched is None or fetched.returncode != 0:
         return False, ("", "the fetch did not finish")

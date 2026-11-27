@@ -27,7 +27,8 @@ from stayawake.utils.json_documents import versioned
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.contexts import empty_hooks_dir
-from stayawake.bots.security import checkout_writes, clean_contents, clean_ledger, hook_status, hookscript, outbound, push_record
+from stayawake.bots.security import (checkout_writes, clean_contents, clean_ledger, hook_status, hookscript, outbound,
+                                     push_record, records)
 from stayawake.lib.git import blob_copies
 from stayawake.lib.git.query import files_brought
 from stayawake.lib.git.run import stdout_bytes
@@ -633,8 +634,8 @@ def _remember_repositories(roots: list[Path]) -> bool:
         cache = _load_cache()
         for root in roots:
             cache.setdefault(os.path.realpath(root), "")
-        return atomicwrite.replace(_cache_path(), json.dumps(cache), mode=atomicwrite.AS_A_PLAIN_WRITE,
-                                   at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        return records.replace(_cache_path(), json.dumps(cache), mode=atomicwrite.AS_A_PLAIN_WRITE,
+                               at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         return False
 
@@ -1358,7 +1359,7 @@ def _history_checked(root: Path, config_path: str | None) -> str | None:
     Takes the root and the operator config. Returns the commit, or None when there is none, the rules
     have changed, or the commit is no longer in the repository."""
     try:
-        held = json.loads(hookscript.history_checked_path().read_text())
+        held = json.loads(records.read_text(hookscript.history_checked_path()))
     except (OSError, ValueError):
         return None
     key = held.get(os.path.realpath(root)) if isinstance(held, dict) else None
@@ -1375,13 +1376,13 @@ def _remember_history(root: Path, head: str, config_path: str | None) -> None:
     the operator config. A write that fails is skipped."""
     try:
         try:
-            held = json.loads(hookscript.history_checked_path().read_text())
+            held = json.loads(records.read_text(hookscript.history_checked_path()))
         except (OSError, ValueError):
             held = {}
         held = {r: k for r, k in held.items() if os.path.isdir(r)} if isinstance(held, dict) else {}
         held[os.path.realpath(root)] = _clean_key(head, config_path)
-        atomicwrite.replace(hookscript.history_checked_path(), json.dumps(held),
-                            mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(hookscript.history_checked_path(), json.dumps(held),
+                        mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
@@ -1675,7 +1676,7 @@ def _warnings_shown() -> dict:
     """Read the infected warnings already shown. Returns them by repository, or none when the record
     cannot be read."""
     try:
-        shown = json.loads(hookscript.warnings_shown_path().read_text())
+        shown = json.loads(records.read_text(hookscript.warnings_shown_path()))
     except (OSError, ValueError):
         return {}
     return shown if isinstance(shown, dict) else {}
@@ -1706,8 +1707,8 @@ _COMPLETE_OUTCOMES = (0, 1)
 def _checks_made() -> dict:
     """Read the checks saw's hooks completed. Returns them by repository, or none when the record
     cannot be read."""
-    raw = atomicwrite.read_back(hookscript.checks_made_path(), _LARGEST_CHECKS_RECORD,
-                                at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+    raw = records.read_back(hookscript.checks_made_path(), _LARGEST_CHECKS_RECORD,
+                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     try:
         made = json.loads(raw) if raw is not None else {}
     except (ValueError, RecursionError):
@@ -1739,8 +1740,8 @@ def _record_outcome(root: Path, operation: str | None, outcome: int, *, now=time
         held = {r: made for r, made in _checks_made().items() if isinstance(made, dict) and os.path.isdir(r)}
         held[os.path.realpath(root)] = {"operation": operation, "at": now(), "outcome": outcome}
         newest = sorted(held.items(), key=lambda item: _when(item[1]))[-_MOST_REPOSITORIES_HELD:]
-        atomicwrite.replace(hookscript.checks_made_path(), json.dumps(dict(newest)),
-                            mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(hookscript.checks_made_path(), json.dumps(dict(newest)),
+                        mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 
@@ -1788,9 +1789,8 @@ def _warn_once(root: Path | None, command: str | None, findings, warn, *, now=ti
         held = {r: k for r, k in _warnings_shown().items() if os.path.isdir(r)}
         shown = sorted(already | {_finding_digest(f) for f in _named_in_a_warning(new)})
         held[where] = {"operation": command, "at": now(), "shown": shown[:_MOST_FINDINGS_HELD_SHOWN]}
-        atomicwrite.replace(hookscript.warnings_shown_path(), json.dumps(held),
-                            mode=atomicwrite.AS_A_PLAIN_WRITE,
-                            at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
+        records.replace(hookscript.warnings_shown_path(), json.dumps(held),
+                        mode=atomicwrite.AS_A_PLAIN_WRITE, at_a_link=atomicwrite.FOLLOW_A_TRUSTED_LINK)
     except OSError:
         pass
 

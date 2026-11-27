@@ -6,6 +6,15 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 const STANDIN: &str = env!("CARGO_BIN_EXE_saw-git-standin");
+/// Answers the questions the stand-in asks git about where a push or ls-remote goes the way git
+/// answers them outside a repository, and leaves them out of the record of git running.
+const ANSWERS_LOOKUPS: &str = r#"case "$*" in
+  "remote get-url --push --all "*) exit 2 ;;
+  "config --get-regexp ^url"*) exit 1 ;;
+  "symbolic-ref --short -q HEAD") exit 1 ;;
+  "ls-remote --get-url"*) [ -n "$3" ] && echo "$3"; exit 0 ;;
+esac
+"#;
 const COMMAND_LINES: &str = include_str!("command_lines_saw_checks.json");
 const HELD: &str = r#"{"scan":{"results":[{"verdict":"infected"}]},"next_steps":["Review it."]}"#;
 const SETTINGS_VARIABLES: &[&str] = &["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL",
@@ -23,7 +32,7 @@ fn the_stand_in_sends_to_saw_exactly_the_lines_saw_answers_as_checked() {
     fs::create_dir_all(dir.join("sub")).unwrap();
     let dir = fs::canonicalize(&dir).unwrap();
     let (real_log, saw_log) = (dir.join("real.log"), dir.join("saw.log"));
-    exec_script(&dir.join("real-program"), &format!("#!/bin/sh\necho \"$@\" >> {real_log:?}\n"));
+    exec_script(&dir.join("real-program"), &format!("#!/bin/sh\n{ANSWERS_LOOKUPS}echo \"$@\" >> {real_log:?}\n"));
     exec_script(&dir.join("fake-saw"), &format!("#!/bin/sh\necho \"$@\" >> {saw_log:?}\nprintf '%s\\n' '{HELD}'\nexit 3\n"));
     let lines: Vec<serde_json::Value> = serde_json::from_str(COMMAND_LINES).unwrap();
     assert!(lines.len() > 20);

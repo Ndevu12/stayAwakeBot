@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -80,6 +81,21 @@ class AliasesAreExpandedAsGitExpandsThem(GitSandbox):
     def test_an_alias_never_hides_a_command_that_brings_files(self):
         self.assertEqual(_read("pull", aliases={"pull": "status"}).subcommand, "pull")
 
+    def test_an_alias_named_as_a_command_git_has_reads_as_that_command(self):
+        for line, aliases, read in ((("archive", "HEAD"), {"archive": "status"}, ("archive", ("HEAD",))),
+                                    (("stash", "pop"), {"stash": "status"}, ("stash", ("pop",))),
+                                    (("-c", "alias.bundle=status", "bundle"), {}, ("bundle", ())),
+                                    (("submodule",), {"submodule": "!sh"}, ("submodule", ()))):
+            with self.subTest(line=line):
+                reading = _read(*line, aliases=aliases)
+                self.assertEqual((reading.readable, reading.subcommand, reading.rest), (True, *read))
+
+    def test_every_command_the_git_under_test_has_is_one_saw_knows(self):
+        listed = subprocess.run(["git", "--list-cmds=builtins"], capture_output=True, text=True, check=True,
+                                stdin=subprocess.DEVNULL).stdout.split()
+        self.assertGreater(len(listed), 100)
+        self.assertEqual(sorted(set(listed) - set(runs_directly.tables()["git_commands"])), [])
+
     def test_an_alias_that_cannot_be_read_is_not_guessed(self):
         for aliases in ({"x": "!git pull"}, {"x": "x"}, {"x": "y", "y": "x"}, {"x": "pull 'unclosed"}, {"x": "-c a=b pull"}):
             with self.subTest(aliases=aliases):
@@ -132,6 +148,12 @@ class SawGovernClassifyAnswers(GitSandbox):
         self.git(repo, "config", "alias.get", "pull --ff-only")
         body = self._classify(repo, "get")[1]
         self.assertEqual((body["subcommand"], body["brings_files"], body["folder"]), ("pull", True, str(repo)))
+
+    def test_an_alias_named_as_a_command_git_has_answers_that_command(self):
+        repo = self.new_repo()
+        self.git(repo, "config", "alias.stash", "status")
+        code, body = self._classify(repo, "stash", "pop")
+        self.assertEqual((code, body["subcommand"], body["checked"]), (exitcodes.CLEAN, "stash", True))
 
     def test_an_unreadable_line_says_why(self):
         code, body = self._classify(self.new_repo(), "--frobnicate", "pull")

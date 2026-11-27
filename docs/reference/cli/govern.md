@@ -154,8 +154,8 @@ files, and only the latest one for each repository. Run it from any folder in th
 add `--repo <folder>` from outside it.
 
 `saw govern status` says whether your terminals are covered and whether the shell you are in is
-covered yet. `saw govern uninstall` takes it back out, and your editor is unaffected. saw always
-falls back to your real git and gh.
+covered yet, and what to change when every check starts over. `saw govern uninstall` takes it back
+out, and your editor is unaffected. saw always falls back to your real git and gh.
 
 ## Asking how saw reads a command
 
@@ -171,6 +171,11 @@ stand-in runs as typed answers `checked: false`; every other one, such as `git r
 fetched commit or an alias, answers `checked: true`. An unreadable line, such as one with an
 unfamiliar option or an alias that runs a shell command, answers `readable: false` with the
 `reason`, and is checked. An editor uses it instead of reading git's options itself.
+
+A command runs as typed only when its options name no program to run, no file to write and no
+fetch. Programs and files named in your own environment, such as `GIT_EXTERNAL_DIFF`,
+`GIT_SSH_COMMAND`, `GIT_EDITOR`, `GIT_TRACE` or `GIT_INDEX_FILE`, are yours, and git uses them
+as you set them.
 
 For a git command saw does not check, the answer also carries `run_with`: how to run it so that no
 program the git settings of the repository it acts on name starts. Those are hooks, filters, diff and

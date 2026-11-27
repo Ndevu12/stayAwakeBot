@@ -223,12 +223,14 @@ def folder_it_creates(command: TypedCommand) -> "str | None":
     or whose folder cannot be told."""
     rest = list(command.rest)
     if command.sub == "worktree" and rest[:1] == ["add"]:
-        words = subcommand_options.read("worktree add", rest[1:]).words
-        return words[0] if words else None
+        added = subcommand_options.resolve("worktree add", rest[1:])
+        return added.words[0] if added is not None and added.words else None
     if command.sub != "clone":
         return None
-    reading = subcommand_options.read("clone", rest)
-    words = list(reading.words) + list(reading.paths)
+    reading = subcommand_options.resolve("clone", rest)
+    if reading is None:
+        return None
+    words = list(reading.words)
     if len(words) >= 2:
         return words[1]
     if not words:
