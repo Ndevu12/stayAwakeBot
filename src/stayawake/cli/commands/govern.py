@@ -153,7 +153,7 @@ def register(sub) -> None:
             "itself, kept settings stay in force. Settings you have not kept do not start. saw asks "
             "again when they change. `--forget` stops keeping them. Keeping them needs a person at a "
             "terminal."),
-        examples=[("saw govern trust", "keep this repository's git settings"),
+        examples=[("saw govern trust", "keep this folder's settings"),
                   ("saw govern trust --forget --repo ~/code/app", "stop keeping them")],
         stream=False)
     tp.add_argument("--repo", default=".", help="any folder in the repository")

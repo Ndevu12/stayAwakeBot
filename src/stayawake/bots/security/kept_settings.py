@@ -101,8 +101,9 @@ def kept_before(folder: str | Path) -> Fingerprint | None:
 
 def keep_after_a_governed_change(folder: str | Path, before: Fingerprint | None) -> bool:
     """Record the settings a folder has after saw wrote a checked update into it, when the operator
-    kept the settings it had before. Takes the folder and its kept fingerprint before the update.
-    Returns whether the record changed."""
+    kept the settings it had before. An update that changes a hook, a hook manager's file or a file
+    a hook names is held for a person's review when it arrives. Takes the folder and its kept
+    fingerprint before the update. Returns whether the record changed."""
     if before is None:
         return False
     after = settings_fingerprint.fingerprint(folder)
