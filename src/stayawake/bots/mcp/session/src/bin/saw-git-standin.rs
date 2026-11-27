@@ -81,7 +81,7 @@ fn main() {
 }
 
 /// Decide how to run a git command directly: as typed when the repository's own settings start no
-/// program or the operator kept them, else with the settings and environment that keep every
+/// program, which its files show without running git, or the operator kept them, else with the settings and environment that keep every
 /// program they name from starting. A person at a terminal is asked once whether to keep settings
 /// saw was not told to keep. Takes the real git and the arguments. Returns how to run it, or why saw
 /// cannot vouch for running the command directly.
@@ -89,6 +89,9 @@ fn run_with_for(real: &Path, args: &[String]) -> Result<RunWith, String> {
     let folder = env::current_dir().map_err(|error| format!("the current folder cannot be read: {error}"))?;
     let environ: folder_guard::Environment =
         env::vars_os().map(|(name, value)| (name.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())).collect();
+    if folder_guard::starts_no_program(real, &folder, args, &environ) {
+        return Ok(RunWith::default());
+    }
     match folder_guard::fingerprint(real, &folder, args, &environ) {
         Ok(None) => return Ok(RunWith::default()),
         Ok(Some(found)) if found.is_empty() => return Ok(RunWith::default()),

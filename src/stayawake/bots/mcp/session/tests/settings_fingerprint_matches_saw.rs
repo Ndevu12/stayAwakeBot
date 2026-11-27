@@ -5,13 +5,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use saw_mcp::folder_guard::{fingerprint, Environment};
+use saw_mcp::folder_guard::{fingerprint, starts_no_program, Environment};
 
 mod common;
 use common::real_git;
 
 const CASES: &str = include_str!("settings_fingerprint_cases.json");
 const ROOT: &str = "@ROOT@";
+const READ_PLAINLY: [&str; 3] = ["no-settings", "settings-that-run-nothing", "only-the-hooks-saw-installs"];
 
 fn build(root: &Path, case: &serde_json::Value, operator: &str, git: &Path) -> Environment {
     let _ = fs::remove_dir_all(root);
@@ -43,6 +44,17 @@ fn build(root: &Path, case: &serde_json::Value, operator: &str, git: &Path) -> E
 }
 
 #[test]
+fn a_repository_named_in_the_environment_is_not_read_plainly() {
+    let root: PathBuf = std::env::temp_dir().join(format!("saw-fingerprint-{}-named", std::process::id()));
+    let cases: serde_json::Value = serde_json::from_str(CASES).unwrap();
+    let mut environ = build(&root, &cases["cases"][0], cases["operator_settings"].as_str().unwrap(), &real_git());
+    assert!(starts_no_program(&real_git(), &root.join("repo"), &["status".to_string()], &environ));
+    environ.insert("GIT_DIR".into(), root.join("repo/.git").display().to_string());
+    assert!(!starts_no_program(&real_git(), &root.join("repo"), &["status".to_string()], &environ));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn every_shared_case_reads_the_same_fingerprint() {
     let cases: serde_json::Value = serde_json::from_str(CASES).unwrap();
     let operator = cases["operator_settings"].as_str().unwrap();
@@ -60,6 +72,9 @@ fn every_shared_case_reads_the_same_fingerprint() {
             .collect();
         assert_eq!(read.entries, expected, "{name}");
         assert_eq!(read.is_empty(), expected.is_empty(), "{name}");
+        let read_plainly = starts_no_program(&git, &root.join("repo"), &["status".to_string()], &environ);
+        assert!(!read_plainly || expected.is_empty(), "{name}: read plainly as starting no program");
+        assert_eq!(read_plainly, READ_PLAINLY.contains(&name), "{name}: read plainly");
         if let Some(digest) = case["digest"].as_str() {
             assert_eq!(read.digest(), digest, "{name}");
         }

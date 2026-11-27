@@ -10,6 +10,7 @@ mod locate;
 mod overrides;
 mod paths;
 mod settings_fingerprint;
+mod starts_no_program;
 mod surface;
 mod typed_command;
 
@@ -18,6 +19,7 @@ use std::path::{Path, PathBuf};
 
 pub use command_line::shell_words;
 pub use settings_fingerprint::Fingerprint;
+pub use starts_no_program::starts_no_program;
 
 /// The environment a command runs in, by variable name.
 pub type Environment = HashMap<String, String>;

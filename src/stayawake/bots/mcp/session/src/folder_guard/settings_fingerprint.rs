@@ -99,7 +99,7 @@ pub fn from_listing(listing: &[u8], found: &Found, environ: &Environment) -> Res
 
 /// Whether a setting's value starts a program. Takes its rule, its key, its value and the
 /// environment.
-fn runs_a_program(rule: &ExecKey, key: &str, value: &str, environ: &Environment) -> bool {
+pub(super) fn runs_a_program(rule: &ExecKey, key: &str, value: &str, environ: &Environment) -> bool {
     let text = value.trim();
     let lowered = text.to_lowercase();
     match rule.runs {
