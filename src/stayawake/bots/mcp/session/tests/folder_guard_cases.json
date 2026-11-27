@@ -77,6 +77,10 @@
     {"name": "working-tree-the-environment-names", "layout": "elsewhere", "settings": "[core]\n\tfsmonitor = /nonexistent/planted-program\n[diff]\n\texternal = /nonexistent/planted-program\n", "args": ["status"], "environment": {"GIT_DIR": "../repo/.git", "GIT_WORK_TREE": "../repo"},
      "expected": {"settings": [["core.hookspath", "@NO_HOOKS@"], ["protocol.ext.allow", "never"], ["protocol.file.allow", "never"], ["core.fsmonitor", "false"], ["diff.external", ""]], "arguments": ["-c", "core.hookspath=@NO_HOOKS@", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "core.fsmonitor=false", "-c", "diff.external="], "environment": {}}},
     {"name": "repository-the-environment-names-that-is-missing", "layout": "plain", "settings": "", "args": ["status"], "environment": {"GIT_DIR": "missing"},
-     "expected": {"refused": true}}
+     "expected": {"refused": true}},
+    {"name": "linked-worktree-runs-the-main-checkout-settings", "layout": "worktree", "settings": "[core]\n\tfsmonitor = /nonexistent/planted-program\n[pager]\n\tstatus = /nonexistent/planted-program\n", "args": ["status"],
+     "expected": {"settings": [["core.hookspath", "@NO_HOOKS@"], ["protocol.ext.allow", "never"], ["protocol.file.allow", "never"], ["core.fsmonitor", "false"], ["pager.status", "false"]], "arguments": ["-c", "core.hookspath=@NO_HOOKS@", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "core.fsmonitor=false", "-c", "pager.status=false"], "environment": {}}},
+    {"name": "linked-worktree-own-settings", "layout": "worktree", "settings": "[extensions]\n\tworktreeConfig = true\n", "args": ["log", "-1"], "worktree_settings": "[core]\n\tpager = /nonexistent/planted-program\n[diff]\n\texternal = /nonexistent/planted-program\n",
+     "expected": {"settings": [["core.hookspath", "@NO_HOOKS@"], ["protocol.ext.allow", "never"], ["protocol.file.allow", "never"], ["core.pager", "less"], ["diff.external", ""]], "arguments": ["-c", "core.hookspath=@NO_HOOKS@", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "core.pager=less", "-c", "diff.external="], "environment": {}}}
   ]
 }
