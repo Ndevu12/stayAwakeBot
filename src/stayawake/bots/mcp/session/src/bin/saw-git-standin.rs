@@ -57,13 +57,21 @@ fn main() {
             guarded = Some(answer);                // saw cannot vouch for running it directly: ask saw
         }
         if sent != Sent::No || guarded.is_some() {
-            if let Some(code) = govern(&tool, &args, &real, sent != Sent::ToSaw, must_check) {
+            let refused = matches!(guarded, Some(Err(_)));
+            if let Some(code) = govern(&tool, &args, &real, sent != Sent::ToSaw, must_check || refused) {
                 exit(code);                        // governed: saw applied it, held it or refused it
             }
         }
         if tool == "git" {
-            if let Ok(run_with) = guarded.unwrap_or_else(|| folder_guard_for(&real, &args)) {
-                run_real_with(&real, &args, &run_with);
+            match guarded.unwrap_or_else(|| folder_guard_for(&real, &args)) {
+                Ok(run_with) => run_real_with(&real, &args, &run_with),
+                Err(why) => exit(match real_saw() {   // a refusal stays one whatever saw answered
+                    Some(saw) => run_or_leave(&tool, &args, &why, false, &real, &saw, &target_repo(&args)),
+                    None => {
+                        eprintln!("saw: this command could not be checked; the folder is unchanged; {tool} did not run.");
+                        2
+                    }
+                }),
             }
         }
     }
@@ -441,14 +449,7 @@ fn govern_with(saw: &Path, tool: &str, args: &[String], holding: &Path, holding_
             eprintln!("saw: left the folder unchanged; {tool} did not run.");
             return Checked::Ended(2);
         }
-        return Checked::Ended(match decide(tool, args, &reason, checked) {
-            Decision::RunAsTyped => run_then_scan(real, saw, args, &scanned_after(&answer, &repo)),
-            Decision::LeaveUnchanged => {
-                eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
-                           answer yes in a terminal, or set SAW_GOVERN_DECISION=run-as-typed.");
-                2
-            }
-        });
+        return Checked::Ended(run_or_leave(tool, args, &reason, checked, real, saw, &scanned_after(&answer, &repo)));
     }
     if !prepared.success() {
         if answer.is_object() {
@@ -676,6 +677,20 @@ fn decide(tool: &str, args: &[String], reason: &str, checked: bool) -> Decision 
         Decision::RunAsTyped
     } else {
         Decision::LeaveUnchanged
+    }
+}
+
+/// Ask whether to run a command saw could not check, then run it as typed and scan the folder, or
+/// leave the folder unchanged. Takes the tool, its arguments, saw's reason, whether saw checked it,
+/// the real program, saw and the folder to scan. Returns the exit code.
+fn run_or_leave(tool: &str, args: &[String], reason: &str, checked: bool, real: &Path, saw: &Path, folder: &str) -> i32 {
+    match decide(tool, args, reason, checked) {
+        Decision::RunAsTyped => run_then_scan(real, saw, args, folder),
+        Decision::LeaveUnchanged => {
+            eprintln!("saw: left the folder unchanged; {tool} did not run. To run it as typed, \
+                       answer yes in a terminal, or set SAW_GOVERN_DECISION=run-as-typed.");
+            2
+        }
     }
 }
 
