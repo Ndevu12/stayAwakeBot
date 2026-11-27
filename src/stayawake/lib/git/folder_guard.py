@@ -101,7 +101,21 @@ def _reports_settings(subcommand: str | None, rest: tuple[str, ...]) -> bool:
     if subcommand not in SUBCOMMANDS_THAT_REPORT_SETTINGS:
         return False
     positionals = [arg for arg in rest if not arg.startswith("-")]
+    if subcommand == "config" and _names_a_blob(rest):
+        return False
     return not (_EDITS_SETTINGS & set(rest) or (subcommand == "config" and positionals[:1] == ["edit"]))
+
+
+def _names_a_blob(rest: tuple[str, ...]) -> bool:
+    """Whether a `git config` command line reads its settings from a blob, which git may fetch. Takes
+    the arguments after the subcommand. Returns the answer."""
+    for arg in rest:
+        if arg in ("--", "--end-of-options"):
+            return False
+        name = arg.split("=", 1)[0]
+        if len(name) > 3 and "--blob".startswith(name):
+            return True
+    return False
 
 
 def _repository(where: Path, command: typed_command.TypedCommand) -> tuple[Path | None, str]:
