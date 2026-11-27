@@ -21,6 +21,10 @@ reader, not the mechanism or the weakness it closed.
 - saw's git stand-in, `saw-git-standin`, now ships on Windows, so an editor can put it in front of
   git there as on macOS and Linux. `saw govern install` does not cover Windows terminals yet.
 
+### Changed
+- `saw govern classify` answers faster, most of all in a repository with many worktrees. Its
+  answers are the same.
+
 ## [0.18.3] - 2026-11-27
 
 ### Fixed

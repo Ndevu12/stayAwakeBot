@@ -48,7 +48,7 @@ def guard(folder: str | Path, args: list[str], environ: Mapping[str, str]) -> Gu
     """Work out the settings and environment that keep a git command in a folder from starting what
     the folder's own configuration names. Takes the folder, the arguments without the program name,
     and the environment the command runs in. Returns the answer."""
-    with one_pass(), stalls_recorded() as stalled:
+    with one_pass(), stalls_recorded() as stalled, exec_surface.each_file_listed_once():
         answer = _guard(Path(folder), list(args), environ)
     if stalled and not answer.refusal:
         return Guard(answer.folder, refusal=f"git did not answer: {stalled[0]}")
