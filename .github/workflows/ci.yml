@@ -91,7 +91,11 @@ jobs:
 
       - name: Build saw's Rust programs as the Windows wheel does
         working-directory: src/stayawake/bots/mcp/session
-        run: cargo build --locked --release --bin saw-mcp
+        run: cargo build --locked --release --bin saw-mcp --bin saw-git-standin
+
+      - name: Run the git stand-in's tests that run on Windows
+        working-directory: src/stayawake/bots/mcp/session
+        run: cargo test --locked --release --test standin_runs_the_real_git_on_every_system --test platform_names_files_and_owners_alike
 
       - name: Scan a folder
         shell: bash

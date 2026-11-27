@@ -1,3 +1,5 @@
+// Unix only: POSIX shell scripts stand in for git and saw.
+#![cfg(unix)]
 //! The git/gh stand-in: it holds a bringing-files command for `saw govern`, passes everything else
 //! straight through, and — this is load-bearing — never breaks git when saw cannot answer.
 use std::fs;

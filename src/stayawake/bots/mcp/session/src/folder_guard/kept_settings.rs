@@ -17,7 +17,7 @@ const RECORD_LIMIT: u64 = 1 << 20;
 pub fn record_path(environ: &Environment) -> Option<PathBuf> {
     let cache = match environ.get("XDG_CACHE_HOME").filter(|value| !value.is_empty()) {
         Some(cache) => PathBuf::from(cache),
-        None => Path::new(environ.get("HOME")?).join(".cache"),
+        None => PathBuf::from(crate::platform::home_folder(environ)?).join(".cache"),
     };
     Some(table("kept_settings_record").iter().fold(cache.join(RECORDS_FOLDER), |path, part| path.join(part)))
 }

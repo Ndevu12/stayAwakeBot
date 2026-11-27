@@ -1,3 +1,5 @@
+// Unix only: POSIX shell scripts stand in for git and saw.
+#![cfg(unix)]
 //! A command the stand-in would run directly, in a folder whose own settings name a program saw
 //! cannot keep from starting, never runs as typed on saw's word that it brings no files, nor on a
 //! decision set ahead in the environment: only the person at a terminal decides, and with no one to

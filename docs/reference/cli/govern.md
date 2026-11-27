@@ -130,6 +130,8 @@ files on this machine or one that names a program to run. A command that points 
 `core.hooksPath` on its command line or in a configuration file its environment names, that lets a push change your folder's files, or that copies hooks from a folder in
 a working tree into a new repository, asks you first too. A `gh` command that names its repository with `-R` is checked like any other. Open a new terminal, or
 source the file the command names, for it to take effect.
+On Windows, saw checks the terminals the editor extension opens; `saw govern install` does not cover
+other Windows terminals yet.
 
 In a repository with no working tree, such as a bare repository or a mirror clone, git runs as
 typed: a fetch, `git fetch --prune`, `git remote update` or `git gc` there runs as it would without

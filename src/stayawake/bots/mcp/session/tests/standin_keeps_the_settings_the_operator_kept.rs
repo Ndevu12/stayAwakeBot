@@ -1,3 +1,4 @@
+// Unix only: POSIX shell scripts stand in for saw.
 #![cfg(unix)]
 //! A command the stand-in runs directly keeps the programs a repository's own settings start (its
 //! hooks, a git-crypt-style filter, fsmonitor) when the operator kept exactly those settings.

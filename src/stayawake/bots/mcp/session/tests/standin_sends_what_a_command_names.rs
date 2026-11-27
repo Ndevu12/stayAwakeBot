@@ -1,3 +1,5 @@
+// Unix only: POSIX shell scripts stand in for git and saw.
+#![cfg(unix)]
 //! A git command the stand-in reads as bringing no files still goes to saw when it names a setting
 //! that may run something, a file to write, a hooks template, a configuration change or a fetch,
 //! and saw is told the stand-in reads it as bringing no files.

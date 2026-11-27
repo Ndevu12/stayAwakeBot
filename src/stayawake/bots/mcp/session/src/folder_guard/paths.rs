@@ -2,8 +2,9 @@
 //! file system. Only regular files are read.
 
 use std::fs;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
-use std::path::{Component, Path, PathBuf};
+use std::path::{is_separator, Component, Path, PathBuf};
+
+use crate::platform;
 
 use super::Environment;
 
@@ -12,11 +13,12 @@ const NO_HOOKS_FOLDER: [&str; 2] = ["saw", "git-runs-no-hooks"];
 /// Expand a leading `~` to the home folder. Takes the text and the environment. Returns the text,
 /// unchanged when it names no home folder this can find.
 pub fn expand_user(value: &str, environ: &Environment) -> String {
-    let home = environ.get("HOME");
-    match (value, home) {
-        ("~", Some(home)) => home.clone(),
-        (_, Some(home)) if value.starts_with("~/") => format!("{}{}", home.trim_end_matches('/'), &value[1..]),
-        _ => value.to_string(),
+    let home = platform::home_folder(environ);
+    let names_home = value.strip_prefix('~').is_some_and(|rest| rest.is_empty() || rest.starts_with(is_separator));
+    match home.filter(|_| names_home) {
+        Some(home) if value == "~" => home,
+        Some(home) => format!("{}{}", home.trim_end_matches(is_separator), &value[1..]),
+        None => value.to_string(),
     }
 }
 
@@ -90,16 +92,16 @@ pub fn read_regular_text(path: &Path) -> Option<String> {
 /// What names the same file for every spelling of a path.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Identity {
-    /// The device and inode of a file that exists.
-    Inode(u64, u64),
+    /// The device and file number of a file that exists: its inode, or its file index on Windows.
+    File(u64, u64),
     /// The real path of one that does not.
     Path(PathBuf),
 }
 
 /// Name the file or directory a path reaches. Takes the path.
 pub fn file_identity(path: &Path) -> Identity {
-    match fs::metadata(path) {
-        Ok(found) => Identity::Inode(found.dev(), found.ino()),
+    match platform::file_id(path) {
+        Ok((device, number)) => Identity::File(device, number),
         Err(_) => Identity::Path(real_path(path)),
     }
 }
@@ -123,14 +125,14 @@ pub fn no_hooks_folder(environ: &Environment) -> Result<PathBuf, String> {
     };
     let folder = NO_HOOKS_FOLDER.iter().fold(state, |path, part| path.join(part));
     let shown = folder.display();
-    if let Err(error) = fs::DirBuilder::new().recursive(true).mode(0o700).create(&folder) {
+    if let Err(error) = platform::create_private_folder(&folder) {
         return Err(format!("saw's empty hooks folder {shown} could not be used: {error}"));
     }
     let found = fs::symlink_metadata(&folder).map_err(|error| format!("saw's empty hooks folder {shown} could not be used: {error}"))?;
     if !found.is_dir() {
         return Err(format!("saw's empty hooks folder {shown} is not a folder"));
     }
-    if found.uid() != fs::metadata("/proc/self").map(|own| own.uid()).unwrap_or_else(|_| current_uid()) {
+    if !platform::belongs_to_this_user(&folder, &found) {
         return Err(format!("saw's empty hooks folder {shown} belongs to someone else"));
     }
     let mut entries = fs::read_dir(&folder).map_err(|error| format!("saw's empty hooks folder {shown} could not be used: {error}"))?;
@@ -138,14 +140,4 @@ pub fn no_hooks_folder(environ: &Environment) -> Result<PathBuf, String> {
         return Err(format!("saw's empty hooks folder {shown} holds files; remove them"));
     }
     Ok(folder)
-}
-
-/// The user this process runs as, read from a file it makes.
-fn current_uid() -> u32 {
-    static PROBES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let probe_number = PROBES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let probe = std::env::temp_dir().join(format!("saw-uid-{}-{probe_number}", std::process::id()));
-    let uid = fs::File::create(&probe).and_then(|_| fs::metadata(&probe)).map(|found| found.uid()).unwrap_or(u32::MAX);
-    let _ = fs::remove_file(&probe);
-    uid
 }

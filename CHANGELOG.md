@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- saw's git stand-in now ships on Windows, so the editor extension checks an incoming update in its
+  Windows terminals as it does on macOS and Linux.
+
 ## [0.18.3] - 2026-11-27
 
 ### Fixed

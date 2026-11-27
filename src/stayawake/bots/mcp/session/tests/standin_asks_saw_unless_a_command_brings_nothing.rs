@@ -1,3 +1,5 @@
+// Unix only: POSIX shell scripts stand in for git and saw.
+#![cfg(unix)]
 //! The git stand-in asks saw before every command it cannot read with certainty as one that brings
 //! no files into the folder, however it is spelled, and runs the rest straight through.
 use std::fs;

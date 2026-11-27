@@ -8,13 +8,14 @@
 use std::cell::Cell;
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
 
 use sha2::{Digest, Sha256};
+
+use crate::platform;
 
 use super::exec_keys::{rule_for, ExecKey, Runs};
 use super::locate::Found;
@@ -182,7 +183,7 @@ fn walk(folder: &Path, budget: &Cell<usize>) -> Result<Vec<Read>, String> {
     for child in listing {
         names.push(child.map_err(|error| format!("{} could not be read: {error}", folder.display()))?.file_name());
     }
-    names.sort_by(|one, other| one.as_bytes().cmp(other.as_bytes()));
+    names.sort_by(|one, other| platform::name_bytes(one).cmp(&platform::name_bytes(other)));
     let mut found = Vec::new();
     for name in names {
         found.extend(read_path(&folder.join(&name), &name.to_string_lossy(), budget)?);
@@ -314,7 +315,7 @@ fn matching(top: &Path, pattern: &str, budget: &Cell<usize>) -> Result<Vec<Read>
     for child in listing {
         names.push(child.map_err(|error| format!("{} could not be read: {error}", folder.display()))?.file_name());
     }
-    names.sort_by(|one, other| one.as_bytes().cmp(other.as_bytes()));
+    names.sort_by(|one, other| platform::name_bytes(one).cmp(&platform::name_bytes(other)));
     let mut found = Vec::new();
     for name in names {
         let shown = name.to_string_lossy().into_owned();
@@ -354,7 +355,7 @@ fn glob_matches(pattern: &str, name: &str) -> bool {
 pub fn saws_own_hook(rel: &Path, environ: &Environment) -> Option<Vec<u8>> {
     let config = match environ.get("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
         Some(config) => PathBuf::from(config),
-        None => Path::new(environ.get("HOME")?).join(".config"),
+        None => PathBuf::from(platform::home_folder(environ)?).join(".config"),
     };
     let folder = table("saws_own_hooks_folder").iter().fold(config, |path, part| path.join(part));
     let path = folder.join(rel);

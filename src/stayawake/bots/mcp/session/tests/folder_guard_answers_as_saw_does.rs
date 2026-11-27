@@ -1,3 +1,4 @@
+// Unix only: the cases name the home folder by HOME and the null device as /dev/null.
 #![cfg(unix)]
 //! The stand-in works out the settings and environment that keep a git command from starting a
 //! program the folder's own settings name, the same ones `saw govern classify` answers: both answer

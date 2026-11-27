@@ -1,3 +1,5 @@
+// Unix only: POSIX shell scripts stand in for git and saw.
+#![cfg(unix)]
 //! The stand-in tells the user when neither git nor saw wrote what a command would, and the command
 //! fails. A decision saw offers is honoured whatever its check exited with.
 use std::fs;
