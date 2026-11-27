@@ -57,9 +57,21 @@ class TrustKeepsARepositorysSettings(unittest.TestCase):
         self.assertTrue(self.kept())
         self.assertTrue(kept_settings.record_path().is_relative_to(self.root / "cache" / "saw"))
 
-    def test_any_other_answer_keeps_nothing(self):
+    def test_any_other_answer_keeps_nothing_and_is_recorded_as_a_no(self):
         self.assertEqual(self.trust("\n"), exitcodes.DID_NOT_RUN)
         self.assertFalse(self.kept())
+        self.assertTrue(kept_settings.is_declined(settings_fingerprint.fingerprint(self.repo)))
+
+    def test_a_no_holds_only_for_the_settings_it_answered(self):
+        self.trust("n\n")
+        self.hook.write_text("#!/bin/sh\necho changed\n", encoding="utf-8")
+        self.assertFalse(kept_settings.is_declined(settings_fingerprint.fingerprint(self.repo)))
+
+    def test_keeping_them_later_replaces_the_no(self):
+        self.trust("n\n")
+        self.assertEqual(self.trust("y\n"), exitcodes.CLEAN)
+        self.assertTrue(self.kept())
+        self.assertFalse(kept_settings.is_declined(settings_fingerprint.fingerprint(self.repo)))
 
     def test_with_no_one_at_a_terminal_nothing_is_kept_whatever_was_decided_ahead(self):
         for decision in ("run-as-typed", "yes", "let-in"):

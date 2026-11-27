@@ -70,12 +70,17 @@ impl Repository {
         assert!(done.success(), "git {args:?}");
     }
 
-    fn keep(&self) {
+    fn record(&self, table: &str) -> (PathBuf, String) {
         let found = fingerprint(&self.git, &self.repo, &["status".to_string()], &self.environ()).unwrap().unwrap();
         let record = kept_settings::record_path(&self.environ()).unwrap();
         fs::create_dir_all(record.parent().unwrap()).unwrap();
-        let kept = serde_json::json!({"version": 1, "repositories": {found.repository.display().to_string(): found.digest()}});
+        let kept = serde_json::json!({"version": 1, table: {found.repository.display().to_string(): found.digest()}});
         fs::write(record, kept.to_string()).unwrap();
+        (found.repository.clone(), found.digest())
+    }
+
+    fn keep(&self) {
+        self.record("repositories");
     }
 
     fn standin(&self, args: &[&str], decision: Option<&str>) -> Output {
@@ -135,6 +140,17 @@ fn settings_that_changed_since_they_were_kept_are_not_kept() {
     exec_script(&repository.repo.join(".git/hooks/pre-commit"), &format!("#!/bin/sh\necho changed-hook >> {:?}\n", repository.log));
     let done = repository.commit(None);
     assert_eq!(repository.ran(), "", "a changed hook ran");
+    assert!(String::from_utf8_lossy(&done.stderr).contains("saw govern trust"));
+}
+
+#[test]
+fn settings_a_person_answered_no_to_run_without_their_programs_and_still_say_how_to_keep_them() {
+    let repository = Repository::new("declined");
+    let (key, digest) = repository.record("declined");
+    let recorded = kept_settings::read(&repository.environ(), &key);
+    assert!(recorded.declined(&digest) && !recorded.keeps(&digest));
+    let done = repository.commit(None);
+    assert_eq!(repository.ran(), "", "a program a person answered no to ran");
     assert!(String::from_utf8_lossy(&done.stderr).contains("saw govern trust"));
 }
 

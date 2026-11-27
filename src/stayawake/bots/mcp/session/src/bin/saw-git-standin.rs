@@ -91,30 +91,30 @@ fn run_with_for(real: &Path, args: &[String]) -> Result<RunWith, String> {
         env::vars_os().map(|(name, value)| (name.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())).collect();
     match folder_guard::fingerprint(real, &folder, args, &environ) {
         Ok(None) => return Ok(RunWith::default()),
-        Ok(Some(found)) if found.is_empty() || kept(&found, &environ) => return Ok(RunWith::default()),
-        Ok(Some(found)) if kept_when_asked(&found, &folder, &environ) => return Ok(RunWith::default()),
-        _ => {}
+        Ok(Some(found)) if found.is_empty() => return Ok(RunWith::default()),
+        Ok(Some(found)) => {
+            let digest = found.digest();
+            let recorded = kept_settings::read(&environ, &found.repository);
+            if recorded.keeps(&digest) || kept_when_asked(&found, &digest, !recorded.declined(&digest), &folder, &environ) {
+                return Ok(RunWith::default());
+            }
+        }
+        Err(_) => {}
     }
     folder_guard::guard(real, &folder, args, &environ)
 }
 
-/// Whether the operator kept exactly these settings for their repository. Takes the fingerprint and
-/// the environment.
-fn kept(found: &Fingerprint, environ: &folder_guard::Environment) -> bool {
-    kept_settings::kept_digest(environ, &found.repository).is_some_and(|digest| digest == found.digest())
-}
-
 /// Ask the person at a terminal, through `saw govern trust`, whether to keep the programs a
-/// repository's own settings start. Ask only a command whose input and both outputs are a terminal.
-/// With no one to ask, say how to keep them. Takes the
-/// fingerprint, the folder the command runs in and the environment. Returns whether the operator
-/// kept exactly these settings.
-fn kept_when_asked(found: &Fingerprint, folder: &Path, environ: &folder_guard::Environment) -> bool {
+/// repository's own settings start. Ask only a command whose input and both outputs are a terminal,
+/// and only about settings no one answered no to. Otherwise say how to keep them. Takes the
+/// fingerprint, its digest, whether to ask about it, the folder the command runs in and the
+/// environment. Returns whether the operator kept exactly these settings.
+fn kept_when_asked(found: &Fingerprint, digest: &str, may_ask: bool, folder: &Path, environ: &folder_guard::Environment) -> bool {
     let trust = match fs::canonicalize(folder).ok().filter(|here| here.starts_with(&found.folder)) {
         Some(_) => "saw govern trust".to_string(),
         None => format!("saw govern trust --repo {}", shell_word(&found.folder.to_string_lossy())),
     };
-    let Some(saw) = real_saw().filter(|_| attended() && io::stdout().is_terminal()) else {
+    let Some(saw) = real_saw().filter(|_| may_ask && attended() && io::stdout().is_terminal()) else {
         eprintln!("saw: this folder's git settings run {}. git ran without them. To keep them for this folder, run: {trust}",
                   named_briefly(&found.named()));
         return false;
@@ -124,7 +124,7 @@ fn kept_when_asked(found: &Fingerprint, folder: &Path, environ: &folder_guard::E
         .arg(&found.folder)
         .env_remove("SAW_GOVERN_DECISION")
         .status();
-    asked.is_ok_and(|status| status.success()) && kept(found, environ)
+    asked.is_ok_and(|status| status.success()) && kept_settings::read(environ, &found.repository).keeps(digest)
 }
 
 /// Name a few of the programs a folder's settings start. Takes their names. Returns the text.

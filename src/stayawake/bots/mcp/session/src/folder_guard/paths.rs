@@ -142,7 +142,9 @@ pub fn no_hooks_folder(environ: &Environment) -> Result<PathBuf, String> {
 
 /// The user this process runs as, read from a file it makes.
 fn current_uid() -> u32 {
-    let probe = std::env::temp_dir().join(format!("saw-uid-{}", std::process::id()));
+    static PROBES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let probe_number = PROBES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let probe = std::env::temp_dir().join(format!("saw-uid-{}-{probe_number}", std::process::id()));
     let uid = fs::File::create(&probe).and_then(|_| fs::metadata(&probe)).map(|found| found.uid()).unwrap_or(u32::MAX);
     let _ = fs::remove_file(&probe);
     uid

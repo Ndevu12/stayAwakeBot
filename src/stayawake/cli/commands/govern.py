@@ -294,7 +294,9 @@ def run_trust(a: argparse.Namespace) -> int:
     print("Keep them for this folder? [y/N] ", end="", file=sys.stderr, flush=True)
     answer = sys.stdin.readline().strip().lower()
     if answer not in ("y", "yes"):
-        print("saw: not kept. git runs here without them.", file=sys.stderr)
+        kept_settings.decline(found)
+        print("saw: not kept. git runs here without them, and saw does not ask again until they change.",
+              file=sys.stderr)
         return exitcodes.DID_NOT_RUN
     if not kept_settings.keep(found):
         print("saw: they could not be recorded. git runs here without them.", file=sys.stderr)

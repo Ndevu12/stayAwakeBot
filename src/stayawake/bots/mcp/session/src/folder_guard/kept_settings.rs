@@ -1,5 +1,6 @@
-//! The record of the git settings the operator kept for each repository, which saw's Python
-//! `bots/security/kept_settings.py` writes. It is read only while it lies outside every repository.
+//! The record of the git settings the operator kept for each repository, and of those a person
+//! answered no to, which saw's Python `bots/security/kept_settings.py` writes. It is read only while
+//! it lies outside every repository.
 
 use std::fs;
 use std::io::Read;
@@ -21,17 +22,43 @@ pub fn record_path(environ: &Environment) -> Option<PathBuf> {
     Some(table("kept_settings_record").iter().fold(cache.join(RECORDS_FOLDER), |path, part| path.join(part)))
 }
 
-/// Read the fingerprint the operator kept for a repository, from a record that lies outside every
-/// repository. Takes the environment and the repository's key. Returns its digest, or None.
-pub fn kept_digest(environ: &Environment, repository: &Path) -> Option<String> {
+/// What the record holds for one repository: the fingerprint the operator kept and the one a person
+/// answered no to, each as its digest.
+#[derive(Debug, Default)]
+pub struct Recorded {
+    kept: Option<String>,
+    declined: Option<String>,
+}
+
+impl Recorded {
+    /// Whether the operator kept the settings with this digest.
+    pub fn keeps(&self, digest: &str) -> bool {
+        self.kept.as_deref() == Some(digest)
+    }
+
+    /// Whether a person answered no to the settings with this digest.
+    pub fn declined(&self, digest: &str) -> bool {
+        self.declined.as_deref() == Some(digest)
+    }
+}
+
+/// Read what the record holds for a repository, from a record that lies outside every repository.
+/// Takes the environment and the repository's key. Returns it, empty without a record.
+pub fn read(environ: &Environment, repository: &Path) -> Recorded {
+    read_record(environ).map(|record| {
+        let digest = |table: &str| repository.to_str().and_then(|key| record.get(table)?.get(key)?.as_str().map(str::to_string));
+        Recorded { kept: digest("repositories"), declined: digest("declined") }
+    }).unwrap_or_default()
+}
+
+fn read_record(environ: &Environment) -> Option<serde_json::Value> {
     let record = record_path(environ)?;
     if lies_inside_a_repository(&record) {
         return None;
     }
     let mut text = String::new();
     fs::File::open(&record).ok()?.take(RECORD_LIMIT).read_to_string(&mut text).ok()?;
-    let kept: serde_json::Value = serde_json::from_str(&text).ok()?;
-    kept.get("repositories")?.get(repository.to_str()?)?.as_str().map(str::to_string)
+    serde_json::from_str(&text).ok()
 }
 
 /// Whether the folder a record lies in, every link followed, is inside a git repository.

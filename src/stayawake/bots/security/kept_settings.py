@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """The git settings the operator kept for each repository: the fingerprint of the programs its own
-settings start, recorded when a person answers yes. The git stand-in reads the record and runs git in
-a repository with its own settings only while they still match it. The record is one of saw's
-records, never kept inside a repository."""
+settings start, recorded when a person answers yes, and the one a person answered no to. The git
+stand-in reads the record, runs git in a repository with its own settings only while they still match
+the kept ones, and does not ask again about settings a person answered no to. The record is one of
+saw's records, never kept inside a repository."""
 from __future__ import annotations
 
 import json
@@ -15,6 +16,8 @@ from stayawake.lib.git.settings_fingerprint import Fingerprint
 VERSION = 1
 RECORD_TABLE = "kept_settings_record"
 RECORD_LIMIT = 1 << 20
+KEPT = "repositories"
+DECLINED = "declined"
 
 
 def record_path() -> Path:
@@ -22,34 +25,36 @@ def record_path() -> Path:
     return records.path(*runs_directly.tables()[RECORD_TABLE])
 
 
-def _read() -> dict[str, str]:
-    """Read every kept fingerprint. Returns each repository's digest, or an empty mapping."""
+def _read() -> dict[str, dict[str, str]]:
+    """Read the record. Returns the kept and the declined digests, each by repository."""
     try:
         data = json.loads(records.read_text(record_path())[:RECORD_LIMIT])
     except (OSError, ValueError):
-        return {}
-    kept = data.get("repositories") if isinstance(data, dict) else None
-    if not isinstance(kept, dict):
-        return {}
-    return {repository: digest for repository, digest in kept.items()
-            if isinstance(repository, str) and isinstance(digest, str)}
+        data = {}
+    found: dict[str, dict[str, str]] = {}
+    for table in (KEPT, DECLINED):
+        listed = data.get(table) if isinstance(data, dict) else None
+        found[table] = ({repository: digest for repository, digest in listed.items()
+                         if isinstance(repository, str) and isinstance(digest, str)}
+                        if isinstance(listed, dict) else {})
+    return found
 
 
-def _write(kept: dict[str, str]) -> bool:
-    """Write every kept fingerprint. Takes each repository's digest. Returns whether it was
-    written."""
+def _write(recorded: dict[str, dict[str, str]]) -> bool:
+    """Write the record. Takes the kept and the declined digests, each by repository. Returns
+    whether it was written."""
     where = record_path()
     try:
         records.make_folder(where.parent)
     except OSError:
         return False
-    text = json.dumps({"version": VERSION, "repositories": kept}, indent=2, sort_keys=True) + "\n"
+    text = json.dumps({"version": VERSION, **recorded}, indent=2, sort_keys=True) + "\n"
     return records.replace(where, text)
 
 
 def kept_digest(repository: str) -> str | None:
     """Return the digest kept for a repository. Takes its key. Returns it, or None."""
-    return _read().get(repository)
+    return _read()[KEPT].get(repository)
 
 
 def is_kept(found: Fingerprint) -> bool:
@@ -57,20 +62,34 @@ def is_kept(found: Fingerprint) -> bool:
     return kept_digest(found.repository) == found.digest()
 
 
+def is_declined(found: Fingerprint) -> bool:
+    """Say whether a person answered no to exactly these settings. Takes the fingerprint."""
+    return _read()[DECLINED].get(found.repository) == found.digest()
+
+
 def keep(found: Fingerprint) -> bool:
     """Record that the operator keeps these settings. Takes the fingerprint. Returns whether the
     record was written."""
-    kept = _read()
-    kept[found.repository] = found.digest()
-    return _write(kept)
+    recorded = _read()
+    recorded[KEPT][found.repository] = found.digest()
+    recorded[DECLINED].pop(found.repository, None)
+    return _write(recorded)
+
+
+def decline(found: Fingerprint) -> bool:
+    """Record that a person answered no to these settings. Takes the fingerprint. Returns whether
+    the record was written."""
+    recorded = _read()
+    recorded[DECLINED][found.repository] = found.digest()
+    return _write(recorded)
 
 
 def forget(repository: str) -> bool:
     """Stop keeping a repository's settings. Takes its key. Returns whether any were kept."""
-    kept = _read()
-    if kept.pop(repository, None) is None:
+    recorded = _read()
+    if recorded[KEPT].pop(repository, None) is None:
         return False
-    return _write(kept)
+    return _write(recorded)
 
 
 def kept_before(folder: str | Path) -> Fingerprint | None:

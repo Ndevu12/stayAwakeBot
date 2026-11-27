@@ -159,7 +159,7 @@ the repository's own git settings start programs, such as its hooks, a filter li
 fsmonitor, those programs run only once you keep them. In a terminal saw names them and asks once
 whether to keep them for this folder: answer yes and they run until they change. Answer no, or where
 there is no one to ask, and git runs without them, and saw prints the command that keeps them,
-`saw govern trust`. `SAW_GOVERN_DECISION` never answers this question. An update saw checks and
+`saw govern trust`. After a no, saw does not ask again until they change. `SAW_GOVERN_DECISION` never answers this question. An update saw checks and
 writes into the folder keeps kept settings kept. When git cannot run without one of those programs,
 saw asks whether to run the command as typed, and only a person answers that too.
 
