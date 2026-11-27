@@ -105,7 +105,8 @@ fn kept(found: &Fingerprint, environ: &folder_guard::Environment) -> bool {
 }
 
 /// Ask the person at a terminal, through `saw govern trust`, whether to keep the programs a
-/// repository's own settings start. With no one to ask, say how to keep them. Takes the
+/// repository's own settings start. Ask only a command whose input and both outputs are a terminal.
+/// With no one to ask, say how to keep them. Takes the
 /// fingerprint, the folder the command runs in and the environment. Returns whether the operator
 /// kept exactly these settings.
 fn kept_when_asked(found: &Fingerprint, folder: &Path, environ: &folder_guard::Environment) -> bool {
@@ -113,7 +114,7 @@ fn kept_when_asked(found: &Fingerprint, folder: &Path, environ: &folder_guard::E
         Some(_) => "saw govern trust".to_string(),
         None => format!("saw govern trust --repo {}", shell_word(&found.folder.to_string_lossy())),
     };
-    let Some(saw) = real_saw().filter(|_| attended()) else {
+    let Some(saw) = real_saw().filter(|_| attended() && io::stdout().is_terminal()) else {
         eprintln!("saw: this folder's git settings run {}. git ran without them. To keep them for this folder, run: {trust}",
                   named_briefly(&found.named()));
         return false;
