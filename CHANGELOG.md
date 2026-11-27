@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-11-27
+
 ### Fixed
 - `saw govern classify` gives a `git config` command that reads its settings from a blob the same
   settings as any other git command it does not check, so a fetch git makes for that blob starts none
@@ -2197,7 +2199,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.7...v0.18.0
 [0.17.7]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.17.6...v0.17.7
