@@ -152,7 +152,7 @@ class TestCapabilities(unittest.TestCase):
                          [".".join(command_of(d)) + ".json" for d in SCHEMA_VERSION_OF_EACH_DOCUMENT]
                          + ["progress.jsonl", "fix.ask.json", "stream", "scan.plan", "scan.deadline",
                             "govern.progress.jsonl", "govern.decision", "govern.held.decision", "govern.passthrough",
-                            "govern.conflicts", "govern.deadline",
+                            "govern.conflicts", "govern.status.held_details", "govern.deadline",
                             "govern.apply.outcome", "govern.lock", "govern.apply.expect",
                             "govern.classify", "govern.classify.run_with", "govern.verdict", "govern.restore",
                             "serve", "mcp"])

@@ -57,6 +57,19 @@ def write(repo: str | Path, phase: str, *, verdict: str | None = None,
         pass
 
 
+def add_held_details(repo: str | Path, details: dict) -> None:
+    """Add the details of a held update to the record for `repo` when the record says held. Takes
+    the open folder and the details. A record in another phase is left as it is, and a write that
+    fails is skipped."""
+    record = read(repo)
+    if not (isinstance(record, dict) and record.get("phase") == "held"):
+        return
+    try:
+        atomicwrite.replace(status_path(repo), json.dumps({**record, **details}))
+    except OSError:
+        pass
+
+
 def read(repo: str | Path) -> dict | None:
     """Read the record for `repo`, or None when there is none."""
     try:
